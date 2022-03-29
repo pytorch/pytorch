@@ -142,3 +142,6 @@
 [submodule "third_party/breakpad"]
 	path = third_party/breakpad
 	url = https://github.com/driazati/breakpad.git
+[submodule "third_party/flatbuffers"]
+	path = third_party/flatbuffers
+	url = https://github.com/google/flatbuffers.git

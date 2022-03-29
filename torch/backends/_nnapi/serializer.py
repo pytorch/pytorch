@@ -166,6 +166,7 @@ def tensor_size(op_type, dims):
         NNAPI_OperandCode.TENSOR_INT32: 4,
         NNAPI_OperandCode.TENSOR_QUANT8_ASYMM: 1,
         NNAPI_OperandCode.TENSOR_QUANT16_SYMM: 2,
+        NNAPI_OperandCode.TENSOR_QUANT16_ASYMM: 2,
     }
     size = ITEM_SIZES[op_type]
     for d in dims:
@@ -210,6 +211,7 @@ class Operand(NamedTuple):
 
     # This is always the PyTorch shape, which is NCHW for feature maps.
     # The actual NNAPI operand might have a transposed shape.
+    # we use 0 for load time dynamic shapes & -1 for runtime dynamic shapes
     shape: Tuple[int, ...]
 
     # Specifies how the shape of the operand that we define in NNAPI
@@ -305,7 +307,7 @@ def reverse_map_dim(dim_order, d):
     # d should be the dimension that NNAPI will see.
     # reverse_map_dim(PRESUMED_CONTIGUOUS, x) == x
     # reverse_map_dim(CHANNELS_LAST, 3) == 1
-    if dim_order is DimOrder.PRESUMED_CONTIGUOUS:
+    if dim_order in (DimOrder.PRESUMED_CONTIGUOUS, DimOrder.SCALAR_OR_VECTOR):
         return d
     assert dim_order is DimOrder.CHANNELS_LAST
     return [0, 2, 3, 1][d]
@@ -318,7 +320,7 @@ def flex_name(op_id, dim):
 
 
 class _NnapiSerializer(object):
-    def __init__(self, config):
+    def __init__(self, config, use_int16_for_qint16=False):
         self.operands = []
         self.values = []
         self.operations = []
@@ -335,6 +337,7 @@ class _NnapiSerializer(object):
         self.cached_immediates = {}
         self.used_weights = []
         self.weight_offset = 0
+        self.use_int16_for_qint16 = use_int16_for_qint16
 
         if config is None:
             config = {}
@@ -364,8 +367,7 @@ class _NnapiSerializer(object):
         self.operands.append(oper)
         return operand_id
 
-    @staticmethod
-    def torch_tensor_to_operand(tensor, dim_order):
+    def torch_tensor_to_operand(self, tensor, dim_order):
         dtype = str(tensor.dtype).replace("torch.", "")
         scale = 0.0
         zero_point = 0
@@ -382,6 +384,20 @@ class _NnapiSerializer(object):
             scale = tensor.q_scale()
             zero_point = tensor.q_zero_point()
             assert zero_point == 0
+        elif dtype == "int16":
+            if self.use_int16_for_qint16:
+                nnapi_dtype = getattr(tensor, "nnapi_dtype", None)
+                op_codes = (NNAPI_OperandCode.TENSOR_QUANT16_SYMM, NNAPI_OperandCode.TENSOR_QUANT16_ASYMM)
+                if nnapi_dtype in op_codes:
+                    op_type = nnapi_dtype
+                    scale = tensor.nnapi_scale
+                    zero_point = tensor.nnapi_zero_point
+                else:
+                    raise Exception(f"`nnapi_type` needs to be one of {op_codes} for `int16`")
+            else:
+                raise Exception(
+                    "`int16` isn't supported. If you're trying to represent NNAPI"
+                    " qint16 with Pytorch int16, set `use_int16_for_qint16 = True`")
         else:
             raise Exception(f"Can't handle input with dtype '{tensor.dtype}'")
         return Operand(
@@ -469,10 +485,13 @@ class _NnapiSerializer(object):
     def get_tensor_operand_by_jitval_fixed_size(self, jitval):
         op_id, oper = self.get_tensor_operand_by_jitval(jitval)
         for s in oper.shape:
-            if s <= 0:
+            if s == 0:
                 # TODO: Improve this error message, possibly after converting
                 # many callsites to support flexible size.
                 raise Exception("Flexible size is not supported for this operand.")
+            if s < 0:
+                # runtime flex
+                LOG.warn(f"Operand {oper} has runtime flex shape")
         return op_id, oper
 
     def get_tensor_operand_or_constant(self, jitval, dim_order=DimOrder.PRESUMED_CONTIGUOUS):
@@ -509,28 +528,47 @@ class _NnapiSerializer(object):
                 f"Expected constant value of type {typekind}, but got {ctype.kind()} for value '{jitval!r}'")
         return record
 
-    @staticmethod
-    def operand_to_template_torchscript(op_id, oper):
+    def operand_to_template_torchscript(self, op_id, oper, shape=None):
         """Return a TorchScript expression to build a template for a given operand."""
+        if shape is None:
+            shape = oper.shape
+        else:
+            assert len(shape) == len(oper.shape)
+
         shape_parts = ["("]
-        for d, s in enumerate(oper.shape):
+        for d, s in enumerate(shape):
             if s > 0:
                 # Fixed shape dimension: just add the value.
                 shape_parts.append(str(s))
-            else:
-                # Flexible shape dimension: it should have been computed in a variable.
+            elif s == 0:
+                # Load time flexible shape dimension: it should have been computed in a variable.
                 shape_parts.append(flex_name(op_id, d))
+            elif s == -1:
+                # Runtime flexible shape
+                shape_parts.append('0')
+            else:
+                raise Exception("Unknown dim value, dimensions should be >= -1")
             shape_parts.append(",")
         shape_parts.append(")")
         shape_code = "".join(shape_parts)
         if oper.op_type == NNAPI_OperandCode.TENSOR_FLOAT32:
             return f"torch.zeros({shape_code}, dtype=torch.float32)"
+        elif oper.op_type == NNAPI_OperandCode.TENSOR_INT32:
+            return f"torch.zeros({shape_code}, dtype=torch.int32)"
         elif oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
             return (
                 f"torch.quantize_per_tensor("
                 f"torch.zeros(1), scale={oper.scale}, zero_point={oper.zero_point}, dtype=torch.quint8)"
                 f".expand({shape_code}).contiguous()"
             )
+        elif oper.op_type in (NNAPI_OperandCode.TENSOR_QUANT16_ASYMM, NNAPI_OperandCode.TENSOR_QUANT16_SYMM):
+            if self.use_int16_for_qint16:
+                return f"torch.zeros({shape_code}, dtype=torch.int16)"
+            else:
+                raise Exception(
+                    "`int16` isn't supported. If you're trying to represent NNAPI"
+                    " qint16 with Pytorch int16, set `use_int16_for_qint16 = True`")
+
         raise Exception(f"Unsupported output operand type: {oper.op_type}")
 
     def forward_operand_shape(self, out_op_id, out_dim, in_op_id, in_dim):
@@ -587,11 +625,9 @@ class _NnapiSerializer(object):
         dilations = [pc[5], pc[6]]
         output_padding = [pc[7], pc[8]]
         group_num = pc[9]
-        transpose = pc[10]
 
         assert len(pc) == 11
         assert output_padding == [0, 0]
-        assert transpose == 0
 
         return self.get_conv_pool_args_2d_common(kernel_size, strides, paddings, dilations, group_num)
 
@@ -622,7 +658,7 @@ class _NnapiSerializer(object):
 
         return ConvPoolArgs2d(*(kernels + strides + real_paddings + dilations + [group_num]))
 
-    def serialize_model(self, model, inputs):
+    def serialize_model(self, model, inputs, return_shapes=None):
         self.add_immediate_bool_scalar(False)
         self.add_immediate_bool_scalar(True)
 
@@ -654,11 +690,17 @@ class _NnapiSerializer(object):
         else:
             raise Exception(f"Unsupported return type: {retn_input.type()}")
 
-        for v in return_values:
+        if return_shapes is not None:
+            assert len(return_shapes) == len(return_values)
+        for i, v in enumerate(return_values):
             op_id = self.jitval_operand_map[v]
             self.outputs.append(op_id)
             out_dim_orders.append(self.operands[op_id].dim_order.value)
-            template_return_lines.append(self.operand_to_template_torchscript(op_id, self.operands[op_id]) + ",")
+            shape = return_shapes[i] if return_shapes else None
+            template_return_lines.append(
+                self.operand_to_template_torchscript(
+                    op_id, self.operands[op_id], shape) + ","
+            )
         template_return_lines.append("]")
 
         model = []
@@ -698,6 +740,9 @@ class _NnapiSerializer(object):
                     self.flexible_shape_computation_lines.append(
                         f"ser_model[{model_offset}] = {flex_name(op_id, pt_d)}")
                 model_offset += 1
+
+            # convert runtime flex shape from -1 to 0
+            shape = tuple(d if d != -1 else 0 for d in shape)
             model.append(self.serialize_ints(shape))
 
         model.extend(serialized_value_data)
@@ -809,10 +854,14 @@ class _NnapiSerializer(object):
             self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
         "quantized::conv2d_relu": lambda self, node:
             self.add_qconv2d(node, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::conv_transpose2d": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE, transpose=True),
         "quantized::add": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
         "quantized::add_relu": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::mul": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
     }
 
     def add_node(self, node):
@@ -1218,7 +1267,16 @@ class _NnapiSerializer(object):
         assert node.outputsSize() == 1
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
-        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        out_oper = in_oper
+        if opcode == NNAPI_OperationCode.LOGISTIC:
+            # NNAPI docs: For ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, the scale
+            # must be 1.f / 256 and the zeroPoint must be 0.
+            # https://fburl.com/h52stoog
+            if in_oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
+                out_oper = in_oper._replace(zero_point=0, scale=1.0 / 256)
+
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         for idx, dim in enumerate(in_oper.shape):
             if dim == 0:
@@ -1491,11 +1549,28 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
 
     def add_upsample_nearest2d(self, node):
-        assert node.inputsSize() == 3
+        assert node.inputsSize() == 3 or node.inputsSize() == 4
         assert node.outputsSize() == 1
-        image, size_jit, scale_jit = node.inputs()
+        if node.inputsSize() == 3:
+            image, size_jit, scale_jit = node.inputs()
+        else:
+            image, size_jit, scale_h_jit, scale_w_jit = node.inputs()
         size_ctype, size_arg = self.get_constant_value(size_jit)
-        scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+
+        if node.inputsSize() == 3:
+            scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+        else:
+            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)
+            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)
+
+            # The only way for the 4-argument overload of upsample_nearest2d to
+            # have been added to the graph without error is if the scale_h and
+            # scale_w arguments are None
+            assert scale_h_ctype.kind() == "NoneType"
+            assert scale_w_ctype.kind() == "NoneType"
+
+            scale_ctype = scale_h_ctype
+            scale_arg = scale_h_arg
 
         image_id, image_oper = self.get_tensor_operand_by_jitval(image)
         assert len(image_oper.shape) == 4
@@ -1794,7 +1869,7 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
 
 
-    def add_qconv2d(self, node, fuse_code):
+    def add_qconv2d(self, node, fuse_code, transpose=False):
         assert node.inputsSize() == 4
         assert node.outputsSize() == 1
 
@@ -1851,7 +1926,7 @@ class _NnapiSerializer(object):
             unsigned_weight,
             bias_id,
             args,
-            False,  # transpose
+            transpose,
             fuse_code,
         )
 
@@ -2002,5 +2077,16 @@ class _NnapiSerializer(object):
                 )
 
 
-def serialize_model(module, inputs, config=None):
-    return _NnapiSerializer(config).serialize_model(module, inputs)
+def serialize_model(module, inputs, *, config=None, return_shapes=None, use_int16_for_qint16=False):
+    """Convert to NNAPI and serialize torchscript module:
+    Parameters:
+        module: Torchscript module to convert
+        inputs: Tensors used to specify input details for NNAPI
+        config (optional): Optional config to attach to module
+        return_shapes (optional): Specify shape of outputs if
+            your module uses runtime flexible shapes to set output
+            buffer size for NNAPI
+        use_int16_for_qint16 (optional): Use Pytorch int16 to represent NNAPI qint16 values
+    """
+
+    return _NnapiSerializer(config, use_int16_for_qint16).serialize_model(module, inputs, return_shapes)

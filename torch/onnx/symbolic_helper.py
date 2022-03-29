@@ -1,4 +1,4 @@
-
+import enum
 import torch
 import warnings
 import inspect
@@ -17,14 +17,15 @@ from torch._C import OptionalType
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
 #
-# - These files are ONLY for ATen operators (e.g., operators that show up in the
-#   trace as aten::blah).  If you need to special case a primitive operator,
-#   look at _run_symbolic_function
-# - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
-#   tensors are always first, then non-tensor arguments.
-# - Parameter names must *exactly* match the names in VariableType.cpp, because
+# - Module-level functions are called to convert the corresponding op in the `aten` domain.
+#   E.g. symbolic_opset9.foo is called to convert aten::foo.
+#   Symbolic functions for other domains are staticmethods in classes named after the domain.
+#   E.g. symbolic_opset9.Prim.ConstantChunk is called to convert prim::ConstantChunk.
+# - Parameter names must *exactly* match the names in
+#   aten/src/ATen/native/native_functions.yaml, because
 #   dispatch is done with keyword arguments.
-# - Looking for inplace ops?  They're detected by the trailing underscore, and
+# - Looking for inplace ops?  They're detected by
+#   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
 #   transparently dispatched to their non inplace versions in
 #   "run_symbolic_function".   See Note [Export inplace]
 #
@@ -42,6 +43,19 @@ from torch._C import OptionalType
 # on the number of dimensions which is better than relying on
 # concrete shapes. Doing so will make the export symbolics
 # more robust to different graphs.
+#
+# ----------------------------------------------------------------------------------
+# Extra context for symbolic functions
+# ----------------------------------------------------------------------------------
+#
+# In general, symbolic functions only require inputs and attributes to
+# the original node. In rare circumstances, extra context may be required.
+# For example, symbolic function for `prim::Loop` needs access to the subblock of
+# the original node.
+# A symbolic function that has a first arg (before the Graph object) with the
+# type annotation of torch.onnx.SymbolicContext will be called with that additional context.
+# During export, it is populated from `utils._run_symbolic_function`
+# to contain the context for each node being converted.
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -118,6 +132,11 @@ def _unpack_list(list_value):
     assert list_node.kind() == "prim::ListConstruct"
     return list(list_node.inputs())
 
+def _unpack_tuple(tuple_value):
+    tuple_node = tuple_value.node()
+    if tuple_node.kind() != "prim::TupleConstruct":
+        raise RuntimeError("ONNX symbolic expected node type `prim::TupleConstruct`, got `{}`".format(tuple_node))
+    return list(tuple_node.inputs())
 
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
@@ -155,7 +174,14 @@ def parse_args(*arg_descriptors):
         @wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
-            assert len(arg_descriptors) >= len(args)
+            FILE_BUG_MSG = "If you believe this is not due to custom symbolic implementation within your code or "\
+                "an external library, please file an issue at "\
+                "https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to report this bug."
+            assert len(arg_descriptors) >= len(args),\
+                f"A mismatch between the number of arguments ({len(args)}) and "\
+                f"their descriptors ({len(arg_descriptors)}) was found at symbolic function '{fn.__name__}'. "\
+                f"{FILE_BUG_MSG}"
+
             try:
                 sig = inspect.signature(fn)
                 arg_names = list(sig.parameters.keys())[1:]
@@ -166,14 +192,87 @@ def parse_args(*arg_descriptors):
             args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
                     for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
-            assert len(kwargs) <= 1
+            assert len(kwargs) <= 1,\
+                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single key/value entry. "\
+                f"{FILE_BUG_MSG}"
+
             if len(kwargs) == 1:
-                assert "_outputs" in kwargs
+                assert "_outputs" in kwargs,\
+                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'. "\
+                    f"{FILE_BUG_MSG}"
             return fn(g, *args, **kwargs)
 
         return wrapper
     return decorator
 
+def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
+    """A decorator which extends support for quantized version of the base operator.
+    Quantization is detected by examining the arguments that are annotated by
+    `arg_q_descriptors`.
+    If quantization is detected, the base operator symbolic function will be wrapped with
+    argument dequantization and output quantization.
+    Otherwise, only base symbolic function will be invoked.
+
+    For example:
+    @quantized_args(True, False)
+    def foo(g, x, y):
+        return x + y
+
+    is equivalent to
+
+    def q_foo(g, x, y):
+        if is_quantized_tensor(x):
+            x = dequantize(x)
+            out = foo(g, x, y)
+            return quantize(out)
+        else:
+            return foo(g, x, y)
+
+    Args:
+        arg_q_descriptors: list of bool, where each element represents if the
+          argument is QTensor for quantized version of this operator.
+        scale: float default None, quantized output scale. If None, derive from
+          the first quantized input scale.
+        zero_point: int default None, quantized output zero point. If None,
+          derive from the first quantized input zero point.
+    """
+    def decorator(fn):
+        fn._scale = scale
+        fn._zero_point = zero_point
+
+        @wraps(fn)
+        def wrapper(g, *args, **kwargs):
+            _scale = fn._scale
+            if _scale is not None:
+                _scale = g.op("Constant", value_t=torch.tensor(_scale))
+            _zero_point = fn._zero_point
+            if _zero_point is not None:
+                _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
+
+            # some args may be optional, so the length may be smaller
+            assert len(arg_q_descriptors) >= len(args)
+            desc_args = tuple(zip(arg_q_descriptors[:len(args)], args))
+            # Run regular symbolic function if none of the argument is QTensor.
+            if not any((desc and arg.node().kind() == "prim::TupleConstruct") for desc, arg in desc_args):
+                return fn(g, *args, **kwargs)
+
+            dequantized_args = []
+            for desc, arg in desc_args:
+                if desc:
+                    dequantized_arg, scale, zero_point = dequantize_helper(g, arg)
+                    dequantized_args.append(dequantized_arg)
+                    if _scale is None:
+                        _scale = scale
+                    if _zero_point is None:
+                        _zero_point = zero_point
+                else:
+                    dequantized_args.append(arg)
+            # TODO: only support single output
+            output = fn(g, *dequantized_args, **kwargs)
+
+            return quantize_helper(g, output, _scale, _zero_point)
+        return wrapper
+    return decorator
 
 def _scalar(x):
     """Convert a scalar tensor into a Python value."""
@@ -317,18 +416,12 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 def _is_fp(value):
     if value:
         if isinstance(value, torch.Tensor):
-            type = value.dtype
-            return (type == "torch.float32") or (type == "torch.float64") or (type == "torch.float16")
+            return value.dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
         else:
             type = value.type().scalarType()
             if type is None:
                 warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-            return (type == "Float") or (type == "Double") or (type == "Half")
-    return False
-
-def _dtype_is_fp(type_value):
-    if type_value:
-        return (type_value == torch.float16) or (type_value == torch.float32) or (type_value == torch.float64)
+            return type in ("Float", "Double", "Half", "BFloat16")
     return False
 
 def _generate_wrapped_number(g, scalar):
@@ -368,12 +461,23 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
+        if _try_get_scalar_type(k) != "Long":
+            k = g.op("Cast", k, to_i=torch.onnx.TensorProtoDataType.INT64)
     if _export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
         return g.op("TopK", input, k, axis_i=dim, outputs=2)
     else:
         return g.op("TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
+
+
+def _lt_helper(g, input, other):
+    if _export_onnx_opset_version <= 8:
+        from torch.onnx.symbolic_opset8 import lt as _lt8
+        return _lt8(g, input, other)
+    else:
+        from torch.onnx.symbolic_opset9 import lt as _lt9
+        return _lt9(g, input, other)
 
 
 def _interpolate_warning(interpolate_mode):
@@ -386,19 +490,38 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator.")
 
+
 def _unsqueeze_helper(g, input, axes_i):
-    if _export_onnx_opset_version >= 13:
-        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
-        return g.op("Unsqueeze", input, axes)
-    else:
+    if _is_constant(axes_i[0]):
+        if _export_onnx_opset_version >= 13:
+            axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("Unsqueeze", input, axes)
         return g.op("Unsqueeze", input, axes_i=axes_i)
+    # Tensor type
+    if _export_onnx_opset_version < 13:
+        raise ValueError(f"Opset version must be >= 13 for Unsqueeze with dynamic axes. {input.node().sourceRange()}")
+    return g.op("Unsqueeze", input, axes_i[0])
+
 
 def _squeeze_helper(g, input, axes_i):
-    if _export_onnx_opset_version >= 13:
-        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
-        return g.op("Squeeze", input, axes)
-    else:
+    if _is_constant(axes_i[0]):
+        if _export_onnx_opset_version >= 13:
+            axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("Squeeze", input, axes)
         return g.op("Squeeze", input, axes_i=axes_i)
+    # Tensor type
+    if _export_onnx_opset_version < 13:
+        raise ValueError(f"Opset version must be >= 13 for Squeeze with dynamic axes. {input.node().sourceRange()}")
+    axes_t = axes_i[0]
+    axes_rank = _get_tensor_rank(axes_t)
+    if axes_rank > 1:
+        raise ValueError("For Squeeze axses as input, the axes rank must be one in ONNX spec.")
+    elif axes_rank == 0:
+        # The axes is a scalar. Unsqueeze it to a rank 1 tensor.
+        axes_t = _unsqueeze_helper(g, axes_t, [0])
+        return g.op("Squeeze", input, axes_t)
+    return g.op("Squeeze", input, axes_t)
+
 
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
@@ -410,6 +533,7 @@ def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_
         return g.op("ReduceSum", input, keepdims_i=keepdims_i, noop_with_empty_axes_i=noop_with_empty_axes_i)
     else:
         return g.op("ReduceSum", input, axes_i=axes_i, keepdims_i=keepdims_i)
+
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, "is")
@@ -635,11 +759,12 @@ def _scatter_helper(g, self, dim, index, src):
 
 def _repeat_interleave_split_helper(g, self, reps, dim):
     if _export_onnx_opset_version <= 12:
-        return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
+        split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
-        return split(g, self, repeats, dim, _outputs=reps)
+        split_out = split(g, self, repeats, dim, _outputs=reps)
+    return split_out if reps > 1 else [split_out]
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):
@@ -704,16 +829,21 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
-# When using reshape helper (opset_version >= 14), if reshape has -1,
-# allowzero cannot be set to 1
+# By default, when any value in the 'shape' input is equal to zero
+# the corresponding dimension value is copied from the input tensor dynamically.
+# allowzero=1 indicates that if any value in the 'shape' input is set to zero,
+# the zero value is honored, similar to NumPy.
+# allowzero=1 is only supported for opset version >= 14.
 def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if _export_onnx_opset_version <= 13:
+        if allowzero == 1:
+            raise _onnx_opset_unsupported("Reshape with allowzero=1",
+                                          _export_onnx_opset_version, 14)
         return g.op("Reshape", input, shape)
     else:
-        warnings.warn("allowzero=0 by default. In order to honor zero value in shape use allowzero=1")
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
@@ -805,6 +935,41 @@ def _handle_reduce_dim_none(g, self, op_name):
         return g.op(op_name, self, keepdims_i=1)
     return g.op(op_name, self, keepdims_i=0)
 
+def dequantize_helper(g, qtensor, qdtype=None):
+    tensor, scale, zero_point = _unpack_tuple(qtensor)
+    input_qdtype = cast_pytorch_to_onnx[tensor.type().scalarType()]
+    if qdtype is None:
+        if input_qdtype is not None:
+            qdtype = input_qdtype
+        else:
+            qdtype = torch.onnx.TensorProtoDataType.UINT8
+    value = g.op("Cast", tensor, to_i=qdtype)
+    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    zero_point = g.op("Cast", zero_point, to_i=qdtype)
+    return g.op("DequantizeLinear", value, scale, zero_point), scale, zero_point
+
+def quantize_helper(g, tensor, scale, zero_point):
+    assert scale is not None
+    if scale.type().scalarType() != "Float":
+        scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+
+    assert zero_point is not None
+    if zero_point.type().scalarType() not in ("Byte", "Char"):
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+    output = g.op("QuantizeLinear", tensor, scale, zero_point)
+    return g.op("prim::TupleConstruct", output, scale, zero_point)
+
+def requantize_bias_helper(g, bias, input_scale, weight_scale):
+    # In PyTorch, bias is float and is quantized implicitly inside the quantized ATen op kernel.
+    # In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
+    # Since int32 is not supported by ONNX operator `QuantizeLinear`, quantization is exported using regular operators.
+    bias_scale = g.op("Mul", weight_scale, input_scale)
+    bias_zero_point = g.op("Constant", value_t=torch.tensor([0], dtype=torch.int))
+    q_bias = g.op("Cast",
+                  g.op("Div", bias, bias_scale),
+                  to_i=torch.onnx.TensorProtoDataType.INT32)
+    return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -833,9 +998,10 @@ def _handle_reduce_dim_none(g, self, op_name):
 
 
 _default_onnx_opset_version = 9
-_onnx_main_opset = 14
-_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13]
+_onnx_main_opset = 15
+_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13, 14]
 _export_onnx_opset_version = _default_onnx_opset_version
+_constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
 
 
 def _set_opset_version(opset_version):
@@ -884,6 +1050,7 @@ cast_pytorch_to_onnx = {
     "Bool": torch.onnx.TensorProtoDataType.BOOL,
     "ComplexFloat": torch.onnx.TensorProtoDataType.COMPLEX64,
     "ComplexDouble": torch.onnx.TensorProtoDataType.COMPLEX128,
+    "BFloat16": torch.onnx.TensorProtoDataType.BFLOAT16,
     "Undefined": torch.onnx.TensorProtoDataType.UNDEFINED,
 }
 
@@ -898,13 +1065,38 @@ scalar_name_to_pytorch = {
     "int16_t": "Short",
     "bool": "Bool",
     "complex64": "ComplexFloat",
-    "complex128": "ComplexDouble"
+    "complex128": "ComplexDouble",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
 }
+
+
+
+class ScalarType(enum.IntEnum):
+    """A human-readable name for a key into scalar_type_to_pytorch_type."""
+    UINT8 = 0
+    INT8 = enum.auto()
+    SHORT = enum.auto()
+    INT = enum.auto()
+    INT64 = enum.auto()
+    HALF = enum.auto()
+    FLOAT = enum.auto()
+    DOUBLE = enum.auto()
+    COMPLEX32 = enum.auto()
+    COMPLEX64 = enum.auto()
+    COMPLEX128 = enum.auto()
+    BOOL = enum.auto()
+    QINT8 = enum.auto()
+    QUINT8 = enum.auto()
+    QINT32 = enum.auto()
+    BFLOAT16 = enum.auto()
 
 
 # This indicates each scalar type's corresponding
 # torch type. Related source:
-# https://github.com/pytorch/pytorch/blob/da7468853ae322252270bbb58032668bd21b7457/c10/core/ScalarType.h
+# https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
 scalar_type_to_pytorch_type = [
     torch.uint8,        # 0
     torch.int8,         # 1
@@ -918,25 +1110,53 @@ scalar_type_to_pytorch_type = [
     torch.complex64,    # 9
     torch.complex128,   # 10
     torch.bool,         # 11
+    torch.qint8,        # 12
+    torch.quint8,       # 13
+    torch.qint32,       # 14
+    torch.bfloat16,     # 15
 ]
+
+# source of truth is
+# https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
+pytorch_name_to_type = {
+    "Byte": torch.uint8,
+    "Char": torch.int8,
+    "Double": torch.double,
+    "Float": torch.float,
+    "Half": torch.half,
+    "Int": torch.int,
+    "Long": torch.int64,
+    "Short": torch.short,
+    "Bool": torch.bool,
+    "ComplexFloat": torch.complex64,
+    "ComplexDouble": torch.complex128,
+    "QInt8": torch.qint8,
+    "QUInt8": torch.quint8,
+    "QInt32": torch.qint32,
+    "BFloat16": torch.bfloat16,
+}
 
 def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
 
 scalar_type_to_onnx = [
-    cast_pytorch_to_onnx["Byte"],
-    cast_pytorch_to_onnx["Char"],
-    cast_pytorch_to_onnx["Short"],
-    cast_pytorch_to_onnx["Int"],
-    cast_pytorch_to_onnx["Long"],
-    cast_pytorch_to_onnx["Half"],
-    cast_pytorch_to_onnx["Float"],
-    cast_pytorch_to_onnx["Double"],
-    cast_pytorch_to_onnx["Undefined"],
-    cast_pytorch_to_onnx["ComplexFloat"],
-    cast_pytorch_to_onnx["ComplexDouble"],
-    cast_pytorch_to_onnx["Bool"],
+    cast_pytorch_to_onnx["Byte"],            # 0
+    cast_pytorch_to_onnx["Char"],            # 1
+    cast_pytorch_to_onnx["Short"],           # 2
+    cast_pytorch_to_onnx["Int"],             # 3
+    cast_pytorch_to_onnx["Long"],            # 4
+    cast_pytorch_to_onnx["Half"],            # 5
+    cast_pytorch_to_onnx["Float"],           # 6
+    cast_pytorch_to_onnx["Double"],          # 7
+    cast_pytorch_to_onnx["Undefined"],       # 8
+    cast_pytorch_to_onnx["ComplexFloat"],    # 9
+    cast_pytorch_to_onnx["ComplexDouble"],   # 10
+    cast_pytorch_to_onnx["Bool"],            # 11
+    cast_pytorch_to_onnx["Char"],            # 12
+    cast_pytorch_to_onnx["Byte"],            # 13
+    cast_pytorch_to_onnx["Int"],             # 14
+    cast_pytorch_to_onnx["BFloat16"],        # 15
 ]
 
 # Global set to store the list of quantized operators in the network.

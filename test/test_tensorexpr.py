@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -6,36 +8,18 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
-
+        super(BaseTestClass, self).setUp()
+        self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        self.tensorexpr_options.restore()
+        super(BaseTestClass, self).tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1222,7 +1206,6 @@ class TestTensorExprFuser(BaseTestClass):
     def test_softmax_cuda(self):
         self._test_softmax('cuda')
 
-    @unittest.skip("float16 is not supported yet.")
     def test_half_gelu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 

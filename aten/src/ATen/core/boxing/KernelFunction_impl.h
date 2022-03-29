@@ -6,7 +6,7 @@
 namespace c10 {
 
 inline KernelFunction::KernelFunction()
-: functor_(nullptr)
+    : functor_()
 , boxed_kernel_func_(nullptr)
 , unboxed_kernel_func_(nullptr)
 {}
@@ -157,6 +157,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) 
     static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
 #if !defined(C10_MOBILE)
+    (void)func_ptr; // Suppress unused variable warning
     return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>(
         guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );

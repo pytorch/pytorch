@@ -102,17 +102,23 @@ index_select_add(const Tensor &select_indices,
   }
   auto numel = add_indices.numel();
   int64_t ddim = src.sizes()[1];
+  auto vocab_size = src.size(0);
   auto src_stride0 = src.strides()[0];
   auto src_stride1 = src.strides()[1];
   auto output_stride0 = output.strides()[0];
   auto output_stride1 = output.strides()[1];
 
-  for (int64_t i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
-    if (select_indices_data[i] != padding_idx) {
+    auto idx = select_indices_data[i];
+    TORCH_CHECK(
+        idx >= 0 && idx < vocab_size,
+        "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+        idx);
+    if (idx != padding_idx) {
       at::native::cpublas::axpy<data_t>(ddim, 1,
-              src_data + src_stride0 * select_indices_data[i], src_stride1,
+              src_data + src_stride0 * idx, src_stride1,
               output_data + output_stride0 * add_indices_data[i], output_stride1);
     } else if (bag_size.defined()) {
       // Decrement bag_size to reflect that the index is padded
@@ -121,6 +127,35 @@ index_select_add(const Tensor &select_indices,
     }
   }
 }
+
+namespace {
+template <typename index_t>
+void fbgemm_spmdm_report_error_(
+    int64_t output_size,
+    int index_size,
+    int64_t N,
+    const index_t* offsets,
+    const index_t* indices) {
+  for (const auto m : c10::irange(output_size)) {
+    for (index_t i = offsets[m]; i < offsets[m + 1]; ++i) {
+      TORCH_CHECK(i < index_size);
+      index_t idx = indices[i];
+      TORCH_CHECK(
+          0 <= idx && idx < N,
+          "Index ",
+          i,
+          " is out of bounds: ",
+          idx,
+          ", range 0 to ",
+          N);
+    }
+  }
+  TORCH_CHECK(
+      offsets[output_size] == index_size,
+      "Yout input seems to be incorrect: the last offset value should be "
+      "the size of the indices tensor, but it appears not.");
+}
+} // namespace
 
 template<typename data_t, typename index_t>
 typename std::enable_if<std::is_same<data_t, float>::value, void>::type
@@ -172,7 +207,7 @@ index_select_add(const Tensor &select_indices,
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
 #ifdef USE_FBGEMM
-          kernel_fp32_index_t(
+          bool success = kernel_fp32_index_t(
             /* output_size */end_idx - start_idx,
             /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
             /* data_size */src.sizes()[0],
@@ -181,6 +216,14 @@ index_select_add(const Tensor &select_indices,
             /* offsets_or_lengths */offsets_data + start_idx,
             /* weights */nullptr,
             /* output */output_data + start_idx * ddim);
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                src.sizes()[0],
+                offsets_data + start_idx,
+                select_indices_data + offsets_data[start_idx]);
+          }
 #else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
@@ -205,19 +248,25 @@ index_select_add(const Tensor &select_indices,
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
     }
+    auto vocab_size = src.size(0);
     auto src_stride0 = src.strides()[0];
     auto src_stride1 = src.strides()[1];
     auto output_stride0 = output.strides()[0];
     auto output_stride1 = output.strides()[1];
     auto numel = add_indices.numel();
-    for (int64_t i = 0; i < numel; i++) {
+    for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
-      if (select_indices_data[i] != padding_idx) {
+      auto idx = select_indices_data[i];
+      TORCH_CHECK(
+          idx >= 0 && idx < vocab_size,
+          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+          idx);
+      if (idx != padding_idx) {
         at::native::cpublas::axpy<float>(
             ddim,
             1,
-            src_data + src_stride0 * select_indices_data[i],
+            src_data + src_stride0 * idx,
             src_stride1,
             output_data + output_stride0 * add_indices_data[i],
             output_stride1);
@@ -256,7 +305,8 @@ index_select_scale_add(const Tensor &select_indices,
     bag_size_data = bag_size.data_ptr<index_t>();
   }
   auto numel = add_indices.numel();
-  int64_t ddim = src.sizes()[1];
+  int64_t ddim = src.size(1);
+  auto vocab_size = src.size(0);
   auto src_stride0 = src.strides()[0];
   auto src_stride1 = src.strides()[1];
   auto output_stride0 = output.strides()[0];
@@ -265,14 +315,19 @@ index_select_scale_add(const Tensor &select_indices,
   auto* scale_data = scale.data_ptr<data_t>();
   auto scale_stride = scale.strides()[0];
 
-  for (int64_t i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
-    if (select_indices_data[i] != padding_idx) {
-      auto* src_base = src_data + src_stride0 * select_indices_data[i];
+    auto idx = select_indices_data[i];
+    TORCH_CHECK(
+        idx >= 0 && idx < vocab_size,
+        "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+        idx);
+    if (idx != padding_idx) {
+      auto* src_base = src_data + src_stride0 * idx;
       auto* output_base = output_data + output_stride0 * add_indices_data[i];
       auto scale = scale_data[i * scale_stride];
-      for (int64_t j = 0; j < ddim; j++) {
+      for (const auto j : c10::irange(ddim)) {
         output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
       }
     } else if (bag_size.defined()) {
@@ -333,7 +388,7 @@ index_select_scale_add(const Tensor &select_indices,
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
 #ifdef USE_FBGEMM
-          kernel_fp32_index_t(
+          bool success = kernel_fp32_index_t(
             /* output_size */end_idx - start_idx,
             /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
             /* data_size */src.sizes()[0],
@@ -342,6 +397,14 @@ index_select_scale_add(const Tensor &select_indices,
             /* offsets_or_lengths */offsets_data + start_idx,
             /* weights */scale_data + offsets_data[start_idx],
             /* output */output_data + start_idx * ddim);
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                src.sizes()[0],
+                offsets_data + start_idx,
+                select_indices_data + offsets_data[start_idx]);
+          }
 #else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
@@ -366,6 +429,7 @@ index_select_scale_add(const Tensor &select_indices,
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
     }
+    auto vocab_size = src.size(0);
     auto src_stride0 = src.strides()[0];
     auto src_stride1 = src.strides()[1];
     auto output_stride0 = output.strides()[0];
@@ -374,14 +438,19 @@ index_select_scale_add(const Tensor &select_indices,
     auto numel = add_indices.numel();
 
 
-    for (int64_t i = 0; i < numel; i++) {
+    for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
-      if (select_indices_data[i] != padding_idx) {
-        auto* src_base = src_data + src_stride0 * select_indices_data[i];
+      auto idx = select_indices_data[i];
+      TORCH_CHECK(
+          idx >= 0 && idx < vocab_size,
+          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+          idx);
+      if (idx != padding_idx) {
+        auto* src_base = src_data + src_stride0 * idx;
         auto* output_base = output_data + output_stride0 * add_indices_data[i];
         auto scale = scale_data[i * scale_stride];
-        for (int64_t j = 0; j < ddim; j++) {
+        for (const auto j : c10::irange(ddim)) {
           output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
         }
       } else if (bag_size.defined()) {
@@ -448,8 +517,8 @@ void make_bag_size_out(
     const bool include_last_offset,
     const bool requires_grad) {
   if (requires_grad || mode == MODE_MEAN || mode == MODE_MAX) {
-    auto num_bags = offsets.size(0) - (include_last_offset ? 1 : 0);
-    bag_size_out = at::zeros({num_bags}, offsets.options());
+    auto num_bags = offsets.sizes()[0] - (include_last_offset ? 1 : 0);
+    at::native::resize_(bag_size_out, {num_bags}, c10::nullopt);
     // Compute this for MODE_MEAN and MODE_MAX (latter needed for backwards)
     if (num_bags != 1) {
       bag_size_out.slice(0, 0, bag_size_out.sizes()[0] - 1, 1) =
@@ -459,6 +528,8 @@ void make_bag_size_out(
     if (num_bags > 0) {
       bag_size_out[-1] = indices.sizes()[0] - offsets[num_bags - 1];
     }
+  } else {
+    at::native::resize_(bag_size_out, offsets.sizes(), c10::nullopt);
   }
 }
 
@@ -585,7 +656,8 @@ void embedding_bag_cpu_max_out(
     Tensor& bag_size,
     int64_t padding_idx) {
   int64_t numIndices = indices.numel();
-  int64_t featureSize = weight.sizes()[1];
+  int64_t featureSize = weight.size(1);
+  int64_t vocab_size = weight.size(0);
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cpu_max_out", [&] {
     auto* indices_data = indices.data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.data_ptr<index_t>();
@@ -605,7 +677,10 @@ void embedding_bag_cpu_max_out(
     for (const auto i : c10::irange(numIndices)) {
       auto bag = offset2bag_data[i];
       auto word_idx = indices_data[i];
-
+      TORCH_CHECK(
+          word_idx >= 0 && word_idx < vocab_size,
+          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+          word_idx);
       if (word_idx != static_cast<index_t>(padding_idx)) {
         bool is_first_for_bag = bag_empty[bag];
         for (const auto dim : c10::irange(featureSize)) {
@@ -654,7 +729,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       // make bag_size output deterministic
       at::native::zero_(bag_size);
     }
-    max_indices = bag_size;
+     max_indices.copy_(bag_size);
   } else { // MODE_MAX
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.scalar_type(), "embedding_bag_cpu_max_out", [&]() {
@@ -723,7 +798,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  if (!weight.requires_grad()) {
+  if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
     out = at::_embedding_bag_forward_only(
       weight, indices.contiguous(), offsets.contiguous(), scale_grad_by_freq,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
@@ -852,7 +927,7 @@ static Tensor _embedding_bag_dense_backward_cpu_max(
   auto nonempty_max_indices = max_indices.index_select(0, bag_size.nonzero().view(-1));
   auto nonempty_grad = grad.index_select(0, bag_size.nonzero().view(-1));
 
-  for (int64_t dim = 0; dim < grad.sizes()[1]; dim++) {
+  for (const auto dim : c10::irange(grad.sizes()[1])) {
     index_grad_weight.select(1, dim).index_add_(
       0, nonempty_max_indices.select(1, dim), nonempty_grad.select(1, dim));
   }

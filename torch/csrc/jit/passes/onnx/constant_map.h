@@ -45,6 +45,17 @@ class ConstantValueMap {
   static bool HasUseInferredType(const std::string& tensorName);
   static c10::optional<bool> GetUseInferredType(const std::string& tensorName);
 
+  static void SetShapeValue(
+      const std::string& tensorName,
+      const c10::SymbolicShape& shapeValue);
+  static bool HasShapeValue(const std::string& tensorName);
+  static c10::optional<c10::SymbolicShape> GetShapeValue(
+      const std::string& tensorName);
+
+  static void UpdateValueName(
+      const std::string& old_name,
+      const std::string& new_name);
+
   static void PrintMaps();
   static void ClearMaps();
   ~ConstantValueMap() = default;
@@ -62,6 +73,14 @@ class ConstantValueMap {
   // This map indicates whether the current type is estimated through inference
   // or tracer.
   std::unordered_map<std::string, bool> useInferredTypeMap;
+  // This map indicates a tensor value which represents a shape.
+  // We assume that the rank of the tensor value <= 1, and we ensure this when
+  // we write the processing logic for the operators. When the rank > 1, we
+  // should be able to rewrite the model so that the rank <= 1. The difference
+  // between shapeMap and shapeValueMap: shapeMap stores the shape of the tensor
+  // from a node. shapeValueMap stores the value of the tensor from a node when
+  // this tensor represents a shape.
+  std::unordered_map<std::string, c10::SymbolicShape> shapeValueMap;
 };
 
 } // namespace jit

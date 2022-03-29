@@ -3,7 +3,9 @@ import torch
 
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+import torch.nn.intrinsic.qat as nniqat
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, WeightedQuantizedModule
+from torch.nn.utils.fusion import fuse_linear_bn_weights
 from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
@@ -83,32 +85,12 @@ class LinearPackedParams(torch.nn.Module):
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
-    @torch.jit.export
-    def __getstate__(self):
-        qweight, bias = self._weight_bias()
-        return qweight, bias, self.training, self.dtype
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        self.dtype = state[3]
-        self.set_weight_bias(state[0], state[1])
-        self.training = state[2]
-
-    def __deepcopy__(self, memo):
-        new_instance = type(self).__new__(type(self))
-        torch.nn.Module.__init__(new_instance)
-        state = self.__getstate__()
-        new_instance.__setstate__(state)
-        return new_instance
-
-    def __copy__(self):
-        return self.__deepcopy__({})
 
     def __repr__(self):
         return self._weight_bias().__repr__()
 
 
-class Linear(torch.nn.Module):
+class Linear(WeightedQuantizedModule):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
@@ -252,14 +234,17 @@ class Linear(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        r"""Create a quantized module from a float module or qparams_dict
+        r"""Create a quantized module from an observed float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
-            # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
+            if type(mod) == nniqat.LinearBn1d:
+                mod.weight, mod.bias = fuse_linear_bn_weights(
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
@@ -287,4 +272,24 @@ class Linear(torch.nn.Module):
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
+        return qlinear
+
+    @classmethod
+    def from_reference(cls, ref_qlinear, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+
+        Args:
+            ref_qlinear (Module): a reference quantized linear module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int): zero point for output Tensor
+        """
+        qlinear = cls(
+            ref_qlinear.in_features,
+            ref_qlinear.out_features)
+        qweight = ref_qlinear.get_quantized_weight()
+        qlinear.set_weight_bias(qweight, ref_qlinear.bias)
+
+        qlinear.scale = float(output_scale)
+        qlinear.zero_point = int(output_zero_point)
         return qlinear

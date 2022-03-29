@@ -26,11 +26,7 @@ class TORCH_API CodeGen {
       StmtPtr stmt,
       std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
-      std::string kernel_func_name = "func")
-      : stmt_(stmt),
-        buffer_args_(std::move(buffer_args)),
-        device_(device),
-        kernel_func_name_(std::move(kernel_func_name)) {}
+      std::string kernel_func_name = "func");
 
   virtual ~CodeGen() = default;
 
@@ -68,17 +64,21 @@ class TORCH_API CodeGen {
     return ("");
   }
 
-  // There are two ways to invoke the codegen:
-  //  1) with a vector of CallArgs
-  //  2) with a vector of raw 'void*' pointers
-  //
-  // The codegen knows types of all inputs from the buffer args, that's why
-  // 'void*' pointers suffice.
-  //
-  // TODO: Eventually we might consider killing the CallArgs version, but
-  // currently only LLVM codegen implements call_raw.
+  // TODO: Figure out how to unify these call interfaces.
+
+  /// Call a function with a vector of CallArgs, which are tagged
+  /// unions that properly type the arguments.
   virtual void call(const std::vector<CallArg>& args) = 0;
+
+  /// Call a function faster than a regular `call` by assuming that
+  /// the generated kernel already knows the type of the arguments, so
+  /// they can be type-punned with `void*`s.
   virtual void call_raw(const std::vector<void*>& args) = 0;
+
+  /// Call a function even faster than a regular call, by assuming
+  /// that the number of thread blocks can be derived from `numel` via
+  /// a simple division, rather than evaluating an expression.
+  virtual void call_with_numel(void** args, int64_t numel);
 
   virtual at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -95,6 +95,8 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
+  void allocIntermediateBufs();
+
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
 
@@ -105,11 +107,26 @@ class TORCH_API CodeGen {
   std::string kernel_func_name_ = "func";
 };
 
+class TORCH_API ExtCallMemoryReuse : public IRMutator {
+  static std::unordered_map<std::string, std::string> makeExtCallFuncNameMap();
+  static const std::unordered_map<std::string, std::string> extCallFuncNameMap_;
+
+ public:
+  explicit ExtCallMemoryReuse(
+      const std::vector<CodeGen::BufferArg>& bufferArgs);
+  ~ExtCallMemoryReuse() override = default;
+  StmtPtr mutate(ExternalCallPtr v) override;
+
+ private:
+  std::unordered_set<BufPtr> bufferArgs_;
+};
+
 class CodeGen::BufferArg {
  public:
   BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
+  BufferArg(const BufPtr& buf) : buf_(buf) {}
 
   VarPtr var() const {
     return isVar_ ? var_ : buf_->base_handle();

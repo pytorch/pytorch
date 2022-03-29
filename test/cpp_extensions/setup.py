@@ -4,6 +4,7 @@ import os
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 if sys.platform == 'win32':
     vc_version = os.getenv('VCToolsVersion', '')
@@ -47,6 +48,23 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
         extra_compile_args={'cxx': CXX_FLAGS,
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
+
+# todo(mkozuki): Figure out the root cause
+if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
+    # malfet: One shoudl not assume that PyTorch re-exports CUDA dependencies
+    cublas_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cublas_extension',
+        sources=['cublas_extension.cpp'],
+        libraries=['cublas'] if torch.version.hip is None else [],
+    )
+    ext_modules.append(cublas_extension)
+
+    cusolver_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cusolver_extension',
+        sources=['cusolver_extension.cpp'],
+        libraries=['cusolver'] if torch.version.hip is None else [],
+    )
+    ext_modules.append(cusolver_extension)
 
 setup(
     name='torch_test_cpp_extension',

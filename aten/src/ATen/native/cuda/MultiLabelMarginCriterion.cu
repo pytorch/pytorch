@@ -25,7 +25,6 @@ void check_shape(const Tensor& input, const Tensor& target) {
 
   if (ndims <= 1) {
     int dim = input.dim() == 0 ? 1 : input.size(0);
-    int target_size = target.dim() == 0 ? 1 : target.size(0);
     TORCH_CHECK(
         valid_inputs && target.dim() <= 1 && target.numel() == dim,
         "inconsistent target size: ",
@@ -210,7 +209,6 @@ void multilabel_margin_loss_forward_out_cuda_template(
 
   if (input.dim() <= 1) {
     int dim = input.dim() == 0 ? 1 : input.size(0);
-    int target_size = target.dim() == 0 ? 1 : target.size(0);
     output.resize_({});
 
     dim3 blocks(1);

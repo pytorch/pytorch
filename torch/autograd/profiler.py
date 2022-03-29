@@ -6,7 +6,7 @@ from torch.autograd.profiler_util import (
 from torch.autograd import (
     DeviceType, ProfilerActivity, ProfilerConfig, ProfilerState,
     kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
-    _prepare_profiler, _supported_activities
+    _prepare_profiler, _supported_activities, _kineto_step,
 )
 import torch
 import torch.cuda
@@ -423,8 +423,9 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str, args: Optional[str] = None):
         self.name: str = name
+        self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
@@ -432,7 +433,7 @@ class record_function(ContextDecorator):
         self.handle: torch.Tensor = torch.zeros(1)
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name)
+        self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
@@ -654,8 +655,8 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        # 211 is cudaKernelLaunch for cuda >= 9.2; 13 is for older cuda versions
-        assert (row['cbid'] == 211) or (row['cbid'] == 13)
+        # 211 is cudaKernelLaunch for cuda >= 9.2
+        assert (row['cbid'] == 211)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,
@@ -663,3 +664,10 @@ def parse_nvprof_trace(path):
 
     functions.sort(key=lambda evt: evt.time_range.start)
     return functions
+
+
+def kineto_step():
+    """ Notify kineto so it is aware of iteration boundaries for asynchronous
+        trace requests.
+    """
+    _kineto_step()

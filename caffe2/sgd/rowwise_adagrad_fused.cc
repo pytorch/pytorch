@@ -3,7 +3,7 @@
 namespace caffe2 {
 
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradient)
-    .NumInputs(6)
+    .NumInputs(6,7)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -30,6 +30,11 @@ SparseLengthsSumGradient operator.
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
+    .Input(
+        6,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Arg(
@@ -59,7 +64,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 // Match the GPU Approx op, here Approx and Exact are the same for
 // RowWiseSparseAdagradFusedWithSparseLengthsSumGradient op
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox)
-    .NumInputs(6)
+    .NumInputs(6,7)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -86,6 +91,11 @@ SparseLengthsSumGradient operator.
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
+    .Input(
+        6,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Arg(
@@ -113,7 +123,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         /*is_mean=*/false>);
 
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient)
-    .NumInputs(6)
+    .NumInputs(6,7)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -140,6 +150,11 @@ SparseLengthsMeanGradient operator.
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
+    .Input(
+        6,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
@@ -166,7 +181,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 // Match the GPU Approx op, here Approx and Exact are the same for
 // RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient op
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradientApprox)
-    .NumInputs(6)
+    .NumInputs(6,7)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -193,6 +208,11 @@ SparseLengthsMeanGradient operator.
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
+    .Input(
+        6,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Arg(
@@ -220,7 +240,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         /*is_mean=*/true>);
 
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient)
-    .NumInputs(7)
+    .NumInputs(7,8)
     .NumOutputs(3)
     .EnforceInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
@@ -251,6 +271,11 @@ operator.
         6,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
+    .Input(
+        7,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Output(2, "aux_grad", "Auxiliary gradient")
@@ -275,7 +300,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 OPERATOR_SCHEMA(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox)
-    .NumInputs(7)
+    .NumInputs(7,8)
     .NumOutputs(3)
     .EnforceInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
@@ -309,6 +334,11 @@ operator.
         6,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
+    .Input(
+        7,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
     .Output(2, "aux_grad", "Auxiliary gradient")

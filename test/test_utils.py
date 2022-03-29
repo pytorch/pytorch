@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import sys
 import os
 import contextlib
@@ -9,6 +11,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import warnings
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -20,7 +23,6 @@ import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
-from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -410,12 +412,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-class TestFFI(TestCase):
-    def test_deprecated(self):
-        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
-
-
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
@@ -594,116 +590,114 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @retry(URLError, tries=3, skip_after_retries=True)
+
+    def setUp(self):
+        super().setUp()
+        self.previous_hub_dir = torch.hub.get_dir()
+        self.tmpdir = tempfile.TemporaryDirectory('hub_dir')
+        torch.hub.set_dir(self.tmpdir.name)
+
+    def tearDown(self):
+        super().tearDown()
+        torch.hub.set_dir(self.previous_hub_dir)  # probably not needed, but can't hurt
+        self.tmpdir.cleanup()
+
+    @retry(Exception, tries=3)
     def test_load_from_github(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            source='github',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example', 'mnist', source='github', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload(
-            'ailzhang/torchhub_example', force_reload=False)
-        hub_model = hub.load(
-            local_dir,
-            'mnist',
-            source='local',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        local_dir = hub._get_cache_or_reload('ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(local_dir, 'mnist', source='local', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_from_branch(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example:ci/test_slash',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example:ci/test_slash', 'mnist', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_set_dir(self):
-        temp_dir = tempfile.gettempdir()
-        hub.set_dir(temp_dir)
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
-        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
+    @retry(Exception, tries=3)
+    def test_get_set_dir(self):
+        previous_hub_dir = torch.hub.get_dir()
+        with tempfile.TemporaryDirectory('hub_dir') as tmpdir:
+            torch.hub.set_dir(tmpdir)
+            self.assertEqual(torch.hub.get_dir(), tmpdir)
+            self.assertNotEqual(previous_hub_dir, tmpdir)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+            hub_model = hub.load('ailzhang/torchhub_example', 'mnist', pretrained=True, verbose=False)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            assert os.path.exists(os.path.join(tmpdir, 'ailzhang_torchhub_example_master'))
+
+        # Test that set_dir properly calls expanduser()
+        # non-regression test for https://github.com/pytorch/pytorch/issues/69761
+        new_dir = os.path.join("~", "hub")
+        torch.hub.set_dir(new_dir)
+        self.assertEqual(torch.hub.get_dir(), os.path.expanduser(new_dir))
+
+
+    @retry(Exception, tries=3)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
         self.assertObjectIn('mnist', entry_lists)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_download_url_to_file(self):
-        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
-        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
-        loaded_state = torch.load(temp_file)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = os.path.join(tmpdir, 'temp')
+            hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, f, progress=False)
+            loaded_state = torch.load(f)
+            self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
+        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_zip_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        # with name
+        file_name = "the_file_name"
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+        expected_file_path = os.path.join(torch.hub.get_dir(), 'checkpoints', file_name)
+        self.assertTrue(os.path.exists(expected_file_path))
+        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+
+    @retry(Exception, tries=3)
+    def test_load_legacy_zip_checkpoint(self):
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip', pretrained=True, verbose=False)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            assert any("will be deprecated in favor of default zipfile" in str(w) for w in ws)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_zip_1_6_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
+    @retry(Exception, tries=3)
+    def test_hub_parse_repo_info(self):
+        # If the branch is specified we just parse the input and return
+        self.assertEqual(
+            torch.hub._parse_repo_info('a/b:c'),
+            ('a', 'b', 'c')
+        )
+        # For torchvision, the default branch is main
+        self.assertEqual(
+            torch.hub._parse_repo_info('pytorch/vision'),
+            ('pytorch', 'vision', 'main')
+        )
+        # For the torchhub_example repo, the default branch is still master
+        self.assertEqual(
+            torch.hub._parse_repo_info('ailzhang/torchhub_example'),
+            ('ailzhang', 'torchhub_example', 'master')
+        )
 
-    def test_hub_dir(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            self.assertEqual(torch.hub.get_dir(), dirname)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_state_dict_from_url_with_name(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            file_name = 'test_file'
-            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
-            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
-            self.assertEqual(sum_of_state_dict(loaded_state),
-                             SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_commit_from_forked_repo(self):
-        with self.assertRaisesRegex(
-                ValueError,
-                'If it\'s a commit from a forked repo'):
-            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+        with self.assertRaisesRegex(ValueError, 'If it\'s a commit from a forked repo'):
+            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
@@ -843,6 +837,14 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
+
+
+class TestCppExtensionUtils(TestCase):
+    def test_cpp_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
+
+    def test_cc_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
 
 
 if __name__ == '__main__':

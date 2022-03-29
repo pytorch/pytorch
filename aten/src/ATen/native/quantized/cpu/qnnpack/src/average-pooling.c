@@ -30,10 +30,8 @@ static inline size_t compute_output_dimension(
 }
 
 enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t pooling_height,
     uint32_t pooling_width,
     uint32_t stride_height,
@@ -145,8 +143,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
     goto error;
   }
 
-  const bool any_padding = (input_padding_left | input_padding_top |
-                            input_padding_right | input_padding_bottom) != 0;
+  const bool any_padding = (input_padding_width | input_padding_height) != 0;
   const uint32_t kr = pytorch_qnnp_params.q8avgpool.kr;
   const uint32_t mr = pytorch_qnnp_params.q8avgpool.mr;
   const uint32_t qr = pytorch_qnnp_params.q8avgpool.qr;
@@ -162,15 +159,16 @@ enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
     average_pooling->zero_pointer = zero_buffer;
   }
 
-  average_pooling->input_padding_top = input_padding_top;
-  average_pooling->input_padding_right = input_padding_right;
-  average_pooling->input_padding_bottom = input_padding_bottom;
-  average_pooling->input_padding_left = input_padding_left;
-
+  average_pooling->input_padding_depth = 0;
+  average_pooling->input_padding_height = input_padding_height;
+  average_pooling->input_padding_width = input_padding_width;
+  average_pooling->kernel_depth = 1;
   average_pooling->kernel_height = pooling_height;
   average_pooling->kernel_width = pooling_width;
+  average_pooling->stride_depth = 1;
   average_pooling->stride_height = stride_height;
   average_pooling->stride_width = stride_width;
+  average_pooling->dilation_depth = 1;
   average_pooling->dilation_height = 1;
   average_pooling->dilation_width = 1;
   average_pooling->channels = channels;
@@ -233,21 +231,21 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
   }
 
   average_pooling->batch_size = batch_size;
+  average_pooling->input_depth = 1;
   average_pooling->input_height = input_height;
   average_pooling->input_width = input_width;
   average_pooling->input = input;
   average_pooling->input_pixel_stride = input_pixel_stride;
 
   average_pooling->output_height = compute_output_dimension(
-      average_pooling->input_padding_top + input_height +
-          average_pooling->input_padding_bottom,
+      input_height + average_pooling->input_padding_height * 2,
       average_pooling->kernel_height,
       average_pooling->stride_height);
   average_pooling->output_width = compute_output_dimension(
-      average_pooling->input_padding_left + input_width +
-          average_pooling->input_padding_right,
+      input_width + average_pooling->input_padding_width * 2,
       average_pooling->kernel_width,
       average_pooling->stride_width);
+  average_pooling->output_depth = 1;
   average_pooling->output = output;
   average_pooling->output_pixel_stride = output_pixel_stride;
 
@@ -261,81 +259,15 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
     }
   }
 
-  const size_t pooling_height = average_pooling->kernel_height;
-  const size_t pooling_width = average_pooling->kernel_width;
-  const size_t pooling_size = pooling_height * pooling_width;
-  const size_t output_height = average_pooling->output_height;
-  const size_t output_width = average_pooling->output_width;
   /* Micro-kernel may read up to (mr - 1) elements after the end of indirection
    * buffer */
   const uint32_t mr = pytorch_qnnp_params.q8avgpool.mr;
 
-  /*
-   * Indirection buffer:
-   * Imagine a we want to do dw conv or avgpooling with these parameters:
-   * kernel_width/height=3 stride=2
-   * Input is:
-   *  ---------------
-   *  |0|1|2|3|4|5|6|
-   *  ---------------       -------
-   *  | | | | | | | |   to  |0|1|2|
-   *  ---------------       -------
-   *  | | | | | | | |       | | | |
-   *  ---------------       -------
-   *  | | | | | | | |
-   *  ---------------
-   *  | | | | | | | |
-   *  ---------------
-   *
-   *  Thus we are going from width=7 height=5 input to width=3 height=2
-   *  Convince yourself that input 5x7 with pooling params of 3x3 kernel
-   *  with 2x2 stride gets you to 2x3 output.
-   *  Now for each output place (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
-   *  we have 3x3 input.
-   *  For just the first row of output this will look like as follows:
-   *  pixel:0   pixel:1  pixel:2
-   *  -------   -------  -------
-   *  |0|1|2|   |2|3|4|  |4|5|6|
-   *  -------   -------  -------
-   *  | | | |   | | | |  | | | |
-   *  -------   -------  -------
-   *  | | | |   | | | |  | | | |
-   *  -------   -------  -------
-   *  As you can see there is some overlap in the input needed for each
-   *  output pixel.
-   *  What is indirection buffer:
-   *  Indirection buffer just stores the pointer to the underlying data.
-   *  In this case pointer for a particular input position will point to
-   *  all the input channels of that position in NHWC format.
-   *  So one option for the aforemnetioned storage would be:
-   *  For each output position: store a 3x3 array of pointers. Thus we
-   *  would have 3x3 * 3 (3 output pixel of the first row) = 27 pointers
-   *  stored.
-   *  Now instead we store the pointer in this format:
-   *  ---------------
-   *  |0|1|2|3|4|5|6|
-   *  ---------------
-   *  | | | | | | | |
-   *  ---------------
-   *  | | | | | | | |
-   *  ---------------
-   *  Then we have all the pointers needed as before, but with less duplication.
-   *  So instead of 27 pointers now we have:
-   *  (3 (# of output pixels) - 1) * (stride) * 3 (kernel height) * + 3 * 3 (kernel h*w)
-   *  = 4 * 3 + 9
-   *  = 21 pointers.
-   *  which is the equation below.
-   *  Now in order for this to work the kernel has to be adjusted.
-   *  Here the kernel produced output worth of entire width. Thus as you move from one
-   *  pixel to the next, the jump in the indirection buffer has to be not 3*3 = 9
-   *  but kernel height (3) * stride (2) = 6.
-   *  This you will see operator-run.c
-   */
-  const size_t step_width = min(average_pooling->stride_width, pooling_width);
-  const size_t step_height =
-      pooling_size + (output_width * step_width - 1) * pooling_height;
-  const size_t indirection_buffer_size =
-      sizeof(void*) * ((mr - 1) + batch_size * output_height * step_height);
+  pytorch_qnnp_indirection_set_step_dimensions(average_pooling);
+  const size_t indirection_buffer_size = sizeof(void*) *
+      ((mr - 1) +
+       batch_size * average_pooling->output_height *
+           average_pooling->step_height);
 
   const void** indirection_buffer = (const void**)realloc(
       average_pooling->indirection_buffer, indirection_buffer_size);
@@ -347,8 +279,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
   }
   average_pooling->indirection_buffer = indirection_buffer;
 
-  pytorch_qnnp_indirection_init_dwconv2d(
-      average_pooling, valid_batch_size, step_height, step_width);
+  pytorch_qnnp_indirection_init_dwconv(average_pooling, valid_batch_size);
 
   average_pooling->last_input = input;
   average_pooling->last_input_height = input_height;

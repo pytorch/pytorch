@@ -42,7 +42,6 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      c10::intrusive_ptr<c10d::ProcessGroup> pg,
       FaultyTensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,

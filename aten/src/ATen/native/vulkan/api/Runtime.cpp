@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -111,7 +112,7 @@ VkInstance create_instance(const Runtime::Type type) {
     VK_API_VERSION_1_0,
   };
 
-  const VkInstanceCreateInfo instance_create_info{
+const VkInstanceCreateInfo instance_create_info{
     VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
     nullptr,
     0u,
@@ -244,7 +245,7 @@ uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device
       &queue_family_count,
       queue_families_properties.data());
 
-  for (uint32_t i = 0; i < queue_families_properties.size(); ++i) {
+  for (const auto i : c10::irange(queue_families_properties.size())) {
     const VkQueueFamilyProperties& properties = queue_families_properties[i];
     if (properties.queueCount > 0 && (properties.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
       return i;

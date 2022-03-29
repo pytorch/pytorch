@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
@@ -109,8 +109,12 @@ class TORCH_API AccessInfo {
   // Each access that depends on this one.
   // ie. this access is present in the dependencies map of all accesses that are
   // dependent.
-  const std::map<size_t, std::shared_ptr<AccessInfo>>& dependents() const {
-    return dependents_;
+  std::map<size_t, std::shared_ptr<AccessInfo>> dependents() const {
+    std::map<size_t, std::shared_ptr<AccessInfo>> res;
+    for (const auto& kv : dependents_) {
+      res.emplace(kv.first, kv.second.lock());
+    }
+    return res;
   }
 
   // Returns the symbolic expression of the indices of this access.
@@ -156,7 +160,7 @@ class TORCH_API AccessInfo {
 
   // Yes these should be sorted.
   std::map<size_t, std::shared_ptr<AccessInfo>> dependencies_;
-  std::map<size_t, std::shared_ptr<AccessInfo>> dependents_;
+  std::map<size_t, std::weak_ptr<AccessInfo>> dependents_;
 };
 
 using VarBoundMap = std::unordered_map<VarPtr, Bound>;

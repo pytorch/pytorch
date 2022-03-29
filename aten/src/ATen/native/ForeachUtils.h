@@ -1,7 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/result_type_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -120,19 +126,11 @@ bool check_fast_path_restrictions(
 bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
                         ArrayRef<Scalar> scalarList = {},
                         bool does_op_promote_integer_inputs_to_float = false) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
   return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
-#endif
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_promote_integer_inputs_to_float = false) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
   return can_use_fast_route({tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
-#endif
 }
 
 }

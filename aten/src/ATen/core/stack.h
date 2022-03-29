@@ -4,6 +4,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Deprecated.h>
+#include <c10/util/irange.h>
 
 // TODO move this to c10 namespace
 
@@ -108,7 +109,7 @@ static inline IValue pop(Stack* stack) {
 static inline std::vector<IValue> pop(Stack& stack, size_t n) {
   std::vector<IValue> result;
   result.reserve(n);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     result.push_back(std::move(peek(stack, i, n)));
   }
   drop(stack, n);
@@ -187,7 +188,7 @@ struct TuplePacker {
 
 template <typename... Args>
 struct TuplePacker<0, Args...> {
-  static void execute(Stack& stack, std::tuple<Args...>&& t){};
+  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){};
 };
 
 template <typename... Args>

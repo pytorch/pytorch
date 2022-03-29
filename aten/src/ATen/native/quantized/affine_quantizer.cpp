@@ -41,7 +41,9 @@ void checkCPUTensor(const std::string& fn_name, const Tensor& t) {
 }
 
 void checkFloatTensor(const std::string& fn_name, const Tensor& t) {
-  TORCH_CHECK(t.scalar_type() == kFloat, fn_name, " expects a Float Tensor.");
+  TORCH_CHECK(
+      t.scalar_type() == kFloat, fn_name, " expects a Float Tensor, got ",
+      t.scalar_type());
 }
 
 void checkSameDevice(
@@ -122,7 +124,7 @@ Tensor& quantize_tensor_per_tensor_affine(
 
   // Temporary solution to pack the tensor if dtype is torch.quint4x2
   // Can move this into the fbgemm::Quantize op.
-  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2 || qtensor.scalar_type() == at::ScalarType::QUInt2x4) {
     quantize_tensor_per_tensor_affine_sub_byte_stub(
         rtensor.device().type(), rtensor, qtensor, scale, zero_point);
   } else {
@@ -227,7 +229,7 @@ Tensor& dequantize_tensor_per_tensor_affine(
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2 || qtensor.scalar_type() == at::ScalarType::QUInt2x4) {
     dequantize_tensor_per_tensor_affine_sub_byte_stub(
         qtensor.device().type(), qtensor, rtensor, scale, zero_point);
   } else {

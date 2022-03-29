@@ -229,7 +229,7 @@ static Tensor _mkldnn_pooling(
           false /*ceil_mode */);
 
       all_equal = true;
-      for (size_t i = 2; i < input.sizes().size(); ++i) {
+      for (const auto i : c10::irange(2, input.sizes().size())) {
         if (output_sizes[i] < output_sizes_ceil[i]) {
            padding_vec_r[i - 2]++;
            all_equal = false;
@@ -252,7 +252,7 @@ static Tensor _mkldnn_pooling(
   // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
   // can reduce the memory use.
   if (ideep::algorithm::pooling_max == algo
-      && !(input.requires_grad() && at::GradMode::is_enabled())) {
+      && !((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
 
@@ -318,7 +318,7 @@ static Tensor _mkldnn_pooling_backward(
           false /*ceil_mode */);
 
       all_equal = true;
-      for (size_t i = 2; i < input.sizes().size(); ++i) {
+      for (const auto i : c10::irange(2, input.sizes().size())) {
         if (output_sizes[i] < output_sizes_ceil[i]) {
            padding_vec_r[i - 2]++;
            all_equal = false;
@@ -479,7 +479,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
   auto output_size_vec =
       expand_param_if_needed(output_size, "output_size", input.dim() - 2);
   std::vector<int64_t> kernel_size(input.dim() - 2);
-  for (int64_t i = 2; i < input.dim(); ++i) {
+  for (const auto i : c10::irange(2, input.dim())) {
     auto s1 = input.size(i);
     auto s2 = output_size_vec[i - 2];
     TORCH_CHECK(s2 != 0, "output size can not be zero");

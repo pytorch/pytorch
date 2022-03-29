@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 
 #include <cstdint>

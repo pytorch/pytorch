@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAGuard.h>
 
@@ -140,7 +140,7 @@ void _calculate_moving_average(
     float* x_min_data = x_min.data_ptr<float>();
     float* x_max_data = x_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
-    const uint64_t num_blocks = cuda::ATenCeilDiv<uint64_t>(size, num_threads);
+    const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
 
     // Moving Average Min/Max observer for activations
     MovingAverageMinMax<<<num_blocks, num_threads, 0, cuda_stream>>>(
@@ -190,7 +190,7 @@ void _calc_moving_avg_qparams_helper(
     float* running_min_data = running_min.data_ptr<float>();
     float* running_max_data = running_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
-    const uint64_t num_blocks = cuda::ATenCeilDiv<uint64_t>(size, num_threads);
+    const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
     ChooseQuantizationParamsKernelImpl<<<num_blocks, num_threads, 0, cuda_stream>>>(
         fake_quant_on_data,
         running_min_data,

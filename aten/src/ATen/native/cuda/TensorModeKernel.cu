@@ -1,10 +1,13 @@
-#include <ATen/Context.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cuda/TensorModeKernel.cuh>
+#include <ATen/native/cuda/TensorModeKernel.h>
 #include <ATen/Dispatch.h>
-#include <ATen/TensorIterator.h>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/Resize.h>
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/native/TensorCompare.h>
-#include <c10/util/Exception.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/ThrustAllocator.h>
+#include <c10/core/DeviceArray.h>
+
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
@@ -13,21 +16,18 @@
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
-#include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/native/cuda/TensorModeKernel.cuh>
-#include <THC/THCThrustAllocator.cuh>
 
 namespace at {
 namespace native {
 
 template <typename scalar_t>
 void calculate_mode(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+    const TensorBase& values,
+    const TensorBase& indices,
+    const TensorBase& self,
     std::vector<int64_t>& position,
     int dim) {
-  THCThrustAllocator thrust_allocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator thrust_allocator;
   auto stream = at::cuda::getCurrentCUDAStream();
   auto policy = thrust::cuda::par(thrust_allocator).on(stream);
 
@@ -48,9 +48,12 @@ void calculate_mode(
   scalar_t* iter_begin = data;
   scalar_t* iter_end = data + n_element;
 
-  Tensor sort_buffer = at::arange(0, n_element, self.options().dtype(kLong));
-  auto sort_buffer_ptr =
-      thrust::device_pointer_cast(sort_buffer.data_ptr<int64_t>());
+  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
+  auto sort_buffer = c10::DeviceArray<int64_t>(*cuda_allocator, n_element);
+  auto sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get());
+  auto count_from_zero_iter = thrust::make_counting_iterator(int64_t{0});
+  thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr);
+
 
   // Sort the input data. The original indices of the data are stored in
   // sort_buffer_ptr
@@ -69,11 +72,11 @@ void calculate_mode(
                    thrust::not_equal_to<scalar_t>());
 
   // Count frequency of each element
-  Tensor keys = at::empty(unique, self.options());
-  Tensor counts = at::empty(unique, self.options().dtype(kLong));
+  auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
+  auto counts = c10::DeviceArray<int64_t>(*cuda_allocator, unique);
 
-  auto keys_ptr = thrust::device_pointer_cast(keys.data_ptr<scalar_t>());
-  auto counts_ptr = thrust::device_pointer_cast(counts.data_ptr<int64_t>());
+  auto keys_ptr = thrust::device_pointer_cast(keys.get());
+  auto counts_ptr = thrust::device_pointer_cast(counts.get());
 
   thrust::reduce_by_key(
       policy,
@@ -111,9 +114,9 @@ void calculate_mode(
 
 template <typename scalar_t>
 void apply_mode(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+    const TensorBase& values,
+    const TensorBase& indices,
+    const TensorBase& self,
     std::vector<int64_t>& position,
     int dim,
     int curDim) {
@@ -133,13 +136,14 @@ void apply_mode(
 template <int64_t size, typename scalar_t>
 void handle_fused_mode(
     dim3 grid,
-    const Tensor& self,
+    const TensorBase& self,
     cuda::detail::TensorInfo<scalar_t, unsigned int>& ti_values,
     cuda::detail::TensorInfo<int64_t, unsigned int>& ti_indices,
     int64_t slice_size,
     int64_t slices) {
   constexpr int num_threads = size / 2;
-  static_assert(num_threads % C10_WARP_SIZE == 0 &&
+  int warp_size = at::cuda::warp_size();
+  TORCH_INTERNAL_ASSERT(num_threads % warp_size == 0 &&
                 num_threads <= cuda_utils::kCUDABlockReduceMaxThreads, "");
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
@@ -151,9 +155,9 @@ void handle_fused_mode(
 
 template <typename scalar_t>
 void fused_mode(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+    const TensorBase& values,
+    const TensorBase& indices,
+    const TensorBase& self,
     int64_t slice_size,
     int64_t slices) {
   // Set-up TensorInfo structs for passing to kernel
@@ -188,15 +192,9 @@ void fused_mode(
     case 16:
     case 8:
     case 4:
-    case 2: {
-      if (ceilPowerOf2 > 2 * C10_WARP_SIZE) {
-        handle_fused_mode<128, scalar_t>(
-            grid, self, ti_values, ti_indices, slice_size, slices);
-      } else {
-        handle_fused_mode<2 * C10_WARP_SIZE, scalar_t>(
-            grid, self, ti_values, ti_indices, slice_size, slices);
-      }
-    }
+    case 2:
+      handle_fused_mode<128, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size, slices);
       break;
     case 1:
     default:
@@ -206,101 +204,23 @@ void fused_mode(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-void mode_kernel_impl(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
-  int64_t ndim = ensure_nonempty_dim(self.dim());
-  int64_t slice_size = ensure_nonempty_size(self, dim);
-  int64_t slices = self.numel() / slice_size;
-
-  // Resize output value, index Tensors to appropriate sizes (i.e. the same as
-  // the input Tensor, except at dim=dimension, the size is 1)
-  self_sizes[dim] = 1;
-
-  if (!keepdim) {
-    if (values.ndimension() >= dim) {
-      values.unsqueeze_(dim);
-    }
-    if (indices.ndimension() >= dim) {
-      indices.unsqueeze_(dim);
-    }
-  }
-
-  at::native::resize_output(values, self_sizes);
-  at::native::resize_output(indices, self_sizes);
-
-  // If sliceSize is 1, copy input to values and set indices
-  if (slice_size == 1) {
-    values.copy_(self);
-    indices.fill_(0);
-    if (!keepdim) {
-      values.squeeze_(dim);
-      indices.squeeze_(dim);
-    }
-    return;
-  }
-
-  // Beginning our optimized implementation. First thing we want to do is to
-  // transpose the input Tensor along the sort dimension, and then make it
-  // contiguous.
-  auto transposed = self.transpose(dim, ndim - 1);
-  auto contiguous = transposed.contiguous();
-
-  // We also need to view the values and indices Tensors as transposed in order
-  // to properly determine the offset into the underlying storage in which to
-  // place the mode and index for a particular set of dimension values.
-  auto values_transposed = values.transpose(dim, ndim - 1);
-  auto indices_transposed = indices.transpose(dim, ndim - 1);
-
-  // Call mode
+void launch_fused_mode_kernel(
+    const TensorBase &values, const TensorBase &indices, const TensorBase &self,
+    int64_t slice_size, int64_t slices) {
   AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
-    // Requirements for fused kernel implementation:
-    //
-    // 1. sliceSize <= 2 * max threads per block
-    // 2. uses one block per slice, so number of slices must be less than the
-    // maximum number of blocks for a kernel launch
-    // 3. Can use 32-bit index math for indexing (mainly just for implementation
-    // conciseness, could be changed)
-    //
-    // MAX_BLOCK_SIZE and MAX_GRID_SIZE come from:
-    //     ATen/native/cuda/SortingCommon.cuh
-    if (slice_size <= 2 * MAX_BLOCK_SIZE &&
-        slices <= MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE &&
-        cuda::detail::canUse32BitIndexMath(self)) {
-      fused_mode<scalar_t>(
-          values_transposed,
-          indices_transposed,
-          contiguous,
-          slice_size,
-          slices);
-    } else {
-      // If transposed is already contiguous, it will return a tensor with the
-      // same storage. So, since we do not want to modify self, we clone it.
-      if (transposed.is_contiguous()) {
-        contiguous = contiguous.clone();
-      }
-
-      // Position will store the dimension values we are processing
-      std::vector<int64_t> position(ndim - 1, 0);
-
-      apply_mode<scalar_t>(
-          values_transposed, indices_transposed, contiguous, position, dim, 0);
-    }
+    fused_mode<scalar_t>(values, indices, self, slice_size, slices);
   });
-
-  if (!keepdim) {
-    values.squeeze_(dim);
-    indices.squeeze_(dim);
-  }
 }
 
-#undef MAX_GRID_SIZE
-#undef MAX_BLOCK_SIZE
+void launch_apply_mode_kernel(const TensorBase &values, const TensorBase &indices,
+                              const TensorBase &self, int64_t dim, int64_t ndim) {
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
+    // Position will store the dimension values we are processing
+    std::vector<int64_t> position(ndim - 1, 0);
 
-REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
+    apply_mode<scalar_t>(values, indices, self, position, dim, 0);
+  });
+}
+
 } // namespace native
 } // namespace at

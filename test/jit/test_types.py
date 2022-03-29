@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from collections import namedtuple
 from typing import Dict, List, Optional, Tuple
 
@@ -37,7 +39,7 @@ class TestTypesAndAnnotation(JitTestCase):
         expected = fn(x)
         scripted = torch.jit.script(fn)(x)
 
-        self.assertEquals(expected, scripted)
+        self.assertEqual(expected, scripted)
 
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
@@ -270,3 +272,37 @@ class TestTypesAndAnnotation(JitTestCase):
                 x = 5
                 if 1 == 1:
                     x : Optional[int] = 7
+
+    def test_annotate_outside_init(self):
+        msg = "annotations on instance attributes must be declared in __init__"
+        highlight = "self.x: int"
+
+        # Simple case
+        with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
+            @torch.jit.script
+            class BadModule(object):
+                def __init__(self, x: int):
+                    self.x = x
+
+                def set(self, val: int):
+                    self.x: int = val
+
+        # Type annotation in a loop
+        with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
+            @torch.jit.script
+            class BadModuleLoop(object):
+                def __init__(self, x: int):
+                    self.x = x
+
+                def set(self, val: int):
+                    for i in range(3):
+                        self.x: int = val
+
+        # Type annotation in __init__, should not fail
+        @torch.jit.script
+        class GoodModule(object):
+            def __init__(self, x: int):
+                self.x: int = x
+
+            def set(self, val: int):
+                self.x = val

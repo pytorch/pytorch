@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -54,44 +56,6 @@ static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-// query codegen output arch and target
-static void codegenOutputQuery(
-    const cudaDeviceProp* const prop,
-    int& major,
-    int& minor,
-    bool& compile_to_sass) {
-  using CudaVersion = std::pair<int, int>;
-  CudaVersion nvrtc_version;
-  AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
-
-  AT_ASSERT(nvrtc_version.first >= 6);
-
-  CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
-  CudaVersion max_dev_version(dev_version);
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
-    max_dev_version = CudaVersion(5, 0);
-  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
-    max_dev_version = CudaVersion(6, 0);
-  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
-    max_dev_version = CudaVersion(7, 2);
-  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
-    max_dev_version = CudaVersion(7, 5);
-  } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
-    // 11.0 supports 3-8.0
-    max_dev_version = CudaVersion(8, 0);
-  }
-  if (dev_version > max_dev_version) {
-    dev_version = max_dev_version;
-  }
-  major = dev_version.first;
-  minor = dev_version.second;
-
-  // if we are clamping major/minor, sass is not compatible
-  compile_to_sass = (major == prop->major) && (minor == prop->minor);
-}
-
 std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
@@ -139,6 +103,10 @@ void CudaAnalysis::visit(AllocatePtr v) {
     p = p->get_parent();
   }
   throw std::runtime_error("Global alloc not supported yet");
+}
+
+void CudaAnalysis::visit(PlacementAllocatePtr v) {
+  throw std::runtime_error("Memory reuse not supported yet");
 }
 
 void CudaAnalysis::visit(ForPtr v) {
@@ -508,7 +476,7 @@ void CudaPrinter::visit(BlockPtr v) {
 
 void CudaPrinter::visit(LetPtr v) {
   emitIndent();
-  os() << dtypeToCppString(v->dtype());
+  os() << dtypeToCppString(v->var()->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -925,7 +893,7 @@ void CudaCodeGen::Initialize() {
   HalfChecker halfChecker(buffer_args());
   stmt_v->accept(&halfChecker);
 
-#if __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #if ROCM_VERSION < 40200
   os() << "#include <hip/hip_runtime.h>" << std::endl;
   if (halfChecker.hasHalf()) {
@@ -948,7 +916,7 @@ void CudaCodeGen::Initialize() {
 
   std::string func_name = GetUniqueFuncName(kernel_func_name());
   os() << "extern \"C\" __global__" << std::endl;
-#ifdef USE_ROCM
+#if defined(USE_ROCM)
   // CUDA has a default limit of threads per block (=flat work group size)
   // of 1024, but ROCm uses 256 by default. At the time of writing
   // (#45506), I am unaware of a stricter limit that TensorExpr imposes
@@ -1033,6 +1001,74 @@ void CudaCodeGen::Initialize() {
     }
   }
 
+  // Precompute block and thread extents for call_with_numel().  If
+  // precomputation can't be done (block/thread extents aren't
+  // constant), then disallow call_with_numel.
+  auto block_extents = metavar_rewriter_->gpu_block_extents();
+  auto thread_extents = metavar_rewriter_->gpu_thread_extents();
+  bool canCallWithNumel =
+      !has_random_ && block_extents.size() > 0 && thread_extents.size() > 0;
+  for (size_t i = 1; i < block_extents.size() && canCallWithNumel; i++) {
+    canCallWithNumel = canCallWithNumel && block_extents[i]->isConstant() &&
+        immediateAs<int>(block_extents[i]) == 1;
+  }
+  for (size_t i = 1; i < thread_extents.size() && canCallWithNumel; i++) {
+    canCallWithNumel = canCallWithNumel && thread_extents[i]->isConstant() &&
+        immediateAs<int>(thread_extents[i]) == 1;
+  }
+  if (canCallWithNumel && thread_extents[0]->isConstant()) {
+    // We assume block_extents[0] is output.numel()/thread_block_size_.
+    thread_block_size_ = immediateAs<int>(thread_extents[0]);
+  } else {
+    // Disable call_with_numel.
+    thread_block_size_ = -1;
+  }
+
+  // Build an LLVM based eval expression for the extents
+  block_extents_eval_.reserve(block_extents.size());
+  std::vector<BufferArg> extents_buffer_args;
+
+  // We need to extract the args that are used in the thread and block extents
+  // from bufferArgs and only use those for the `ExprEval` below. Without this,
+  // bufferArgs might contain arbitrary types that are not handled by LLVM and
+  // hence would result in an error.
+  std::unordered_set<VarPtr> vars_in_extents;
+  for (const auto& be : block_extents) {
+    auto v = VarFinder::find(be);
+    vars_in_extents.insert(v.begin(), v.end());
+  }
+  for (const auto& te : thread_extents) {
+    auto v = VarFinder::find(te);
+    vars_in_extents.insert(v.begin(), v.end());
+  }
+  for (const size_t i : c10::irange(buffer_args.size())) {
+    if (vars_in_extents.count(buffer_args[i].var())) {
+      extents_buffer_args.push_back(buffer_args[i]);
+      arg_pos_in_extents_.push_back(true);
+    } else {
+      arg_pos_in_extents_.push_back(false);
+    }
+  }
+  for (const auto& be : block_extents) {
+#ifdef TORCH_ENABLE_LLVM
+    block_extents_eval_.emplace_back(
+        ExprEval<LLVMCodeGen>(ExprHandle(be), extents_buffer_args));
+#else
+    block_extents_eval_.emplace_back(
+        ExprEval<SimpleIREvaluator>(ExprHandle(be), extents_buffer_args));
+#endif
+  }
+  thread_extents_eval_.reserve(thread_extents.size());
+  for (const auto& te : thread_extents) {
+#ifdef TORCH_ENABLE_LLVM
+    thread_extents_eval_.emplace_back(
+        ExprEval<LLVMCodeGen>(ExprHandle(te), extents_buffer_args));
+#else
+    thread_extents_eval_.emplace_back(
+        ExprEval<SimpleIREvaluator>(ExprHandle(te), extents_buffer_args));
+#endif
+  }
+
   GRAPH_DEBUG(
       "Fused TE CUDA kernel:\n",
       oss_.str(),
@@ -1045,6 +1081,59 @@ void CudaCodeGen::Initialize() {
       ")");
 
   CompileToNVRTC(oss_.str(), func_name);
+}
+
+void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
+  if (C10_UNLIKELY(numel == 0)) {
+    return;
+  }
+  if (C10_UNLIKELY(thread_block_size_ <= 0)) {
+    TORCH_INTERNAL_ASSERT(
+        thread_block_size_ >= 0,
+        "call_with_numel() requires a precomputed thread block size");
+  }
+
+  auto const& buffer_args = this->buffer_args();
+  size_t gpu_block_extents =
+      (numel + thread_block_size_ - 1) / thread_block_size_;
+  size_t gpu_thread_extents = thread_block_size_;
+
+  // In CUDA we need to pass pointers to pointers for buffers, thus we need to
+  // go over args and add an extra indirection for such non-scalar
+  // arguments.
+  // Why? See some details here:
+  // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
+  std::vector<void*> ptr_to_args(buffer_args.size());
+  for (size_t i = 0; i < buffer_args.size(); i++) {
+    ptr_to_args[i] =
+        // NOLINTNEXTLINE: const_cast
+        buffer_args[i].isVar() ? args[i] : const_cast<void**>(&args[i]);
+  }
+
+  const auto device = this->device().index();
+  const auto prior_device = at::cuda::current_device();
+  if (prior_device != device) {
+    at::cuda::set_device(device);
+  }
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  fuser::cuda::executor_utils::initializeCudaContext();
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+      function_,
+      gpu_block_extents,
+      1,
+      1,
+      gpu_thread_extents,
+      1,
+      1,
+      0,
+      stream,
+      ptr_to_args.data(),
+      nullptr));
+
+  if (prior_device != device) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
@@ -1068,23 +1157,37 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
+  std::vector<void*> extent_args;
+  size_t raw_args_size = raw_args.size();
+  extent_args.reserve(raw_args_size);
+  for (size_t i = 0; i < raw_args_size; ++i) {
+    if (arg_pos_in_extents_[i]) {
+      extent_args.push_back(raw_args[i]);
+    }
+  }
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (gpu_block_extents[i]->isConstant()) {
-      gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
+      gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
       continue;
     }
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_block_extents[i]), buffer_args);
-    gpu_block_extents_v[i] = eval.value<int>(raw_args);
+    {
+      // invocation of block_extents_eval_ isn't thread safe and this function
+      // may be invoked by multiple threads
+      std::lock_guard<std::mutex> guard(eval_lock_);
+      gpu_block_extents_v[i] =
+          block_extents_eval_[i].value<int64_t>(extent_args);
+    }
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (gpu_thread_extents[i]->isConstant()) {
-      gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
+      gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_thread_extents[i]), buffer_args);
-    gpu_thread_extents_v[i] = eval.value<int>(raw_args);
+    {
+      std::lock_guard<std::mutex> guard(eval_lock_);
+      gpu_thread_extents_v[i] =
+          thread_extents_eval_[i].value<int64_t>(extent_args);
+    }
   }
 
   // Skip launching the kernel if there are no elements to process.
@@ -1138,6 +1241,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
+  fuser::cuda::executor_utils::initializeCudaContext();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       function_,
       gpu_block_extents_v[0],
@@ -1187,21 +1291,12 @@ at::Tensor CudaCodeGen::empty_strided(
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
-  CUcontext pctx = nullptr;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  fuser::cuda::executor_utils::initializeCudaContext();
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   auto prior_device = at::cuda::current_device();
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
-  }
-  // cudaSetDevice does not have to really change the underlying device if it
-  // doesn't have to, so calling cudaFree to force that change
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(nullptr);
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
@@ -1210,7 +1305,7 @@ void CudaCodeGen::CompileToNVRTC(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int major, minor;
   bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
+  fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1218,14 +1313,14 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -1264,7 +1359,7 @@ void CudaCodeGen::CompileToNVRTC(
   size_t ptx_size;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   auto getSize = compile_to_sass

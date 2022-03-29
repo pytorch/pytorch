@@ -37,11 +37,13 @@ namespace tensorexpr {
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
       output_bufs_(other.output_bufs_) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
     : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
@@ -50,22 +52,27 @@ LoopNest::LoopNest(
     const std::vector<Tensor>& output_tensors,
     const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
-std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
-  std::unordered_set<BufPtr> result;
+std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
+  std::vector<BufPtr> result;
+  std::unordered_set<BufPtr> result_set;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
   for (auto buf : bufs) {
-    if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
-      result.insert(buf);
+    if (!output_bufs_.count(buf) && !input_bufs.count(buf) &&
+        !result_set.count(buf)) {
+      result.push_back(buf);
+      result_set.insert(buf);
     }
   }
   return result;
@@ -102,7 +109,8 @@ class IndexFlattener : public IRMutator {
     return alloc<Load>(
         v->dtype(),
         v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}));
+        std::vector<ExprPtr>({flatten_index(
+            v->buf()->dims(), v->indices(), v->buf()->strides())}));
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -112,7 +120,7 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     std::vector<ExprPtr> indices = {
-        flatten_index(v->buf()->dims(), v->indices())};
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides())};
     v->set_indices(indices);
     v->set_value(new_value);
     return v;
@@ -650,46 +658,48 @@ class FunctionInliner : public IRMutator {
       : buf_(producer->buf()),
         producer_(producer),
         outputs_(std::move(outputs)) {
+    success_ = true;
     for (auto i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
-      } else if (intValue(i)) {
+      } else {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
-        TORCH_INTERNAL_ASSERT(
-            *intValue(i) == 0,
-            buildErrorMessage(
-                "Unexpected non-zero constant index in inlined buffer in the fuser."));
+        auto index_val = evalInt(i);
+        if (!index_val || *index_val != 0) {
+          success_ = false;
+          break;
+        }
         producer_index_vars_.push_back(nullptr);
-      } else {
-        throw std::logic_error("cannot inline Buf with compound indices");
       }
     }
+  }
+
+  bool success() const {
+    return success_;
   }
 
  private:
   ExprPtr mutate_loads(BufPtr buf, std::vector<ExprPtr> dims) {
     std::vector<VarPtr> index_vars;
-    TORCH_INTERNAL_ASSERT(
-        buf->ndim() == producer_index_vars_.size(),
-        buildErrorMessage(
-            "Dimensions of producer and consumer expressions do not match in inliner in the fuser."));
+    if (buf->ndim() != producer_index_vars_.size()) {
+      // Dimensions of producer and consumer expressions do not match in inliner
+      // in the fuser
+      success_ = false;
+      return nullptr;
+    }
     for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        auto param_val = evalInt(func_caller_param);
-        TORCH_INTERNAL_ASSERT(
-            param_val && *param_val == 0,
-            buildErrorMessage(
-                "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
         continue;
       }
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
-        throw std::logic_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
+        // Duplicated variables
+        success_ = false;
+        return nullptr;
       }
       // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
@@ -725,20 +735,33 @@ class FunctionInliner : public IRMutator {
   }
 
   ExprPtr mutate(LoadPtr v) override {
+    if (!success()) {
+      return v;
+    }
     BufPtr buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(
-        v->indices().size() == buf->ndim(),
-        buildErrorMessage(
-            "Number of indices doesn't match buf rank in the fuser."));
-    return mutate_loads(buf, v->indices());
+    if (v->indices().size() != buf->ndim()) {
+      // Number of indices doesn't match buf rank in the fuser
+      success_ = false;
+      return v;
+    }
+    auto result = mutate_loads(buf, v->indices());
+    if (!result) {
+      // If we don't inline successfully return the given load.
+      success_ = false;
+      return v;
+    }
+    return result;
   }
 
   // Replace the target variable with the caller expressions.
   ExprPtr mutate(VarPtr v) override {
+    if (!success()) {
+      return v;
+    }
     auto iter = inline_mapping_.find(v);
     if (iter == inline_mapping_.end()) {
       return v;
@@ -751,6 +774,9 @@ class FunctionInliner : public IRMutator {
 
   // Handle random intrinsics which should be cached.
   ExprPtr mutate(IntrinsicsPtr v) override {
+    if (!success()) {
+      return v;
+    }
     if (!in_producer_ || v->op_type() != kRand) {
       return IRMutator::mutate(v);
     }
@@ -768,15 +794,19 @@ class FunctionInliner : public IRMutator {
 
   // Remove the buffer write from the inlined function.
   StmtPtr mutate(StorePtr v) override {
+    if (!success()) {
+      return v;
+    }
     // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
     // remove it.
     if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = to<Store>(IRMutator::mutate(v));
-      TORCH_INTERNAL_ASSERT(
-          producer_,
-          buildErrorMessage(
-              "Producer statement for output buf should remain non-null in the fuser"));
+      if (!producer_) {
+        // Producer statement for output buf should remain non-null in the fuser
+        success_ = false;
+        return v;
+      }
       in_producer_ = false;
       return nullptr;
     } else {
@@ -786,6 +816,9 @@ class FunctionInliner : public IRMutator {
 
   // Any Random Instrinsics that were turned into vars must be inserted here.
   StmtPtr mutate(BlockPtr v) override {
+    if (!success()) {
+      return v;
+    }
     std::vector<StmtPtr> stmts;
     for (StmtPtr stmt : *v) {
       StmtPtr stmt_new = stmt->accept_mutator(this);
@@ -804,6 +837,9 @@ class FunctionInliner : public IRMutator {
   }
 
   StmtPtr mutate(ForPtr v) override {
+    if (!success()) {
+      return v;
+    }
     ForPtr res = to<For>(IRMutator::mutate(v));
     if (!res) {
       return nullptr;
@@ -840,57 +876,80 @@ class FunctionInliner : public IRMutator {
   bool in_producer_ = false;
   std::unordered_map<LetPtr, std::unordered_set<VarPtr>> random_bindings_;
   std::unordered_set<BufPtr> outputs_;
+  bool success_ = true;
 };
 
-bool LoopNest::computeInline(StmtPtr s) {
-  auto s_store = to<Store>(s);
-  if (s_store == nullptr) {
-    throw std::logic_error("Could not find buffer producer to inline");
-  }
-  return computeInline(s_store->buf());
-}
-
-bool LoopNest::computeInline(BufPtr b) {
+StmtPtr computeInlineImpl(
+    BufPtr b,
+    StmtPtr stmt,
+    const std::unordered_set<BufPtr>& output_bufs) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
-  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  auto buf_load_store_uses = findLoadOrStoreUses(stmt);
   if (!buf_load_store_uses.count(b)) {
-    return false;
+    return nullptr;
   }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
-    if (to<ExternalCall>(s)) {
-      return false;
+    if (to<ExternalCall>(s) || to<ExternalCallWithAlloc>(s)) {
+      return nullptr;
     }
   }
 
   // Find producers.
   StorePtr relevant_store{nullptr};
-  auto stores = NodeFinder<Store>::find(root_stmt_);
+  auto stores = NodeFinder<Store>::find(stmt);
   for (auto s : stores) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
         // Cannot inline a reduction computation
-        return false;
+        return nullptr;
       }
       if (relevant_store != nullptr) {
         // Cannot inline Buf with multiple Tensors
-        return false;
+        return nullptr;
       }
       relevant_store = s;
     }
   }
 
-  TORCH_INTERNAL_ASSERT(
-      relevant_store,
-      buildErrorMessage(
-          "Cannot find a relevant store to inline a buf in the fuser."));
+  if (!relevant_store) {
+    // Cannot find a relevant store to inline a buf in the fuser
+    return nullptr;
+  }
 
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
-  FunctionInliner inliner(relevant_store, output_bufs_);
-  root_stmt_ = root_stmt_->accept_mutator(&inliner);
+  FunctionInliner inliner(relevant_store, output_bufs);
+  auto result = stmt->accept_mutator(&inliner);
+  if (inliner.success()) {
+    return result;
+  }
+  return nullptr;
+}
 
+bool LoopNest::computeInline(BufPtr b) {
+  // Inlining may not always be successful. Since all mutations now happen
+  // in-place, an unsuccessful inlining transformation might leave the IR
+  // in an invalid state. To get around this problem, we clone the root stmt,
+  // try inlining on the clone, and if it succeeds, we proceed to perform
+  // inlining on the actual root stmt. This way the root stmt will always be
+  // in a valid state.
+  auto stmt_copy = Stmt::clone(root_stmt_);
+  auto try_inline = computeInlineImpl(b, stmt_copy, output_bufs_);
+  if (!try_inline) {
+    return false;
+  }
+  root_stmt_ = computeInlineImpl(b, root_stmt_, output_bufs_);
   return true;
+}
+
+bool LoopNest::computeInline(StmtPtr s) {
+  auto s_store = to<Store>(s);
+  if (s_store == nullptr) {
+    // Could not find buffer producer to inline
+    return false;
+  }
+  return computeInline(s_store->buf());
 }
 
 // inlining buffers with multiple uses can create duplicated work, which can
@@ -930,7 +989,8 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
         } else {
           // If S is not a store, it must be an ExternalCall.
           TORCH_INTERNAL_ASSERT(
-              to<ExternalCall>(stores[0].s),
+              to<ExternalCall>(stores[0].s) ||
+                  to<ExternalCallWithAlloc>(stores[0].s),
               buildErrorMessage(
                   "Expected stmt: " + std::to_string(stores[0].s) +
                   "\nto be either a Store or an ExternalCall in the fuser."));
@@ -990,6 +1050,23 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
+  void visit(ExternalCallWithAllocPtr v) override {
+    for (const auto& out_buf : v->buf_out_args()) {
+      if (stores_[out_buf].insert(last_stmt_).second) {
+        uses_[out_buf].push_back({(StmtPtr)v, true});
+      }
+    }
+    last_stmt_ = (StmtPtr)v;
+
+    for (const auto& input_buf : v->buf_args()) {
+      if (loads_[input_buf].insert(last_stmt_).second) {
+        uses_[input_buf].push_back({last_stmt_, false});
+      }
+    }
+
+    IRVisitor::visit(v);
+  }
+
   void visit(LoadPtr v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
@@ -1026,6 +1103,10 @@ class ContainedStmtsFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
   void visit(ExternalCallPtr v) override {
+    contained_.insert((StmtPtr)v);
+    IRVisitor::visit(v);
+  }
+  void visit(ExternalCallWithAllocPtr v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
@@ -1068,37 +1149,6 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   while (b && !containsAll(uses, b)) {
     b = findParentBlock(b->get_parent());
   }
-  return b;
-}
-
-StmtPtr LoopNest::insertAllocFree(
-    StmtPtr stmt,
-    const c10::optional<std::unordered_set<BufPtr>>&
-        interm_bufs /* = c10::nullopt*/) {
-  std::unordered_set<BufPtr> intermediate_bufs;
-  if (interm_bufs) {
-    intermediate_bufs = *interm_bufs;
-  } else {
-    intermediate_bufs = getIntermediateBufs();
-  }
-
-  if (intermediate_bufs.size() == 0ULL) {
-    return stmt;
-  }
-
-  BlockPtr b = to<Block>(stmt);
-  if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
-  }
-
-  std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> uses =
-      findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers at global scope.
-  for (BufPtr buf : intermediate_bufs) {
-    b->prepend_stmt(alloc<Allocate>(buf));
-    b->append_stmt(alloc<Free>(buf));
-  }
-
   return b;
 }
 
@@ -1158,17 +1208,12 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen(
-    const c10::optional<std::unordered_set<BufPtr>>&
-        interm_bufs /*= c10::nullopt*/) {
+void LoopNest::prepareForCodegen() {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
 
   root_stmt_ = FlattenIndexes(root_stmt_);
-
-  // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
@@ -1547,6 +1592,9 @@ void LoopNest::splitWithTail(
   if (!p) {
     throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
+
+  // Normalize the loop to simplify start and stop bound computation
+  normalize(f);
 
   bool tail_is_needed = true;
   if (intValue(f->start()) && intValue(f->stop())) {
@@ -1993,7 +2041,7 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   return unsafeFuseLoops(loops, fused);
 }
 
-ForPtr findOuterFor(ForPtr a, ForPtr b) {
+ForPtr LoopNest::findOuterFor(ForPtr a, ForPtr b) {
   StmtPtr s = b; // guess b is the latter.
   while (s != nullptr) {
     if (s == a) {
@@ -2287,7 +2335,7 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
   return true;
 }
 
-void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
+void LoopNest::fullUnroll(ForPtr f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
   if (!f) {
     throw malformed_input("unroll attempted on null loop");
@@ -2319,10 +2367,26 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::unroll(ForPtr f) {
+void LoopNest::fullUnroll(ForPtr f) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   StmtPtr unrolled;
-  unroll(f, &unrolled);
+  fullUnroll(f, &unrolled);
+}
+
+void LoopNest::unroll(ForPtr f, int factor, ForPtr* tail) {
+  if (factor < 2) {
+    return;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr inner;
+  splitWithTail(f, factor, &inner, tail);
+  fullUnroll(inner);
+}
+
+void LoopNest::unroll(ForPtr f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr tail;
+  unroll(f, factor, &tail);
 }
 
 bool LoopNest::isNormalized(ForPtr f) {
@@ -2917,7 +2981,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_params,
         reduceOp->reducer()(
             producer,
-            ExprHandle(alloc<Load>(tmp_buf, new_loop_vars_expr)),
+            alloc<Load>(tmp_buf, new_loop_vars_expr),
             tmp_params,
             {}));
 

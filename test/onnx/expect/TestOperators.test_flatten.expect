@@ -1,16 +1,16 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
+    input: "onnx::Shape_0"
+    output: "onnx::Slice_1"
     name: "Shape_0"
     op_type: "Shape"
   }
   node {
-    input: "1"
-    output: "2"
+    input: "onnx::Slice_1"
+    output: "onnx::Concat_2"
     name: "Slice_1"
     op_type: "Slice"
     attribute {
@@ -30,7 +30,7 @@ graph {
     }
   }
   node {
-    output: "3"
+    output: "onnx::Concat_3"
     name: "Constant_2"
     op_type: "Constant"
     attribute {
@@ -44,9 +44,9 @@ graph {
     }
   }
   node {
-    input: "2"
-    input: "3"
-    output: "4"
+    input: "onnx::Concat_2"
+    input: "onnx::Concat_3"
+    output: "onnx::Reshape_4"
     name: "Concat_3"
     op_type: "Concat"
     attribute {
@@ -56,15 +56,15 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "4"
+    input: "onnx::Shape_0"
+    input: "onnx::Reshape_4"
     output: "5"
     name: "Reshape_4"
     op_type: "Reshape"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Shape_0"
     type {
       tensor_type {
         elem_type: 1

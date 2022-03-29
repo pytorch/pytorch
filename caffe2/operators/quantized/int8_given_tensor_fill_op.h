@@ -40,7 +40,7 @@ class Int8GivenTensorFillOp final : public Operator<CPUContext> {
         {static_cast<int64_t>(source_values.size())},
         at::dtype<uint8_t>().device(CPU));
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
-    for (int i = 0; i < source_values.size(); i++) {
+    for (const auto i : c10::irange(source_values.size())) {
       values_data[i] = static_cast<uint8_t>(source_values[i]);
     }
   }
@@ -92,7 +92,7 @@ class Int8GivenIntTensorFillOp final : public Operator<CPUContext> {
         {static_cast<int64_t>(source_values.size())},
         at::dtype<int32_t>().device(CPU));
     auto* values_data = values_.template mutable_data<int32_t>();
-    for (int i = 0; i < source_values.size(); i++) {
+    for (const auto i : c10::irange(source_values.size())) {
       values_data[i] = static_cast<int32_t>(source_values[i]);
     }
   }

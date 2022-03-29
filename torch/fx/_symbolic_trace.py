@@ -7,14 +7,12 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, Type, List, Callable, Union
 from itertools import chain
 import torch
-import torch._C._fx  # type: ignore[import]
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 import torch.utils._pytree as pytree
 
-import sys
 from ._compatibility import compatibility
 from .node import Argument, map_aggregate, base_types
-from .graph import Graph, _PyTreeInfo
+from .graph import Graph, _PyTreeInfo, _PyTreeCodeGen
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy, ParameterProxy
 
@@ -122,42 +120,6 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
-class _CPatchManager(object):
-    """
-    Calls patch_function in order to intercept functions at the C-extension level
-    """
-    def __init__(self, tracer):
-        self.tracer = tracer
-        patched_fns = [torch.randn, torch.rand, torch.randint]
-
-        def patched_impl(to_patch, args, kwargs):
-            return tracer.create_proxy('call_function', to_patch, args, kwargs)
-
-        c_patch_enabled = True
-
-        def patched_in(to_patch, args, kwargs):
-            nonlocal c_patch_enabled
-            try:
-                c_patch_enabled = False
-                r = patched_impl(to_patch, args, kwargs)
-            finally:
-                c_patch_enabled = True
-            return r
-
-        def trace_func(frame, action, arg):
-            if action == 'c_call':
-                if c_patch_enabled:
-                    if arg in patched_fns:
-                        torch._C._fx.patch_function(arg, patched_in)
-
-        self.func = trace_func
-
-    def __enter__(self):
-        if self.tracer.enable_cpatching:
-            sys.setprofile(self.func)
-
-    def __exit__(self, type, value, tb):
-        sys.setprofile(None)
 
 @compatibility(is_backward_compatible=False)
 class PHBase(object):
@@ -176,7 +138,7 @@ class Tracer(TracerBase):
     # documentation. We need it so that Sphinx doesn't leak `math`s path from the
     # build environment (e.g. `<module 'math' from '/leaked/path').
 
-    """Tracer(autowrap_modules=(math,), autowrap_functions=(), enable_cpatching=False)
+    """Tracer(autowrap_modules=(math,), autowrap_functions=())
 
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
@@ -193,7 +155,6 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
-                 enable_cpatching: bool = False,
                  param_shapes_constant: bool = False) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
@@ -219,17 +180,6 @@ class Tracer(TracerBase):
                 will be evaluted directly, rather than returning a new Proxy value
                 for an attribute access. Backward compatibility for this parameter
                 is guaranteed.
-
-            enable_cpatching (bool): defaults to `False`,
-                Allows you to enable/disable monkeypatching of torch functions at the
-                C-level (which captures functins like randn).
-
-                C-level monkeypatching works by directly modifying the PyCFunctionObject*
-                so that calling it returns a different function.
-
-                Turning this on is likely to slow down tracing by 1.5-3x. This
-                parameter is experimental and its backward-compatibility is NOT
-                guaranteed.
         """
 
         super().__init__()
@@ -244,7 +194,6 @@ class Tracer(TracerBase):
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
-        self.enable_cpatching = enable_cpatching
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
@@ -319,6 +268,7 @@ class Tracer(TracerBase):
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
+                self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
@@ -457,17 +407,22 @@ class Tracer(TracerBase):
                 def replace_ph(x):
                     nonlocal cnt
                     cnt += 1
-                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
+                    param = sig.parameters[name]
+                    default = () if param.default is inspect.Parameter.empty else (param.default,)
+                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', default, {})
                     if x == PH:
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
                     if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
-                        torch._assert(out == x, f"{name} has been specialized to have value {x}")
+                        torch._assert(out == x, f"{name} has been specialized to have value {x} but got another value")
+                    elif type(x) == type(None):
+                        args = (out, f"{name} has been specialized to have value None but got another value")
+                        self.create_proxy('call_function', _assert_is_none, args, {})
                     else:
                         torch.warnings.warn(
-                            "Was not able to add assertion to guarantee correct inputs to "
-                            "specialized function. It is up to the user to make sure that your inputs match the "
-                            "inputs you specialized the function with."
+                            f"Was not able to add assertion to guarantee correct input {name} to "
+                            f"specialized function. It is up to the user to make sure that your inputs match the "
+                            f"inputs you specialized the function with."
                         )
 
                     return x
@@ -500,14 +455,14 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec, None)
+            self.graph._codegen = _PyTreeCodeGen(_PyTreeInfo(orig_args[:total_args], in_spec, None))
 
             def flatten_fn(*args):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                assert(self.graph._pytree_info is not None)
-                self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
+                assert(isinstance(self.graph._codegen, _PyTreeCodeGen))
+                self.graph._codegen.pytree_info = self.graph._codegen.pytree_info._replace(out_spec=out_spec)
                 return out_args
 
             return flatten_fn, flat_args
@@ -515,8 +470,8 @@ class Tracer(TracerBase):
 
 
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-        if isinstance(attr_val, torch.nn.Parameter):
-            for n, p in self.root.named_parameters():
+        def maybe_get_proxy_for_attr(attr_val, collection_to_search, parameter_proxy_cache):
+            for n, p in collection_to_search:
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
                         kwargs = {}
@@ -526,6 +481,17 @@ class Tracer(TracerBase):
                         val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
+            return None
+
+        if isinstance(attr_val, torch.nn.Parameter):
+            maybe_parameter_proxy = maybe_get_proxy_for_attr(attr_val, self.root.named_parameters(), parameter_proxy_cache)
+            if maybe_parameter_proxy is not None:
+                return maybe_parameter_proxy
+
+        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
+            maybe_buffer_proxy = maybe_get_proxy_for_attr(attr_val, self.root.named_buffers(), parameter_proxy_cache)
+            if maybe_buffer_proxy is not None:
+                return maybe_buffer_proxy
 
         return attr_val
 
@@ -603,17 +569,16 @@ class Tracer(TracerBase):
                             self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
-        with _CPatchManager(self):
-            with _Patcher() as patcher:
-                # allow duplicate patches to support the case of nested calls
-                patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
-                patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
-                _patch_wrapped_functions(patcher)
-                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-                for module in self._autowrap_search:
-                    _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
-                self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                                 type_expr=fn.__annotations__.get('return', None))
+        with _Patcher() as patcher:
+            # allow duplicate patches to support the case of nested calls
+            patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
+            patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
+            _patch_wrapped_functions(patcher)
+            _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+            for module in self._autowrap_search:
+                _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
+            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                             type_expr=fn.__annotations__.get('return', None))
 
         self.submodule_paths = None
 
@@ -853,8 +818,8 @@ def wrap(fn_or_name : Union[str, Callable]):
     return fn_or_name
 
 @compatibility(is_backward_compatible=True)
-def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None,
-                   enable_cpatching: bool = False) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]],
+                   concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
     """
     Symbolic tracing API
 
@@ -898,12 +863,16 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]], concrete_a
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
         concrete_args (Optional[Dict[str, any]]): Inputs to be partially specialized
-        enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
     """
-    tracer = Tracer(enable_cpatching=enable_cpatching)
+    tracer = Tracer()
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)
+
+
+@wrap
+def _assert_is_none(value, msg):
+    assert value is None, msg

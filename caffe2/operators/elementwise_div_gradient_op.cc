@@ -51,8 +51,7 @@ void ComputeDivGradient(
     const TOut* C,
     TGrad* dA,
     TGrad* dB,
-    CPUContext* context,
-    bool allow_broadcast_fastpath) {
+    CPUContext* context) {
   const int A_size =
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(A_dims, A_dims + ndim, 1, std::multiplies<int>());
@@ -67,8 +66,7 @@ void ComputeDivGradient(
   }
   math::Set<TGrad, CPUContext>(B_size, TGrad(0), dB, context);
   if (
-      allow_broadcast_fastpath
-      && math::can_use_broadcast_fastpath(ndim, B_dims)
+      math::can_use_broadcast_fastpath(ndim, B_dims)
       && (dA == nullptr || math::can_use_broadcast_fastpath(ndim, A_dims))) {
     ComputeDivGradientFastpath(A_size, B_size, C_size, dC, B, C, dA, dB);
     return;
@@ -135,8 +133,7 @@ bool DivFunctor<CPUContext>::Backward(
         C,
         nullptr,
         dB,
-        context,
-        allow_broadcast_fastpath_);
+        context);
     math::Div(
         A_dims.size(),
         A_dims.data(),
@@ -157,8 +154,7 @@ bool DivFunctor<CPUContext>::Backward(
         C,
         dA,
         dB,
-        context,
-        allow_broadcast_fastpath_);
+        context);
   }
   return true;
 }
@@ -167,7 +163,7 @@ template <>
 class BinaryElementwiseWithArgsGradientOp<
     NumericTypes,
     CPUContext,
-    BinaryFunctorWithBroadcastOptionsCtor<DivFunctor<CPUContext>>,
+    BinaryFunctorWithDefaultCtor<DivFunctor<CPUContext>>,
     SameTypeAsInput,
     SameTypeAsInput>
     final : public Operator<CPUContext> {
@@ -180,8 +176,7 @@ class BinaryElementwiseWithArgsGradientOp<
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
-        OP_SINGLE_ARG(string, "order", order_, "NCHW"),
-        functor_(*this) {
+        OP_SINGLE_ARG(string, "order", order_, "NCHW") {
     if (legacy_broadcast_) {
       if (axis_ != -1) {
         // Get axis from an explicit axis argument.
@@ -307,12 +302,12 @@ class BinaryElementwiseWithArgsGradientOp<
   const std::string axis_str_;
   const std::string order_;
 
-  BinaryFunctorWithBroadcastOptionsCtor<DivFunctor<CPUContext>> functor_;
+  DivFunctor<CPUContext> functor_;
 };
 
 REGISTER_CPU_OPERATOR(
     DivGradient,
-    BinaryElementwiseGradientBroadcastOp<
+    BinaryElementwiseGradientOp<
         NumericTypes,
         CPUContext,
         DivFunctor<CPUContext>>);

@@ -20,6 +20,20 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
   return false;
 }
 
+// Normalize rsub such that `rsub(x,y) = sub(x,y)`
+bool normalizeRSub(graph_node_list_iterator& iter) {
+  if (iter->matches(
+          "aten::rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")) {
+    ArrayRef<Value*> args = iter->inputs();
+    Node* newSub = iter->replaceWithNewSymbol(aten::sub);
+    newSub->replaceInput(0, args[1]);
+    newSub->replaceInput(1, args[0]);
+    iter.destroyCurrent();
+    return true;
+  }
+  return false;
+}
+
 // Normalizes a `__is__` comparison with a bool to `eq` (and same with
 // `__isnot__`)
 bool normalizeIsBool(graph_node_list_iterator& iter) {
@@ -47,6 +61,10 @@ void NormalizeOps(Block* block) {
       NormalizeOps(sub);
     }
 
+    if (normalizeRSub(it)) {
+      continue;
+    }
+
     if (normalizeOpAliases(it)) {
       continue;
     }
@@ -54,6 +72,7 @@ void NormalizeOps(Block* block) {
     if (normalizeIsBool(it)) {
       continue;
     }
+
     it++;
   }
 }
@@ -69,6 +88,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::clip_, aten::clamp_},
       {aten::det, aten::linalg_det},
       {aten::matrix_power, aten::linalg_matrix_power},
+      {aten::matrix_exp, aten::linalg_matrix_exp},
       {aten::ger, aten::outer},
       {aten::arccos, aten::acos},
       {aten::arccos_, aten::acos_},
@@ -76,6 +96,8 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::arcsin_, aten::asin_},
       {aten::arctan, aten::atan},
       {aten::arctan_, aten::atan_},
+      {aten::arctan2, aten::atan2},
+      {aten::arctan2_, aten::atan2_},
       {aten::arccosh, aten::acosh},
       {aten::arccosh_, aten::acosh_},
       {aten::arcsinh, aten::asinh},
@@ -129,8 +151,10 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_xlogy, aten::xlogy},
       {aten::special_log_softmax, aten::log_softmax},
       {aten::orgqr, aten::linalg_householder_product},
+      {aten::adjoint, aten::mH},
       {aten::special_multigammaln, aten::mvlgamma},
       {aten::special_polygamma, aten::polygamma},
+      {aten::special_softmax, aten::softmax},
       {aten::special_gammainc, aten::igamma},
       {aten::special_gammaincc, aten::igammac},
       {aten::special_gammaln, aten::lgamma}};

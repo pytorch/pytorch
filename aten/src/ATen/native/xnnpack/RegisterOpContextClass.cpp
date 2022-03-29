@@ -16,7 +16,7 @@ using internal::convolution2d::createConv2dClampPrePackOpContext;
 using internal::convolution2d::createConv2dTransposeClampPrePackOpContext;
 
 TORCH_LIBRARY(xnnpack, m) {
-  m.class_<LinearOpContext>("LinearOpContext")
+  m.class_<LinearOpContext>(TORCH_SELECTIVE_CLASS("LinearOpContext"))
     .def_pickle(
         [](const c10::intrusive_ptr<LinearOpContext>& op_context)
             -> SerializationTypeLinearPrePack { // __getstate__
@@ -33,7 +33,7 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<3>(state)));
         });
 
-  m.class_<Conv2dOpContext>("Conv2dOpContext")
+  m.class_<Conv2dOpContext>(TORCH_SELECTIVE_CLASS("Conv2dOpContext"))
     .def_pickle(
         [](const c10::intrusive_ptr<Conv2dOpContext>& op_context)
             -> SerializationTypeConv2dPrePack { // __getstate__
@@ -55,7 +55,7 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<7>(state)));
         });
 
-  m.class_<TransposeConv2dOpContext>("TransposeConv2dOpContext")
+  m.class_<TransposeConv2dOpContext>(TORCH_SELECTIVE_CLASS("TransposeConv2dOpContext"))
     .def_pickle(
         [](const c10::intrusive_ptr<TransposeConv2dOpContext>& op_context)
             -> SerializationTypeTransposeConv2dPrePack { // __getstate__
@@ -82,8 +82,8 @@ TORCH_LIBRARY(xnnpack, m) {
 
 // Registration using the TORCH_LIBRARY def gives dispatching errors when there is no tensor input
 TORCH_LIBRARY(prepacked, m) {
-  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_conv2d(Any W_prepack) -> (int[], int[]?, int[], int[], int[], int)"), [](const IValue& inp) { return internal::convolution2d::unpack_prepacked_sizes_conv2d(inp);});
-  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_linear(Any W_prepack) -> (int[], int[]?)"), [](const IValue& inp) { return internal::linear::unpack_prepacked_sizes_linear(inp);});
+  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_conv2d(Any W_prepack) -> (Any)"), [](const IValue& inp) { return internal::convolution2d::unpack_prepacked_sizes_conv2d(inp);});
+  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_linear(Any W_prepack) -> (Any)"), [](const IValue& inp) { return internal::linear::unpack_prepacked_sizes_linear(inp);});
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.LinearOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.Conv2dOpContext"));

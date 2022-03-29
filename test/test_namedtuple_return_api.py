@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import os
 import re
 import yaml
@@ -14,16 +16,21 @@ all_operators_with_namedtuple_return = {
     'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
-    '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
+    'linalg_svd', '_linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
-    'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
-    '_fused_moving_avg_obs_fq_helper',
+    'frexp', 'lu_unpack', 'histogram', 'histogramdd',
+    '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
+    '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex',
     '_det_lu_based_helper',
     '_lu_with_info',
 }
 
 
 class TestNamedTupleAPI(TestCase):
+
+    def test_import_return_types(self):
+        import torch.return_types  # noqa: F401
+        exec('from torch.return_types import *')
 
     def test_native_functions_yaml(self):
         operators_found = set()
@@ -65,8 +72,9 @@ class TestNamedTupleAPI(TestCase):
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
-            op(operators=['svd', '_svd_helper'], input=(), names=('U', 'S', 'V'), hasout=True),
+            op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
             op(operators=['linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
+            op(operators=['_linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
             op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=False),
             op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['solve'], input=(a,), names=('solution', 'LU'), hasout=True),
@@ -79,6 +87,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['linalg_inv_ex'], input=(), names=('inverse', 'info'), hasout=True),
+            op(operators=['linalg_lu_factor'], input=(), names=('LU', 'pivots'), hasout=True),
+            op(operators=['linalg_lu_factor_ex'], input=(), names=('LU', 'pivots', 'info'), hasout=True),
             op(operators=['fake_quantize_per_tensor_affine_cachemask'],
                input=(0.1, 0, 0, 255), names=('output', 'mask',), hasout=False),
             op(operators=['fake_quantize_per_channel_affine_cachemask'],
@@ -91,6 +101,7 @@ class TestNamedTupleAPI(TestCase):
                input=(torch.tensor([3, 2, 1, 4, 5], dtype=torch.int32), True, True),
                names=('P', 'L', 'U'), hasout=True),
             op(operators=['histogram'], input=(1,), names=('hist', 'bin_edges'), hasout=True),
+            op(operators=['histogramdd'], input=(1,), names=('hist', 'bin_edges'), hasout=False),
             op(operators=['_fake_quantize_per_tensor_affine_cachemask_tensor_qparams'],
                input=(torch.tensor([1.0]), torch.tensor([0], dtype=torch.int), torch.tensor([1]), 0, 255),
                names=('output', 'mask',), hasout=False),
@@ -119,6 +130,15 @@ class TestNamedTupleAPI(TestCase):
             for i, name in enumerate(names):
                 self.assertIs(getattr(tup, name), tup[i])
 
+        def check_torch_return_type(f, names):
+            """
+            Check that the return_type exists in torch.return_types
+            and they can constructed.
+            """
+            return_type = getattr(torch.return_types, f)
+            inputs = [torch.randn(()) for _ in names]
+            self.assertEqual(type(return_type(inputs)), return_type)
+
         for op in operators:
             for f in op.operators:
                 # 1. check the namedtuple returned by calling torch.f
@@ -126,11 +146,13 @@ class TestNamedTupleAPI(TestCase):
                 if func:
                     ret1 = func(a, *op.input)
                     check_namedtuple(ret1, op.names)
+                    check_torch_return_type(f, op.names)
                 #
                 # 2. check the out= variant, if it exists
                 if func and op.hasout:
                     ret2 = func(a, *op.input, out=tuple(ret1))
                     check_namedtuple(ret2, op.names)
+                    check_torch_return_type(f + "_out", op.names)
                 #
                 # 3. check the Tensor.f method, if it exists
                 meth = getattr(a, f, None)
@@ -144,7 +166,6 @@ class TestNamedTupleAPI(TestCase):
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of
         test_namedtuple_return_api.py. Do you forget to add test for that operator?
         '''))
-
 
 if __name__ == '__main__':
     run_tests()

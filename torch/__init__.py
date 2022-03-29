@@ -15,11 +15,10 @@ import platform
 import textwrap
 import ctypes
 import warnings
-from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
-from ._utils import _import_dotted_name
+from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
@@ -30,7 +29,8 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING
+from typing import Set, Type, TYPE_CHECKING, Union
+import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -39,10 +39,13 @@ __all__ = [
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
+    '_TypedStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
     'are_deterministic_algorithms_enabled',
+    'is_deterministic_algorithms_warn_only_enabled',
+    'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -106,8 +109,7 @@ if sys.platform == 'win32':
     try:
         ctypes.CDLL('vcruntime140.dll')
         ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
+        ctypes.CDLL('vcruntime140_1.dll')
     except OSError:
         print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
@@ -367,13 +369,16 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def use_deterministic_algorithms(mode):
+def use_deterministic_algorithms(mode, *, warn_only=False):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
     When enabled, operations will use deterministic algorithms when available,
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
+
+    .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
+        interface for this feature.
 
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
@@ -468,6 +473,11 @@ def use_deterministic_algorithms(mode):
             operations switch to a deterministic algorithm or throw a runtime
             error. If False, allows nondeterministic operations.
 
+    Keyword args:
+        warn_only (:class:`bool`, optional): If True, operations that do not
+            have a deterministic implementation will throw a warning instead of
+            an error. Default: ``False``
+
     Example::
 
         >>> torch.use_deterministic_algorithms(True)
@@ -482,13 +492,76 @@ def use_deterministic_algorithms(mode):
         ...
         RuntimeError: index_add_cuda_ does not have a deterministic implementation...
     """
-    _C._set_deterministic_algorithms(mode)
+    _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
+
+def is_deterministic_algorithms_warn_only_enabled():
+    r"""Returns True if the global deterministic flag is set to warn only.
+    Refer to :func:`torch.use_deterministic_algorithms` documentation for more
+    details.
+    """
+    return _C._get_deterministic_algorithms_warn_only()
+
+def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
+    r"""Sets the debug mode for deterministic operations.
+
+    .. note:: This is an alternative interface for
+        :func:`torch.use_deterministic_algorithms`. Refer to that function's
+        documentation for details about affected operations.
+
+    Args:
+        debug_mode(str or int): If "default" or 0, don't error or warn on
+            nondeterministic operations. If "warn" or 1, warn on
+            nondeterministic operations. If "error" or 2, error on
+            nondeterministic operations.
+    """
+
+    # NOTE: builtins.int is used here because int in this scope resolves
+    # to torch.int
+    if not isinstance(debug_mode, (builtins.int, str)):
+        raise TypeError(f'debug_mode must be str or int, but got {type(debug_mode)}')
+
+    if isinstance(debug_mode, str):
+        if debug_mode == 'default':
+            debug_mode = 0
+        elif debug_mode == 'warn':
+            debug_mode = 1
+        elif debug_mode == 'error':
+            debug_mode = 2
+        else:
+            raise RuntimeError(
+                'invalid value of debug_mode, expected one of `default`, '
+                f'`warn`, `error`, but got {debug_mode}')
+
+    if debug_mode == 0:
+        _C._set_deterministic_algorithms(False)
+    elif debug_mode == 1:
+        _C._set_deterministic_algorithms(True, warn_only=True)
+    elif debug_mode == 2:
+        _C._set_deterministic_algorithms(True)
+    else:
+        raise RuntimeError(
+            'invalid value of debug_mode, expected 0, 1, or 2, '
+            f'but got {debug_mode}')
+
+def get_deterministic_debug_mode() -> builtins.int:
+    r"""Returns the current value of the debug mode for deterministic
+    operations. Refer to :func:`torch.set_deterministic_debug_mode`
+    documentation for more details.
+    """
+
+    if _C._get_deterministic_algorithms():
+        if _C._get_deterministic_algorithms_warn_only():
+            return 1
+        else:
+            return 2
+    else:
+        return 0
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
@@ -522,70 +595,105 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase
+from .storage import _StorageBase, _TypedStorage, _LegacyStorage
 
+# NOTE: New <type>Storage classes should never be added. When adding a new
+# dtype, use torch.storage._TypedStorage directly.
 
-class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
+class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
+class ByteStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.uint8
 
-class FloatStorage(_C.FloatStorageBase, _StorageBase):
-    pass
+class DoubleStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.double
 
+class FloatStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.float
 
-class HalfStorage(_C.HalfStorageBase, _StorageBase):
-    pass
+class HalfStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.half
 
+class LongStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.long
 
-class LongStorage(_C.LongStorageBase, _StorageBase):
-    pass
+class IntStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.int
 
+class ShortStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.short
 
-class IntStorage(_C.IntStorageBase, _StorageBase):
-    pass
+class CharStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.int8
 
+class BoolStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.bool
 
-class ShortStorage(_C.ShortStorageBase, _StorageBase):
-    pass
+class BFloat16Storage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.bfloat16
 
+class ComplexDoubleStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.cdouble
 
-class CharStorage(_C.CharStorageBase, _StorageBase):
-    pass
+class ComplexFloatStorage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.cfloat
 
+class QUInt8Storage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint8
 
-class ByteStorage(_C.ByteStorageBase, _StorageBase):
-    pass
+class QInt8Storage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.qint8
 
+class QInt32Storage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.qint32
 
-class BoolStorage(_C.BoolStorageBase, _StorageBase):
-    pass
+class QUInt4x2Storage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint4x2
 
-
-class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
-    pass
-
-class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
-    pass
-
-class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
-    pass
-
-class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
-    pass
-
-class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
-    pass
-
-class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
-    pass
-
-class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
-    pass
+class QUInt2x4Storage(_LegacyStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint2x4
 
 _storage_classes = {
-    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    _UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
+    QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
+    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
+    _TypedStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -609,6 +717,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
+from torch.amp import autocast
 
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
@@ -648,19 +757,7 @@ from .functional import *  # noqa: F403
 # Remove unnecessary members
 ################################################################################
 
-del DoubleStorageBase
-del FloatStorageBase
-del LongStorageBase
-del IntStorageBase
-del ShortStorageBase
-del CharStorageBase
 del ByteStorageBase
-del BoolStorageBase
-del QUInt8StorageBase
-del BFloat16StorageBase
-del ComplexDoubleStorageBase
-del ComplexFloatStorageBase
-del QUInt4x2StorageBase
 
 ################################################################################
 # Define _assert
@@ -714,15 +811,18 @@ from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
 import torch.backends.cuda
+import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-from torch import quantization as quantization
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
+
+from torch.nested._nestedtensor import NestedTensor
+from torch.nested._nestedtensor import nested_tensor
 
 _C._init_names(list(torch._storage_classes))
 
@@ -739,6 +839,10 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+
+# quantization depends on torch.fx
+# Import quantization
+from torch import quantization as quantization
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom
@@ -767,6 +871,11 @@ quantized_gru = torch.ops.aten.quantized_gru
 
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
+# Import experimental masked operations support. See
+# [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
+# information.
+from . import _masked
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -782,3 +891,6 @@ def _register_device_module(device_type, module):
         raise RuntimeError("The runtime module of '{}' has already "
                            "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
+
+# expose return_types
+from . import return_types

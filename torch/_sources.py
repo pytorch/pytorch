@@ -69,10 +69,11 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True, funcname=None):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
         self.filename = filename
+        self.funcname = funcname
 
 
 @functools.lru_cache(maxsize=None)
@@ -100,5 +101,5 @@ def parse_def(fn):
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, True)
+    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, True, fn.__name__)
     return ParsedDef(py_ast, ctx, source, filename, file_lineno)

@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
 
@@ -46,9 +48,9 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   const float maxDiff = maxValue * tolerance;
   std::cout << "Max Diff allowed: " << maxDiff << std::endl;
   if (diff.sizes().size() == 2) {
-    for (int y = 0; y < diff.sizes()[0]; y++) {
+    for (const auto y : c10::irange(diff.sizes()[0])) {
       std::cout << y << ":";
-      for (int x = 0; x < diff.sizes()[1]; x++) {
+      for (const auto x : c10::irange(diff.sizes()[1])) {
         float diff_xy = diff[y][x].item<float>();
         if (diff_xy > maxDiff) {
           std::cout << std::setw(5) << x;
@@ -60,6 +62,105 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
       std::cout << std::endl;
     }
   }
+}
+
+
+static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
+  // generate all permutations of a given dims
+  if (i == in.size()) {
+    out.push_back(in);
+  }
+  else {
+    for (const auto j : c10::irange(i, in.size())) {
+      std::swap(in[i], in[j]);
+      gen_allpermutations(out, in, i + 1);
+    }
+  }
+}
+
+static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  // Act
+  const auto out_cpu = at::slice(in_cpu, dim, start, end, step);
+  const auto out_vulkan = at::slice(in_vulkan, dim, start, end, step);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>& dim2sizes) {
+  for (const auto& dim2size : dim2sizes) {
+    slice_test(dim2size.second, dim2size.first, 10, 30, 1);         // i.e., 4D tensor's equivalent indexing = [:,:,:,10:30:1]
+    slice_test(dim2size.second, dim2size.first, 10, 30, 7);         // i.e., 4D tensor's equivalent indexing = [:,:,:,10:30:7]
+    slice_test(dim2size.second, dim2size.first, 10, 50, 2);         // i.e., 4D tensor's equivalent indexing = [:,:,:,10:50:2] with end=out of range
+    slice_test(dim2size.second, dim2size.first, -60, 60, 2);        // i.e., 4D tensor's equivalent indexing = [:,:,:,-60:60:2] with start/end=out of range
+    slice_test(dim2size.second, dim2size.first, -30, -10, 1);       // i.e., 4D tensor's equivalent indexing = [:,:,:,-30:-10:1] with negative start/end
+    slice_test(dim2size.second, dim2size.first, 0, INT64_MAX, 1);   // i.e., 4D 's equivalent indexing = [:,:,:,0:9223372036854775807:1] with end=INT64_MAX
+    slice_test(dim2size.second, dim2size.first, -10, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-10:9223372036854775807:1] with negative start and end=INT64_MAX
+    slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
+    slice_test(dim2size.second, dim2size.first, {}, {}, 1);         // i.e., 4D 's equivalent indexing = [:,:,:,::1] with empty start/end
+  }
+}
+
+static void clone_test(const std::vector<int64_t>& size, c10::optional<at::MemoryFormat> optional_memory_format) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  // Act
+  const auto out_cpu = at::clone(in_cpu, optional_memory_format);
+  const auto out_vulkan = at::clone(in_vulkan, optional_memory_format);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+template <class... Inputs>
+inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+  return {std::forward<Inputs>(inputs)...};
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByHandle(
+    const c10::OperatorHandle& op,
+    Args... args) {
+  auto stack = makeStack(std::forward<Args>(args)...);
+  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  return stack;
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByName(
+    const char* func_name,
+    const char* overload_name,
+    Args... args) {
+  const c10::optional<c10::OperatorHandle> op_handle =
+      c10::Dispatcher::singleton().findSchema({func_name, overload_name});
+  assert(op_handle.has_value());
+  return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
 }
 
 } // namespace
@@ -1476,7 +1577,7 @@ TEST(VulkanAPITest, tanh) {
     return;
   }
 
-  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   const auto in_vulkan = in_cpu.vulkan();
 
   const auto out_cpu = at::tanh(in_cpu);
@@ -1495,7 +1596,7 @@ TEST(VulkanAPITest, tanh_) {
     return;
   }
 
-  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   auto vulkan = cpu.vulkan();
 
   at::tanh_(cpu);
@@ -1663,6 +1764,86 @@ TEST(VulkanAPITest, sub_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, transposed_conv2d) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 1};
+  //TODO: Support conv_transpose2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        batches,
+        channels,
+        height,
+        width,
+      };
+    }
+  } input {1, 55, 7, 19};
+
+  constexpr struct {
+    uint32_t input_channels;
+    uint32_t output_channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        input_channels,
+        output_channels,
+        height,
+        width,
+      };
+    }
+  } weights {input.channels, 47, 2, 3};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto output_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+
+  const auto output_vk = at::conv_transpose2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation).cpu();
+
+  // Assert
+  const bool check = almostEqual(output_cpu, output_vk);
+  if (!check) {
+    showRtol(output_cpu, output_vk);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, upsample_nearest2d) {
   if (!at::is_vulkan_available()) {
     return;
@@ -1680,6 +1861,719 @@ TEST(VulkanAPITest, upsample_nearest2d) {
   }
 
   ASSERT_TRUE(check);
+}
+
+#if !defined(__APPLE__)
+TEST(VulkanAPITest, cat_dim1_samefeature_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_difffeature_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({3, 3, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 11, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_texture2d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: 2D Texture (VK_IMAGE_VIEW_TYPE_2D)
+  const auto in_cpu1 = at::rand({2, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({2, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({2, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+#endif /* !defined(__APPLE__) */
+
+TEST(VulkanAPITest, cat_dim1_singledepth_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch x channel (1x1) = single depth texture
+  const auto in_cpu1 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_singletensor_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: single input tensor
+  const auto in_cpu1 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1}, 1);
+  const auto out_vulkan = at::cat({in_cpu1}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_twotensors_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: two input tensors
+  const auto in_cpu1 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=1 and channel (a multiple of 4 <-> channel %4 == 0)
+  const auto in_cpu1 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=2 and channel (a multiple of 4 <-> channel %4 == 0)
+  const auto in_cpu1 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=1 and channel (different multiples of 4 <-> channel %4 == 0)
+  const auto in_cpu1 = at::rand({3, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 12, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=1 and channel (a mixed set of multiples and non-multiples of 4)
+  const auto in_cpu1 = at::rand({3, 3, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu4 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3, in_cpu4}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan(), in_cpu4.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim2_sameheight_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 2);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim2_diffheight_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 2);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim2_singledepth_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch x channel (1x1) = single depth texture
+  const auto in_cpu1 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 2);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: Vulkan cat inputs must have matching sizes except concatenated dimension
+  {
+    const auto in_cpu1 = at::rand({3, 5, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat expects 4 dimensional inputs
+  {
+    const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat is implemented only for height dimension
+  {
+    const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1);
+    }, ::c10::Error);
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+}
+
+TEST(VulkanAPITest, permute_2d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {1, 0});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {1, 0});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_3d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  std::vector<std::vector<int64_t>> all_dims;
+  std::vector<int64_t> in{0, 1, 2};
+  gen_allpermutations(all_dims, in, 0);
+
+  for (const auto& dims : all_dims) {
+    // Act
+    const auto out_cpu = at::permute(in_cpu, dims);
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), dims);
+
+    // Assert
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, permute_4d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({2, 3, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  std::vector<std::vector<int64_t>> all_dims;
+  std::vector<int64_t> in{0, 1, 2, 3};
+  gen_allpermutations(all_dims, in, 0);
+
+  for (const auto& dims : all_dims) {
+    // Act
+    const auto out_cpu = at::permute(in_cpu, dims);
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), dims);
+
+    // Assert
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, permute_4dmclaren_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: McLaren Model usage
+  const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {0, 2, 1, 3});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {0, 2, 1, 3});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_4dbig_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({3, 9, 89, 91}, at::device(at::kCPU).dtype(at::kFloat));
+  std::vector<std::vector<int64_t>> all_dims;
+  std::vector<int64_t> in{0, 1, 2, 3};
+  gen_allpermutations(all_dims, in, 0);
+
+  for (const auto& dims : all_dims) {
+    // Act
+    const auto out_cpu = at::permute(in_cpu, dims);
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), dims);
+
+    // Assert
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, permute_negativedims_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({5, 4, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act: {-1,-2,-3,0} is equivalent to {3,2,1,0}
+  const auto out_cpu = at::permute(in_cpu, {-1, -2, -3, 0});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {-1, -2, -3, 0});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_1d_nochange) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {0});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {0});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_sameDims_nochange) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {0, 1, 2, 3});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {0, 1, 2, 3});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_invalidinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act: Repeated dim
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {2, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({2, 2, 1, 0});
+  }, ::c10::Error);
+
+  // Act: Number of dims don't match
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {4, 3, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({4, 3, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({2, 1, 0});
+  }, ::c10::Error);
+
+  // Act: Dim out of range
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {5, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({5, 2, 1, 0});
+  }, ::c10::Error);
+
+  // Act: Input tensor size > 4D
+  const auto in_cpu_5d = at::rand({1, 2, 1, 2, 161}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW({
+    const auto out_vulkan_5d = at::permute(in_cpu_5d.vulkan(), {4, 3, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan_5d = in_cpu_5d.vulkan();
+    out_vulkan_5d.permute({4, 3, 2, 1, 0});
+  }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, slice_width_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {3, {2, 3, 40, 50}},  // 4D tensors with dim=width
+    {2, {3, 40, 50}},     // 3D tensors with dim=width
+    {1, {40, 50}},        // 2D tensors with dim=width
+    {0, {50}},            // 1D tensors with dim=width
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_height_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {2, {2, 3, 40, 50}},  // 4D tensors with dim=height
+    {1, {3, 40, 50}},     // 3D tensors with dim=height
+    {0, {40, 50}},        // 2D tensors with dim=height
+                          // 1D tesnors don't have height dim for test
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_feature_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {1, {2, 40, 13, 14}}, // 4D tensors with dim=feature(channel)
+    {0, {40, 13, 14}},    // 3D tensors with dim=feature(channel)
+                          // 1D and 2D tesnors don't have feature(channel) dim for test
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_batch_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {0, {40, 3, 13, 14}}, // 4D tensors with dim=batch
+                          // 1D, 2D and 3D tesnors don't have batch dim for test
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_invalidinputs_exceptions) {
+  // Act: slice step must be positive
+  EXPECT_THROW({
+    slice_test({2, 3, 4, 5}, 3, 0, 3, 0);
+  }, ::c10::Error);
+
+  // Act: Vulkan doesn't support zero-sized slice (when start=end)
+  EXPECT_THROW({
+    slice_test({2, 3, 4, 5}, 3, 0, 0, 1);
+  }, ::c10::Error);
+
+  // Act: Vulkan doesn't support zero-sized slice (when start > end)
+  EXPECT_THROW({
+    slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
+  }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, clone_success) {
+  // Arrange
+  std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
+    {c10::MemoryFormat::Preserve, {2, 3, 5, 161}},    // 4D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {2, 3, 5, 161}},  // 4D tensors with MemoryFormat::Contiguous
+    {{}, {2, 3, 5, 161}},                             // 4D tensors with null
+    {c10::MemoryFormat::Preserve, {3, 5, 161}},       // 3D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {3, 5, 161}},     // 3D tensors with MemoryFormat::Contiguous
+    {{}, {3, 5, 161}},                                // 3D tensors with null
+    {c10::MemoryFormat::Preserve, {5, 161}},          // 2D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {5, 161}},        // 2D tensors with MemoryFormat::Contiguous
+    {{}, {5, 161}},                                   // 2D tensors with null
+    {c10::MemoryFormat::Preserve, {161}},             // 1D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {161}},           // 1D tensors with MemoryFormat::Contiguous
+    {{}, {161}},                                      // 1D tensors with null
+  };
+
+  // Act/Assert
+  for (const auto& mem2size : mem2sizes) {
+    clone_test(mem2size.second, mem2size.first);
+  }
+}
+
+TEST(VulkanAPITest, clone_invalidinputs_exceptions) {
+  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  EXPECT_THROW({
+    clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast);
+  }, ::c10::Error);
+
+  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  EXPECT_THROW({
+    clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast3d);
+  }, ::c10::Error);
 }
 
 enum class OpType {
@@ -1935,6 +2829,360 @@ TEST(VulkanAPITest, mobilenetv2) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, gru_mclareninputs_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int H_in = 384;  // input_size
+  const int H_out = 384; // hidden_size
+  const int num_layers = 2;
+  const double gru_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
+  for (int i = 0; i < num_layers; ++i) {
+    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
+    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::gru(in_cpu, h0_cpu,
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0], weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1] },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+
+  // weights/biases should be always on CPU.
+  const auto out_vulkan = at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto vulkan_output = std::get<0>(out_vulkan);
+  auto vulkan_hidden = std::get<1>(out_vulkan);
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+}
+
+TEST(VulkanAPITest, gru_invalidinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int H_in = 384;  // input_size
+  const int H_out = 384; // hidden_size
+  const int num_layers = 2;
+  const double gru_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
+  for (int i = 0; i < num_layers; ++i) {
+    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
+    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act: incorrect # of weights/biases
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: non-3D input tensor
+  EXPECT_THROW({
+    const auto in_cpu_2d = at::rand({1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+    at::gru(in_cpu_2d.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: non-3D hidden tensor
+  EXPECT_THROW({
+    const auto h0_cpu_2d = at::rand({num_layers, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+    at::gru(in_cpu.vulkan(), h0_cpu_2d.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: has_biases should be true
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      false, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: train should be false
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, true, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: bidirectional should be false
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, true, batch_first);
+  }, ::c10::Error);
+
+  // Act: batch_first should be true
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, false);
+  }, ::c10::Error);
+
+  // Act: dropout should be 0.0
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, 1.0, train, bidirectional, batch_first);
+  }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, gru_prepack_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int H_in = 384;  // input_size
+  const int H_out = 384; // hidden_size
+  const int num_layers = 2;
+  const double gru_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
+  for (int i = 0; i < num_layers; ++i) {
+    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
+    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::gru(in_cpu, h0_cpu,
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0], weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1] },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::gru_prepack",
+      "",
+      std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+        weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  auto out_vulkan = callOpByName(
+      "vulkan_prepack::gru_run",
+      "",
+      in_cpu.vulkan(), h0_cpu.vulkan(), prepack[0]);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto vulkan_output = out_vulkan[0].toTensor();
+  auto vulkan_hidden = out_vulkan[1].toTensor();
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+}
+
+TEST(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int H_in = 384;  // input_size
+  const int H_out = 384; // hidden_size
+  const int num_layers = 2;
+  const double gru_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
+  for (int i = 0; i < num_layers; ++i) {
+    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
+    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act: incorrect # of weights/biases
+  EXPECT_THROW({
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) }),
+        has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: non-3D input tensor
+  EXPECT_THROW({
+    const auto in_cpu_2d = at::rand({1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+    auto out_vulkan = callOpByName(
+        "vulkan_prepack::gru_run",
+        "",
+        in_cpu_2d.vulkan(), h0_cpu.vulkan(), prepack[0]);
+  }, ::c10::Error);
+
+  // Act: non-3D hidden tensor
+  EXPECT_THROW({
+    const auto h0_cpu_2d = at::rand({num_layers, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+    auto out_vulkan = callOpByName(
+        "vulkan_prepack::gru_run",
+        "",
+        in_cpu.vulkan(), h0_cpu_2d.vulkan(), prepack[0]);
+  }, ::c10::Error);
+
+  // Act: has_biases should be true
+  EXPECT_THROW({
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+           weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        false, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: train should be false
+  EXPECT_THROW({
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+           weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        has_biases, num_layers, gru_dropout, true, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: bidirectional should be false
+  EXPECT_THROW({
+     auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+           weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        has_biases, num_layers, gru_dropout, train, true, batch_first);
+ }, ::c10::Error);
+
+  // Act: batch_first should be true
+  EXPECT_THROW({
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+           weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        has_biases, num_layers, gru_dropout, train, bidirectional, false);
+  }, ::c10::Error);
+
+  // Act: dropout should be 0.0
+  EXPECT_THROW({
+    auto prepack = callOpByName(
+        "vulkan_prepack::gru_prepack",
+        "",
+        std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+           weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+        has_biases, num_layers, 1.0, train, bidirectional, batch_first);
+  }, ::c10::Error);
 }
 
 } // namespace

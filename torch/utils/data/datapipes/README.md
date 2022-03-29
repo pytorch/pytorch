@@ -21,7 +21,9 @@ class MapperIterDataPipe(IterDataPipe):
         self.dp = dp
         self.fn = fn
 ```
-Note: Avoid loading data from the source DataPipe in `__init__` function, in order to support lazy data loading and save memory.
+Note:
+- Avoid loading data from the source DataPipe in `__init__` function, in order to support lazy data loading and save memory.
+- If `IterDataPipe` instance holds data in memory, please be ware of the in-place modification of data. When second iterator is created from the instance, the data may have already changed. Please take [`IterableWrapper`](https://github.com/pytorch/pytorch/blob/master/torch/utils/data/datapipes/iter/utils.py) class as reference to `deepcopy` data for each iterator.
 
 ### Iterator
 For `IterDataPipe`, an `__iter__` function is needed to consume data from the source `IterDataPipe` then apply operation over the data before yield.
@@ -60,9 +62,9 @@ class MapperIterDataPipe(IterDataPipe):
 Then, the stack of DataPipe can be constructed in functional-programming manner.
 ```py
 >>> import torch.utils.data.datapipes as dp
->>> datapipes1 = dp.iter.FileLoader(['a.file', 'b.file']).map(fn=decoder).shuffle().batch(2)
+>>> datapipes1 = dp.iter.FileOpener(['a.file', 'b.file']).map(fn=decoder).shuffle().batch(2)
 
->>> datapipes2 = dp.iter.FileLoader(['a.file', 'b.file'])
+>>> datapipes2 = dp.iter.FileOpener(['a.file', 'b.file'])
 >>> datapipes2 = dp.iter.Mapper(datapipes2)
 >>> datapipes2 = dp.iter.Shuffler(datapipes2)
 >>> datapipes2 = dp.iter.Batcher(datapipes2, 2)
@@ -95,7 +97,7 @@ Then, the pipeline can be assembled as following:
 
 >>> FOLDER = 'path/2/csv/folder'
 >>> datapipe = dp.iter.FileLister([FOLDER]).filter(fn=lambda filename: filename.endswith('.csv'))
->>> datapipe = dp.iter.FileLoader(datapipe, mode='rt')
+>>> datapipe = dp.iter.FileOpener(datapipe, mode='rt')
 >>> datapipe = datapipe.parse_csv_files(delimiter=' ')
 
 >>> for d in datapipe: # Start loading data

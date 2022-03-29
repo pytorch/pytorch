@@ -12,29 +12,29 @@ namespace jit {
 class SourceRangeUnpickler;
 struct SourceRange;
 
-// Source represents a code segment. It keeps track of:
-//  - text : the text of the code segment
+// SourceView represents a code segment. It keeps track of:
+//  - text_view : the view into text of the code segment
 //  - filename (optional) : if present, represents the name of the file from
 //                          which the code segment originated.
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
-struct Source {
-  explicit Source(
-      std::string text,
+struct SourceView {
+  explicit SourceView(
+      c10::string_view text_view,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
-      : text_(std::move(text)),
+      : text_view_(text_view),
         filename_(c10::nullopt),
         starting_line_no_(0),
         gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
 
-  Source(
-      std::string text,
+  SourceView(
+      c10::string_view text_view,
       c10::optional<std::string> filename,
       size_t starting_line_no,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
-      : text_(std::move(text)),
+      : text_view_(text_view),
         filename_(std::move(filename)),
         starting_line_no_(starting_line_no),
         gen_ranges_(std::move(gen_ranges)) {
@@ -71,8 +71,8 @@ struct Source {
     }
   }
 
-  const std::string& text() const {
-    return text_;
+  const c10::string_view text() const {
+    return text_view_;
   }
 
   const c10::optional<std::string>& filename() const {
@@ -86,15 +86,18 @@ struct Source {
   c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range);
 
+ protected:
+  c10::string_view text_view_;
+
  private:
   void calc_line_start_offsets() {
     line_starting_offsets_.push_back(0);
     size_t pos = 0;
-    while ((pos = text_.find('\n', pos)) != std::string::npos) {
+    while ((pos = text().find('\n', pos)) != std::string::npos) {
       line_starting_offsets_.push_back(++pos);
     }
   }
-  std::string text_;
+
   c10::optional<std::string> filename_;
   // If filename_ is not present, starting_line_no_ is don't care
   size_t starting_line_no_;
@@ -105,15 +108,67 @@ struct Source {
   std::shared_ptr<SourceRangeUnpickler> gen_ranges_;
 };
 
-// A SourceRange is a view into a Source, that points to a subset of the source,
-// specified by `start` and `end` byte offsets into the source text.
+// Source represents a code segment like SourceView, but the former owns a copy
+// of source text while the latter doesn't.
+struct Source : public SourceView {
+  explicit Source(
+      std::string text,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text, gen_ranges), text_(std::move(text)) {
+    text_view_ = text_;
+  }
+
+  explicit Source(
+      c10::string_view text_view,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text_view, gen_ranges),
+        text_(text_view.begin(), text_view.end()) {
+    text_view_ = text_;
+  }
+
+  explicit Source(
+      std::string text,
+      c10::optional<std::string> filename,
+      size_t starting_line_no,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text, filename, starting_line_no, gen_ranges),
+        text_(std::move(text)) {
+    text_view_ = text_;
+  }
+
+  explicit Source(
+      c10::string_view text_view,
+      c10::optional<std::string> filename,
+      size_t starting_line_no,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text_view, filename, starting_line_no, gen_ranges),
+        text_(text_view.begin(), text_view.end()) {
+    text_view_ = text_;
+  }
+
+  // Constructor that deepcopies and owns source text referenced in
+  // `source_view`.
+  explicit Source(const SourceView& source_view) : SourceView(source_view) {
+    text_ = std::string(text_view_.begin(), text_view_.end());
+    text_view_ = text_;
+  }
+
+  std::string text_;
+};
+
+// A SourceRange is a reference to subset of a Source, specified by `start` and
+// `end` byte offsets into the source text.
 struct TORCH_API SourceRange {
-  SourceRange(std::shared_ptr<Source> source_, size_t start_, size_t end_)
-      : source_(std::move(source_)), start_(start_), end_(end_) {}
-  SourceRange() : source_(nullptr), start_(0), end_(0) {}
+  SourceRange(
+      std::shared_ptr<SourceView> source_view_,
+      size_t start_,
+      size_t end_)
+      : source_view_(std::move(source_view_)), start_(start_), end_(end_) {}
+  SourceRange() : source_view_(nullptr), start_(0), end_(0) {}
 
   const std::string text() const {
-    return source_->text().substr(start(), end() - start());
+    auto text_view = source_view_->text().substr(start(), end() - start());
+    return std::string(text_view.begin(), text_view.end());
   }
   size_t size() const {
     return end() - start();
@@ -128,8 +183,8 @@ struct TORCH_API SourceRange {
       bool highlight,
       const std::string& funcname) const;
 
-  const std::shared_ptr<Source>& source() const {
-    return source_;
+  const std::shared_ptr<SourceView>& source() const {
+    return source_view_;
   }
   size_t start() const {
     return start_;
@@ -144,16 +199,16 @@ struct TORCH_API SourceRange {
   }
 
   c10::optional<std::tuple<std::string, size_t, size_t>> file_line_col() const {
-    if (!source_ || !source()->filename()) {
+    if (!source_view_ || !source()->filename()) {
       return c10::nullopt;
     }
 
-    auto lineno = source_->lineno_for_offset(start_);
-    auto col_offset = (int)start_ - (int)source_->offset_for_line(lineno);
+    auto lineno = source_view_->lineno_for_offset(start_);
+    auto col_offset = (int)start_ - (int)source_view_->offset_for_line(lineno);
     // TODO: c10::optional<>::value returns an rvalue ref so can't use it here??
     return std::make_tuple<std::string, size_t, size_t>(
-        source_->filename().value_or(""),
-        source_->lineno_to_source_lineno(lineno),
+        source_view_->filename().value_or(""),
+        source_view_->lineno_to_source_lineno(lineno),
         (size_t)col_offset);
   }
 
@@ -167,16 +222,30 @@ struct TORCH_API SourceRange {
   }
 
   c10::optional<SourceRange> findSourceRangeThatGenerated() const {
-    if (!source_) {
+    if (!source_view_) {
       return c10::nullopt;
     }
-    return source_->findSourceRangeThatGenerated(*this);
+    return source_view_->findSourceRangeThatGenerated(*this);
   }
 
+ protected:
+  std::shared_ptr<SourceView> source_view_;
+
  private:
-  std::shared_ptr<Source> source_;
   size_t start_;
   size_t end_;
+};
+
+// OwnedSourceRange is just like a SourceRange except that it owns a `Source`
+// instead of `SourceView`. Thus OwnedSourceRange owns a copy of source text.
+struct OwnedSourceRange : public SourceRange {
+  OwnedSourceRange(const SourceRange& source_range)
+      : SourceRange(source_range) {
+    const auto& source = source_range.source();
+    if (source) {
+      source_view_ = std::make_shared<Source>(*source);
+    }
+  }
 };
 
 struct TORCH_API SourceRangeHasher {
@@ -189,7 +258,7 @@ struct StackEntry {
   SourceRange range;
 };
 
-C10_EXPORT void format_stack_trace(
+TORCH_API void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries);
 

@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <fstream>
@@ -43,25 +44,14 @@ class IrNodeLabel : private OptInConstDispatch {
     }
   }
 
-  void handle(const Float* f) override {
-    if (f->isSymbolic()) {
-      label_ << "f" << f->name();
+  void handle(const Double* d) override {
+    if (d->isSymbolic()) {
+      label_ << "d" << d->name();
     } else {
       if (detail_level_ >= DetailLevel::Explicit) {
-        label_ << "f" << f->name() << "=";
+        label_ << "d" << d->name() << "=";
       }
-      label_ << std::fixed << std::setprecision(2) << *f->value();
-    }
-  }
-
-  void handle(const Half* h) override {
-    if (h->isSymbolic()) {
-      label_ << "h" << h->name();
-    } else {
-      if (detail_level_ >= DetailLevel::Explicit) {
-        label_ << "h" << h->name() << "=";
-      }
-      label_ << *h->value();
+      label_ << *d->value();
     }
   }
 
@@ -89,14 +79,12 @@ class IrNodeLabel : private OptInConstDispatch {
       label_ << IrNodeLabel::gen(id->start()) << " : ";
     }
     label_ << IrNodeLabel::gen(id->extent());
-    if (id->rawExtent() != id->extent()) {
-      label_ << "\\<" << IrNodeLabel::gen(id->rawExtent()) << "\\>";
-    }
     label_ << ")";
   }
 
   void handle(const Split* split) override {
-    label_ << "Split(factor=" << IrNodeLabel::gen(split->factor()) << ")";
+    label_ << "Split(inner=" << (split->innerSplit() ? "true" : "false")
+           << ", factor=" << IrNodeLabel::gen(split->factor()) << ")";
   }
 
   void handle(const Merge* merge) override {
@@ -108,28 +96,64 @@ class IrNodeLabel : private OptInConstDispatch {
   const DetailLevel detail_level_;
 };
 
+// Small color palette from the X11 theme
+static const char* getColorFromIndex(size_t index) {
+  const size_t number_of_colors = 10;
+  index = index % number_of_colors;
+  switch (index) {
+    case 0: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "azure";
+    case 1: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "pink";
+    case 2: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "green";
+    case 3: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "grey";
+    case 4: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "yellow";
+    case 5: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "lavender";
+    case 6: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "cyan";
+    case 7: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "white";
+    case 8: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "magenta";
+    case 9: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      return "red";
+    default:
+      break;
+  }
+  return "";
+}
+
 } // anonymous namespace
 
 void IrGraphGenerator::print(
     const Fusion* fusion,
     const char* filename,
-    DetailLevel detail_level) {
+    DetailLevel detail_level,
+    ExprColorMap* expr_color_map) {
   std::ofstream dot_file(filename);
   TORCH_CHECK(dot_file.good(), "Failed to open the IR graph file");
-  dot_file << toGraphviz(fusion, detail_level);
+  dot_file << toGraphviz(fusion, detail_level, expr_color_map);
 }
 
 std::string IrGraphGenerator::toGraphviz(
     const Fusion* fusion,
-    DetailLevel detail_level) {
-  IrGraphGenerator ir_graph(fusion, detail_level);
+    DetailLevel detail_level,
+    ExprColorMap* expr_color_map) {
+  IrGraphGenerator ir_graph(fusion, detail_level, expr_color_map);
   return ir_graph.generate();
 }
 
 IrGraphGenerator::IrGraphGenerator(
     const Fusion* fusion,
-    DetailLevel detail_level)
-    : detail_level_(detail_level), fusion_(fusion) {
+    DetailLevel detail_level,
+    ExprColorMap* expr_color_map)
+    : detail_level_(detail_level),
+      fusion_(fusion),
+      expr_color_map_(expr_color_map) {
   // setup inputs & outputs
   // (indexes used to quickly check if a value is fusion input or output)
   for (const auto* input : fusion->inputs()) {
@@ -172,7 +196,13 @@ void IrGraphGenerator::addArc(
 void IrGraphGenerator::printExpr(const Expr* expr, const std::string& label) {
   graph_def_ << "    " << getid(expr) << " "
              << "[label=\"" << label << "\", shape=oval, color=blue, "
-             << "style=filled, fillcolor=azure];\n";
+             << "style=filled, fillcolor=";
+  if (expr_color_map_ != nullptr && expr_color_map_->count(expr)) {
+    graph_def_ << getColorFromIndex(expr_color_map_->at(expr));
+  } else {
+    graph_def_ << "azure";
+  }
+  graph_def_ << "];\n";
 }
 
 void IrGraphGenerator::printValue(const Val* val, const std::string& label) {
@@ -274,13 +304,13 @@ void IrGraphGenerator::generateScheduleGraph() {
       // Maybe not the best way to handle the root domain, but should be okay
       addArc(
           tv,
-          new TensorDomain(tv->getRootDomain()),
+          IrBuilder::create<TensorDomain>(tv->getRootDomain()),
           "[style=dashed, color=green, arrowhead=none]");
 
       if (tv->domain()->hasRFactor())
         addArc(
             tv,
-            new TensorDomain(tv->domain()->getRFactorDomain()),
+            IrBuilder::create<TensorDomain>(tv->domain()->getRFactorDomain()),
             "[style=dashed, color=green, arrowhead=none]");
     }
   }
@@ -295,7 +325,7 @@ void IrGraphGenerator::handle(const Statement* s) {
 void IrGraphGenerator::handle(const Val* v) {
   if (!visited(v)) {
     visited_.insert(v);
-    if (const auto* def = fusion_->origin(v)) {
+    if (const auto* def = v->definition()) {
       handle(def);
     }
     OptInConstDispatch::handle(v);
@@ -326,24 +356,15 @@ void IrGraphGenerator::handle(const IterDomain* id) {
     addArc(id->start(), id, "[color=gray]");
   }
 
-  addArc(id->rawExtent(), id, "[color=gray]");
-
-  if (detail_level_ >= DetailLevel::Explicit &&
-      id->rawExtent() != id->extent()) {
-    addArc(id->extent(), id, "[color=gray, style=dashed]");
-  }
+  addArc(id->extent(), id, "[color=gray]");
 }
 
 void IrGraphGenerator::handle(const Bool* b) {
   printValue(b, IrNodeLabel::gen(b, detail_level_));
 }
 
-void IrGraphGenerator::handle(const Float* f) {
-  printValue(f, IrNodeLabel::gen(f, detail_level_));
-}
-
-void IrGraphGenerator::handle(const Half* h) {
-  printValue(h, IrNodeLabel::gen(h, detail_level_));
+void IrGraphGenerator::handle(const Double* d) {
+  printValue(d, IrNodeLabel::gen(d, detail_level_));
 }
 
 void IrGraphGenerator::handle(const Int* i) {
@@ -378,13 +399,6 @@ void IrGraphGenerator::handle(const TensorView* tv) {
 
   graph_def_ << "    " << getid(tv) << " [label=\"" << label.str()
              << "\", shape=Mrecord, color=brown, " << style << "];\n";
-
-  if (const auto* compute_at_view = tv->getComputeAtView()) {
-    std::stringstream arc_style;
-    arc_style << "[color=red, style=dashed, label=\""
-              << "ComputeAt(" << tv->getRelativeComputeAtAxis() << ")\"]";
-    addArc(tv, compute_at_view, arc_style.str());
-  }
 
   tensor_views_.push_back(tv);
 }

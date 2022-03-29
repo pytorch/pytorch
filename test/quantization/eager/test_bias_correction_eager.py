@@ -1,10 +1,12 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
-from torch.quantization import default_qconfig
-from torch.quantization import QuantWrapper
+from torch.ao.quantization import default_qconfig
+from torch.ao.quantization import QuantWrapper
 import torch.ao.ns._numeric_suite as ns
 
 from torch.ao.quantization._correct_bias import (
@@ -19,7 +21,7 @@ from torch.ao.quantization._correct_bias import (
 import copy
 
 
-class TestBiasCorrection(QuantizationTestCase):
+class TestBiasCorrectionEager(QuantizationTestCase):
     def compute_sqnr(self, x, y):
         Ps = torch.norm(x)
         Pn = torch.norm(x - y)
@@ -31,10 +33,10 @@ class TestBiasCorrection(QuantizationTestCase):
         '''
         artificial_model = copy.deepcopy(float_model)
         artificial_model.qconfig = default_qconfig
-        torch.quantization.prepare(artificial_model, inplace=True)
+        torch.ao.quantization.prepare(artificial_model, inplace=True)
         for data in img_data:
             artificial_model(data[0])
-        torch.quantization.convert(artificial_model, inplace=True)
+        torch.ao.quantization.convert(artificial_model, inplace=True)
 
         # manually changing bias
         for name, submodule in artificial_model.named_modules():

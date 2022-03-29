@@ -1,12 +1,24 @@
 import torch
 from typing import Tuple, List
+from . import forward_ad as fwAD
 from torch._vmap_internals import _vmap
 
 # Utility functions
 
-def _as_tuple(inp, arg_name, fn_name):
+def _as_tuple_nocheck(x):
+    if isinstance(x, tuple):
+        return x
+    elif isinstance(x, list):
+        return tuple(x)
+    else:
+        return x,
+
+def _as_tuple(inp, arg_name=None, fn_name=None):
     # Ensures that inp is a tuple of Tensors
     # Returns whether or not the original inp was a tuple and the tupled version of the input
+    if arg_name is None and fn_name is None:
+        return _as_tuple_nocheck(inp)
+
     is_inp_tuple = True
     if not isinstance(inp, tuple):
         inp = (inp,)
@@ -124,7 +136,7 @@ def _check_requires_grad(inputs, input_type, strict):
                                    " The outputs must be computed in a differentiable manner from the input"
                                    " when running in strict mode.".format(i))
 
-def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None):
+def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None, is_grads_batched=False):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
     assert isinstance(outputs, tuple)
@@ -145,7 +157,8 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
         return (None,) * len(inputs)
     else:
         return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True,
-                                   create_graph=create_graph, retain_graph=retain_graph)
+                                   create_graph=create_graph, retain_graph=retain_graph,
+                                   is_grads_batched=is_grads_batched)
 
 def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     # Used to detect None in the grads and depending on the flags, either replace them
@@ -310,6 +323,13 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
             jvp (tuple of Tensors or Tensor): result of the dot product with
             the same shape as the output.
 
+    Note:
+        ``autograd.functional.jvp`` computes the jvp by using the backward of
+        the backward (sometimes called the double backwards trick). This is not
+        the most performant way of computing the jvp. Please consider using
+        `functorch's jvp <https://github.com/pytorch/functorch#jvp>`_
+        or the :ref:`low-level forward-mode AD API <forward-mode-ad>` instead.
+
     Example:
 
         >>> def exp_reducer(x):
@@ -332,10 +352,6 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
 
-    Note:
-        The jvp is currently computed by using the backward of the backward
-        (sometimes called the double backwards trick) as we don't have support
-        for forward mode AD in PyTorch at the moment.
     """
 
     with torch.enable_grad():
@@ -400,15 +416,73 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
     total_numel = sum(tensor_numels)
-    diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
     chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
                    for tensor, tensor_numel in zip(tensors, tensor_numels))
-    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+    diag_start_idx = 0
+    for chunk, numel in zip(chunks, tensor_numels):
         chunk.diagonal(diag_start_idx).fill_(1)
+        diag_start_idx -= numel
     return chunks
 
 
-def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
+def _jacfwd(func, inputs, strict=False, vectorize=False):
+    if strict:
+        raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
+                           'and `strategy="forward-mode"` are not supported together (yet). '
+                           'Please either set `strict=False` or '
+                           '`strategy="reverse-mode"`.')
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
+    output_info = []
+
+    if vectorize:
+        # See NOTE: [Computing jacobian with vmap and grad for multiple outputs]
+        input_numels = tuple(input.numel() for input in inputs)
+
+        # Step 1: Prepare tangents
+        tangents = _construct_standard_basis_for(inputs, input_numels)
+
+        # Step 2: Compute vmap over computation with dual tensors
+        def jvp(tangents):
+            with fwAD.dual_level():
+                dual_inputs = tuple(
+                    fwAD.make_dual(input, tangent.view_as(input)) for input, tangent in zip(inputs, tangents))
+                _is_outputs_tuple, dual_outputs = _as_tuple(func(*dual_inputs), "outputs")
+                output_info.append(_is_outputs_tuple)
+                jv = []
+                primal_outs = []
+                for dual_out in dual_outputs:
+                    primal, tangent = fwAD.unpack_dual(dual_out)
+                    primal_outs.append(primal)
+                    if tangent is not None:
+                        jv.append(tangent)
+                    else:
+                        jv.append(torch.zeros_like(primal))
+                output_info.append(primal_outs)
+                return tuple(jv)
+
+        outputs_before_split = _vmap(jvp)(tangents)
+        is_outputs_tuple, outputs = output_info
+        # Step 3: for each of the output tangents, split along dim 0
+        jacobian_input_output = []
+        for jac, output_i in zip(outputs_before_split, outputs):
+            jacobian_output_i_output = []
+            for jac, input_j in zip(jac.split(input_numels, dim=0), inputs):
+                # We need to transpose the Jacobian because in forward AD, the
+                # batch dimension represents that of the inputs
+                jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0) \
+                    .reshape(tuple([*output_i.shape, *input_j.shape]))  # noqa: C409
+
+                jacobian_output_i_output.append(jacobian_input_i_output_j)
+            jacobian_input_output.append(jacobian_output_i_output)
+
+        # Omit [Step 4] because everything is already transposed w/ forward AD
+        return _tuple_postprocess(jacobian_input_output, (is_outputs_tuple, is_inputs_tuple))
+    else:
+        raise NotImplementedError("Computing Jacobian using forward-AD or forward-over-reverse Hessian is"
+                                  "only implemented for `vectorize=True`.")
+
+
+def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, strategy="reverse-mode"):
     r"""Function that computes the Jacobian of a given function.
 
     Args:
@@ -424,17 +498,24 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
             independent of it. If ``False``, we return a Tensor of zeros as the
             jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-        vectorize (bool, optional): This feature is experimental, please use at
-            your own risk. When computing the jacobian, usually we invoke
+        vectorize (bool, optional): This feature is experimental.
+            Please consider using
+            `functorch's jacrev or jacfwd <https://github.com/pytorch/functorch#what-are-the-transforms>`_
+            instead if you are looking for something less experimental and more performant.
+            When computing the jacobian, usually we invoke
             ``autograd.grad`` once per row of the jacobian. If this flag is
-            ``True``, we use the vmap prototype feature as the backend to
-            vectorize calls to ``autograd.grad`` so we only invoke it once
-            instead of once per row. This should lead to performance
-            improvements in many use cases, however, due to this feature
-            being incomplete, there may be performance cliffs. Please
-            use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
-            to show any performance warnings and file us issues if
-            warnings exist for your use case. Defaults to ``False``.
+            ``True``, we perform only a single ``autograd.grad`` call with
+            ``batched_grad=True`` which uses the vmap prototype feature.
+            Though this should lead to performance improvements in many cases,
+            because this feature is still experimental, there may be performance
+            cliffs. See :func:`torch.autograd.grad`'s ``batched_grad`` parameter for
+            more information.
+        strategy (str, optional): Set to ``"forward-mode"`` or ``"reverse-mode"`` to
+            determine whether the Jacobian will be computed with forward or reverse
+            mode AD. Currently, ``"forward-mode"`` requires ``vectorized=True``.
+            Defaults to ``"reverse-mode"``. If ``func`` has more outputs than
+            inputs, ``"forward-mode"`` tends to be more performant. Otherwise,
+            prefer to use ``"reverse-mode"``.
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -446,7 +527,8 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
         ``i``\th output and ``j``\th input and will have as size the
         concatenation of the sizes of the corresponding output and the
         corresponding input and will have same dtype and device as the
-        corresponding input.
+        corresponding input. If strategy is ``forward-mode``, the dtype will be
+        that of the output; otherwise, the input.
 
     Example:
 
@@ -474,6 +556,17 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
          tensor([[3., 0.],
                  [0., 3.]]))
     """
+    assert strategy in ("forward-mode", "reverse-mode"), (
+        'Expected strategy to be either "forward-mode" or "reverse-mode". Hint: If your '
+        'function has more outputs than inputs, "forward-mode" tends to be more performant. '
+        'Otherwise, prefer to use "reverse-mode".')
+    if strategy == "forward-mode":
+        if create_graph:
+            raise NotImplementedError('torch.autograd.functional.jacobian: `create_graph=True` '
+                                      'and `strategy="forward-mode"` are not supported together (yet). '
+                                      'Please either set `create_graph=False` or '
+                                      '`strategy="reverse-mode"`.')
+        return _jacfwd(func, inputs, strict, vectorize)
 
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
@@ -484,8 +577,6 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
                                               "outputs of the user-provided function",
                                               "jacobian")
         _check_requires_grad(outputs, "outputs", strict=strict)
-
-
 
         if vectorize:
             if strict:
@@ -540,14 +631,14 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
 
             # Step 2: Call vmap + autograd.grad
             def vjp(grad_output):
-                vj = list(_autograd_grad(flat_outputs, inputs, grad_output, create_graph=create_graph))
+                vj = list(_autograd_grad(flat_outputs, inputs, grad_output, create_graph=create_graph, is_grads_batched=True))
                 for el_idx, vj_el in enumerate(vj):
                     if vj_el is not None:
                         continue
-                    vj[el_idx] = torch.zeros_like(inputs[el_idx])
+                    vj[el_idx] = torch.zeros_like(inputs[el_idx]).expand((sum(output_numels),) + inputs[el_idx].shape)
                 return tuple(vj)
 
-            jacobians_of_flat_output = _vmap(vjp)(grad_outputs)
+            jacobians_of_flat_output = vjp(grad_outputs)
 
             # Step 3: The returned jacobian is one big tensor per input. In this step,
             # we split each Tensor by output.
@@ -602,7 +693,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
 
         return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
-def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
+def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, outer_jacobian_strategy="reverse-mode"):
     r"""Function that computes the Hessian of a given scalar function.
 
     Args:
@@ -617,8 +708,11 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
             such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
             hessian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-        vectorize (bool, optional): This feature is experimental, please use at
-            your own risk. When computing the hessian, usually we invoke
+        vectorize (bool, optional): This feature is experimental.
+            Please consider using
+            `functorch <https://github.com/pytorch/functorch#what-are-the-transforms>`_
+            instead if you are looking for something less experimental and more performant.
+            When computing the hessian, usually we invoke
             ``autograd.grad`` once per row of the hessian. If this flag is
             ``True``, we use the vmap prototype feature as the backend to
             vectorize calls to ``autograd.grad`` so we only invoke it once
@@ -628,6 +722,13 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
             use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
             to show any performance warnings and file us issues if
             warnings exist for your use case. Defaults to ``False``.
+        outer_jacobian_strategy (str, optional): The Hessian is computed by
+            computing the Jacobian of a Jacobian. The inner Jacobian is always
+            computed in reverse-mode AD. Setting strategy to ``"forward-mode"``
+            or ``"reverse-mode"`` determines whether the outer Jacobian will be
+            computed with forward or reverse mode AD. Currently, computing the outer
+            Jacobian in ``"forward-mode"`` requires ``vectorized=True``. Defaults
+            to ``"reverse-mode"``.
 
     Returns:
         Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
@@ -679,6 +780,8 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
+    assert outer_jacobian_strategy in ("forward-mode", "reverse-mode"), (
+        'Expected strategy to be either "forward-mode" or "reverse-mode".')
 
     def ensure_single_output_function(*inp):
         out = func(*inp)
@@ -694,11 +797,16 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
         return out.squeeze()
 
     def jac_func(*inp):
+        if outer_jacobian_strategy == "forward-mode":
+            # _grad_preprocess requires create_graph=True and input to require_grad
+            # or else the input will be detached
+            inp = tuple(t.requires_grad_(True) for t in inp)
         jac = jacobian(ensure_single_output_function, inp, create_graph=True)
         _check_requires_grad(jac, "jacobian", strict=strict)
         return jac
 
-    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize)
+    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize,
+                   strategy=outer_jacobian_strategy)
     return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 

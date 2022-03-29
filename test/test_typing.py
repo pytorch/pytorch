@@ -1,3 +1,4 @@
+# Owner(s): ["module: typing"]
 # based on NumPy numpy/typing/tests/test_typing.py
 
 import itertools

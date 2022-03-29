@@ -9,8 +9,10 @@
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
 /torch/nn/ @albanD @jbschlosser
+/torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
-/aten/src/ATen/native/native_functions.yaml @ezyang
+/docs/source/conf.py @albanD
+/aten/src/ATen/native/native_functions.yaml @bdhirsh
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
@@ -19,22 +21,22 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang @cbalioglu
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang @cbalioglu
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
 
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @neginraoof @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @neginraoof @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @shubhambhokare1
-/torch/onnx/ @bowenbao @neginraoof @shubhambhokare1
-/test/onnx/ @bowenbao @neginraoof @shubhambhokare1
+/torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx/ @bowenbao @shubhambhokare1
+/torch/onnx/ @bowenbao @shubhambhokare1
+/test/onnx/ @bowenbao @shubhambhokare1
 
 # Docker
 /.circleci/docker/ @jeffdaily @jithunnair-amd
@@ -42,7 +44,12 @@
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @zhouzhuojie @driazati
+/.github/ @seemethere @janeyx99 @atalman
+
+# Custom Test Infrastructure
+/test/run_test.py @pytorch-dev-infra
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/common_utils.py @pytorch-dev-infra
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano

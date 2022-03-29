@@ -43,7 +43,7 @@ struct TORCH_API Method : public torch::IMethod {
       TaskLauncher taskLauncher = at::launch);
 
   std::shared_ptr<Graph> graph() const {
-    return function_->graph();
+    return toGraphFunction(*function_).graph();
   }
 
   const std::string& name() const override {
@@ -55,7 +55,7 @@ struct TORCH_API Method : public torch::IMethod {
   }
 
   GraphExecutor& get_executor() {
-    return function_->get_executor();
+    return toGraphFunction(*function_).get_executor();
   }
 
   Function& function() const {

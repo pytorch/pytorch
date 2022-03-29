@@ -84,10 +84,10 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
 }
 
 struct AliasAndIValue {
-  AliasAndIValue(c10::optional<at::AliasInfo> aliasInfo, IValue iValue)
-      : aliasInfo(std::move(aliasInfo)), iValue(std::move(iValue)) {}
+  AliasAndIValue(const at::AliasInfo* aliasInfo, IValue iValue)
+      : aliasInfo(aliasInfo), iValue(std::move(iValue)) {}
 
-  const c10::optional<at::AliasInfo> aliasInfo;
+  const at::AliasInfo* aliasInfo;
   const IValue iValue;
 };
 
@@ -113,8 +113,8 @@ void checkAliases(
     // if this output aliases any input, make sure that they share an alias set
     for (const auto& input : inputs) {
       if (output.iValue.isAliasOf(input.iValue)) {
-        const auto inputSet = input.aliasInfo;
-        const auto outputSet = output.aliasInfo;
+        const auto* inputSet = input.aliasInfo;
+        const auto* outputSet = output.aliasInfo;
         AT_ASSERT(inputSet && outputSet);
         bool found = false;
         for (const auto& set : inputSet->beforeSets()) {
@@ -148,7 +148,7 @@ const Node* findNodeForOp(
     const Graph& g,
     const std::string& unqualifiedOpName) {
   const auto opName = Symbol::fromQualString("aten::" + unqualifiedOpName);
-  for (const auto node : g.nodes()) {
+  for (const auto* node : g.nodes()) {
     if (node->kind() == opName) {
       return node;
     }
@@ -156,10 +156,29 @@ const Node* findNodeForOp(
 
   // Check for alias-ed operator names
   const auto aliasOp = torch::jit::getOperatorAliasMap().find(opName);
-  AT_ASSERT(aliasOp != torch::jit::getOperatorAliasMap().end());
-  for (const auto node : g.nodes()) {
-    if (node->kind() == aliasOp->second) {
-      return node;
+  if (aliasOp != torch::jit::getOperatorAliasMap().end()) {
+    for (const auto* node : g.nodes()) {
+      if (node->kind() == aliasOp->second) {
+        return node;
+      }
+    }
+  }
+
+  // Ideally, there will be only one ATen operator that has tensor outputs in
+  // the graph. Let's use that as the last resolve to make checkAliasAnnotation
+  // more robust.
+  for (const auto* node : g.nodes()) {
+    if (!node->maybeOperator()) {
+      continue;
+    }
+    if (!node->getOperator().isC10Op()) {
+      continue;
+    }
+
+    for (const auto* output : node->outputs()) {
+      if (output->type()->kind() == TypeKind::TensorType) {
+        return node;
+      }
     }
   }
 
@@ -190,7 +209,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     } else if (containedType == FloatType::get()) {
       return IValue(
           fmap(genericList, [](const IValue& v) { return v.toDouble(); }));
-    } else if (containedType->isSubtypeOf(TensorType::get())) {
+    } else if (containedType->isSubtypeOf(*TensorType::get())) {
       return IValue(
           fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
     } else {
@@ -205,6 +224,21 @@ c10::optional<IValue> toIValueProp(const Value* v) {
   }
   return c10::nullopt;
 }
+
+// batch_norm and instance_norm have incorrect annotations, because
+// (a!)? annotations aren't supported, so these checks would fail.
+// Their behavior also varies depending on the `training` and
+// `use_input_stats` arguments.
+// There are custom implementations in alias_analysis.cpp for these ops.
+bool shouldIgnoreNode(const Node* n) {
+  switch (n->kind()) {
+    case aten::batch_norm:
+    case aten::instance_norm:
+      return true;
+    default:
+      return false;
+  }
+}
 } // namespace
 
 void checkAliasAnnotation(
@@ -213,6 +247,9 @@ void checkAliasAnnotation(
     const std::string& unqualifiedOpName) {
   // Find the node that corresponds to our op name
   const auto node = findNodeForOp(*graph, unqualifiedOpName);
+  if (shouldIgnoreNode(node)) {
+    return;
+  }
 
   // Build the stack to use as input to the op
   Stack stack;

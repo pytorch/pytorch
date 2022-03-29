@@ -45,7 +45,7 @@ public:
         // linking libraries of different compilers together, they might have
         // different ways to serialize a type name. That, together with a missing
         // RTLD_GLOBAL, would still fail this.
-        if (lhs.name() == rhs.name()) {
+        if (0 == strcmp(lhs.signature_.name(), rhs.signature_.name())) {
             return true;
         }
 

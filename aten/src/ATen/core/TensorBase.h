@@ -7,6 +7,7 @@
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
@@ -19,7 +20,7 @@
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
-struct TensorOptions;
+class Scalar;
 }
 
 namespace torch { namespace autograd {
@@ -42,7 +43,6 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
@@ -137,6 +137,11 @@ class TORCH_API TensorBase {
   // will only lead to trouble and dangling references.
   c10::MaybeOwned<TensorBase> expect_contiguous(
       MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
+
+  const TensorBase& fill_(const c10::Scalar& scalar) const;
+  const TensorBase& zero_() const;
+
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -300,6 +305,14 @@ class TORCH_API TensorBase {
     return impl_->storage().is_alias_of(other.storage());
   }
 
+  inline bool _is_zerotensor() const {
+    return impl_->_is_zerotensor();
+  }
+
+  inline void _set_zero(bool zero) const {
+    impl_->_set_zero(zero);
+  }
+
   inline bool is_conj() const {
     return impl_->is_conj();
   }
@@ -366,6 +379,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` has XLA backend.
   bool is_xla() const {
     return impl_->is_xla();
+  }
+
+  /// Returns if a `Tensor` has HPU backend.
+  bool is_hpu() const {
+    return impl_->is_hpu();
   }
 
   /// Returns if a `Tensor` has Lazy backend.
@@ -442,6 +460,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
+  }
+
+  // Returns if a `Tensor` is a NestedTensor.
+  bool is_nested() const {
+    return impl_->is_nested();
   }
 
   /// If a tensor is a quantized tensor, returns its quantizer
@@ -625,6 +648,22 @@ class TORCH_API TensorBase {
   }
   bool requires_grad() const {
     return impl_->requires_grad();
+  }
+
+  // The Forward AD API functions below are low level and are not to be used by end
+  // users who should use the API provided in torch/csrc/autograd.h
+
+  /// This function returns the forward gradient for this Tensor at the given level.
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op) const {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
   /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
@@ -832,7 +871,7 @@ struct MaybeOwnedTraits<at::TensorBase> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };
@@ -861,13 +900,14 @@ struct ExclusivelyOwnedTraits<at::TensorBase> {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(toDestroy != nullptr, "Tensor somehow got null TensorImpl?");
     // May be 0 because UndefinedTensorImpl doesn't get its refcount
     // incremented.
+    const bool isUndefined = toDestroy == UndefinedTensorImpl::singleton();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
-        "ExclusivelyOwned<Tensor> destroyed with refcount ", toDestroy->refcount_, ", expected 1!");
+        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && isUndefined),
+        "ExclusivelyOwned<Tensor> destroyed with isUndefined ", isUndefined, " and refcount ", toDestroy->refcount_, ", expected 1 or, if isUndefined, 0!");
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         toDestroy->weakcount_ == 1 || (toDestroy->weakcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
-        "ExclusivelyOwned<Tensor> destroyed with weakcount ", toDestroy->weakcount_, ", expected 1!");
-    if (toDestroy != UndefinedTensorImpl::singleton()) {
+        "ExclusivelyOwned<Tensor> destroyed with isUndefined ", isUndefined, " and weakcount ", toDestroy->weakcount_, ", expected 1 or, if isUndefined, 0!");
+    if (!isUndefined) {
 #ifndef NDEBUG
       // Needed to pass the debug assertions in ~intrusive_ptr_target.
       toDestroy->refcount_ = 0;

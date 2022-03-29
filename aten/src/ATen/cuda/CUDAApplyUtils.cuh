@@ -1,8 +1,10 @@
 #pragma once
 
+#include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/TensorUtils.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/core/TensorBase.h>
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/Copy.h>
@@ -198,11 +200,6 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
   }
 }
 
-// Threads per block for our apply kernel
-// FIXME: use occupancy calculator instead
-constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
-constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
-
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to
 //  1. Initialize `remaining_steps = step`, where `step` is the template arg of
@@ -273,7 +270,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
@@ -299,14 +296,14 @@ struct ApplyOp2 {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int64_t n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
+  const IndexType aOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset = sizeof...(Offsets) < n ?
+  const IndexType bOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, remaining_steps - 1, const IndexType, Offsets...>::apply(
@@ -328,7 +325,7 @@ struct ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, 0, Offset> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int /*n*/, IndexType /*linearIndex*/,
                   Offset aOffset, Offset bOffset) {
   op(a.data[aOffset], b.data[bOffset]);
 }
@@ -359,7 +356,7 @@ template <typename Op,
           int step,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
 #endif
 __global__ void
@@ -378,47 +375,17 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
 
 } // namespace
 
-/**
-   Computes ceil(a / b)
-*/
-template <typename T>
-__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
-  return (a + b - 1) / b;
-}
-
-template <int step = 1>
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
-  if (curDevice == -1) return false;
-  uint64_t numel_per_thread = static_cast<uint64_t>(max_threads_per_block) * static_cast<uint64_t>(step);
-  uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);
-  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
-  if (numBlocks > maxGridX)
-      numBlocks = maxGridX;
-  grid = dim3(numBlocks);
-  return true;
-}
-
-constexpr int getApplyBlocksPerSM() {
-  return AT_APPLY_BLOCKS_PER_SM;
-}
-
-constexpr int getApplyBlockSize() {
-  return AT_APPLY_THREADS_PER_BLOCK;
-}
-
-inline dim3 getApplyBlock(int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
-  return dim3(max_threads_per_block);
-}
-
 template <typename scalar1, typename scalar2, int step, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-inline bool CUDA_tensor_apply2(at::Tensor a,
-                               at::Tensor b,
+inline bool CUDA_tensor_apply2(at::TensorBase a,
+                               at::TensorBase b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
+  TORCH_CHECK(a.device().is_cuda() && b.device().is_cuda(),
+              "CUDA_tensor_apply2: Expected tensors to have CUDA DeviceType, but got "
+              "tensors with type ", a.device().type(), " and ", b.device().type());
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel()) {
@@ -448,8 +415,8 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   This ensures that each element of the tensor is operated on once and only
   once.
   */
-  Tensor oldA;
-  Tensor oldB;
+  TensorBase oldA;
+  TensorBase oldB;
 
   if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
@@ -559,8 +526,8 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 template <typename scalar1, typename scalar2, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-inline bool CUDA_tensor_apply2(at::Tensor a,
-                               at::Tensor b,
+inline bool CUDA_tensor_apply2(const at::TensorBase &a,
+                               const at::TensorBase &b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {

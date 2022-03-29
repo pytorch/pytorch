@@ -55,30 +55,27 @@ class PeriodicModelAverager(ModelAverager):
         >>>
         >>>  dist.init_process_group("nccl", rank=rank, world_size=16)
         >>>  torch.cuda.set_device(rank)
-        >>>  module = nn.Linear(1, 1, bias=False).to(rank)
+        >>>  module = nn.Linear(1, 1, bias=False).cuda()
         >>>  model = nn.parallel.DistributedDataParallel(
         >>>     module, device_ids=[rank], output_device=rank
         >>>  )
         >>>  # Register a post-localSGD communication hook.
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
         >>>  # After 100 steps, run model averaging every 4 steps.
         >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
         >>>  averager = averagers.PeriodicModelAverager(period=4, warmup_steps=100)
-        >>>  for step in range(0, 20):
+        >>>  for step in range(0, 200):
         >>>     optimizer.zero_grad()
         >>>     loss = loss_fn(output, labels)
         >>>     loss.backward()
         >>>     optimizer.step()
-        >>>     # Average parameters globally after ``optimizer.step()``.
-        >>>     # Thus, the inter-node communication only occurs periodically after ``warmup_steps``.
+        >>>     # Will average model parameters globally every 4 steps. Thus,
+        >>>     # inter-node communication only occurs every 4 iterations after
+        >>>     # the initial ``warmup_steps`` period.
         >>>     averager.average_parameters(model.parameters())
-
-    .. warning ::
-        `PeriodicModelAverager` is experimental and subject to change.
     """
 
     def __init__(
@@ -97,7 +94,7 @@ class PeriodicModelAverager(ModelAverager):
             warnings.warn(
                 "When period is 1, no need to use model averaging because the communication cost "
                 "of all-reducing parameters will be no less than the cost of all-reducing gradients "
-                "by DistributedDataParall in the backward pass. Therefore, only "
+                "by DistributedDataParallel in the backward pass. Therefore, only "
                 "DistributedDataParallel should be used for this case."
             )
         self.period = period

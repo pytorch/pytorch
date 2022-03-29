@@ -28,9 +28,8 @@ class TORCH_API TimeCounter {
   int iterations_ = 0;
 };
 
-class TORCH_API TimeOperatorObserver final
-    : public TimeCounter,
-      public ObserverBase<OperatorBase> {
+class TORCH_API TimeOperatorObserver final : public TimeCounter,
+                                             public ObserverBase<OperatorBase> {
  public:
   explicit TimeOperatorObserver(OperatorBase* subject) = delete;
   explicit TimeOperatorObserver(

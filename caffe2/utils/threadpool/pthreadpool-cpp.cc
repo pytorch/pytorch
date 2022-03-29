@@ -83,7 +83,7 @@ size_t getDefaultNumThreads();
 PThreadPool* pthreadpool() {
   static auto threadpool =
     std::make_unique<PThreadPool>(getDefaultNumThreads());
-#ifndef WIN32
+#if !(defined(WIN32)) && !(defined(__XROS__))
   static std::once_flag flag;
   std::call_once(flag, []() {
     pthread_atfork(nullptr, nullptr, child_atfork);

@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -35,6 +35,7 @@ template<int n> struct TensorListMetadata
   int numel_for_tensor[depth_to_max_tensors[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
+  int start_tensor_this_launch;
 };
 
 template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata
@@ -137,6 +138,7 @@ void multi_tensor_apply(
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
         size_t n_tensors = tensor_lists[0].size();
         TensorListMetadata<depth> tensorListMeta;
+        tensorListMeta.start_tensor_this_launch = 0;
 
         int loc_block_info = 0;
         int loc_tensor_info = 0;
@@ -169,6 +171,7 @@ void multi_tensor_apply(
                     loc_block_info = 0;
                     if(chunk == chunks - 1) {
                         loc_tensor_info = 0;
+                        tensorListMeta.start_tensor_this_launch = t + 1;
                     }
                     else {
                         tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info-1];
@@ -176,6 +179,7 @@ void multi_tensor_apply(
                             tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info-1];
                         }
                         loc_tensor_info = 1;
+                        tensorListMeta.start_tensor_this_launch = t;
                     }
                 }
             }

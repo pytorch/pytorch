@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 
 #include <ATen/core/alias_info.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -40,32 +41,33 @@ namespace jit {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
-      {"Generator", GeneratorType::get()},
-      {"Dimname", StringType::get()},
-      {"ScalarType", IntType::get()},
-      {"Layout", IntType::get()},
-      {"MemoryFormat", IntType::get()},
-      {"Storage", StorageType::get()},
-      {"QScheme", QSchemeType::get()},
-      {"Quantizer", QuantizerType::get()},
+      {"Generator", c10::TypeFactory::get<GeneratorType>()},
+      {"Dimname", c10::TypeFactory::get<StringType>()},
+      {"ScalarType", c10::TypeFactory::get<IntType>()},
+      {"Layout", c10::TypeFactory::get<IntType>()},
+      {"MemoryFormat", c10::TypeFactory::get<IntType>()},
+      {"Storage", c10::TypeFactory::get<StorageType>()},
+      {"QScheme", c10::TypeFactory::get<QSchemeType>()},
+      {"Quantizer", c10::TypeFactory::get<QuantizerType>()},
       {"ConstQuantizerPtr",
-       IntType::get()}, // TODO This type should be removed from the schema
-                        // parser, it should use the custom class mechanism
-                        // instead. @jerryzh
-      {"Device", DeviceObjType::get()},
-      {"Stream", StreamObjType::get()},
-      {"Scalar", NumberType::get()},
-      {"str", StringType::get()},
-      {"float", FloatType::get()},
-      {"complex", ComplexType::get()},
-      {"int", IntType::get()},
-      {"bool", BoolType::get()},
-      {"None", NoneType::get()},
-      {"NoneType", NoneType::get()},
-      {"Capsule", CapsuleType::get()},
-      {"Any", at::AnyType::get()},
-      {"AnyClassType", at::AnyClassType::get()},
-      {"AnyEnumType", at::AnyEnumType::get()},
+       c10::TypeFactory::get<IntType>()}, // TODO This type should be removed
+                                          // from the schema parser, it should
+                                          // use the custom class mechanism
+                                          // instead. @jerryzh
+      {"Device", c10::TypeFactory::get<DeviceObjType>()},
+      {"Stream", c10::TypeFactory::get<StreamObjType>()},
+      {"Scalar", c10::TypeFactory::get<NumberType>()},
+      {"str", c10::TypeFactory::get<StringType>()},
+      {"float", c10::TypeFactory::get<FloatType>()},
+      {"complex", c10::TypeFactory::get<ComplexType>()},
+      {"int", c10::TypeFactory::get<IntType>()},
+      {"bool", c10::TypeFactory::get<BoolType>()},
+      {"None", c10::TypeFactory::get<NoneType>()},
+      {"NoneType", c10::TypeFactory::get<NoneType>()},
+      {"Capsule", c10::TypeFactory::get<CapsuleType>()},
+      {"Any", c10::TypeFactory::get<c10::AnyType>()},
+      {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
+      {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
@@ -78,7 +80,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
     if (text.size() > 0 && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return VarType::create(text);
+      return c10::TypeFactory::createNamed<VarType>(text);
     }
     throw ErrorReport(tok.range) << "unknown type specifier";
   }
@@ -92,7 +94,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
 c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
-  std::set<Symbol> sets;
   AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'
@@ -207,7 +208,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   std::vector<int64_t> strides;
   parseList(TK_NOTHING, ',', ')', [&] {
     // Extra handling for options like 'device' and 'requires_grad'
-    if (L.cur().kind == TK_IDENT) {
+    if (L.cur().kind == TK_IDENT && L.cur().text() != "SS") {
       const std::string& field = L.expect(TK_IDENT).text();
       if (field == "device") {
         auto parsed_device = tryToParseDeviceType();
@@ -258,10 +259,21 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       }
       return;
     }
+    bool shape_symbol = false;
+    if (L.cur().kind == TK_IDENT && L.cur().text() == "SS") {
+      L.next();
+      L.expect('(');
+      L.expect('-');
+      shape_symbol = true;
+    }
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    auto dim = c10::stoll(num, &num_len);
+    int64_t dim = c10::stoll(num, &num_len);
+    if (shape_symbol) {
+      L.expect(')');
+      dim = -dim;
+    }
     dims.emplace_back(dim);
   });
   if (seen_strides) {
@@ -302,7 +314,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
         alias_info->addContainedType(std::move(*r.second));
       }
     });
-    value = TupleType::create(std::move(types));
+    value = c10::TypeFactory::create<TupleType>(std::move(types));
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
     L.next(); // Future
     L.expect('(');
@@ -310,7 +322,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    value = FutureType::create(subtype);
+    value = c10::TypeFactory::create<FutureType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -318,10 +330,10 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    value = RRefType::create(subtype);
+    value = c10::TypeFactory::create<RRefType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
-    value = TensorType::get();
+    value = c10::TypeFactory::get<TensorType>();
     alias_info = parseAliasAnnotation();
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
     L.next();
@@ -331,7 +343,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto value_type = parseType().first;
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    value = DictType::create(key_type, value_type);
+    value = c10::TypeFactory::create<DictType>(key_type, value_type);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
     L.next();
     L.expect('(');
@@ -343,7 +355,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     }
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    value = UnionType::create(types);
+    value = c10::TypeFactory::create<c10::UnionType>(std::move(types));
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
@@ -384,14 +396,14 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [
       L.next(); // ]
-      value = ListType::create(value);
+      value = c10::TypeFactory::create<ListType>(value);
       auto container = parseAliasAnnotation();
       if (container && alias_info) {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      value = OptionalType::create(value);
+      value = c10::TypeFactory::create<c10::OptionalType>(value);
     } else {
       break;
     }
@@ -403,7 +415,7 @@ void SchemaTypeParser::parseList(
     int begin,
     int sep,
     int end,
-    const std::function<void()>& callback) {
+    c10::function_ref<void()> callback) {
   auto r = L.cur().range;
   if (begin != TK_NOTHING)
     L.expect(begin);

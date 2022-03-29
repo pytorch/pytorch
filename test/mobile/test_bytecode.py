@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: mobile"]
+
 import fnmatch
 import io
 import shutil
@@ -7,6 +9,7 @@ import torch.utils.show_pickle
 # from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.jit.mobile import (
     _load_for_lite_interpreter,
+    _get_mobile_model_contained_types,
     _get_model_bytecode_version,
     _get_model_ops_and_info,
     _backport_for_mobile_to_buffer,
@@ -305,6 +308,24 @@ class testVariousModelVersions(TestCase):
         ops_v6 = _get_model_ops_and_info(script_module_v6)
         assert(ops_v6["aten::add.int"].num_schema_args == 2)
         assert(ops_v6["aten::add.Scalar"].num_schema_args == 2)
+
+    def test_get_mobile_model_contained_types(self):
+        class MyTestModule(torch.nn.Module):
+            def __init__(self):
+                super(MyTestModule, self).__init__()
+
+            def forward(self, x):
+                return x + 10
+
+        sample_input = torch.tensor([1])
+
+        script_module = torch.jit.script(MyTestModule())
+        script_module_result = script_module(sample_input)
+
+        buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        type_list = _get_mobile_model_contained_types(buffer)
+        assert(len(type_list) >= 0)
 
 if __name__ == '__main__':
     run_tests()

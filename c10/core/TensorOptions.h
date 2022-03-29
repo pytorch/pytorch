@@ -588,7 +588,8 @@ inline TensorOptions device(Device device) {
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
 inline TensorOptions device_index(int16_t device_index) {
-  return TensorOptions().device_index(device_index);
+  return TensorOptions().device_index(
+      static_cast<c10::DeviceIndex>(device_index));
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
@@ -806,5 +807,15 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
       .layout(dispatchKeyToLayout(dispatch_key))
       .device(dispatchKeyToDeviceType(dispatch_key));
 }
+
+namespace detail {
+inline bool backend_supports_empty_operator(const TensorOptions options) {
+  // Quantized backends don't support at::empty().
+  // They have separate operators like at::empty_quantized() that take in
+  // extra information about how to quantize the tensor.
+  return !isQIntType(typeMetaToScalarType(options.dtype()));
+}
+
+} // namespace detail
 
 } // namespace c10

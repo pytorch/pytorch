@@ -25,9 +25,9 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | Device         | CPU | GPU | CPU | GPU | CPU | GPU |
 +================+=====+=====+=====+=====+=====+=====+
-| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -37,7 +37,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | all_gather     | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -123,14 +123,24 @@ It is imperative that all processes specify the same number of interfaces in thi
 Other NCCL environment variables
 """"""""""""""""""""""""""""""""
 
-NCCL has also provided a number of environment variables for fine-tuning purposes.
+**Debugging** - in case of NCCL failure, you can set ``NCCL_DEBUG=INFO`` to print an explicit
+warning message as well as basic NCCL initialization information.
 
-Commonly used ones include the following for debugging purposes:
+You may also use ``NCCL_DEBUG_SUBSYS`` to get more details about a specific
+aspect of NCCL. For example, ``NCCL_DEBUG_SUBSYS=COLL`` would print logs of
+collective calls, which may be helpful when debugging hangs, especially those
+caused by collective type or message size mismatch. In case of topology
+detection failure, it would be helpful to set ``NCCL_DEBUG_SUBSYS=GRAPH``
+to inspect the detailed detection result and save as reference if further help
+from NCCL team is needed.
 
-- ``export NCCL_DEBUG=INFO``
-- ``export NCCL_DEBUG_SUBSYS=ALL``
+**Performance tuning** - NCCL performs automatic tuning based on its topology detection to save users'
+tuning effort. On some socket-based systems, users may still try tuning
+``NCCL_SOCKET_NTHREADS`` and ``NCCL_NSOCKS_PERTHREAD`` to increase socket
+network bandwidth. These two environment variables have been pre-tuned by NCCL
+for some cloud providers, such as AWS or GCP.
 
-For the full list of NCCL environment variables, please refer to
+For a full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
 
@@ -271,6 +281,7 @@ Once :func:`torch.distributed.init_process_group` was run, the following functio
 check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
 
 .. autoclass:: Backend
+    :members:
 
 .. autofunction:: get_backend
 
@@ -449,25 +460,6 @@ Note that you can use ``torch.profiler`` (recommended, only available after 1.8.
 
 Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
 
-Autograd-enabled communication primitives
------------------------------------------
-
-If you want to use collective communication functions supporting autograd
-you can find an implementation of those in the `torch.distributed.nn.*` module.
-
-Functions here are synchronous and will be inserted in the autograd graph, so
-you need to ensure that all the processes that participated in the collective operation
-will do the backward pass for the backward communication to effectively happen and
-don't cause a deadlock.
-
-Please notice that currently the only backend where all the functions are guaranteed to work is ``gloo``.
-.. autofunction:: torch.distributed.nn.broadcast
-.. autofunction:: torch.distributed.nn.gather
-.. autofunction:: torch.distributed.nn.scatter
-.. autofunction:: torch.distributed.nn.reduce
-.. autofunction:: torch.distributed.nn.all_gather
-.. autofunction:: torch.distributed.nn.all_to_all
-.. autofunction:: torch.distributed.nn.all_reduce
 
 Multi-GPU collective functions
 ------------------------------
@@ -543,19 +535,21 @@ of 16
 Third-party backends
 --------------------
 
-Besides the GLOO/MPI/NCCL backends, PyTorch distributed supports third-party backends
-through a run-time register mechanism.
+Besides the builtin GLOO/MPI/NCCL backends, PyTorch distributed supports
+third-party backends through a run-time register mechanism.
 For references on how to develop a third-party backend through C++ Extension,
 please refer to `Tutorials - Custom C++ and CUDA Extensions <https://pytorch.org/
-tutorials/advanced/cpp_extension.html>`_ and `test/cpp_extensions/cpp_c10d_extension.cpp`.
-The capability of third-party backends are decided by their own implementations.
+tutorials/advanced/cpp_extension.html>`_ and
+``test/cpp_extensions/cpp_c10d_extension.cpp``. The capability of third-party
+backends are decided by their own implementations.
 
-The new backend derives from `c10d.ProcessGroup` and registers the backend name and the
-instantiating interface through :func:`torch.distributed.Backend.register_backend` when
-imported.
+The new backend derives from ``c10d::ProcessGroup`` and registers the backend
+name and the instantiating interface through :func:`torch.distributed.Backend.register_backend`
+when imported.
 
 When manually importing this backend and invoking :func:`torch.distributed.init_process_group`
-with the corresponding backend name, the `torch.distributed` package runs on the new backend.
+with the corresponding backend name, the ``torch.distributed`` package runs on
+the new backend.
 
 .. warning::
     The support of third-party backend is experimental and subject to change.
@@ -590,6 +584,9 @@ Debugging ``torch.distributed`` applications
 
 Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. ``torch.distributed`` provides
 a suite of tools to help debug training applications in a self-serve fashion:
+
+Monitored Barrier
+^^^^^^^^^^^^^^^^^
 
 As of v1.10, :func:`torch.distributed.monitored_barrier` exists as an alternative to :func:`torch.distributed.barrier` which fails with helpful information about which rank may be faulty
 when crashing, i.e. not all ranks calling into :func:`torch.distributed.monitored_barrier` within the provided timeout. :func:`torch.distributed.monitored_barrier` implements a host-side
@@ -628,6 +625,9 @@ The following error message is produced on rank 0, allowing the user to determin
    Original exception:
   [gloo/transport/tcp/pair.cc:598] Connection closed by peer [2401:db00:eef0:1100:3560:0:1c05:25d]:8594
 
+
+``TORCH_DISTRIBUTED_DEBUG``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
@@ -790,6 +790,49 @@ With the ``NCCL`` backend, such an application would likely result in a hang whi
     RuntimeError: Error when verifying shape tensors for collective ALLREDUCE on rank 0. This likely indicates that input shapes into the collective are mismatched across ranks. Got shapes:  10
     [ torch.LongTensor{1} ]
 
+.. note::
+    For fine-grained control of the debug level during runtime the functions :func:`torch.distributed.set_debug_level`, :func:`torch.distributed.set_debug_level_from_env`, and
+    :func:`torch.distributed.get_debug_level` can also be used.
+
 In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
 collective desynchronization checks will work for all applications that use ``c10d`` collective calls backed by process groups created with the
 :func:`torch.distributed.init_process_group` and :func:`torch.distributed.new_group` APIs.
+
+Logging
+-------
+
+In addition to explicit debugging support via :func:`torch.distributed.monitored_barrier` and ``TORCH_DISTRIBUTED_DEBUG``, the underlying C++ library of ``torch.distributed`` also outputs log
+messages at various levels. These messages can be helpful to understand the execution state of a distributed training job and to troubleshoot problems such as network connection failures. The
+following matrix shows how the log level can be adjusted via the combination of ``TORCH_CPP_LOG_LEVEL`` and ``TORCH_DISTRIBUTED_DEBUG`` environment variables.
+
++-------------------------+-----------------------------+------------------------+
+| ``TORCH_CPP_LOG_LEVEL`` | ``TORCH_DISTRIBUTED_DEBUG`` |   Effective Log Level  |
++=========================+=============================+========================+
+| ``ERROR``               | ignored                     | Error                  |
++-------------------------+-----------------------------+------------------------+
+| ``WARNING``             | ignored                     | Warning                |
++-------------------------+-----------------------------+------------------------+
+| ``INFO``                | ignored                     | Info                   |
++-------------------------+-----------------------------+------------------------+
+| ``INFO``                | ``INFO``                    | Debug                  |
++-------------------------+-----------------------------+------------------------+
+| ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
++-------------------------+-----------------------------+------------------------+
+
+
+.. Distributed modules that are missing specific entries.
+.. Adding them here for tracking purposes until they are more permanently fixed.
+.. py:module:: torch.distributed.algorithms
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks
+.. py:module:: torch.distributed.algorithms.model_averaging
+.. py:module:: torch.distributed.elastic
+.. py:module:: torch.distributed.elastic.utils
+.. py:module:: torch.distributed.elastic.utils.data
+.. py:module:: torch.distributed.launcher
+.. py:module:: torch.distributed.nn
+.. py:module:: torch.distributed.nn.api
+.. py:module:: torch.distributed.nn.jit
+.. py:module:: torch.distributed.nn.jit.templates
+.. py:module:: torch.distributed.pipeline
+.. py:module:: torch.distributed.pipeline.sync
+.. py:module:: torch.distributed.pipeline.sync.skip

@@ -20,13 +20,16 @@ std::unique_ptr<SimpleIREvaluator> compile(
 }
 
 TEST(Ops, Sum) {
+  constexpr int M = 8;
+  constexpr int N = 16;
   std::vector<IntList> testDims = {{0}, {1}, {0, 1}};
-  for (auto const& dims : testDims) {
-    constexpr int M = 8;
-    constexpr int N = 16;
+  std::vector<std::vector<ExprHandle>> outputShapes = {{N}, {M}, {}};
+  for (int idx = 0; idx < testDims.size(); idx++) {
+    const auto& dims = testDims[idx];
+    const auto& outShape = outputShapes[idx];
 
     BufHandle a("a", {M, N}, kFloat);
-    Tensor b = computeSum({a, dims, false}, c10::kFloat);
+    Tensor b = computeSum({a, dims, false}, outShape, c10::kFloat, at::kCPU);
     auto cg = compile({a}, {b});
 
     auto at = at::arange(M * N, at::kFloat).view({M, N});

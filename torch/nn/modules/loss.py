@@ -146,7 +146,7 @@ class NLLLoss(_WeightedLoss):
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
-            when :attr:`reduce` is ``False``. Default: ``True``
+            when :attr:`reduce` is ``False``. Default: ``None``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When
             :attr:`size_average` is ``True``, the loss is averaged over
@@ -154,7 +154,7 @@ class NLLLoss(_WeightedLoss):
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
-            batch element instead and ignores :attr:`size_average`. Default: ``True``
+            batch element instead and ignores :attr:`size_average`. Default: ``None``
         reduction (string, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
             be applied, ``'mean'``: the weighted mean of the output is taken,
@@ -323,11 +323,11 @@ class GaussianNLLLoss(_Loss):
             losses. Default: ``'mean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+        - Input: :math:`(N, *)` or :math:`(*)` where :math:`*` means any number of additional
           dimensions
-        - Target: :math:`(N, *)`, same shape as the input, or same shape as the input
+        - Target: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input
           but with one dimension equal to 1 (to allow for broadcasting)
-        - Var: :math:`(N, *)`, same shape as the input, or same shape as the input but
+        - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
           dimension (to allow for broadcasting)
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
@@ -373,77 +373,86 @@ class GaussianNLLLoss(_Loss):
 
 
 class KLDivLoss(_Loss):
-    r"""The Kullback-Leibler divergence loss measure
+    r"""The Kullback-Leibler divergence loss.
 
-    `Kullback-Leibler divergence`_ is a useful distance measure for continuous
-    distributions and is often useful when performing direct regression over
-    the space of (discretely sampled) continuous output distributions.
-
-    As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
-    *log-probabilities* and is not restricted to a 2D Tensor.
-    The targets are interpreted as *probabilities* by default, but could be considered
-    as *log-probabilities* with :attr:`log_target` set to ``True``.
-
-    This criterion expects a `target` `Tensor` of the same size as the
-    `input` `Tensor`.
-
-    The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
+    For tensors of the same shape :math:`y_{\text{pred}},\ y_{\text{true}}`,
+    where :math:`y_{\text{pred}}` is the :attr:`input` and :math:`y_{\text{true}}` is the
+    :attr:`target`, we define the **pointwise KL-divergence** as
 
     .. math::
-        l(x,y) = L = \{ l_1,\dots,l_N \}, \quad
-        l_n = y_n \cdot \left( \log y_n - x_n \right)
 
-    where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same
-    shape as ``input``. If :attr:`reduction` is not ``'none'`` (default ``'mean'``), then:
+        L(y_{\text{pred}},\ y_{\text{true}})
+            = y_{\text{true}} \cdot \log \frac{y_{\text{true}}}{y_{\text{pred}}}
+            = y_{\text{true}} \cdot (\log y_{\text{true}} - \log y_{\text{pred}})
 
-    .. math::
-        \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';} \\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
-        \end{cases}
+    To avoid underflow issues when computing this quantity, this loss expects the argument
+    :attr:`input` in the log-space. The argument :attr:`target` may also be provided in the
+    log-space if :attr:`log_target`\ `= True`.
 
-    In default :attr:`reduction` mode ``'mean'``, the losses are averaged for each minibatch over observations
-    **as well as** over dimensions. ``'batchmean'`` mode gives the correct KL divergence where losses
-    are averaged over batch dimension only. ``'mean'`` mode's behavior will be changed to the same as
-    ``'batchmean'`` in the next major release.
+    To summarise, this function is roughly equivalent to computing
 
-    .. _`kullback-leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+    .. code-block:: python
+
+        if not log_target: # default
+            loss_pointwise = target * (target.log() - input)
+        else:
+            loss_pointwise = target.exp() * (target - input)
+
+    and then reducing this result depending on the argument :attr:`reduction` as
+
+    .. code-block:: python
+
+        if reduction == "mean":  # default
+            loss = loss_pointwise.mean()
+        elif reduction == "batchmean":  # mathematically correct
+            loss = loss_pointwise.sum() / input.size(0)
+        elif reduction == "sum":
+            loss = loss_pointwise.sum()
+        else:  # reduction == "none"
+            loss = loss_pointwise
+
+    .. note::
+        As all the other losses in PyTorch, this function expects the first argument,
+        :attr:`input`, to be the output of the model (e.g. the neural network)
+        and the second, :attr:`target`, to be the observations in the dataset.
+        This differs from the standard mathematical notation :math:`KL(P\ ||\ Q)` where
+        :math:`P` denotes the distribution of the observations and :math:`Q` denotes the model.
+
+    .. warning::
+        :attr:`reduction`\ `= "mean"` doesn't return the true KL divergence value, please use
+        :attr:`reduction`\ `= "batchmean"` which aligns with the mathematical definition.
+        In a future release, `"mean"` will be changed to be the same as `"batchmean"`.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch. Ignored
-            when :attr:`reduce` is ``False``. Default: ``True``
+            is set to `False`, the losses are instead summed for each minibatch. Ignored
+            when :attr:`reduce` is `False`. Default: `True`
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
-            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
-            batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
-            ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
-            ``'none'``: no reduction will be applied.
-            ``'batchmean'``: the sum of the output will be divided by batchsize.
-            ``'sum'``: the output will be summed.
-            ``'mean'``: the output will be divided by the number of elements in the output.
-            Default: ``'mean'``
-        log_target (bool, optional): Specifies whether `target` is passed in the log space.
-            Default: ``False``
-
-    .. note::
-        :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
-        and in the meantime, specifying either of those two args will override :attr:`reduction`.
-
-    .. note::
-        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
-        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
-        In the next major release, ``'mean'`` will be changed to be the same as ``'batchmean'``.
+            on :attr:`size_average`. When :attr:`reduce` is `False`, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: `True`
+        reduction (string, optional): Specifies the reduction to apply to the output. Default: `"mean"`
+        log_target (bool, optional): Specifies whether `target` is the log space. Default: `False`
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
-        - Output: scalar by default. If :attr:``reduction`` is ``'none'``, then :math:`(*)`,
+        - Output: scalar by default. If :attr:`reduction` is `'none'`, then :math:`(*)`,
           same shape as the input.
 
+    Examples::
+
+        >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
+        >>> # input should be a distribution in the log space
+        >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
+        >>> # Sample a batch of distributions. Usually this would come from the dataset
+        >>> target = F.softmax(torch.rand(3, 5))
+        >>> output = kl_loss(input, target)
+
+        >>> log_target = F.log_softmax(torch.rand(3, 5))
+        >>> output = kl_loss(input, log_target, log_target=True)
     """
     __constants__ = ['reduction']
 
@@ -870,7 +879,7 @@ class SmoothL1Loss(_Loss):
         also known as delta for Huber). This leads to the following differences:
 
         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
-          converges to a constant 0 loss.
+          converges to a constant 0 loss. When beta is 0, Smooth L1 loss is equivalent to L1 loss.
         * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
           :class:`HuberLoss` converges to :class:`MSELoss`.
         * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
@@ -1022,14 +1031,14 @@ class CrossEntropyLoss(_WeightedLoss):
     This is particularly useful when you have an unbalanced training set.
 
     The `input` is expected to contain raw, unnormalized scores for each class.
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
-    :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
-    `K`-dimensional case. The latter is useful for higher dimension inputs, such
+    `input` has to be a Tensor of size :math:`(C)` for unbatched input,
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
+    `K`-dimensional case. The last being useful for higher dimension inputs, such
     as computing cross entropy loss per-pixel for 2D images.
 
     The `target` that this criterion expects should contain either:
 
-    - Class indices in the range :math:`[0, C-1]` where :math:`C` is the number of classes; if
+    - Class indices in the range :math:`[0, C)` where :math:`C` is the number of classes; if
       `ignore_index` is specified, this loss also accepts this class index (this index
       may not necessarily be in the class range). The unreduced (i.e. with :attr:`reduction`
       set to ``'none'``) loss for this case can be described as:
@@ -1061,7 +1070,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
       .. math::
           \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
+          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
       :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
@@ -1110,16 +1119,20 @@ class CrossEntropyLoss(_WeightedLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`, or
-          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+        - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`(N)` where each value is
-          :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-          same shape as the input.
-        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
-          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
-          Otherwise, scalar.
+        - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+
+        where:
+
+        .. math::
+            \begin{aligned}
+                C ={} & \text{number of classes} \\
+                N ={} & \text{batch size} \\
+            \end{aligned}
 
     Examples::
 
@@ -1254,8 +1267,8 @@ class CosineEmbeddingLoss(_Loss):
 
 class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
-    inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
-    and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
+    inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
+    and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
@@ -1284,10 +1297,10 @@ class MarginRankingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input1: :math:`(N)` where `N` is the batch size.
-        - Input2: :math:`(N)`, same shape as the Input1.
-        - Target: :math:`(N)`, same shape as the inputs.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+        - Input1: :math:`(N)` or :math:`()` where `N` is the batch size.
+        - Input2: :math:`(N)` or :math:`()`, same shape as the Input1.
+        - Target: :math:`(N)` or :math:`()`, same shape as the inputs.
+        - Output: scalar. If :attr:`reduction` is ``'none'`` and Input size is not :math:`()`, then :math:`(N)`.
 
     Examples::
 
@@ -1436,9 +1449,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
-        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-          otherwise.
+        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
+          input shape is :math`(N, D)`; a scalar otherwise.
 
     Examples::
 
@@ -1607,7 +1620,7 @@ class CTCLoss(_Loss):
             to be aligned to the targets.
 
     Shape:
-        - Log_probs: Tensor of size :math:`(T, N, C)`,
+        - Log_probs: Tensor of size :math:`(T, N, C)` or :math:`(T, C)`,
           where :math:`T = \text{input length}`,
           :math:`N = \text{batch size}`, and
           :math:`C = \text{number of classes (including blank)}`.
@@ -1624,12 +1637,12 @@ class CTCLoss(_Loss):
           In the :math:`(\operatorname{sum}(\text{target\_lengths}))` form,
           the targets are assumed to be un-padded and
           concatenated within 1 dimension.
-        - Input_lengths: Tuple or tensor of size :math:`(N)`,
+        - Input_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
           where :math:`N = \text{batch size}`. It represent the lengths of the
           inputs (must each be :math:`\leq T`). And the lengths are specified
           for each sequence to achieve masking under the assumption that sequences
           are padded to equal lengths.
-        - Target_lengths: Tuple or tensor of size :math:`(N)`,
+        - Target_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
           where :math:`N = \text{batch size}`. It represent lengths of the targets.
           Lengths are specified for each sequence to achieve masking under the
           assumption that sequences are padded to equal lengths. If target shape is
@@ -1639,7 +1652,7 @@ class CTCLoss(_Loss):
           If the targets are given as a 1d tensor that is the concatenation of individual
           targets, the target_lengths must add up to the total length of the tensor.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N)`, where :math:`N = \text{batch size}`.
+          :math:`(N)` if input is batched or :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
     Examples::
 
@@ -1675,6 +1688,22 @@ class CTCLoss(_Loss):
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
         >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)
+        >>> ctc_loss = nn.CTCLoss()
+        >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
+        >>> loss.backward()
+        >>>
+        >>>
+        >>> # Target are to be un-padded and unbatched (effectively N=1)
+        >>> T = 50      # Input sequence length
+        >>> C = 20      # Number of classes (including blank)
+        >>>
+        >>> # Initialize random batch of input vectors, for *size = (T,C)
+        >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
+        >>> input_lengths = torch.tensor(T, dtype=torch.long)
+        >>>
+        >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
+        >>> target_lengths = torch.randint(low=1, high=T, size=(), dtype=torch.long)
+        >>> target = torch.randint(low=1, high=C, size=(target_lengths,), dtype=torch.long)
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()

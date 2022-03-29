@@ -1,3 +1,5 @@
+# Owner(s): ["module: cuda"]
+
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
@@ -18,14 +20,12 @@ import torch.cuda.comm as comm
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
-
-from test_torch import AbstractTestCases
-
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY
+    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
+    get_cycles_per_ms
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -56,18 +56,6 @@ if TEST_CUDA:
     TEST_BF16 = torch.cuda.is_bf16_supported()
 
 
-types = [
-    torch.FloatTensor,
-    torch.DoubleTensor,
-    torch.LongTensor,
-    torch.IntTensor,
-    torch.ShortTensor,
-    torch.CharTensor,
-    torch.ByteTensor,
-    torch.HalfTensor,
-]
-
-
 def make_sparse_tensor(t, n, *sizes):
     assert t.is_sparse
     tensor = t()
@@ -76,23 +64,9 @@ def make_sparse_tensor(t, n, *sizes):
         torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
     v = tensor._values()
     v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes))
+    return t(i, v, torch.Size(sizes)).coalesce()
 
 _cycles_per_ms = None
-
-
-def get_cycles_per_ms():
-    """Approximate number of cycles per millisecond for torch.cuda._sleep"""
-    global _cycles_per_ms
-    if _cycles_per_ms is None:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        _cycles_per_ms = 1000000 / start.elapsed_time(end)
-    return _cycles_per_ms
 
 
 class TestCuda(TestCase):
@@ -539,6 +513,17 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+        # Test the case where the pinned data_ptr is not equal to the storage data_ptr.
+        x_base = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        x = x_base[1:]
+        self.assertTrue(x.is_pinned())
+        self.assertTrue(x_base.is_pinned())
+        self.assertNotEqual(x_base.data_ptr(), x.data_ptr())
+        self.assertEqual(x_base.storage().data_ptr(), x.storage().data_ptr())
+        y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
+        _test_copy_non_blocking(x, y)
+
+
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -583,9 +568,10 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
-        self.assertTrue(isinstance(q_copy[3], torch.cuda.IntStorage))
+        self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda._UntypedStorage))
         q_copy[1].fill_(10)
-        self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
+        self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
@@ -593,6 +579,13 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
@@ -1339,7 +1332,7 @@ class TestCuda(TestCase):
     def test_external_streams(self):
         device = torch.cuda.device(0)
         with self._get_external_stream(device) as stream_v:
-            ext_stream = torch.cuda.streams.ExternalStream(stream_v)
+            ext_stream = torch.cuda.ExternalStream(stream_v)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 
@@ -1348,7 +1341,7 @@ class TestCuda(TestCase):
     def test_external_streams_multi_device(self):
         device = torch.cuda.device(1)
         with self._get_external_stream(device) as stream_v:
-            ext_stream = torch.cuda.streams.ExternalStream(
+            ext_stream = torch.cuda.ExternalStream(
                 stream_v, device=device)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
@@ -1543,34 +1536,6 @@ except RuntimeError as e:
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
-    def test_tensor_gather(self):
-        AbstractTestCases._TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
-
-    def test_tensor_scatter(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
-
-    def test_tensor_scatterAdd(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
-
-    def test_scatter_add_mult_index_base(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
-
-    def test_tensor_scatterFill(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_', True, test_bounds=False)
-
-    def test_tensor_scatter_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_', test_bounds=False, test_complex=True)
-
-    def test_tensor_scatterAdd_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_add_', test_bounds=False, test_complex=True)
-
-    def test_tensor_scatterFill_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_', True, test_bounds=False, test_complex=True)
-
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
         # This affects the result of THC_reduceAll operations at extreme values
@@ -1600,6 +1565,8 @@ except RuntimeError as e:
         torch.cuda.nvtx.range_push("foo")
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
+        range_handle = torch.cuda.nvtx.range_start("range_start")
+        torch.cuda.nvtx.range_end(range_handle)
 
     def test_bincount_ext(self):
         # ensure CUDA code coverage
@@ -1638,7 +1605,24 @@ except RuntimeError as e:
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
+    # Verifies that mem_get_info works, including when called for a different device
+    def test_mem_get_info(self):
+        def _test(idx):
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            t = torch.randn(1024 * 1024 * 8, device='cuda:' + str(idx))
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
+
+            self.assertTrue(after_free_bytes < before_free_bytes)
+            self.assertEqual(before_available_bytes, after_available_bytes)
+
+        _test(0)
+        if TEST_MULTIGPU:
+            _test(1)
+
     # Test that wrap_with_cuda_memory_check successfully detects leak
+    # skip for ROCM. Look into #62533.
+    @skipIfRocm
     def test_cuda_memory_leak_detection(self):
         l = []
 
@@ -1648,19 +1632,21 @@ except RuntimeError as e:
 
         @self.wrap_with_cuda_memory_check
         def leak_gpu0():
-            l.append(torch.tensor(10, device=torch.device("cuda:0")))
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            l.append(torch.randn(1024 * 1024 * 8, device=torch.device("cuda:0")))
 
         no_leak()
 
-        with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 0"):
+        with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 0.+"):
             leak_gpu0()
 
         if TEST_MULTIGPU:
             @self.wrap_with_cuda_memory_check
             def leak_gpu1():
-                l.append(torch.tensor(10, device=torch.device("cuda:1")))
+                # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+                l.append(torch.randn(1024 * 1024 * 8, device=torch.device("cuda:1")))
 
-            with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
+            with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 1.+"):
                 leak_gpu1()
 
     def test_cuda_memory_leak_detection_propagates_errors(self):
@@ -1970,6 +1956,8 @@ t1.start()
 t2.start()
 """])
 
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -3021,7 +3009,6 @@ torch.cuda.synchronize()
                     x = torch.randn((B, T, F), device="cuda", dtype=input_dtype)
                 elif input_layout == "packed":
                     batch_first = False
-                    x = torch.randn((T, B, F), device="cuda", dtype=input_dtype)
                     x = torch.nn.utils.rnn.pack_padded_sequence(torch.randn((T, B, F),
                                                                             device="cuda", dtype=input_dtype),
                                                                 lengths=(3, 2, 1, 3),
@@ -3954,7 +3941,7 @@ class TestCudaComm(TestCase):
         r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
-            self.assertEqual(r, t * 2)
+            self.assertEqual(r.coalesce() if r.is_sparse else r, t * 2)
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)

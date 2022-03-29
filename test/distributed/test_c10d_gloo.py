@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import logging
 import math
@@ -1221,6 +1223,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     # one tensor in output tensor list
                     self.assertEqualIgnoreType(y, z)
 
+        # Added to address https://github.com/pytorch/pytorch/issues/65231
+        # In the failed tests, all assertEqualIgnoreType are passed on all
+        # processes. However, one of the process didn't call ProcessGroupGloo
+        # destructor before exiting program. This is not surprising as the only
+        # guarantee that Python makes is that garbage collection MAY happen
+        # before the program exits. If GC didn't happen, the two threads in
+        # ProcessGroup might be destructed before joined.
+        # FIXME: it's still unclear why only this test require explicit
+        # destroy_process_group()
+        c10d.destroy_process_group()
+
     @requires_gloo()
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1444,11 +1457,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
 
 class DistributedDataParallelTest(
-    test_c10d_common.AbstractDistributedDataParallelTest, MultiProcessTestCase
+    test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
         self._spawn_processes()
+
+    def _get_process_group(self):
+        store = self._get_store()
+        return c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
     def _test_gloo_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -1551,9 +1568,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            cpu_model._set_static_graph()
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
@@ -1564,9 +1580,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            gpu_model._set_static_graph()
         run_and_verify_grad(gpu_model)
 
     @requires_gloo()
@@ -1746,7 +1761,7 @@ class DistributedDataParallelTest(
         # Check that the gradients are sparse and identical
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
-        self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+        self.assertEqual(vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce())
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
@@ -2091,7 +2106,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
+        dist.Reducer(parameters, buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2106,8 +2121,8 @@ class ReducerTest(TestCase):
         # Raise if there are multiple types per bucket.
         # In this case we create one bucket for all parameters.
         with self.assertRaises(RuntimeError):
-            parameters = [list(model.parameters())]
-            buckets = [list(range(len(parameters[0])))]
+            parameters = list(model.parameters())
+            buckets = [list(range(len(parameters)))]
             dist.Reducer(
                 parameters,
                 buckets,
@@ -2118,9 +2133,9 @@ class ReducerTest(TestCase):
     @requires_gloo()
     def test_multi_dtype_multi_bucket(self):
         model = self._create_mixed_precision_model()
-        parameters = [list(model.parameters())]
+        parameters = list(model.parameters())
         group_by_dtype = groupby(
-            range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
+            range(len(parameters)), key=lambda i: parameters[i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(
@@ -2131,9 +2146,10 @@ class ReducerTest(TestCase):
         )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
-        parameters = [list(model.parameters()) for model in models]
+        self.assertEqual(len(models), 1)
+        parameters = list(models[0].parameters())
         group_by_dtype = groupby(
-            range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
+            range(len(parameters)), key=lambda i: parameters[i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
         return dist.Reducer(
@@ -2143,16 +2159,6 @@ class ReducerTest(TestCase):
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )
-
-    @requires_gloo()
-    def test_reducer_no_multi_replicas(self):
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected exactly one model replica.",
-        ):
-            reducer = self._create_reducer_for_models(models)
 
     @requires_gloo()
     def test_forward_backward(self):
@@ -2315,6 +2321,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_warn_not_in_group(self):
+        self._test_warn_not_in_group(backend="gloo")
 
 
 if __name__ == "__main__":

@@ -15,12 +15,12 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/cudnn/ConvShared.h>
 
-#include <THC/THC.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <iterator>
@@ -132,14 +132,14 @@ struct Workspace {
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.
     TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
-    data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
+    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
   Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
-      THCudaFree(globalContext().lazyInitCUDA(), data);
+      c10::cuda::CUDACachingAllocator::raw_delete(data);
     }
   }
 
@@ -201,11 +201,10 @@ size_t getMaxWorkspaceSize(
   size_t max_block_size = 0;
   size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
+  const auto device = c10::cuda::current_device();
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
 
-  for (int i = 0; i < n_algo; i++) {
+  for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;
     size_t sz;
     err = getWorkspaceSize(args, algo[i], &sz);
@@ -230,7 +229,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 
   std::vector<perf_t> result;
   result.reserve(n_algo);
-  for (int i = 0; i < n_algo; i++) {
+  for (const auto i : c10::irange(n_algo)) {
     perf_t perf = perfResults[i];
 
     // TODO: Shouldn't all returned results be successful?
@@ -580,7 +579,7 @@ static inline void split_batch_dim_to_32bit_out(
   int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
+    for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
@@ -620,8 +619,6 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 //
 // ---------------------------------------------------------------------
 
-#if !HAS_CUDNN_V8()
-
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -632,9 +629,10 @@ void raw_cudnn_convolution_forward_out_32bit(
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  args.idesc.set(input);
-  args.wdesc.set(weight, input.suggest_memory_format(), 0);
-  args.odesc.set(output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  args.idesc.set(input, memory_format);
+  args.wdesc.set(weight, memory_format, 0);
+  args.odesc.set(output, memory_format);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
   // TODO: when we do legacy group convolution support, we'll repeatedly
@@ -666,14 +664,17 @@ void raw_cudnn_convolution_forward_out_32bit(
   );
 }
 
+
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_forward_out(
+#else
+void raw_cudnn_convolution_forward_out_v7(
+#endif
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
-
-#endif // !HAS_CUDNN_V8()
 
 // ---------------------------------------------------------------------
 //
@@ -692,9 +693,10 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  args.idesc.set(grad_input);
-  args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
-  args.odesc.set(grad_output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(grad_input, weight);
+  args.idesc.set(grad_input, memory_format);
+  args.wdesc.set(weight, memory_format, 0);
+  args.odesc.set(grad_output, memory_format);
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
@@ -725,7 +727,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   );
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_backward_input_out(
+#else
+void raw_cudnn_convolution_backward_input_out_v7(
+#endif
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
@@ -750,9 +756,10 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  args.idesc.set(input);
-  args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
-  args.odesc.set(grad_output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, grad_weight);
+  args.idesc.set(input, memory_format);
+  args.wdesc.set(grad_weight, memory_format, 0);
+  args.odesc.set(grad_output, memory_format);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
   AlgoIterator<cudnnConvolutionBwdFilterAlgoPerf_t>(args, benchmark).try_all(
@@ -783,7 +790,11 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   );
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_backward_weight_out(
+#else
+void raw_cudnn_convolution_backward_weight_out_v7(
+#endif
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
@@ -806,15 +817,19 @@ void raw_cudnn_convolution_backward_weight_out(
   int64_t split_size = std::max<int64_t>(1024 * 1024 * 512 / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
+    const auto kAccType = (grad_weight.scalar_type() == kHalf || grad_weight.scalar_type() == kBFloat16)
+                             ? kFloat : grad_weight.scalar_type();
+    Tensor grad_weight_accumulator = at::zeros(grad_weight.sizes(), grad_weight.options().dtype(kAccType));
+    for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor grad_output_ = grad_output.narrow(0, start, split_size_);
       Tensor grad_weight_ = at::empty_like(grad_weight);
       raw_cudnn_convolution_backward_weight_out_32bit(grad_weight_, grad_output_, input_, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-      grad_weight.add_(grad_weight_);
+      grad_weight_accumulator.add_(grad_weight_);
     }
+    grad_weight.copy_(grad_weight_accumulator);
     return;
   }
   // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
@@ -831,7 +846,12 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_add_relu_out(
+#else
+void raw_cudnn_convolution_add_relu_out_v7(
+#endif
+
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -858,9 +878,10 @@ void raw_cudnn_convolution_add_relu_out(
       groups,
       deterministic,
       allow_tf32);
-  args.idesc.set(input);
-  args.wdesc.set(weight, input.suggest_memory_format(), 0);
-  args.odesc.set(output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  args.idesc.set(input, memory_format);
+  args.wdesc.set(weight, memory_format, 0);
+  args.odesc.set(output, memory_format);
   args.cdesc.set(
       dataType,
       input.dim() - 2,
@@ -871,10 +892,10 @@ void raw_cudnn_convolution_add_relu_out(
       args.params.allow_tf32);
 
   TensorDescriptor zdesc;
-  zdesc.set(z);
+  zdesc.set(z, memory_format);
 
   TensorDescriptor bdesc;
-  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
+  bdesc.set(bias.expand({1, bias.size(0)}), memory_format, output.dim());
 
   ActivationDescriptor adesc;
   adesc.set(CUDNN_ACTIVATION_RELU);
@@ -916,11 +937,39 @@ void raw_cudnn_convolution_add_relu_out(
                 args.odesc.desc(),
                 output.data_ptr()),
             args,
+            "zdesc: ", zdesc,
+            "bdesc: ", bdesc,
             "cudnnConvolutionBiasActivationForward: ",
             static_cast<int>(fwdAlgPerf.algo),
             "\n");
       });
 }
+
+void raw_cudnn_convolution_add_relu_fallback_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+
+  // cuDNN Conv-Bias-Activation:
+  // y = act ( alpha1 * conv(x) + alpha2 * z + bias )
+  // In pytorch function `raw_cudnn_convolution_add_relu_out`: alpha1 is 1, alpha 2 is `float alpha`
+
+  raw_cudnn_convolution_forward_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  at::Tensor alpha_mul_z_add_bias = at::native::reshape_bias(input.dim(), bias).add(z, alpha);
+  output.add_(alpha_mul_z_add_bias);
+  output.relu_();
+}
+
 }}  // namespace at::native
 
 #endif

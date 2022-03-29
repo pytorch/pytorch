@@ -8,19 +8,20 @@ import re
 from typing import Any, Callable, Dict, List, Optional, cast
 from urllib.request import urlopen
 
-# PYTORCH_IGNORE_DISABLED_ISSUES should only be set during CI (along with IN_CI) as a
-# comma-separated list of issue numbers. The intent is to re-enable any disabled tests
-# associated with the issues in this list.
-#
-# There is normally no reason to use this locally as the disabled tests list should not
-# affect your local development and every test should be enabled. If for whatever reason
-# you would like to use this during local development, please note the following caveat:
-#
-# Whenever you set OR reset PYTORCH_IGNORE_DISABLED_ISSUES, you should delete the existing
-# .pytorch-disabled-tests.json and redownload/parse the file for your change to apply, as
-# PYTORCH_IGNORE_DISABLED_ISSUES is used during the parsing stage. To download the files,
-# run test/run_test.py with IN_CI=1.
-IGNORE_DISABLED_ISSUES: List[str] = os.getenv('PYTORCH_IGNORE_DISABLED_ISSUES', '').split(',')
+def get_disabled_issues() -> List[str]:
+    pr_body = os.getenv('PR_BODY', '')
+    # The below regex is meant to match all *case-insensitive* keywords that
+    # GitHub has delineated would link PRs to issues, more details here:
+    # https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue.
+    # E.g., "Close #62851", "fixES #62851" and "RESOLVED #62851" would all match, but not
+    # "closes  #62851" --> extra space, "fixing #62851" --> not a keyword, nor "fix 62851" --> no #
+    regex = '(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) #([0-9]+)'
+    issue_numbers = [x[4] for x in re.findall(regex, pr_body)]
+    print("Ignoring disabled issues: ", issue_numbers)
+    return issue_numbers
+
+
+IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
 
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
@@ -48,22 +49,25 @@ def fetch_and_cache(
         return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
 
     if os.path.exists(path) and is_cached_file_valid():
-        # Another test process already downloaded the file, so don't re-do it
+        # Another test process already download the file, so don't re-do it
         with open(path, "r") as f:
             return cast(Dict[str, Any], json.load(f))
-    try:
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        processed_contents = process_fn(json.loads(contents))
-        with open(path, "w") as f:
-            f.write(json.dumps(processed_contents))
-        return processed_contents
-    except Exception as e:
-        print(f'Could not download {url} because of error {e}.')
-        return {}
+
+    for _ in range(3):
+        try:
+            contents = urlopen(url, timeout=5).read().decode('utf-8')
+            processed_contents = process_fn(json.loads(contents))
+            with open(path, "w") as f:
+                f.write(json.dumps(processed_contents))
+            return processed_contents
+        except Exception as e:
+            print(f'Could not download {url} because: {e}.')
+    print(f'All retries exhausted, downloading {url} failed.')
+    return {}
 
 
 def get_slow_tests(dirpath: str, filename: str = SLOW_TESTS_FILE) -> Optional[Dict[str, float]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/main/stats/slow-tests.json"
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/slow-tests.json"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
@@ -92,7 +96,7 @@ def get_disabled_tests(dirpath: str, filename: str = DISABLED_TESTS_FILE) -> Opt
                 disabled_test_from_issues[test_name] = (item['html_url'], platforms_to_skip)
         return disabled_test_from_issues
     try:
-        url = 'https://raw.githubusercontent.com/pytorch/test-infra/main/stats/disabled-tests.json'
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests.json'
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
