@@ -39,12 +39,12 @@ class Linear(nn.Linear):
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
-        from torch.ao.quantization.utils import nonparam_type  # import error if this is moved to the top
-        assert nonparam_type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
+        from torch.ao.quantization.utils import type_before_parametrizations  # import error if this is moved to the top
+        assert type_before_parametrizations(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
-        if nonparam_type(mod) == LinearReLU:
+        if type_before_parametrizations(mod) == LinearReLU:
             mod = mod[0]
 
         qconfig = mod.qconfig

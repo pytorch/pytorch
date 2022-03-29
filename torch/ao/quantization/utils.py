@@ -363,7 +363,7 @@ def _parent_name(target):
     else:
         return r[0], r[1]
 
-def nonparam_type(module):
+def type_before_parametrizations(module):
     """
     Returns type(module) or the original
     type if module is currently parametrized
@@ -373,7 +373,7 @@ def nonparam_type(module):
     else:
         return type(module)
 
-def is_leaf(module):
+def is_leaf_or_only_parametrized(module):
     """
     Checks if module._modules is empty or
     if module is a parametrization, checks that module._modules only has
