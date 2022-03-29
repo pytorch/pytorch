@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include <torch/csrc/jit/runtime/simple_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
@@ -764,12 +765,33 @@ GraphExecutor::GraphExecutor(
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()
+              ? (getProfilingMode() ?
+
+                                    dynamic_cast<GraphExecutorImplBase*>(
+                                        new ProfilingGraphExecutorImpl(
+                                            graph,
+                                            std::move(function_name)))
+                                    : dynamic_cast<GraphExecutorImplBase*>(
+                                          new SimpleGraphExecutorImpl(
+                                              graph,
+                                              std::move(function_name))))
+              : dynamic_cast<GraphExecutorImplBase*>(
+                    new GraphExecutorImpl(graph, std::move(function_name)))) {}
+
+GraphExecutor::GraphExecutor(
+    const std::shared_ptr<Graph>& graph,
+    std::string function_name,
+    ExecutorExecutionMode executor_mode)
+    : pImpl(
+          executor_mode == ExecutorExecutionMode::SIMPLE
               ? dynamic_cast<GraphExecutorImplBase*>(
-                    new ProfilingGraphExecutorImpl(
+                    new SimpleGraphExecutorImpl(
                         graph,
                         std::move(function_name)))
               : dynamic_cast<GraphExecutorImplBase*>(
-                    new GraphExecutorImpl(graph, std::move(function_name)))) {}
+                    new ProfilingGraphExecutorImpl(
+                        graph,
+                        std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);

@@ -310,8 +310,9 @@ bool guardDifferentiableGraph(Node* dnode) {
 }
 
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
-  GRAPH_DEBUG(
-      "Before LowerGradOf (beginning of runNooptPassPipeline)\n", *graph);
+  GRAPH_DEBUG("Before Inliner (beginning of runNooptPassPipeline)\n", *graph);
+  Inline(*graph);
+  GRAPH_DEBUG("After Inline, Before NoGrad\n", *graph);
   LowerGradOf(*graph);
   GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", *graph);
   RemoveExpands(graph);

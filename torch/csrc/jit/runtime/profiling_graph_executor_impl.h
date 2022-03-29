@@ -10,6 +10,8 @@ C10_DECLARE_bool(torch_jit_always_dynamic);
 namespace torch {
 namespace jit {
 
+TORCH_API void runNooptPassPipeline(std::shared_ptr<Graph>& graph);
+
 struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
