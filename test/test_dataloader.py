@@ -23,6 +23,7 @@ from torch.utils.data import (
     DataLoader2,
     Dataset,
     IterableDataset,
+    IterDataPipe,
     Subset,
     TensorDataset,
     communication,
@@ -61,6 +62,14 @@ try:
 except ImportError:
     HAS_DILL = False
 skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
+
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -833,12 +842,35 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
         return int(math.ceil(len(self.dataset) / float(self.batch_size)))
 
 
+class TestMultiEpochDataset(IterableDataset):
+    def __init__(self, length):
+        self.length = length
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        assert worker_info is not None
+        worker_id = worker_info.id
+        for idx in range(self.length // worker_info.num_workers):
+            yield worker_id
+
+    def __len__(self):
+        return self.length
+
+
 class CustomList(list):
     pass
 
 
 class CustomDict(dict):
     pass
+
+
+def row_processor(row):
+    return np.add(row, 1)
+
+
+def filter_len(row):
+    return len(row) == 4
 
 
 @unittest.skipIf(
@@ -1366,6 +1398,30 @@ except RuntimeError as e:
                 self.assertEqual(
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
+    @skipIfNoNumpy
+    def test_multiprocessing_iterdatapipe(self):
+        # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
+        # and used with multiprocess DataLoader
+
+        reference = [torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
+                     torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64)]
+        datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
+        datapipe = datapipe.map(row_processor)
+        datapipe = datapipe.filter(lambda row: len(row) == 4) if HAS_DILL else datapipe.filter(filter_len)
+
+        dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
+        for ctx in supported_multiprocessing_contexts:
+            self.assertEqual(reference,
+                             [t.type(torch.int64)
+                              for t in self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)])
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(reference,
+                                 [t.type(torch.int64)
+                                  for t in
+                                  self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)])
+
     def test_worker_seed(self):
         num_workers = 6
         batch_size = 1
@@ -1384,6 +1440,19 @@ except RuntimeError as e:
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
         self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+
+    def test_multi_epochs_reproducibility(self):
+        num_workers = 2
+        batch_size = 10
+        num_epochs = 3
+
+        dataset = TestMultiEpochDataset(batch_size * num_workers)
+        dataloader = self._get_data_loader(dataset, batch_size=batch_size,
+                                           shuffle=False, num_workers=num_workers)
+
+        for ind in range(num_epochs):
+            for batch_idx, sample in enumerate(dataloader):
+                self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
@@ -2349,6 +2418,42 @@ except RuntimeError as e:
                 # and can cache values safely
                 dataset.start = i
 
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @unittest.skipIf(IS_WINDOWS, "Needs fork")
+    def test_early_exit(self):
+        import subprocess
+        proc = subprocess.check_output([sys.executable, '-c', """\
+import torch
+from torch.utils.data import DataLoader, IterableDataset
+
+class RandomDataset(IterableDataset):
+    def __init__(self, len, size):
+        super(RandomDataset).__init__()
+        self.len = len
+        self.size = size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.len <= 0:
+            raise StopIteration
+        self.len -= 1
+        return torch.randn(self.size)
+
+if __name__ == '__main__':
+    dl = DataLoader(
+        RandomDataset(64, (28, 28)),
+        batch_size=16,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True,
+        multiprocessing_context="fork",
+    )
+
+    for _ in dl:
+        break
+"""])
 
 
 class NamedTupleDataset(Dataset):

@@ -2,11 +2,14 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+IrCloner::IrCloner(IrContainer* container) : ir_container_(container) {}
 
 Statement* IrCloner::clone(const Statement* statement) {
   if (statement == nullptr) {
@@ -30,7 +33,6 @@ Statement* IrCloner::clone(const Statement* statement) {
     // that something went horribly wrong.
     TORCH_INTERNAL_ASSERT(new_node != nullptr);
     TORCH_INTERNAL_ASSERT(clones_map_[statement] == new_node);
-    TORCH_INTERNAL_ASSERT(new_node->fusion() == fusion_);
 
     return new_node;
   }
@@ -39,7 +41,6 @@ Statement* IrCloner::clone(const Statement* statement) {
 void IrCloner::registerClone(const Statement* src, Statement* clone) {
   TORCH_CHECK(src != nullptr);
   TORCH_CHECK(clone != nullptr);
-  TORCH_CHECK(clone->fusion() == fusion_);
   TORCH_CHECK(clones_map_.insert({src, clone}).second);
 }
 
@@ -56,79 +57,79 @@ void IrCloner::handle(const Expr* e) {
 }
 
 void IrCloner::handle(const TensorDomain* td) {
-  clone_ = new TensorDomain(td, this);
+  clone_ = IrBuilder::clone(td, this);
 }
 
 void IrCloner::handle(const IterDomain* id) {
-  clone_ = new IterDomain(id, this);
+  clone_ = IrBuilder::clone(id, this);
 }
 
 void IrCloner::handle(const Bool* b) {
-  clone_ = new Bool(b, this);
+  clone_ = IrBuilder::clone(b, this);
 }
 
 void IrCloner::handle(const Double* d) {
-  clone_ = new Double(d, this);
+  clone_ = IrBuilder::clone(d, this);
 }
 
 void IrCloner::handle(const Int* i) {
-  clone_ = new Int(i, this);
+  clone_ = IrBuilder::clone(i, this);
 }
 
 void IrCloner::handle(const NamedScalar* named_scalar) {
-  clone_ = new NamedScalar(named_scalar, this);
+  clone_ = IrBuilder::clone(named_scalar, this);
 }
 
 void IrCloner::handle(const TensorView* tv) {
-  clone_ = new TensorView(tv, this);
+  clone_ = IrBuilder::clone(tv, this);
 }
 
 void IrCloner::handle(const UnaryOp* op) {
-  clone_ = new UnaryOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const BinaryOp* op) {
-  clone_ = new BinaryOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const TernaryOp* op) {
-  clone_ = new TernaryOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const BroadcastOp* op) {
-  clone_ = new BroadcastOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const ReductionOp* op) {
-  clone_ = new ReductionOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const WelfordOp* op) {
-  clone_ = new WelfordOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const TransposeOp* op) {
-  clone_ = new TransposeOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const ShiftOp* op) {
-  clone_ = new ShiftOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const GatherOp* op) {
-  clone_ = new GatherOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const ViewOp* op) {
-  clone_ = new ViewOp(op, this);
+  clone_ = IrBuilder::clone(op, this);
 }
 
 void IrCloner::handle(const Split* split) {
-  clone_ = new Split(split, this);
+  clone_ = IrBuilder::clone(split, this);
 }
 
 void IrCloner::handle(const Merge* merge) {
-  clone_ = new Merge(merge, this);
+  clone_ = IrBuilder::clone(merge, this);
 }
 
 TensorView* RecomputeTv::recompute(TensorView* tv) {
@@ -141,7 +142,7 @@ TensorView* RecomputeTv::recompute(TensorView* tv) {
       "Cannot recompute buffers that are inputs of the fusion.");
 
   // Grab all the expressions used to generate the TensorView
-  auto exprs = ExprSort::getExprs(tv->fusion(), {tv});
+  auto exprs = StmtSort::getExprs(tv->fusion(), {tv}, false);
 
   // Run the replicator
   RecomputeTv replicator(tv->fusion(), exprs);
@@ -161,7 +162,7 @@ TensorView* RecomputeTv::recompute(TensorView* tv) {
 }
 
 RecomputeTv::RecomputeTv(Fusion* fusion, std::vector<Expr*> exprs)
-    : IrCloner(fusion) {
+    : IrCloner(fusion), fusion_(fusion) {
   // Add inputs to the clones map to prevent cloning them.
   for (const auto inp : fusion->inputs()) {
     clones_map_[inp] = inp;
@@ -183,7 +184,7 @@ void RecomputeTv::handle(const TensorDomain* td) {
   // Make sure to recompute the history of the iteration domains, explicitly go
   // through the expressions and send them to IrCloner.
   auto exprs =
-      ExprSort::getExprs(fusion(), {td->domain().begin(), td->domain().end()});
+      StmtSort::getExprs(fusion_, {td->domain().begin(), td->domain().end()});
 
   for (auto expr : exprs) {
     IrCloner::handle(expr);

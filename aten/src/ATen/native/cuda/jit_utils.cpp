@@ -18,13 +18,22 @@
 #include <cstdlib>
 #include <string>
 
-#if BUILD_JITERATOR_WITH_CACHE
-  // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
-  // TODO: C++17 has the fileystem header, which may replace these
+// TODO: C++17 has the fileystem header, which may replace these
+#ifdef _WIN32
+  // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
+  #include <process.h>
+  #include <direct.h>
+  #include <io.h>
+  #define access _access
+  #define getpid _getpid
+  #define R_OK    4
+  #define W_OK    2
+  #define F_OK    0
+#else
   #include <sys/types.h>
   #include <sys/stat.h> // mkdir
   #include <unistd.h>
-#endif // BUILD_JITERATOR_WITH_CACHE
+#endif
 
 
 namespace at { namespace cuda { namespace jit {
@@ -799,8 +808,66 @@ std::string generate_code(
   return code;
 }
 
+// Creates directories recursively
+bool _r_mkdir(const std::string& dir) {
+  // Check if current dir exists
+  const char* p_dir = dir.c_str();
+  const bool dir_exists = (access(p_dir, F_OK) == 0);
+  if (dir_exists) {
+    return true;
+  }
 
-#if BUILD_JITERATOR_WITH_CACHE
+  // Try to create current directory
+#ifdef _WIN32
+  int ret = _mkdir(dir.c_str());
+#else
+  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+#endif
+  // Success
+  if (ret == 0) {
+    return true;
+  }
+
+  // Find folder separator and check if we are at the top
+  auto  pos = dir.find_last_of("/\\");
+  if (pos == std::string::npos) {
+    return false;
+  }
+
+  // Try to create parent directory
+  if (!(_r_mkdir(dir.substr(0, pos)))) {
+    return false;
+  }
+
+  // Try to create complete path again
+#ifdef _WIN32
+  ret = _mkdir(dir.c_str());
+#else
+  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+#endif
+  return ret == 0;
+}
+
+// Creates directories recursively assuming that base exists
+bool r_mkdir_with_base(std::string& base, std::string& dir){
+  const char* p_base = base.c_str();
+  const bool base_exists = (access(p_base, F_OK) == 0);
+  if (!base_exists) {
+    return false;
+  }
+
+  // remove trailing '/' or '\\'
+  if ((base[base.size()-1]=='/') || base[base.size()-1]=='\\') {
+    base.pop_back();
+  }
+  if ((dir[dir.size()-1]=='/') || dir[dir.size()-1]=='\\') {
+    dir.pop_back();
+  }
+
+  return _r_mkdir(base+dir);
+}
+
+
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
@@ -811,16 +878,23 @@ c10::optional<std::string> get_cache_dir() {
     return {};
   }
 
-  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then XDG_CACHE_HOME, then HOME environment variables
+  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
   char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
+  std::string kernels_cache_dir = "";
   if (ptkcp != nullptr) {
     cache_dir = std::string(ptkcp);
   } else {
+#ifdef _WIN32
+    ptkcp = std::getenv("TEMP");
+#else
     // USES XDG_CACHE_HOME if it's set
     ptkcp = std::getenv("XDG_CACHE_HOME");
+#endif
     if (ptkcp != nullptr) {
-      cache_dir = std::string(ptkcp) + "/torch/kernels";
+      kernels_cache_dir = "/torch/kernels";
+      cache_dir = std::string(ptkcp) + kernels_cache_dir;
     } else {
       // Falls back to HOME/.cache
       ptkcp = std::getenv("HOME");
@@ -829,7 +903,8 @@ c10::optional<std::string> get_cache_dir() {
                         " This disables kernel caching.");
         return {};
       } else {
-        cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+        kernels_cache_dir = "/.cache/torch/kernels";
+        cache_dir = std::string(ptkcp) + kernels_cache_dir;
       }
     }
   }
@@ -838,7 +913,8 @@ c10::optional<std::string> get_cache_dir() {
   const char* p_cache_dir = cache_dir.c_str();
   const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
   if (!cache_dir_exists) {
-    if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+    std::string s_ptkcp = std::string(ptkcp);
+    if (!r_mkdir_with_base(s_ptkcp, kernels_cache_dir)) {
       TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
                       " Specified directory is ", cache_dir, ".",
                       " This warning will appear only once per process.");
@@ -865,7 +941,6 @@ c10::optional<std::string> get_cache_dir() {
 
   return cache_dir;
 }
-#endif // BUILD_JITERATOR_WITH_CACHE
 
 // Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
@@ -886,48 +961,46 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  #if BUILD_JITERATOR_WITH_CACHE
-    static const c10::optional<std::string> cache_dir = get_cache_dir();
+  static const c10::optional<std::string> cache_dir = get_cache_dir();
 
-    std::string file_path;
-    if (cache_dir.has_value()) {
-      // Attemps to read from the cache.
-      // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
-      // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
-      //   because we hash on the CUDA code, but we save the compiled ptx or sass
+  std::string file_path;
+  if (cache_dir.has_value()) {
+    // Attemps to read from the cache.
+    // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
+    // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
+    //   because we hash on the CUDA code, but we save the compiled ptx or sass
 
-      // Acquires SHA1 hash
-      c10::sha1 sha1_hash{code};
-      const auto hash_code = sha1_hash.str();
+    // Acquires SHA1 hash
+    c10::sha1 sha1_hash{code};
+    const auto hash_code = sha1_hash.str();
 
-      // Constructs file path by appending constructed cubin name to cache path
-      std::stringstream ss;
-      ss << *cache_dir << "/";
-      ss << kernel_name;
-      ss << "_arch" << cuda_major << "." << cuda_minor;
-      ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
-      ss << (compile_to_sass ? "_sass" : "_ptx");
-      ss << "_" << code.length();
-      ss << "_" << hash_code;
-      file_path = ss.str();
+    // Constructs file path by appending constructed cubin name to cache path
+    std::stringstream ss;
+    ss << *cache_dir << "/";
+    ss << kernel_name;
+    ss << "_arch" << cuda_major << "." << cuda_minor;
+    ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+    ss << (compile_to_sass ? "_sass" : "_ptx");
+    ss << "_" << code.length();
+    ss << "_" << hash_code;
+    file_path = ss.str();
 
-      std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-      if (readin.fail()) {
-        // NOTE: this does not warn because the file might not exist
-        // TODO: consider if this should explicilty check for the file's existence or not to throw
-        //   an informative warning
-        readin.close();
-      } else {
-        // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-        std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
-        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-        AT_CUDA_DRIVER_CHECK(
-          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-        readin.close();
-        return compiled_kernel_;
-      }
+    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+    if (readin.fail()) {
+      // NOTE: this does not warn because the file might not exist
+      // TODO: consider if this should explicilty check for the file's existence or not to throw
+      //   an informative warning
+      readin.close();
+    } else {
+      // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+      AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+      AT_CUDA_DRIVER_CHECK(
+        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+      readin.close();
+      return compiled_kernel_;
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+  }
 
   // Just-in-time compiles the program
 
@@ -1000,36 +1073,34 @@ NvrtcFunction jit_pwise_function(
   // TODO: use guards to avoid leaking
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
-  #if BUILD_JITERATOR_WITH_CACHE
-    if (cache_dir.has_value()) {
-      // Writes the program to the cache if caching
-      // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
-      //   The temporary file is then renamed to the actual file.
-      //   If the actual file already exists then the rename may fail or replace the actual file,
-      //     the behavior is implementation-specific.
-      //   Files replaced through this process should remain extant if they are being read because
-      //     of UNIX filesystem properties, but this behavior is unverified and may require
-      //     additional review in the future.
-      // TODO: In C++17 we should be able to use the filesystem header.
-      const auto pid = getpid();
-      std::stringstream tmp_file_path_ss;
-      tmp_file_path_ss << file_path << "_tmp_" << pid;
-      const std::string tmp_file_path = tmp_file_path_ss.str();
-      std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
-      if (cubin.fail()) {
-        TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
-                        " File path was ", tmp_file_path, ".",
-                        " This warning will only appear once per process.");
-      } else {
-        std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
-        if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
-          // Removes tmp file if the rename failed
-          std::remove(tmp_file_path.c_str());
-        }
+  if (cache_dir.has_value()) {
+    // Writes the program to the cache if caching
+    // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
+    //   The temporary file is then renamed to the actual file.
+    //   If the actual file already exists then the rename may fail or replace the actual file,
+    //     the behavior is implementation-specific.
+    //   Files replaced through this process should remain extant if they are being read because
+    //     of UNIX filesystem properties, but this behavior is unverified and may require
+    //     additional review in the future.
+    // TODO: In C++17 we should be able to use the filesystem header.
+    const auto pid = getpid();
+    std::stringstream tmp_file_path_ss;
+    tmp_file_path_ss << file_path << "_tmp_" << pid;
+    const std::string tmp_file_path = tmp_file_path_ss.str();
+    std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
+    if (cubin.fail()) {
+      TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
+                      " File path was ", tmp_file_path, ".",
+                      " This warning will only appear once per process.");
+    } else {
+      std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+      if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+        // Removes tmp file if the rename failed
+        std::remove(tmp_file_path.c_str());
       }
-      cubin.close();
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+    cubin.close();
+  }
 
   return compiled_kernel_;
 }

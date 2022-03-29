@@ -14,7 +14,7 @@ Automatic differentiation package - torch.autograd
     backward
     grad
 
-.. forward-mode-ad:
+.. _forward-mode-ad:
 
 Forward-mode Automatic Differentiation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

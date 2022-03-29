@@ -8,7 +8,7 @@ from itertools import product
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes)
+    (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 # For testing handling NumPy objects and sending tensors to / accepting
@@ -228,6 +228,7 @@ class TestNumPyInterop(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
+    @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
         warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
         with self.assertWarnsOnceRegex(UserWarning, warning_msg):

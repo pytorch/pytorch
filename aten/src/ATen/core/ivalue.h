@@ -92,7 +92,24 @@ struct OptionalArray {
     return *this;
   }
 
+  // Used when saving an argument for the backwards pass.
+  OptionalArray& operator=(c10::OptionalArrayRef<T> ref) {
+    if (ref) {
+      list = std::vector<T>(ref->begin(), ref->end());
+    } else {
+      list = nullopt;
+    }
+    return *this;
+  }
+
   operator c10::optional<c10::ArrayRef<T>>() {
+    if (!list) {
+      return nullopt;
+    }
+    return *list;
+  }
+
+  operator c10::OptionalArrayRef<T>() {
     if (!list) {
       return nullopt;
     }
@@ -666,6 +683,8 @@ public:
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
   // ClassType
@@ -1269,4 +1288,4 @@ struct TORCH_API WeakOrStrongTypePtr {
 
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep

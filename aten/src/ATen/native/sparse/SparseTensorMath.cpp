@@ -1,18 +1,70 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_addmm.h>
+#include <ATen/ops/_sparse_addmm_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_mm_native.h>
+#include <ATen/ops/_sparse_sum.h>
+#include <ATen/ops/_sparse_sum_backward_native.h>
+#include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_sparse_sparse_matmul.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/any.h>
+#include <ATen/ops/any_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/conj_physical_native.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/div.h>
+#include <ATen/ops/div_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/floor_divide.h>
+#include <ATen/ops/floor_divide_native.h>
+#include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/mul_native.h>
+#include <ATen/ops/mv_native.h>
+#include <ATen/ops/native_norm_native.h>
+#include <ATen/ops/neg_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/pow_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/smm_native.h>
+#include <ATen/ops/sspaddmm.h>
+#include <ATen/ops/sspaddmm_native.h>
+#include <ATen/ops/sub_native.h>
+#include <ATen/ops/zero_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros_native.h>
+#endif
 
 #include <algorithm>
 
@@ -625,7 +677,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
         commonDtype, "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(resultBuffer, value, sparse, indices, valuesBuffer);
         });
@@ -653,6 +705,34 @@ Tensor mul_sparse(const Tensor& self, const Tensor& other) {
 
 Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
+}
+
+Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
+  // // TODO: Use a specialized CSR kernel for performance if needed
+  TORCH_CHECK(t_.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(src_.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  Tensor t = t_.to_sparse();
+  Tensor src = src_.to_sparse();
+  Tensor tmp_result = t.mul(src);
+  auto r_sparse_csr = tmp_result.to_sparse_csr();
+  r.resize_as_sparse_(r_sparse_csr);
+  r.copy_(r_sparse_csr);
+  return r;
+}
+
+Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
+  auto commonDtype = at::result_type(self, other);
+  TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  auto result_options = self.options().dtype(commonDtype);
+  // CSR is 2d!
+  Tensor result = at::empty({0, 0}, result_options);
+  return at::mul_out(result, self, other); // redispatch!
+}
+
+Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
+  return at::mul_out(self, self, other); // redispatch!
 }
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
@@ -730,7 +810,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
       s_i++;
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
         commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
@@ -918,11 +998,14 @@ Tensor _sparse_addmm(
 }
 
 Tensor _sparse_mm(
-  const SparseTensor& sparse,
-  const Tensor& dense
+  const Tensor& mat1,
+  const Tensor& mat2
 ) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
+  if (mat1.is_sparse() && mat2.is_sparse()) {
+    return at::_sparse_sparse_matmul(mat1, mat2);
+  }
+  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that
@@ -1441,11 +1524,14 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<sca
 
   int64_t left_ind = 0;
   int64_t right_ind = length - 1;
-  int64_t mid_ind; // NOLINT(cppcoreguidelines-init-variables)
+  // This value should be overwritten in the loop so we use
+  // a destructive initial value to ensure disaster if that
+  // turns out not to be the case.
+  int64_t mid_ind = std::numeric_limits<int64_t>::max();
   bool done_searching = false;
 
   while (!done_searching) {
-    mid_ind = (left_ind+right_ind) >> 1;
+    mid_ind = left_ind + (right_ind - left_ind) / 2;
     scalar_t mid_val = sorted_arr_accessor[sorted_arr_begin_idx + mid_ind];
 
     if (mid_val > search_val) {

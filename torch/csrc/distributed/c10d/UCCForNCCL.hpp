@@ -9,7 +9,7 @@
 
 namespace c10d {
 
-std::shared_ptr<at::DynamicLibrary> loadTorchUCC() {
+inline std::shared_ptr<at::DynamicLibrary> loadTorchUCC() {
   const char *path = std::getenv("TORCH_UCC_LIBRARY_PATH");
   if (path != nullptr) {
     try {
