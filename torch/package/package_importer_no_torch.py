@@ -71,17 +71,9 @@ class PackageImporter(Importer):
             zip_reader = DefaultPackageZipFileReader(file_or_buffer)
         return filename, zip_reader
 
-    def initialization_function(
-        self,
-        file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
-        module_allowed: Callable[[str], bool] = lambda module_name: True,
-    ):
-        # meant to be overwritten, it is ran at the end of the constructor
-        pass
-
     def __init__(
         self,
-        file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
         zip_file_reader_type: Type[PackageZipFileReader] = DefaultPackageZipFileReader
     ):
@@ -128,8 +120,6 @@ class PackageImporter(Importer):
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
-
-        self.initialization_function(file_or_buffer, module_allowed)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return

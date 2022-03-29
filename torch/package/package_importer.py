@@ -1,7 +1,6 @@
 import torch
 from ._directory_reader_torchscript import TorchScriptDirectoryReader
 from ._zip_file_torchscript import TorchScriptPackageZipFileReader
-from ._zip_file import PackageZipFileReader
 from torch.serialization import _get_restore_location
 from .package_importer_no_torch import _maybe_decode_ascii
 from .package_importer_no_torch import PackageImporter as DefaultPackageImporter
@@ -14,7 +13,7 @@ class PackageImporter(DefaultPackageImporter):
 
     def __init__(
         self,
-        file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True
     ):
         super(PackageImporter, self).__init__(file_or_buffer, module_allowed, zip_file_reader_type=TorchScriptPackageZipFileReader)
