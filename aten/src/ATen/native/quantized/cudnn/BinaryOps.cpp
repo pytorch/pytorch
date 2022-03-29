@@ -68,7 +68,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     std::vector<int64_t> new_sizes(3, 1);
     // cudnn expects leading dimensions to be the dummy dimensions
     new_sizes.back() = qa.sizes().back();
-    if (qa.ndim() == 2) {
+    if (qa.dim() == 2) {
       new_sizes[1] = qa.size(0);
     }
     qa = qa.view(new_sizes);
