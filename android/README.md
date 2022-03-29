@@ -14,9 +14,16 @@ repositories {
     jcenter()
 }
 
+# lite interpreter build
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.6.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0'
+    implementation 'org.pytorch:pytorch_android_lite:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.10.0'
+}
+
+# full jit build
+dependencies {
+    implementation 'org.pytorch:pytorch_android:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.10.0'
 }
 ```
 
@@ -32,6 +39,15 @@ repositories {
     }
 }
 
+# lite interpreter build
+dependencies {
+    ...
+    implementation 'org.pytorch:pytorch_android_lite:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.12.0-SNAPSHOT'
+    ...
+}
+
+# full jit build
 dependencies {
     ...
     implementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
@@ -68,7 +84,7 @@ They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
-`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk)
+`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK 21.x.
 
 `GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
 
@@ -133,7 +149,7 @@ android {
 }
 
 dependencies {
-    extractForNativeBuild('org.pytorch:pytorch_android:1.6.0')
+    extractForNativeBuild('org.pytorch:pytorch_android:1.10.0')
 }
 
 task extractAARForNativeBuild {
@@ -218,6 +234,23 @@ void loadAndForwardModel(const std::string& modelPath) {
 To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
 
 [Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
+
+
+## Running Instrumentation Test
+Test using lite interpreter
+```
+./android/run_tests.sh
+```
+
+Test using full JIT
+```
+BUILD_LITE_INTERPRETER=0 ./android/run_tests.sh
+```
+
+Regenerate all test models
+```
+python test/mobile/model_test/gen_test_model.py android
+```
 
 ## PyTorch Android API Javadoc
 

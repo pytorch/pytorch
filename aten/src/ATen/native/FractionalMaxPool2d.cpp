@@ -134,8 +134,9 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
         static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
     }
   }
-  sequence[outputSize - 1] = inputSize - poolSize;
-
+  if (outputSize > 0) {
+    sequence[outputSize - 1] = inputSize - poolSize;
+  }
   return sequence;
 }
 

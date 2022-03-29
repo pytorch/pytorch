@@ -65,7 +65,7 @@ def get_ops_in_version(version):
     domain_opname_ops = []
     for obj in members:
         if isinstance(obj[1], type) and hasattr(obj[1], "domain"):
-            ops = getmembers(obj[1])
+            ops = getmembers(obj[1], predicate=isfunction)
             for op in ops:
                 domain_opname_ops.append((obj[1].domain, op[0], op[1]))  # type: ignore[attr-defined]
 
@@ -130,15 +130,15 @@ def get_registered_op(opname, domain, version):
 class UnsupportedOperatorError(RuntimeError):
     def __init__(self, domain, opname, version):
         supported_version = get_op_supported_version(opname, domain, version)
-        if domain in ["", "aten", "prim"]:
-            msg = "Exporting the operator " + opname + " to ONNX opset version " + str(version) + " is not supported. "
+        if domain in ["", "aten", "prim", "quantized"]:
+            msg = f"Exporting the operator {domain}::{opname} to ONNX opset version {version} is not supported. "
             if supported_version is not None:
-                msg += "Support for this operator was added in version " + str(supported_version) + \
-                       ", try exporting with this version."
+                msg += (f"Support for this operator was added in version {supported_version}, "
+                        "try exporting with this version.")
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
         else:
-            msg = ("ONNX export failed on an operator with unrecognized namespace {}::{}. "
+            msg = (f"ONNX export failed on an operator with unrecognized namespace {domain}::{opname}. "
                    "If you are trying to export a custom operator, make sure you registered "
-                   "it with the right domain and version.".format(domain, opname))
+                   "it with the right domain and version.")
         super().__init__(msg)
