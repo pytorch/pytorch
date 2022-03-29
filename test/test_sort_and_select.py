@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
 )
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
+    (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -135,8 +135,6 @@ class TestSortAndSelect(TestCase):
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
             x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
@@ -230,8 +228,6 @@ class TestSortAndSelect(TestCase):
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float('inf')
             neg_inf = -float('inf')
@@ -295,11 +291,8 @@ class TestSortAndSelect(TestCase):
 
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_msort(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             if tensor.size() != torch.Size([]):
                 if dtype is torch.bfloat16:
                     expected = torch.from_numpy(np.msort(tensor.float().cpu().numpy())).bfloat16()
@@ -685,7 +678,6 @@ class TestSortAndSelect(TestCase):
 
     @onlyCUDA
     @dtypes(torch.bfloat16)
-    @skipCUDAIfRocm
     def test_topk_bfloat16(self, device, dtype):
 
         small = 10
@@ -697,9 +689,6 @@ class TestSortAndSelect(TestCase):
     @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
         expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
@@ -734,9 +723,6 @@ class TestSortAndSelect(TestCase):
                                    include_bfloat16=True)))
     @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
     def test_topk_zero(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)
         val, idx = torch.topk(t, k=0, largest=False)

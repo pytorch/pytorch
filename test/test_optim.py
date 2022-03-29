@@ -481,9 +481,8 @@ class TestOptim(TestCase):
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    # TODO: uncomment after optim foreach cleanup is landed
-                    # if iter == 0:
-                    #     optimizer.zero_grad(set_to_none=True)
+                    if iter == 0:
+                        optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
 

@@ -39,7 +39,7 @@ def fuser(name):
     elif name == 'fuser1':  # NNC
         old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_set_nvfuser_enabled(False)
@@ -106,48 +106,35 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         self(*args, **kwargs)
         return last_executed_optimized_graph()
 
-def _set_fusion_strategy(strategy: List[Tuple[str, int]]):
+def set_fusion_strategy(strategy: List[Tuple[str, int]]):
     """
-    Sets the type and number of specializations that can occur during fusion
+    Sets the type and number of specializations that can occur during fusion.
 
     Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"
-           and depth is an integer.
-            //
+    and depth is an integer.
+
     Behavior - static vs dynamic:
-    - in STATIC fusion, fused ops are compiled to have fixed input shapes. The input shapes
-      are determined based on a number of initial profiling runs. The shape is determined based
-      on some initial profiling runs. For example, if on the first run an input of shape
-      [2, 4] is observed, then the compiled op will only work on shapes of size [2, 4].
-    - in DYNAMIC fusion, fused ops are compiled to have variable input shapes, so that multiple
-      shapes are possible. Dynamic fusion uses "symbolic shapes", where any dimensions of the
-      same value that are observed in profiling runs are assumed to have the same value.
-      For example, if inputs of [2,3,4] and [3,4,5] are observed, then it is assumed that future
-      inputs will have shapes [a,b,c] and [b,c,d] for some values of a,b,c,d.
+        In STATIC fusion, fused ops are compiled to have fixed input shapes. The shape is determined
+        based on some initial profiling runs.
+        In DYNAMIC fusion, fused ops are compiled to have variable input shapes, so that multiple
+        shapes are possible.
 
-   In both cases, we also recompile on new striding behavior, device, or dtype.
+    In both cases, we also recompile on new striding behavior, device, or dtype.
 
-            //
     Behavior - fallback functions & depth:
-      When an input doesn't match the format required by the specialized compiled op, it will run
-      a fallback function.
-      Fallback functions can also recursively be compiled and specialized based on the input shape
-      Since compilation can be slow, the "depth" parameter is provided to limit the number of
-      specializations that can be compiled, before JIT gives up on recompiling and falls back
-      to a completely un-fused, un-specialized implementation.
-            //
+        When an input doesn't match the format required by the specialized compiled op, it will run
+        a fallback function. Fallback functions are recursively be compiled and specialized based
+        on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
+        limit the number of specializations that can be compiled, before giving up on recompiling and
+        falling back to a completely un-fused, un-specialized implementation.
+
     The list of (type, depth) pairs controls the type of specializations and the number of
-      specializations. For example: [("STATIC", 2), ("DYNAMIC", 2)] indicates that the first
-      two specializations will use static fusions, the following two specializations will use
-      dynamic fusion, and any inputs that satisfy none of the 4 options will run an
-      unfused implementation.
-    Below an example of the fallback function structure is shown, if given a strategy of
-      [("STATIC", 2), ("DYNAMIC", 2)] and if consecutive runs had these input shapes:
-      [2, 2], [3, 3], [4, 4], [3, 5], ...
-            //
-      + specialized: statically fused, shape [2, 2]
-      |-> + fallback 1; statically fused, shape [3, 3]
-          |-> + fallback 2; dynamically fused, shape [A, A]
-              |-> + fallback 3: dynamically fused, shape [A, B]
-                  |-> final fallback: unspecialized, unfused
+    specializations. For example: [("STATIC", 2), ("DYNAMIC", 2)] indicates that the first
+    two specializations will use static fusions, the following two specializations will use
+    dynamic fusion, and any inputs that satisfy none of the 4 options will run an
+    unfused implementation.
+
+    NB: in the future, if more as more fusion backends are added there may be more granular
+    apis for specific fusers.
     """
     return torch._C._jit_set_fusion_strategy(strategy)
