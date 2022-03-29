@@ -141,7 +141,9 @@ uint64_t Result::correlation_id() const {
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
     const ProfilerConfig& config)
-    : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {}
+    : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
+  torch::profiler::impl::kineto::recordThreadInfo();
+}
 
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn,
