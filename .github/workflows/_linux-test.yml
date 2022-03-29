@@ -75,7 +75,10 @@ jobs:
         run: |
           git log --format=%B -n 1 HEAD
           git cherry -v "origin/${GIT_DEFAULT_BRANCH}"
-          echo "COMMIT_MESSAGES=$(git cherry -v origin/${GIT_DEFAULT_BRANCH})" >> $GITHUB_ENV
+
+          echo 'COMMIT_MESSAGES<<EOF' >> $GITHUB_ENV
+          git cherry -v "origin/${GIT_DEFAULT_BRANCH}" >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
 
       - name: Test
         env:
@@ -106,7 +109,7 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
-          echo $COMMIT_MESSAGES
+          echo "$COMMIT_MESSAGES"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
