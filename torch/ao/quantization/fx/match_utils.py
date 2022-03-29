@@ -124,16 +124,21 @@ def find_matches(
         else:
             matched.append(node)
 
+    # Ensure tuple patterns are matched first, e.g. match (F.relu, F.linear) before F.relu,
+    # such that we do not need to impose an ordering requirement on the patterns map
+    sorted_patterns = sorted(patterns.keys(), key=lambda k: -1 if isinstance(k, tuple) else 1)
+
     cache_for_no_tensor_check: Dict[Node, bool] = dict()
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
-            for pattern, value in patterns.items():
+            for pattern in sorted_patterns:
                 if is_match(modules, node, pattern):
                     matched: List[Any] = []
                     record_match(pattern, node, matched)
+                    quantize_handler = patterns[pattern]
                     for n in matched:
                         match_map[n.name] = (
-                            node, matched, pattern, value(node, modules),  # type: ignore[operator]
+                            node, matched, pattern, quantize_handler(node, modules),  # type: ignore[operator]
                             qconfig_map[n.name])
                         all_matched.add(n.name)
                     # break after finding the first match

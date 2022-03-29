@@ -209,19 +209,11 @@ class CatQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return True
 
-# TODO(andrew): figure out why functional conv + relu doesn't work
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv1d))
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv2d))
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv3d))
-@register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv1d))
-@register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv2d))
-@register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
+# TODO: remove this class
 class ConvReluQuantizeHandler(QuantizeHandler):
     pass
 
-# TODO(andrew): figure out why functional linear + relu doesn't work
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.linear))
-@register_quant_pattern((torch.nn.ReLU, torch.nn.functional.linear))
+# TODO: remove this class
 class LinearReLUQuantizeHandler(QuantizeHandler):
     pass
 
