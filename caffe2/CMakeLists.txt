@@ -458,6 +458,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
+    "${TOOLS_PATH}/codegen/gen_backend_stubs.py"
+    "${TOOLS_PATH}/codegen/gen_lazy_tensor.py"
+    "${TOOLS_PATH}/codegen/api/lazy.py"
+    "${TOOLS_PATH}/codegen/dest/lazy_ir.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -1350,8 +1354,14 @@ if(USE_DISTRIBUTED)
     else()
       if(BUILD_SPLIT_CUDA)
         target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda_cpp PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       else()
         target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       endif()
     endif()
   endif()
