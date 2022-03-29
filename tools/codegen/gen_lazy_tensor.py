@@ -135,8 +135,7 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(aten_path, 'native/native_functions.yaml')
-    tags_yaml_path = os.path.join(aten_path, 'native/tags.yaml')
-    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
+    parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
