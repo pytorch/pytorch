@@ -59,7 +59,7 @@ cpu_offload_config = [
 backward_prefetch_config = [
     BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST
 ]
-full_precision_param_dtype_config = [torch.float32, torch.float64]
+full_precision_param_dtype_config = [torch.float32]
 configs = list(product(
     mp_configs,
     cpu_offload_config,
