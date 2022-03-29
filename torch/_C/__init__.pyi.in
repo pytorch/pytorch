@@ -780,6 +780,8 @@ def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
+def _get_cudnn_benchmark_limit() -> _int: ...  # THPModule_benchmarkLimitCuDNN
+def _set_cudnn_benchmark_limit(arg: _int) -> None: ...  # THPModule_setBenchmarkLimitCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
 def _get_deterministic_algorithms() -> _bool: ...  # THPModule_deterministicAlgorithms
