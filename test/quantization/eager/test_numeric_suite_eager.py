@@ -430,8 +430,6 @@ class TestNumericSuiteEager(QuantizationTestCase):
             "myadd.stats",
             "mymul.stats",
             "myadd_relu.stats",
-            # "my_scalar_add.stats", # empty
-            # "my_scalar_mul.stats", # empty
             "quant.stats",
         }
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
