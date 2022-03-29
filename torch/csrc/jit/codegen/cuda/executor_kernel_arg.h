@@ -33,6 +33,7 @@ struct TensorArgCodegen {
   }
 };
 
+// 0-Dim GPU based tensor
 template <typename T, typename nvfuser_index_t>
 struct TensorArgCodegen<T, 0, nvfuser_index_t> {
   T& operator[](nvfuser_index_t ind) {
@@ -51,6 +52,17 @@ struct TensorArgCodegen<T, 0, nvfuser_index_t> {
   }
 };
 
+// Specialization for 0-dim case that's easy to pass in a CPU based tensor
+// without memcpy
+template <typename T>
+struct CpuScalarTensorCodegen {
+  T& operator[](int) {
+    return data;
+  };
+
+  T data;
+};
+
 struct ArgAbstract {
   virtual ~ArgAbstract() = default;
   virtual void* arg() = 0;
@@ -67,7 +79,7 @@ struct PhiloxCudaStateArg : public ArgAbstract {
 
 struct LongArg : public ArgAbstract {
   int64_t val_;
-  explicit LongArg(int64_t _val) : val_(_val){};
+  explicit LongArg(int64_t _val) : val_(_val) {}
   // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
@@ -76,7 +88,7 @@ struct LongArg : public ArgAbstract {
 
 struct DoubleArg : public ArgAbstract {
   double val_;
-  explicit DoubleArg(double _val) : val_(_val){};
+  explicit DoubleArg(double _val) : val_(_val) {}
   // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
@@ -85,7 +97,7 @@ struct DoubleArg : public ArgAbstract {
 
 struct BoolArg : public ArgAbstract {
   bool val_;
-  explicit BoolArg(bool _val) : val_(_val){};
+  explicit BoolArg(bool _val) : val_(_val) {}
   // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
@@ -119,9 +131,20 @@ struct TensorArg : public TensorArgAbstract {
   }
 };
 
-std::unique_ptr<TensorArgAbstract> getTensorArg(
-    c10::ScalarType dtype,
-    int nDims);
+template <typename CPU_TENSOR_TYPE>
+struct CpuScalarTensorArg : public ArgAbstract {
+  CPU_TENSOR_TYPE instance_;
+
+  CpuScalarTensorArg() = delete;
+
+  explicit CpuScalarTensorArg(decltype(CPU_TENSOR_TYPE::data) _data) {
+    instance_.data = _data;
+  }
+
+  void* arg() override {
+    return &instance_;
+  }
+};
 
 class KernelArgumentHolder {
  public:

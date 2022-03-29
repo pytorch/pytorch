@@ -14,7 +14,7 @@ graph {
       type: STRING
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 4
     data_type: 1

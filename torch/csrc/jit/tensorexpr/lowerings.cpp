@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
+#include <ATen/native/Activation.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -641,22 +643,44 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_gelu(
-      {"aten::gelu(Tensor self) -> (Tensor)"},
+      {"aten::gelu(Tensor self, *, str approximate='none') -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        return computeOneOperand(
-            "aten_gelu",
-            inputs,
-            outputShape,
-            outputType,
-            [](const ExprHandle& a) {
-              auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
-              auto one = Cast::make(a.dtype(), 1.);
-              auto point_five = Cast::make(a.dtype(), .5);
-              return a * point_five * (one + erf(a * m_sqrt1_2));
-            });
+        const auto& kApproximate = c10::get<std::string>(inputs[1]);
+        std::vector<ArgValue> operands = {inputs.front()};
+        if (at::native::get_gelutype_enum(kApproximate) ==
+            at::native::GeluType::Tanh) {
+          // approximate == 'tanh'
+          return computeOneOperand(
+              "aten_tanh_gelu",
+              operands,
+              outputShape,
+              outputType,
+              [](const ExprHandle& a) {
+                auto one = Cast::make(a.dtype(), 1.);
+                auto point_five = Cast::make(a.dtype(), .5);
+                auto beta = Cast::make(a.dtype(), M_SQRT2 * M_2_SQRTPI * 0.5);
+                auto kappa = Cast::make(a.dtype(), 0.044715);
+                auto a_cube = a * a * a;
+                auto inner = beta * (a + kappa * a_cube);
+                return point_five * a * (one + tanh(inner));
+              });
+        } else {
+          // approximate == 'none'
+          return computeOneOperand(
+              "aten_gelu",
+              operands,
+              outputShape,
+              outputType,
+              [](const ExprHandle& a) {
+                auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+                auto one = Cast::make(a.dtype(), 1.);
+                auto point_five = Cast::make(a.dtype(), .5);
+                return a * point_five * (one + erf(a * m_sqrt1_2));
+              });
+        }
       });
 
   RegisterNNCLoweringsFunction aten_batch_norm(
@@ -1712,7 +1736,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_upsample_nearest2d(
       {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)"},
-      computeUpsampleNearest2d);
+      computeUpsampleNearest2dExternalCall);
 
   return 0;
 }

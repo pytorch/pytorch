@@ -334,9 +334,9 @@ ReductionParams innerReductionHeuristic(
 
   ReductionParams rparams;
   rparams.fastest_dim = true;
-  rparams.cross_block_inner_reduce = true;
+  rparams.cross_block_inner_reduction = true;
   rparams.block_dim_inner_reduction = ParallelType::TIDx;
-  rparams.cross_grid_inner_reduce = gridim > 1;
+  rparams.cross_grid_inner_reduction = gridim > 1;
   rparams.multiple_reds_per_blk = bdimy > 1;
   bool pad_bdimx = bdimx > 16 &&
       bdimx * bdimy <
@@ -359,7 +359,9 @@ ReductionParams innerReductionHeuristic(
     rparams.vectorize_inner_reduction = vectorize;
   }
 
-  rparams.block_dim_iter_dom = ParallelType::TIDy;
+  if (rparams.multiple_reds_per_blk) {
+    rparams.block_dim_iter_dom = ParallelType::TIDy;
+  }
   if (iter_unroll_factor > 1) {
     rparams.unroll_iter_dom = true;
     rparams.unroll_factor_iter_dom = iter_unroll_factor;
@@ -368,10 +370,10 @@ ReductionParams innerReductionHeuristic(
   rparams.schedule_3D = total_reduction_numel != inner_most_dimension_numel;
   // Outer reduction domain
   if (rparams.schedule_3D) {
-    rparams.cross_grid_outer_reduce = grodim > 1;
+    rparams.cross_grid_outer_reduction = grodim > 1;
     if (bdimz > 1) {
       rparams.block_dim_outer_reduction = ParallelType::TIDz;
-      rparams.cross_block_outer_reduce = true;
+      rparams.cross_block_outer_reduction = true;
     }
     rparams.unroll_outer_reduction = outer_reduction_unroll_factor > 1;
     rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
@@ -385,39 +387,40 @@ ReductionParams innerReductionHeuristic(
   // gdimx assigned to grdim. Otherwise it's helpful to pull godim into gdimx in
   // case it's larger than gdimy can hold, as not doing so can thrash the cache.
 
-  if (rparams.cross_grid_inner_reduce) {
+  if (rparams.cross_grid_inner_reduction) {
     rparams.grid_dim_inner_reduction = ParallelType::BIDx;
-    gdimx = gridim;
-    rparams.split_grid_dim_inner_reduction =
-        gdimx > scheduler_utils::x_grid_limit;
+    rparams.split_grid_dim_inner_reduction = true;
+    gdimx = std::min(gridim, scheduler_utils::x_grid_limit);
 
     rparams.grid_dim_iter_dom = ParallelType::BIDy;
-    gdimy = godim;
-    rparams.split_grid_dim_iter_dom = gdimy > scheduler_utils::y_grid_limit;
+    if (godim > scheduler_utils::y_grid_limit) {
+      rparams.split_grid_dim_iter_dom = true;
+      gdimy = std::min(godim, scheduler_utils::y_grid_limit);
+    }
 
   } else {
-    gdimx = godim;
     rparams.grid_dim_iter_dom = ParallelType::BIDx;
-    rparams.split_grid_dim_iter_dom = gdimx > scheduler_utils::x_grid_limit;
+    if (gdimx > scheduler_utils::x_grid_limit) {
+      rparams.split_grid_dim_iter_dom = true;
+      gdimx = godim;
+    }
   }
 
-  if (rparams.cross_grid_outer_reduce) {
-    if (rparams.cross_block_inner_reduce) {
-      gdimz = grodim;
+  if (rparams.cross_grid_outer_reduction) {
+    if (rparams.cross_block_inner_reduction) {
       rparams.grid_dim_outer_reduction = ParallelType::BIDz;
+      gdimz = std::min(grodim, scheduler_utils::z_grid_limit);
+      rparams.split_grid_dim_outer_reduction = true;
     } else {
-      gdimy = grodim;
       rparams.grid_dim_outer_reduction = ParallelType::BIDy;
+      gdimy = std::min(grodim, scheduler_utils::y_grid_limit);
+      rparams.split_grid_dim_outer_reduction = true;
     }
   }
 
   rparams.lparams = LaunchParams(
-      rparams.grid_dim_iter_dom == ParallelType::BIDx
-          ? LaunchParams::UNINITIALIZED_VAL
-          : gdimx,
-      rparams.grid_dim_iter_dom == ParallelType::BIDy
-          ? LaunchParams::UNINITIALIZED_VAL
-          : gdimy,
+      gdimx,
+      gdimy,
       gdimz,
       bdimx,
       bdimy > 1 ? bdimy : LaunchParams::UNINITIALIZED_VAL,
@@ -441,12 +444,13 @@ ReductionParams innerReductionHeuristic(
   // schedule
   if (rparams.schedule_3D) {
     if (rparams.multiple_reds_per_blk &&
-        (rparams.cross_grid_inner_reduce || rparams.cross_grid_outer_reduce)) {
+        (rparams.cross_grid_inner_reduction ||
+         rparams.cross_grid_outer_reduction)) {
       if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
         std::cerr << "\n===== UNSUPPORTED REDUCTION HEURISTIC ========\n";
         std::cerr << rparams.multiple_reds_per_blk << ", "
                   << rparams.unroll_inner_reduction << ", "
-                  << rparams.cross_grid_inner_reduce << std::endl;
+                  << rparams.cross_grid_inner_reduction << std::endl;
       }
       return innerReductionHeuristic(
           total_reduction_numel,
@@ -534,9 +538,9 @@ ReductionParams OuterReductionHeuristic(
   // domain for this
 
   // Blocks for reductions
-  int64_t gdimy = 1;
+  int64_t grdim = 1;
   // Blocks for outputs
-  int64_t gdimx = 1;
+  int64_t gidim = 1;
 
   // Threads for reduction
   int64_t bdimy = 1;
@@ -597,11 +601,11 @@ ReductionParams OuterReductionHeuristic(
       std::min(max_unroll, ceilDiv(total_reduction_numel, bdimy));
 
   // Go cross grid
-  gdimy = ceilDiv(
+  grdim = ceilDiv(
       ceilDiv(total_reduction_numel, bdimy * inner_reduction_unroll_factor),
       (int64_t)4);
 
-  gdimx = ceilDiv(total_iteration_numel, bdimx * iter_unroll_factor);
+  gidim = ceilDiv(total_iteration_numel, bdimx * iter_unroll_factor);
 
   // Clang tidy
   constexpr int64_t kEight = 8;
@@ -611,13 +615,13 @@ ReductionParams OuterReductionHeuristic(
   if (ceilDiv(total_reduction_numel, bdimy * inner_reduction_unroll_factor) >=
       kThirtyTwo) {
     // Many reduction elements, go cross grid
-    int64_t min_gdimy = 1;
-    if (gdimy > 1) {
+    int64_t min_grdim = 1;
+    if (grdim > 1) {
       // already cross grid, don't go below target or what was already set
-      min_gdimy = std::min(gdimy, ceilDiv(target_blocks, gdimx));
+      min_grdim = std::min(grdim, ceilDiv(target_blocks, gidim));
     }
-    gdimy = std::max(
-        min_gdimy,
+    grdim = std::max(
+        min_grdim,
         ceilDiv(
             ceilDiv(
                 total_reduction_numel, bdimy * inner_reduction_unroll_factor),
@@ -625,33 +629,33 @@ ReductionParams OuterReductionHeuristic(
     // Don't go too far above number of threads in a block since that's how many
     // threads are available to do final reduction iteration
     // This is good!
-    gdimy = std::min(gdimy, bdimx * bdimy * kEight);
+    grdim = std::min(grdim, bdimx * bdimy * kEight);
   }
 
   // Try to do some cleanup of ragged waves on device
   if (
       // If we have less than 8 waves of blocks
-      gdimy * gdimx < device_multiprocessor_count * kEight &&
+      grdim * gidim < device_multiprocessor_count * kEight &&
       // And we don't have an even divisible number of blocks
-      (gdimy * gdimx) % device_multiprocessor_count != 0 &&
+      (grdim * gidim) % device_multiprocessor_count != 0 &&
       // And we have more than one wave
-      gdimy * gdimx > device_multiprocessor_count) {
+      grdim * gidim > device_multiprocessor_count) {
     // round waves down
     auto waves =
-        std::max((gdimx * gdimy) / device_multiprocessor_count, (int64_t)1);
-    auto new_gdimy =
-        std::max((waves * device_multiprocessor_count) / gdimx, (int64_t)1);
+        std::max((gidim * grdim) / device_multiprocessor_count, (int64_t)1);
+    auto new_grdim =
+        std::max((waves * device_multiprocessor_count) / gidim, (int64_t)1);
     if (
-        // If difference is less than 25% of the original gdimy
-        (new_gdimy - gdimy) * 4 < gdimy &&
+        // If difference is less than 25% of the original grdim
+        (new_grdim - grdim) * 4 < grdim &&
         // and difference is less than 25% of the original number of blocks
-        ((new_gdimy * gdimx) - (gdimy * gdimx)) * 4 < gdimy * gdimx) {
-      gdimy = new_gdimy;
+        ((new_grdim * gidim) - (grdim * gidim)) * 4 < grdim * gidim) {
+      grdim = new_grdim;
     }
   }
 
   // Cannot unroll with cross grid reductions
-  if (gdimy > 1 && iter_unroll_factor > 1) {
+  if (grdim > 1 && iter_unroll_factor > 1) {
     // Readjust the thread bindings, ideally we would repeat the block setup
     // without considering iter domain unrolling, but for now will simplify
     bdimx = std::min(max_threads_in_block, bdimx * iter_unroll_factor);
@@ -664,10 +668,18 @@ ReductionParams OuterReductionHeuristic(
     iter_unroll_factor = 1;
   }
 
+  int64_t gdimx = LaunchParams::UNINITIALIZED_VAL;
+  int64_t gdimy = LaunchParams::UNINITIALIZED_VAL;
+
   ReductionParams rparams;
   // cross grid implies cross block
-  rparams.cross_block_inner_reduce = bdimy > 1 || gdimy > 1;
-  rparams.cross_grid_inner_reduce = gdimy > 1;
+  rparams.cross_block_inner_reduction = bdimy > 1 || grdim > 1;
+  rparams.cross_grid_inner_reduction = grdim > 1;
+  if (rparams.cross_grid_inner_reduction) {
+    rparams.split_grid_dim_inner_reduction = true;
+    rparams.grid_dim_inner_reduction = ParallelType::BIDy;
+    gdimy = std::min(grdim, scheduler_utils::y_grid_limit);
+  }
   rparams.multiple_reds_per_blk = bdimx > 1 || iter_unroll_factor > 1;
 
   if (rparams.multiple_reds_per_blk) {
@@ -675,15 +687,12 @@ ReductionParams OuterReductionHeuristic(
   }
 
   rparams.grid_dim_iter_dom = ParallelType::BIDx;
-  rparams.split_grid_dim_iter_dom = gdimx > scheduler_utils::x_grid_limit;
-
-  if (rparams.cross_grid_inner_reduce) {
-    rparams.grid_dim_inner_reduction = ParallelType::BIDy;
-    rparams.split_grid_dim_inner_reduction =
-        gdimy > scheduler_utils::y_grid_limit;
+  if (gidim > scheduler_utils::x_grid_limit) {
+    rparams.split_grid_dim_iter_dom = true;
+    gdimx = scheduler_utils::x_grid_limit;
   }
 
-  if (rparams.cross_block_inner_reduce) {
+  if (rparams.cross_block_inner_reduction) {
     if (rparams.block_dim_iter_dom == ParallelType::TIDx) {
       rparams.block_dim_inner_reduction = ParallelType::TIDy;
     } else {
@@ -702,7 +711,7 @@ ReductionParams OuterReductionHeuristic(
   }
 
   rparams.lparams = LaunchParams(
-      LaunchParams::UNINITIALIZED_VAL,
+      gdimx,
       gdimy,
       LaunchParams::UNINITIALIZED_VAL,
       rparams.multiple_reds_per_blk ? bdimx : bdimy,

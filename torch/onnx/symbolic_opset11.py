@@ -7,8 +7,9 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType, quantized_args
 from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -101,7 +102,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         indices_list = [indices_list_value]
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         args = [self] + indices_list + [values, accumulate]
-        return g.op("ATen", *args, operator_s="index_put")
+        return g.at("index_put", *args)
 
     from torch.onnx.symbolic_opset9 import add, expand
     accumulate = sym_help._parse_arg(accumulate, "b")
@@ -225,7 +226,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
+        return g.at("gather", self, dim, index, sparse_grad)
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
@@ -233,7 +234,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, dim, index, src, operator_s="scatter")
+        return g.at("scatter", self, dim, index, src, overload_name="src")
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
@@ -568,6 +569,10 @@ def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
 
+    # dim as a tensor
+    if not sym_help._is_constant(dim):
+        return sym_help._squeeze_helper(g, self, [dim])
+
     dim = sym_help._get_const(dim, "i", "dim")
 
     input_rank = sym_help._get_tensor_rank(self)
@@ -605,8 +610,10 @@ def squeeze(g, self, dim=None):
     return sym_help._squeeze_helper(g, self, [dim])
 
 
-@parse_args("v", "i")
 def unsqueeze(g, self, dim):
+    if sym_help._is_constant(dim):
+        dim = sym_help._get_const(dim, "i", "dim")
+
     return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
@@ -615,7 +622,7 @@ def mm(g, self, other):
 
 def index(g, self, index):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, index, operator_s="index")
+        return g.at("index", self, index, overload_name="Tensor")
 
     if sym_help._is_packed_list(index):
         indices = sym_help._unpack_list(index)
@@ -636,7 +643,7 @@ def index(g, self, index):
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
+        return g.at("index_fill", self, index, value, dim_i=dim_value, overload_name="int_Scalar")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
@@ -647,7 +654,7 @@ def index_fill(g, self, dim, index, value):
 def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
+        return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 
@@ -790,10 +797,12 @@ def narrow(g, input, dim, start, length):
     end = g.op("Add", start, length)
     return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
 
-
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
+    if dim == 1:
+        return input
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):
@@ -811,6 +820,17 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    if ord == 0:
+        if dim is None:
+            self = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+            keepdim = None
+        cond_op = g.op("Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0]))))
+        cond_op = g.op("Cast", cond_op, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        return sym_help._reducesum_helper(g, cond_op, axes_i=dim, keepdims_i=keepdim)
+    else:
+        return lvn(g, self, ord, dim, keepdim, dtype)
 
 @parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(g,
