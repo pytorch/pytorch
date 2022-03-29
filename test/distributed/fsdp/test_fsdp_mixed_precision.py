@@ -59,7 +59,7 @@ cpu_offload_config = [
 backward_prefetch_config = [
     BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST
 ]
-full_precision_param_dtype_config = [torch.float32]
+full_precision_param_dtype_config = [torch.float32, torch.float64]
 configs = list(product(
     mp_configs,
     cpu_offload_config,
@@ -308,7 +308,10 @@ class TestFSDPMixedPrecision(FSDPTest):
                         if name in named_buffers.keys():
                             self.assertEqual(tensor.dtype, buffer_orig_dtype)
                         else:
-                            self.assertEqual(tensor.dtype, full_precision_param_dtype)
+                            self.assertEqual(
+                                tensor.dtype, full_precision_param_dtype,
+                                f"{name}: {tensor.dtype} vs {full_precision_param_dtype}"
+                            )
 
                     # After state_dict, buffer's dtype should have been restored
                     # to the mixed precision one.
