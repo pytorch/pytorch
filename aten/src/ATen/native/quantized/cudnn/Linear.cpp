@@ -275,7 +275,7 @@ at::Tensor PackedLinearWeightCudnn::apply_impl(
     int64_t output_zero_point) {
   std::vector<int64_t> original_output_shape{act.sizes().vec()}; // 2D
   original_output_shape.back() = orig_weight.size(0); // output channels
-  // cudnn expects tensors to be at least 3D. act is currently 2D. we will create a 3D view
+  // cudnn expects tensors to be at least 3D. we will prepend a dummy dimension for quantized_output
   std::vector<int64_t> output_shape(3, 1);
   output_shape[1] = original_output_shape[0];
   output_shape[2] = original_output_shape[1];
@@ -320,12 +320,7 @@ class QLinearInt8 final {
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    // should we process the 1st n-1 dimensions of act here??
-
-    // TODO: I think we need to check the shape of act conforms with the weight tensor for matmul purposes
-    // cudnn expects tensors to be at least 3D. our weight tensor is [out_channels, in_channels]
-    // act is 2D and is [batch_size, in_channels]. We append an additional dummy dimension
-    // so it becomes [batch_size, in_channels, 1]
+    // TODO: if act is more than 2D, I think we should flatten the first n-1 dimensions?
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);

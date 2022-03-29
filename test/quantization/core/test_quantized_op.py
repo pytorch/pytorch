@@ -2755,7 +2755,7 @@ class TestDynamicQuantizedOps(TestCase):
         X_value_max = 255
         if reduce_range:
             X_value_max = 127
-        X_q0 = np.round(np.random.rand(batch_size, 2, input_channels) *
+        X_q0 = np.round(np.random.rand(batch_size, input_channels) *
                         (X_value_max - X_value_min) + X_value_min).astype(np.uint8)
         X_q0[0, 0] = X_value_min
         X_q0[0, 1] = X_value_max
@@ -3431,7 +3431,7 @@ class TestQuantizedLinear(TestCase):
            use_bias=st.sampled_from([False]),
            use_relu=st.sampled_from([False]),
            use_multi_dim_input=st.booleans(),
-           use_channelwise=st.sampled_from([False])) # channelwise currently not supported for qlinear cudnn
+           use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
