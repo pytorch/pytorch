@@ -123,6 +123,8 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(B), "batch_size of LU and B must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
@@ -1473,26 +1475,34 @@ void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tens
     const auto trans = to_cublas(transpose);
     int n = cuda_int_cast(LU.size(-2), "n");
     int nrhs = cuda_int_cast(B.size(-1), "nrhs");
-    auto batch_size = batchCount(LU);
+    auto batch_size = batchCount(B);
     auto info = at::zeros({1}, LU.options().dtype(kInt));
     auto info_data = info.data_ptr<int>();
     auto b_data = B.data_ptr<scalar_t>();
     auto lu_data = LU.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
-    auto pivots_stride = pivots.size(-1);
-    auto lu_stride = matrixStride(LU);
+    auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+    auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
     auto b_stride = matrixStride(B);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
+    // lu and pivots tensors can be broadcast to b
+    // here we construct a helper indexing tensor to linearly index into lu and pivots
+    IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+    IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
+    BroadcastLinearIndices lu_index(
+        batchCount(LU), lu_batch_shape, b_batch_shape);
+
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      int64_t lu_index_i = lu_index(batch);
       at::cuda::solver::getrs<scalar_t>(
         handle,
         n,
         nrhs,
-        lu_data + batch * lu_stride,
+        lu_data + lu_index_i * lu_stride,
         leading_dimension,
-        pivots_data + batch * pivots_stride,
+        pivots_data + lu_index_i * pivots_stride,
         b_data + batch * b_stride,
         leading_dimension,
         info_data,
