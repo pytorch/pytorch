@@ -499,11 +499,9 @@ class intrusive_ptr final {
    * use intrusive_ptr::make instead which statically guarantees
    * that the allocation was done properly.
    *
-   * At the moment, the only two reasons this method exists are:
-   * 1) Because pybind11 holder types expect to be able to allocate in
+   * At the moment, the only reason this method exists is because
+   * pybind11 holder types expect to be able to allocate in
    * this way (because pybind11 handles the new allocation itself).
-   * 2) Because ProcessGroupNCCL wants to load torch_ucc.so at runtime
-   * and passes parameters and return values with void *
    */
   static intrusive_ptr unsafe_steal_from_new(TTarget* raw_ptr) {
     return intrusive_ptr(raw_ptr);
