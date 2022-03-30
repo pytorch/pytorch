@@ -158,6 +158,61 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
+TEST(MobileTest, SaveParametersDefaultsToZip) {
+  // Save some empty parameters.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+  _save_parameters(empty_parameters, ss_data);
+
+  // Verify that parameters were serialized to a ZIP container.
+  EXPECT_GE(ss_data.str().size(), 4);
+  EXPECT_EQ(ss_data.str()[0], 'P');
+  EXPECT_EQ(ss_data.str()[1], 'K');
+  EXPECT_EQ(ss_data.str()[2], '\x03');
+  EXPECT_EQ(ss_data.str()[3], '\x04');
+}
+
+#if defined(ENABLE_FLATBUFFER)
+TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
+  // Save some empty parameters using flatbuffer.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+  _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
+
+  // Verify that parameters were serialized to a flatbuffer. The flatbuffer
+  // magic bytes should be at offsets 4..7. The first four bytes contain an
+  // offset to the actual flatbuffer data.
+  EXPECT_GE(ss_data.str().size(), 8);
+  EXPECT_EQ(ss_data.str()[4], 'P');
+  EXPECT_EQ(ss_data.str()[5], 'T');
+  EXPECT_EQ(ss_data.str()[6], 'M');
+  EXPECT_EQ(ss_data.str()[7], 'F');
+}
+#else // !defined(ENABLE_FLATBUFFER)
+TEST(MobileTest, SaveParametersThrowsWithoutFlatbufferSupport) {
+  // Some empty parameters to try saving.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+
+  // Save using flatbuffers should fail when support isn't compiled in. Make
+  // sure we get the exception that explicitly mentions the lack of flatbuffer
+  // support.
+  try {
+    _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
+    FAIL() << "_save_parameters should have thrown";
+  } catch (const ::c10::Error& e) {
+    static const std::string kExpectedSubstring =
+        "build hasn't enabled flatbuffer";
+    EXPECT_TRUE(
+        std::string(e.msg()).find(kExpectedSubstring) != std::string::npos)
+        << "Exception message does not contain expected substring \""
+        << kExpectedSubstring << "\": actual message \"" << e.msg() << "\"";
+  } catch (...) {
+    FAIL() << "Unexpected exception type";
+  }
+}
+#endif // !defined(ENABLE_FLATBUFFER)
+
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
