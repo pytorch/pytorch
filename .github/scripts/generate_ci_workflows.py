@@ -980,30 +980,30 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             isolated_workflow=True,
         ),
     ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.PRE_CXX11_ABI
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="libtorch",
+    #     abi_version=generate_binary_build_matrix.CXX11_ABI,
+    #     build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+    #         OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI
+    #     ),
+    #     ciflow_config=CIFlowConfig(
+    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+    #         isolated_workflow=True,
+    #     ),
+    # ),
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="libtorch",
+    #     abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+    #     build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+    #         OperatingSystem.LINUX, generate_binary_build_matrix.PRE_CXX11_ABI
+    #     ),
+    #     ciflow_config=CIFlowConfig(
+    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+    #         isolated_workflow=True,
+    #     ),
+    # ),
 ]
 
 LINUX_BINARY_SMOKE_WORKFLOWS = [
@@ -1016,28 +1016,28 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             python_versions=["3.7"]),
         branches="master",
     ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="master",
-    ),
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="libtorch",
+    #     abi_version=generate_binary_build_matrix.CXX11_ABI,
+    #     build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+    #         OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+    #         arches=["cpu"],
+    #         libtorch_variants=["shared-with-deps"],
+    #     ),
+    #     branches="master",
+    # ),
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="libtorch",
+    #     abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+    #     build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+    #         OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+    #         arches=["cpu"],
+    #         libtorch_variants=["shared-with-deps"],
+    #     ),
+    #     branches="master",
+    # ),
 ]
 
 WINDOWS_BINARY_BUILD_WORKFLOWS = [

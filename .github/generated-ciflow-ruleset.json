@@ -2,8 +2,6 @@
   "__comment": "@generated DO NOT EDIT MANUALLY, Generation script: .github/scripts/generate_ci_workflows.py",
   "label_rules": {
     "ciflow/all": [
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
       "windows-binary-libtorch-debug",
       "windows-binary-libtorch-release",
@@ -11,8 +9,6 @@
     ],
     "ciflow/binaries": [
       "linux-binary-conda",
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
       "macos-arm64-binary-conda",
       "macos-arm64-binary-wheel",
@@ -32,8 +28,6 @@
       "windows-binary-conda"
     ],
     "ciflow/binaries_libtorch": [
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
       "macos-binary-libtorch-cxx11-abi",
       "macos-binary-libtorch-pre-cxx11",
       "windows-binary-libtorch-debug",
@@ -47,8 +41,6 @@
     ],
     "ciflow/default": [
       "linux-binary-conda",
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
       "macos-arm64-binary-conda",
       "macos-arm64-binary-wheel",
@@ -62,8 +54,6 @@
       "windows-binary-wheel"
     ],
     "ciflow/trunk": [
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
       "windows-binary-libtorch-debug",
       "windows-binary-libtorch-release",
