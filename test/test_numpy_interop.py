@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
-from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -397,7 +397,7 @@ class TestNumPyInterop(TestCase):
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.long).storage())
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.uint8).storage())
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(*get_all_dtypes())
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
             tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),
