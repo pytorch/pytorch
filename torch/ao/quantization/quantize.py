@@ -17,7 +17,7 @@ from torch.ao.quantization.quantization_mappings import (
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
-from .utils import get_qparam_dict, type_before_parametrizations, is_leaf_or_only_parametrized
+from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
@@ -26,6 +26,7 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
@@ -185,7 +186,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
-    if is_leaf_or_only_parametrized(module) and not isinstance(module, torch.nn.Sequential) \
+    if has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
        and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
@@ -208,7 +209,7 @@ def add_quant_dequant(module):
         wraps the input module, the latter case only happens when the input
         module is a leaf module and we want to quantize it.
     """
-    if is_leaf_or_only_parametrized(module) and hasattr(module, 'qconfig') and module.qconfig:
+    if has_no_children_ignoring_parametrizations(module) and hasattr(module, 'qconfig') and module.qconfig:
         return QuantWrapper(module)
 
     for name, child in module.named_children():
