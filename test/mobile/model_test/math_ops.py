@@ -22,7 +22,7 @@ class PointwiseOpsModule(torch.nn.Module):
         f = torch.zeros(3)
         g = torch.tensor([-1, 0, 1])
         w = torch.tensor([0.3810, 1.2774, -0.2972, -0.3719, 0.4637])
-        return len(
+        return (
             torch.abs(torch.tensor([-1, -2, 3])),
             torch.absolute(torch.tensor([-1, -2, 3])),
             torch.acos(a),
@@ -222,7 +222,7 @@ class ReductionOpsModule(torch.nn.Module):
         a = torch.randn(4)
         b = torch.randn(4)
         c = torch.tensor(0.5)
-        return len(
+        return (
             torch.argmax(a),
             torch.argmin(a),
             torch.amax(a),
@@ -271,7 +271,7 @@ class ComparisonOpsModule(torch.nn.Module):
     def forward(self):
         a = torch.tensor(0)
         b = torch.tensor(1)
-        return len(
+        return (
             torch.allclose(a, b),
             torch.argsort(a),
             torch.eq(a, b),
@@ -327,7 +327,7 @@ class OtherMathOpsModule(torch.nn.Module):
         f = torch.randn(4, 4, 4)
         size = [0, 1]
         dims = [0, 1]
-        return len(
+        return (
             torch.atleast_1d(a),
             torch.atleast_2d(a),
             torch.atleast_3d(a),
@@ -380,7 +380,7 @@ class OtherMathOpsModule(torch.nn.Module):
             torch.triu_indices(3, 3),
             torch.vander(a),
             torch.view_as_real(torch.randn(4, dtype=torch.cfloat)),
-            torch.view_as_complex(torch.randn(4, 2)).real,
+            torch.view_as_complex(torch.randn(4, 2)),
             torch.resolve_conj(a),
             torch.resolve_neg(a),
         )
@@ -396,7 +396,7 @@ class SpectralOpsModule(torch.nn.Module):
     def spectral_ops(self):
         a = torch.randn(10)
         b = torch.randn(10, 8, 4, 2)
-        return len(
+        return (
             torch.stft(a, 8),
             torch.stft(a, torch.tensor(8)),
             torch.istft(b, 8),
@@ -420,7 +420,7 @@ class BlasLapackOpsModule(torch.nn.Module):
         a = torch.randn(10, 3, 4)
         b = torch.randn(10, 4, 3)
         v = torch.randn(3)
-        return len(
+        return (
             torch.addbmm(m, a, b),
             torch.addmm(torch.randn(2, 3), torch.randn(2, 3), torch.randn(3, 3)),
             torch.addmv(torch.randn(2), torch.randn(2, 3), torch.randn(3)),
