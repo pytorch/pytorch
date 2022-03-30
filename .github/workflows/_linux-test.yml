@@ -67,13 +67,13 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: printt testing thing
-        run: |
-          {
-            echo 'COMMIT_MESSAGES<<EOF'
-            git cherry -v "origin/${GIT_DEFAULT_BRANCH}"
-            echo 'EOF'
-          } >> "$GITHUB_ENV"
+      # - name: printt testing thing
+      #   run: |
+      #     {
+      #       echo 'COMMIT_MESSAGES<<EOF'
+      #       git cherry -v "origin/${GIT_DEFAULT_BRANCH}"
+      #       echo 'EOF'
+      #     } >> "$GITHUB_ENV"
 
       - name: Test
         env:
@@ -104,6 +104,8 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+
+          COMMIT_MESSAGES=$(env -i git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
