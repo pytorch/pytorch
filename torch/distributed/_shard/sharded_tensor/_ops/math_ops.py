@@ -30,29 +30,49 @@ def register_math_op(op):
             if lhs.size() == rhs.size() and lhs_spec.dim == rhs_spec.dim:
                 # perform local element-wise math op
                 res = op(lhs.local_tensor(), rhs.local_tensor())
-                return ShardedTensor._init_from_local_tensor(res, lhs_spec, list(lhs.size()), process_group=pg)
+                return ShardedTensor._init_from_local_tensor(
+                    res,
+                    lhs_spec,
+                    lhs.size(),  # type: ignore[arg-type]
+                    process_group=pg)
             else:
                 raise RuntimeError("Implicit broadcasting not supported yet!")
 
         elif isinstance(lhs, ReplicatedTensor):
             assert isinstance(rhs, ShardedTensor)
             res = op(lhs, rhs.local_tensor())
-            return ShardedTensor._init_from_local_tensor(res, rhs.sharding_spec(), list(rhs.size()), process_group=pg)
+            return ShardedTensor._init_from_local_tensor(
+                res,
+                rhs.sharding_spec(),
+                rhs.size(),  # type: ignore[arg-type]
+                process_group=pg)
 
         elif isinstance(rhs, ReplicatedTensor):
             assert isinstance(lhs, ShardedTensor)
             res = op(lhs.local_tensor(), rhs)
-            return ShardedTensor._init_from_local_tensor(res, lhs.sharding_spec(), list(lhs.size()), process_group=pg)
+            return ShardedTensor._init_from_local_tensor(
+                res,
+                lhs.sharding_spec(),
+                lhs.size(),  # type: ignore[arg-type]
+                process_group=pg)
 
         elif isinstance(lhs, (int, float)):
             assert isinstance(rhs, ShardedTensor)
             res = op(lhs, rhs.local_tensor())
-            return ShardedTensor._init_from_local_tensor(res, rhs.sharding_spec(), list(rhs.size()), process_group=pg)
+            return ShardedTensor._init_from_local_tensor(
+                res,
+                rhs.sharding_spec(),
+                rhs.size(),  # type: ignore[arg-type]
+                kprocess_group=pg)
 
         elif isinstance(rhs, (int, float)):
             assert isinstance(lhs, ShardedTensor)
             res = op(lhs.local_tensor(), rhs)
-            return ShardedTensor._init_from_local_tensor(res, lhs.sharding_spec(), list(lhs.size()), process_group=pg)
+            return ShardedTensor._init_from_local_tensor(
+                res,
+                lhs.sharding_spec(),
+                lhs.size(),  # type: ignore[arg-type]
+                process_group=pg)
         else:
             raise RuntimeError(
                 f"torch function '{op.__name__}', with args: {args} and "
