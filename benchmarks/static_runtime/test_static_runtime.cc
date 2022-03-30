@@ -1662,6 +1662,28 @@ TEST(StaticRuntime, Index) {
   testStaticRuntime(index_with_two_tensors_script, args_c, args_d);
 }
 
+TEST(StaticRuntime, IndexSelect) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dim: int, %index: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::index_select(%self, %dim, %index)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6});
+  auto dim0 = 0;
+  auto index0 = at::randint(0, 5, {6}, torch::kInt32);
+  std::vector<IValue> args{self0, dim0, index0};
+  testStaticRuntime(script, args);
+
+  auto self1 = at::rand({128});
+  auto dim1 = 0;
+  auto index1 = at::randint(0, 127, {127}, torch::kInt32);
+  std::vector<IValue> args2{self1, dim1, index1};
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, ClampMin) {
   const auto clamp_min_int_script = R"JIT(
     def forward(self, a: Tensor, b: int):
@@ -2992,4 +3014,47 @@ TEST(StaticRuntime, ConcatEmpty) {
 
   torch::jit::StaticModule smod(mod);
   EXPECT_THROW(smod({}), c10::Error);
+}
+
+TEST(StaticRuntime, IntImplicit) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  testStaticRuntime(src, {at::tensor({1}, at::kInt).squeeze()});
+}
+
+TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  torch::jit::StaticModule smod(graph);
+  // Not 0D tensor
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  // Wrong dtype
+  EXPECT_THROW(
+      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+}
+
+TEST(StaticRuntime, Select) {
+  const auto src = R"IR(
+    graph(%a: Tensor, %dim: int, %index: int):
+        %none: NoneType = prim::Constant()
+        %b: Tensor = aten::select(%a, %dim, %index)
+        %c: Tensor = aten::clone(%b, %none)
+        return (%c)
+  )IR";
+  testStaticRuntime(src, {at::randn({2, 2}), 0, 1});
+}
+
+TEST(StaticRuntime, ReshapeAs) {
+  const auto src = R"JIT(
+    def forward(self, a, b):
+        return a.reshape_as(b).clone()
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
 }

@@ -60,7 +60,6 @@ name: !{{ build_environment }}
           fi
 
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
-          # shellcheck disable=SC2016
           export id
           id=$(docker run -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
@@ -81,14 +80,11 @@ name: !{{ build_environment }}
             -v "$(pwd):/var/lib/jenkins/workspace" \
             --cap-add=SYS_PTRACE \
             --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --security-opt seccomp=unconfined \
             -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}")
 
-          # shellcheck disable=SC2016
           export COMMAND
           # shellcheck disable=SC2016
-          COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          COMMAND='(echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec -u jenkins -e BUILD_LITE_INTERPRETER -e GRADLE_OFFLINE=1 -i "$id" bash) 2>&1'
           echo "${COMMAND}" > ./command.sh && bash ./command.sh
           # Skip docker push as this job is purely for size analysis purpose.
           # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
