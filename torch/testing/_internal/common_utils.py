@@ -369,9 +369,9 @@ class ProfilingMode(Enum):
 
 def cppProfilingFlagsToProfilingMode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     torch._C._jit_set_profiling_executor(old_prof_exec_state)
-    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+    torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
     if old_prof_exec_state:
         if old_prof_mode_state:
@@ -385,23 +385,23 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+        old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+            torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def enable_profiling_mode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         torch._C._jit_set_profiling_executor(old_prof_exec_state)
-        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+        torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def num_profiled_runs(num_runs):
@@ -1999,9 +1999,11 @@ class TestCase(expecttest.TestCase):
         return crow_indices.to(device=device)
 
     def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+        from operator import mul
+        from functools import reduce
         sparse_dim = 2
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
-        assert len(size) == sparse_dim
+        assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
+        assert len(size) >= sparse_dim
 
         def random_sparse_csr(n_rows, n_cols, nnz):
             crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
@@ -2015,7 +2017,15 @@ class TestCase(expecttest.TestCase):
             values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
             return values, crow_indices, col_indices
 
-        values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
+        batch_shape = size[:-2]
+        n_batch = reduce(mul, batch_shape, 1)
+
+        sparse_tensors = [random_sparse_csr(size[-2], size[-1], nnz) for _ in range(n_batch)]
+        sparse_tensors_it = map(list, zip(*sparse_tensors))
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        crow_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        col_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+
         return torch.sparse_csr_tensor(crow_indices,
                                        col_indices,
                                        values, size=size, dtype=dtype, device=device)
