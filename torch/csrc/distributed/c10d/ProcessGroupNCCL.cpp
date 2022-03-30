@@ -620,6 +620,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 void ProcessGroupNCCL::runHealthCheck() {
   // Run health check in a separate thread and wait on CV to handle timeouts,
   // since majority of getNCCLComm failures are hangs.
+
+  struct HealthCheckData {
     std::mutex healthCheckMutex;
     std::condition_variable healthCheckCv;
     bool healthCheckSuccess = false;
