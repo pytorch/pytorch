@@ -105,7 +105,8 @@ jobs:
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
 
-          export COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          export COMMIT_MESSAGES
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase

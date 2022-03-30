@@ -84,7 +84,8 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
         run: |
-          export COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          export COMMIT_MESSAGES
           .jenkins/pytorch/win-test.sh
 
       - name: Upload test artifacts
