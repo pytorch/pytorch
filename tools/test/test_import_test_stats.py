@@ -30,7 +30,7 @@ class TestGetDisabledIssues(unittest.TestCase):
     # test strange spacing
     def test_spacing(self) -> None:
         pr_body = 'resolve #123,resolveS #143eee'
-        commit_messages = 'REsolved #345\nRESOLVES #10283Fixed #2348'
+        commit_messages = 'Resolved #345\nRESOLVES #10283Fixed #2348'
         self.run_assert_disabled_issues(pr_body, commit_messages, ['123', '143', '345', '10283', '2348'])
 
     # test bad things
