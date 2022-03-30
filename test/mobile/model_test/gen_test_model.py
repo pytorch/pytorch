@@ -1,6 +1,5 @@
 import io
 import sys
-
 import torch
 import yaml
 from android_api_module import AndroidAPIModule
