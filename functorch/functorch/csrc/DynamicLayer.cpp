@@ -26,6 +26,7 @@ constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
   DispatchKey::Functionalize,
   // DispatchKey::Batched,
   kBatchedKey,
+  DispatchKey::PythonTLSSnapshot,
   DispatchKey::ADInplaceOrView
 }) | autograd_dispatch_keyset;
 
@@ -495,6 +496,9 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   if (dynamicLayerStack.size() == 0) {
     sanityCheckStack(op, stack);
     c10::impl::ExcludeDispatchKeyGuard guard(all_dynlayer_keyset);
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    local_keyset.excluded_ = local_keyset.excluded_.remove(DispatchKey::PythonTLSSnapshot);
+    c10::impl::ForceDispatchKeyGuard guard2(local_keyset);
     op.callBoxed(stack);
     return;
   }
