@@ -186,7 +186,7 @@ table ExtraFile {
 }
 
 table Module {
-  version:int;
+  version:int;  // overall file version, will start at 9
   extra_files:[ExtraFile];
   methods:[uint];  // index to ivalues
   state_obj:uint; // index to ivalues
@@ -196,6 +196,8 @@ table Module {
   object_types:[ObjectType];
   jit_sources:[ExtraFile];
   jit_constants:[uint];  // index to ivalues
+  operator_version:uint; // version of operator, depends on operators used
+  bytecode_version:uint; // version of bytecode, comes from mobile::Module
 }
 
 root_type Module;
