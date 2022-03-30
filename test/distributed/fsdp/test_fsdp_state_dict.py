@@ -311,6 +311,15 @@ class TestFSDPStateDict(FSDPTest):
             sd_keys = list(state_dict.keys())
             expected = list(SkipModel(double_nest=False).state_dict().keys())
             self.assertEqual(sorted(sd_keys), sorted(expected))
+			# TODO: parameters in linear_skip_tensor_names should not be handled
+			# by FSDP.state_dict(). Have a check once this is implemented in
+			# FSDP.state_dict().
+
+
+        new_fsdp, _ = _create_module()
+        new_fsdp.load_state_dict(deepcopy(state_dict))
+        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
+            self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)
