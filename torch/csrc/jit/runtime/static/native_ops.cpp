@@ -735,6 +735,24 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node*) -> SROperator {
   };
 });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::SingleBlockIf,
+    prim_SingleBlockIf,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const bool condition = p_node->Input(0).toBool();
+        const bool block_is_run = p_node->Input(1).toBool();
+        if (condition == block_is_run) {
+          std::vector<BlockRunner>* block_runners = p_node->block_runners();
+          DCHECK(block_runners);
+          DCHECK_EQ(block_runners->size(), 1);
+          const c10::IValue output = block_runners->front()({});
+          DCHECK(output.isNone());
+        }
+        p_node->Output(0) = c10::IValue();
+      };
+    });
+
 namespace {
 
 std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {

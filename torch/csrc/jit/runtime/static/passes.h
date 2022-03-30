@@ -65,5 +65,7 @@ TORCH_API void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
 
 TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
+TORCH_API void TransformIfsToSingleBlockIfs(std::shared_ptr<Graph> graph);
+
 } // namespace jit
 } // namespace torch

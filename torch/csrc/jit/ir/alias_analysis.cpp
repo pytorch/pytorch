@@ -618,6 +618,8 @@ void AliasDb::analyzeImpl(Node* node) {
   switch (node->kind()) {
     case prim::If:
       return analyzeIf(node);
+    case prim::SingleBlockIf:
+      return analyzeSingleBlockIf(node);
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
@@ -943,6 +945,14 @@ void AliasDb::analyzeIf(Node* node) {
     makePointerTo(nodeOutput, trueOutput);
     makePointerTo(nodeOutput, falseOutput);
   }
+}
+
+void AliasDb::analyzeSingleBlockIf(Node* node) {
+  DCHECK_EQ(node->blocks().size(), 1);
+  Block* subBlock = node->blocks().at(0);
+  DCHECK_EQ(subBlock->outputs().size(), 1);
+  analyze(subBlock);
+  makePointerTo(node->output(), subBlock->outputs().at(0));
 }
 
 void AliasDb::analyzeLoop(Node* node) {

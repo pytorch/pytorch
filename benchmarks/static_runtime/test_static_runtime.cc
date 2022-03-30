@@ -2988,12 +2988,30 @@ TEST(StaticRuntime, IfThenElse) {
   testStaticRuntime(src, args2);
 }
 
+TEST(StaticRuntime, EmptyIfBlockPruning) {
+  const auto src = R"JIT(
+    def forward(self, cond: bool, a: Tensor, b: Tensor):
+        l = []
+        if cond:
+            l.append((a + b).clone())
+        return l
+  )JIT";
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_TRUE(hasNodeWithKind(smod, "prim::SingleBlockIf"));
+  EXPECT_FALSE(hasNodeWithKind(smod, "prim::If"));
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
 TEST(StaticRuntime, StackEmpty) {
   const auto src = R"JIT(
-    def forward(self):
-        x = torch.stack([])
-        return x
-  )JIT";
+      def forward(self):
+          x = torch.stack([])
+          return x
+    )JIT";
 
   torch::jit::Module mod("mod");
   mod.define(src);
@@ -3004,9 +3022,9 @@ TEST(StaticRuntime, StackEmpty) {
 
 TEST(StaticRuntime, ConcatEmpty) {
   const auto src = R"JIT(
-    def forward(self):
-        x = torch.concat([])
-        return x
+      def forward(self):
+          x = torch.concat([])
+          return x
   )JIT";
 
   torch::jit::Module mod("mod");

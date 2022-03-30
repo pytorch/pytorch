@@ -53,6 +53,7 @@ namespace c10 {
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \
   _(prim, StaticSubgraph)            \
+  _(prim, SingleBlockIf)             \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \

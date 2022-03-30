@@ -966,7 +966,7 @@ void ForceNonEmptyOutputsHelper(Value* none_value, Block* block) {
     if (needs_output) {
       // Loop sub-blocks should always return at least one output (the new loop
       // condition)
-      DCHECK(node->kind() == prim::If);
+      DCHECK(node->kind() == prim::If || node->kind() == prim::SingleBlockIf);
       auto* output = node->addOutput();
       output->setType(c10::NoneType::get());
     }
@@ -1120,6 +1120,107 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
   for (auto* node : to_erase) {
     node->destroy();
   }
+}
+std::vector<Node*> getIfNodesWithPrunedBlocks(std::shared_ptr<Graph> graph) {
+  std::vector<Node*> nodes;
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (Node* node = graph_it.next(); node != nullptr; node = graph_it.next()) {
+    // transform only prim::If nodes
+    if (node->kind() != prim::If) {
+      continue;
+    }
+    DCHECK(node->kind() == prim::If);
+    // there must be 2 blocks in the pattern
+    if (node->blocks().size() != 2) {
+      continue;
+    }
+    DCHECK(node->blocks().size() == 2);
+    // neither of the blocks returns
+    Block* true_block = node->blocks()[0];
+    Block* false_block = node->blocks()[1];
+    const bool true_block_returns_empty = true_block->outputs().empty();
+    const bool false_block_returns_empty = false_block->outputs().empty();
+    if (!true_block_returns_empty || !false_block_returns_empty) {
+      continue;
+    }
+    DCHECK(true_block_returns_empty && false_block_returns_empty);
+    // one of the blocks must be empty
+    const bool false_block_is_empty =
+        false_block->nodes().begin() == false_block->nodes().end();
+    const bool true_block_is_empty =
+        true_block->nodes().begin() == true_block->nodes().end();
+    if (!false_block_is_empty && !true_block_is_empty) {
+      continue;
+    }
+    DCHECK(false_block_is_empty || true_block_is_empty);
+    DCHECK(!(false_block_is_empty && true_block_is_empty));
+
+    nodes.push_back(node);
+  }
+  return nodes;
+}
+
+void rewriteIfNodesWithPrunedBlocks(
+    std::shared_ptr<Graph> graph,
+    const std::vector<Node*>& nodes) {
+  for (Node* node : nodes) {
+    LOG(INFO) << "old node (" << *node << ")";
+    Node* new_node = graph->create(prim::SingleBlockIf, /* num_outputs */ 0);
+
+    DCHECK_EQ(node->inputs().size(), 1);
+    new_node->addInput(node->inputs().at(0));
+
+    new_node->copyMetadata(node);
+    new_node->copyAttributes(*node);
+
+    Block* true_block = node->blocks()[0];
+    Block* false_block = node->blocks()[1];
+    const bool true_block_is_empty =
+        true_block->nodes().begin() == true_block->nodes().end();
+
+    new_node->addBlock()->cloneFrom(
+        true_block_is_empty ? false_block : true_block,
+        [](Value* v) { return v; });
+    new_node->addInput(graph->insertConstant(!true_block_is_empty));
+    DCHECK_EQ(node->outputs().size(), 0);
+    DCHECK_EQ(new_node->outputs().size(), 0);
+
+    new_node->insertBefore(node);
+    node->destroy();
+    LOG(INFO) << "rewritten by new node (" << *new_node
+              << ") during pass pruning empty blocks in if stmts";
+  }
+} // namespace
+
+void TransformIfsToSingleBlockIfs(std::shared_ptr<Graph> graph) {
+  // IN:
+  // = prim::If(%condition)
+  // block0():
+  //    // Do something, but return nothing
+  //    // (often, this is something like prim::RaiseException)
+  //    -> ()
+  // block1():
+  //    // Do nothing
+  //    -> ()
+  // OUT:
+  // = prim::SingleBlockIf(%condition)
+  // block0():
+  //    // Do something, but return nothing
+  //    // (often, this is something like prim::RaiseException)
+  //    -> ()
+  // Note: any of the 2 blocks could be empty, and the empty block is pruned
+
+  LOG(INFO) << "old graph (" << *graph << ")";
+  std::vector<Node*> cleanup_nodes = getIfNodesWithPrunedBlocks(graph);
+
+  if (cleanup_nodes.empty()) {
+    LOG(INFO)
+        << "pass pruning empty blocks in if stmts did not change the graph";
+  }
+
+  rewriteIfNodesWithPrunedBlocks(graph, cleanup_nodes);
+
+  LOG(INFO) << "new graph (" << *graph << ")";
 }
 
 } // namespace jit

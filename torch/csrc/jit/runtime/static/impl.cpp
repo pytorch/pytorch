@@ -176,6 +176,7 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
+  TransformIfsToSingleBlockIfs(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -839,7 +840,9 @@ BlockRunner::BlockRunner(
     if (num_blocks == 0) {
       continue;
     }
-    DCHECK(node->kind() == prim::If || node->kind() == prim::Loop);
+    DCHECK(
+        node->kind() == prim::If || node->kind() == prim::Loop ||
+        node->kind() == prim::SingleBlockIf);
     auto block_runners = std::make_unique<std::vector<BlockRunner>>();
     block_runners->reserve(num_blocks);
 

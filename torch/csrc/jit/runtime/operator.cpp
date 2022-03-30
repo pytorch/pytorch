@@ -279,6 +279,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {
       prim::If,
+      prim::SingleBlockIf,
       prim::Loop,
       prim::FusionGroup,
       prim::CudaFusionGroup,
