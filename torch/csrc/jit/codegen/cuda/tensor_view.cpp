@@ -183,7 +183,7 @@ void TensorView::convertRfactorToRootDomain() {
             ++idx;
           } else {
             TORCH_INTERNAL_ASSERT(!id->isRFactorProduct());
-            new_root_domain[idx++] = id->clone();
+            new_root_domain[idx++] = id->cloneWithoutRFactor();
           }
         }
 
@@ -834,7 +834,7 @@ TensorView* TensorView::cache_before() {
       TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
-    new_root_domain[i++] = dom->clone();
+    new_root_domain[i++] = dom->cloneWithoutRFactor();
   }
 
   consumer->setDomain(IrBuilder::create<TensorDomain>(
@@ -952,7 +952,7 @@ TensorView* TensorView::cache_after() {
       TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
-    new_root_domain[i++] = dom->clone();
+    new_root_domain[i++] = dom->cloneWithoutRFactor();
   }
 
   // This domain will be the producer, so create the consumer

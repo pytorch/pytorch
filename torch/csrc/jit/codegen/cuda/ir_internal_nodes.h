@@ -562,8 +562,12 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       Val* extent,
       ParallelType parallel_type = ParallelType::Serial,
       IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false);
+      bool is_rfactor_domain = false,
+      bool is_padded_dimension = false,
+      c10::optional<int64_t> padded_to_size_ = c10::nullopt,
+      bool is_mma_swizzled = false);
 
+  // Same as the above but can set the offset of the stop point
   IterDomain(
       IrBuilderPasskey,
       Val* start,
@@ -571,14 +575,19 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       Val* stop_offset,
       ParallelType parallel_type = ParallelType::Serial,
       IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false);
+      bool is_rfactor_domain = false,
+      bool is_padded_dimension = false,
+      c10::optional<int64_t> padded_to_size_ = c10::nullopt,
+      bool is_mma_swizzled = false);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const Statement* other) const override;
 
-  // Returns a new IterDomain matching properties of this
-  IterDomain* clone() const;
+  //! Returns a new IterDomain matching properties of this
+  //!
+  //! This does NOT copy the is_rfactor_domain flag.
+  IterDomain* cloneWithoutRFactor() const;
 
   //! Clone a vector domains
   static std::vector<IterDomain*> clone(

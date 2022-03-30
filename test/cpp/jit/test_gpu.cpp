@@ -5264,7 +5264,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast5_CUDA) {
   // Note: IterDomain must not be reused, so K needs to be cloned.
   TensorView* tv1 = IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({K->clone(), N}),
+          std::vector<IterDomain*>({K->cloneWithoutRFactor(), N}),
           std::vector<bool>({true, true})),
       DataType::Float);
 

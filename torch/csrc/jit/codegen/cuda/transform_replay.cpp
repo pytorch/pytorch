@@ -56,7 +56,10 @@ class ReplaySelf : public ReplayTransformations {
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
         s->outer()->getParallelType(),
         s->outer()->getIterType(),
-        s->outer()->isRFactorProduct());
+        s->outer()->isRFactorProduct(),
+        s->outer()->hasPaddingToMultipleOfWarp(),
+        s->outer()->getMaybeSizeAfterPadding(),
+        s->outer()->isMmaSwizzled());
 
     // inner IterDomain
     IterDomain* idi = IrBuilder::create<IterDomain>(
@@ -65,7 +68,10 @@ class ReplaySelf : public ReplayTransformations {
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
         s->inner()->getParallelType(),
         s->inner()->getIterType(),
-        s->inner()->isRFactorProduct());
+        s->inner()->isRFactorProduct(),
+        s->outer()->hasPaddingToMultipleOfWarp(),
+        s->outer()->getMaybeSizeAfterPadding(),
+        s->outer()->isMmaSwizzled());
 
     // Generate the split node
     IrBuilder::create<Split>(
@@ -122,7 +128,10 @@ class ReplaySelf : public ReplayTransformations {
         merged_id_size->as<Int>(),
         m->out()->getParallelType(),
         m->outer()->getIterType(),
-        m->out()->isRFactorProduct());
+        m->out()->isRFactorProduct(),
+        m->out()->hasPaddingToMultipleOfWarp(),
+        m->out()->getMaybeSizeAfterPadding(),
+        m->out()->isMmaSwizzled());
 
     IrBuilder::create<Merge>(
         m->container(), merged_id, id_outer_mapped, id_inner_mapped);

@@ -828,7 +828,10 @@ IterDomain::IterDomain(
     Val* extent,
     ParallelType parallel_type,
     IterType iter_type,
-    bool is_rfactor_domain)
+    bool is_rfactor_domain,
+    bool is_padded_dimension,
+    c10::optional<int64_t> padded_to_size,
+    bool is_mma_swizzled)
     : IterDomain(
           passkey,
           start,
@@ -836,7 +839,10 @@ IterDomain::IterDomain(
           nullptr,
           parallel_type,
           iter_type,
-          is_rfactor_domain) {}
+          is_rfactor_domain,
+          is_padded_dimension,
+          padded_to_size,
+          is_mma_swizzled) {}
 
 IterDomain::IterDomain(
     IrBuilderPasskey passkey,
@@ -845,7 +851,10 @@ IterDomain::IterDomain(
     Val* stop_offset,
     ParallelType parallel_type,
     IterType iter_type,
-    bool is_rfactor_domain)
+    bool is_rfactor_domain,
+    bool is_padded_dimension,
+    c10::optional<int64_t> padded_to_size,
+    bool is_mma_swizzled)
     : Val(passkey, ValType::IterDomain, DataType::Int),
       start_(start),
       extent_(extent),
@@ -854,7 +863,10 @@ IterDomain::IterDomain(
                                  : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
-      is_rfactor_domain_(is_rfactor_domain) {
+      is_rfactor_domain_(is_rfactor_domain),
+      is_padded_dimension_(is_padded_dimension),
+      padded_to_size_(padded_to_size),
+      is_mma_swizzled_(is_mma_swizzled) {
   TORCH_CHECK(
       !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
@@ -905,8 +917,9 @@ bool IterDomain::sameAs(const Statement* other) const {
   return is_same;
 }
 
-// Returns a new IterDomain matching properties of this
-IterDomain* IterDomain::clone() const {
+// Returns a new IterDomain matching properties of this except for
+// is_rfactor_domain_
+IterDomain* IterDomain::cloneWithoutRFactor() const {
   auto cloned = IrBuilder::create<IterDomain>(
       ir_container_,
       start(),
@@ -914,10 +927,11 @@ IterDomain* IterDomain::clone() const {
       stopOffset(),
       getParallelType(),
       getIterType(),
-      isRFactorProduct());
+      false,
+      is_padded_dimension_,
+      padded_to_size_,
+      is_mma_swizzled_);
 
-  cloned->is_padded_dimension_ = is_padded_dimension_;
-  cloned->padded_to_size_ = padded_to_size_;
   return cloned;
 }
 
@@ -928,7 +942,7 @@ std::vector<IterDomain*> IterDomain::clone(
       domains.begin(),
       domains.end(),
       std::back_inserter(cloned_domains),
-      [](auto id) { return id->clone(); });
+      [](auto id) { return id->cloneWithoutRFactor(); });
   return cloned_domains;
 }
 

@@ -652,10 +652,10 @@ TensorView* castIntermediateValueInCompleteFusion(
     // Keep broadcast axes and remove reduction axes
     size_t i = 0;
     auto no_reduction_root_domain =
-        TensorDomain::noReductions(original_tv->getRootDomain());
+        TensorDomain::noReductions(original_tv->getMaybeRFactorDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
     for (const auto& dom : no_reduction_root_domain) {
-      new_root_domain[i++] = dom->clone();
+      new_root_domain[i++] = dom->cloneWithoutRFactor();
     }
 
     // Create the actual domain and tv.

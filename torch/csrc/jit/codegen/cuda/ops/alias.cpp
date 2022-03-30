@@ -66,7 +66,7 @@ TensorView* view(TensorView* x, DataType dtype) {
   auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
   out_domain.reserve(inp_domain.size());
   for (auto d : inp_domain) {
-    out_domain.push_back(d->clone());
+    out_domain.push_back(d->cloneWithoutRFactor());
   }
   auto out = IrBuilder::create<TensorView>(
       x->container(),

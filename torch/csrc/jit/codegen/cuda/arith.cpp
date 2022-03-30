@@ -939,7 +939,7 @@ TensorView* transpose(
 
   for (const auto i : c10::irange(out_domain.size())) {
     auto in_id = inp_domain[new2old[i]];
-    out_domain[i] = in_id->clone();
+    out_domain[i] = in_id->cloneWithoutRFactor();
   }
 
   TensorView* out_tensor = IrBuilder::create<TensorView>(
@@ -1298,7 +1298,7 @@ TensorView* shift(
     const auto pad = pad_width[i];
 
     if (offset == 0) {
-      out_dom.push_back(inp_axis->clone());
+      out_dom.push_back(inp_axis->cloneWithoutRFactor());
       continue;
     }
 
