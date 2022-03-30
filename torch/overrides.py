@@ -970,6 +970,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.multigammaln: lambda input, p: -1,
         torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
+        torch.special.log_ndtr: lambda input: -1,
         torch.special.xlogy: lambda input, other, out=None: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
         torch.special.zeta: lambda self, other, out=None: -1,

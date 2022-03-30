@@ -991,7 +991,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return *device_opt_;
   }
 
-  virtual Layout slow_layout() const;
+  virtual Layout slow_layout() const {
+    TORCH_CHECK(false, "slow_layout is only implemented for subclasses.");
+  }
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
