@@ -68,7 +68,6 @@ binary_ops = [
     torch.add,
     Tensor.add,
     Tensor.__add__,
-    Tensor.__radd__,
     # sub
     torch.sub,
     Tensor.sub,
@@ -78,7 +77,6 @@ binary_ops = [
     torch.mul,
     Tensor.mul,
     Tensor.__mul__,
-    Tensor.__rmul__,
     # div
     torch.div,
     Tensor.div,

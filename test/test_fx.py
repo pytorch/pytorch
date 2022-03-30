@@ -461,6 +461,19 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         self.assertEqual(gm(3, 4), 14)
 
+    def test_concrete_arg_none_assert(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, val=None):
+                return x if val is None else x + val
+
+        f = Foo()
+        traced = torch.fx.symbolic_trace(f, concrete_args={'val' : None})
+        with self.assertRaisesRegex(AssertionError, 'val has been specialized to have value None'):
+            traced(torch.randn(5), torch.randn(5))
+
+        x = torch.randn(5)
+        torch.testing.assert_close(traced(x), f(x))
+
     def test_graph_unique_names(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -2702,7 +2715,7 @@ class TestFX(JitTestCase):
 
     def test_profiler_ranges_side_effect(self):
         g = torch.fx.Graph()
-        handle = g.call_function(torch.ops.profiler._record_function_enter, ('test_range',))
+        handle = g.call_function(torch.ops.profiler._record_function_enter_new, ('test_range',))
         g.call_function(torch.ops.profiler._record_function_exit, (handle,))
         g.output(None)
 
@@ -2712,7 +2725,7 @@ class TestFX(JitTestCase):
                 found_targets.setdefault(node.target)
         self.assertEqual(
             list(found_targets.keys()),
-            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+            [torch.ops.profiler._record_function_enter_new, torch.ops.profiler._record_function_exit]
         )
 
         g.eliminate_dead_code()
@@ -2722,7 +2735,7 @@ class TestFX(JitTestCase):
                 found_targets.setdefault(node.target)
         self.assertEqual(
             list(found_targets.keys()),
-            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+            [torch.ops.profiler._record_function_enter_new, torch.ops.profiler._record_function_exit]
         )
 
     def test_ast_rewriter_wrapped_via_decorator(self):
