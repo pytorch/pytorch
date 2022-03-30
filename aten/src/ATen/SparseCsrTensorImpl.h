@@ -44,6 +44,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& col_indices() const { return col_indices_; }
   const Tensor& values() const { return values_; }
   int nnz() { return col_indices_.size(-1); }
+  Layout slow_layout() const { return kSparseCsr; }
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.

@@ -990,12 +990,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return *device_opt_;
   }
 
+  virtual Layout slow_layout() const;
+
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
     } else if (is_sparse_csr()) {
-      return kSparseCsr;
+      return slow_layout();
     } else if (is_mkldnn()) {
       return kMkldnn;
     } else {
