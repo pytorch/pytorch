@@ -38,12 +38,12 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
-        uses: pytorch/pytorch/.github/actions/setup-win@master
+        uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/pytorch/.github/actions/setup-ssh@master
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -87,7 +87,7 @@ jobs:
           .jenkins/pytorch/win-test.sh
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@master
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
@@ -119,6 +119,6 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows
-        uses: pytorch/pytorch/.github/actions/teardown-win@master
+        uses: ./.github/actions/teardown-win
         if: always()
         timeout-minutes: 120
