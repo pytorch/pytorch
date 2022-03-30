@@ -592,11 +592,13 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 class TestHub(TestCase):
 
     def setUp(self):
+        super().setUp()
         self.previous_hub_dir = torch.hub.get_dir()
         self.tmpdir = tempfile.TemporaryDirectory('hub_dir')
         torch.hub.set_dir(self.tmpdir.name)
 
     def tearDown(self):
+        super().tearDown()
         torch.hub.set_dir(self.previous_hub_dir)  # probably not needed, but can't hurt
         self.tmpdir.cleanup()
 
