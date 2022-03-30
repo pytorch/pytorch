@@ -1375,7 +1375,7 @@ def _export_jit_graph_to_onnx_model_proto(
     proto, _1, _2, _3 = graph._export_onnx(
         {}, _export_onnx_opset_version, {}, False,
         operator_export_type, False, False,
-        {}, True, '', {})
+        {}, True, "", {})
     return proto
 
 

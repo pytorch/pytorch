@@ -1,6 +1,5 @@
 # Owner(s): ["module: onnx"]
 import torch
-import io
 import onnxruntime
 import unittest
 from test_pytorch_onnx_onnxruntime import run_ort, ort_compare_with_pytorch
