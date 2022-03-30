@@ -23,6 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, all_types_and, floating_and_complex_types,
     floating_types, floating_and_complex_types_and, integral_types_and
 )
+from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
@@ -514,9 +515,7 @@ class TestTensorCreation(TestCase):
         real = torch.tensor([1, 2], device=device, dtype=dtype)
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
-        float_to_complex_map = {torch.float16: torch.complex32,
-                                torch.float: torch.complex64, torch.double: torch.complex128}
-        complex_dtype = float_to_complex_map[dtype]
+        complex_dtype = float_to_corresponding_complex_type_map[dtype]
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes

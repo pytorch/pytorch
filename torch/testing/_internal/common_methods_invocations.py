@@ -14692,6 +14692,14 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    safe_casts_outputs=True),
+    UnaryUfuncInfo('special.log_ndtr',
+                   aten_name='special_log_ndtr',
+                   ref=scipy.special.log_ndtr if TEST_SCIPY else _NOTHING,
+                   dtypes=all_types_and(torch.bool),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   safe_casts_outputs=True,
+                   ),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
                    aliases=('special.erf', ),
@@ -15071,6 +15079,7 @@ op_db: List[OpInfo] = [
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
         ),
+        supports_expanded_weight=True,
         supports_out=False,
     ),
     OpInfo(
