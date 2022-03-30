@@ -63,7 +63,7 @@ void i0_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // See note [Jiterator]
-const char i0e_name[] = "i0e";
+const char i0e_name[] = "calc_i0e";
 void i0e_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0e_cuda", [&]() {
@@ -120,12 +120,39 @@ void i1e_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char sigmoid_name[] = "sigmoid";
 void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp(-a));
+  auto common_dtype = iter.common_dtype();
+  if (at::isComplexType(common_dtype)) {
+    // only jiterate for complex-dtype
+    #if AT_USE_JITERATOR()
+      static const auto sigmoid_string = jiterator_stringify(
+        template <typename T>
+        T sigmoid(T x) {
+          return T{1} / (T{1} + std::exp(-x));
+        }
+      ); // sigmoid_string
+      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sigmoid_cuda", [&]() {
+        jitted_gpu_kernel<
+            /*name=*/sigmoid_name,
+            /*return_dtype=*/scalar_t,
+            /*common_dtype=*/scalar_t,
+            /*arity=*/1>(iter, sigmoid_string);
+      });
+    #else
+      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sigmoid_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return scalar_t{1} / (scalar_t{1} + std::exp(-a));
+        });
+      });
+    #endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, common_dtype, "sigmoid_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return scalar_t{1} / (scalar_t{1} + std::exp(-a));
+      });
     });
-  });
+  }
 }
 
 const char sinc_name[] = "sinc";
@@ -198,6 +225,23 @@ void ndtri_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cuda", [&]() {
       gpu_kernel(
           iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return calc_ndtri(a); });
+      });
+  #endif
+}
+
+const char log_ndtr_name[] = "log_ndtr";
+void log_ndtr_kernel_cuda(TensorIteratorBase& iter) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "log_ndtr_cuda", [&]() {
+      jitted_gpu_kernel</*name=*/log_ndtr_name,
+                        /*return_dtype=*/ scalar_t,
+                        /*common_dtype=*/ scalar_t,
+                        /*arity=*/ 1>(iter, log_ndtr_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "log_ndtr_cuda", [&]() {
+      gpu_kernel(
+          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return calc_log_ndtr(a); });
       });
   #endif
 }
@@ -322,6 +366,7 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
+REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
 
 } // namespace native

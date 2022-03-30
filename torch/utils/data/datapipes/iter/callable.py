@@ -1,6 +1,8 @@
 from typing import Callable, Iterator, Sized, TypeVar
 
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data._utils.collate import default_collate
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import check_lambda_fn
 
 T_co = TypeVar("T_co", covariant=True)
@@ -159,6 +161,6 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        collate_fn: Callable = _utils.collate.default_collate,
+        collate_fn: Callable = default_collate,
     ) -> None:
         super().__init__(datapipe, fn=collate_fn)
