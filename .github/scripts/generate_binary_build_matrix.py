@@ -10,7 +10,7 @@ architectures:
     * Latest ROCM
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 
 CUDA_ARCHES = ["10.2", "11.3", "11.5"]
@@ -112,20 +112,26 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     return ret
 
 
-def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
-    libtorch_variants = [
-        "shared-with-deps",
-        "shared-without-deps",
-        "static-with-deps",
-        "static-without-deps",
-    ]
+def generate_libtorch_matrix(os: str, abi_version: str,
+                             arches: Optional[List[str]] = None,
+                             libtorch_variants: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    if arches is None:
+        arches = ["cpu"]
+        if os == "linux":
+            arches += CUDA_ARCHES
+        elif os == "windows":
+            # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
+            arches += list_without(CUDA_ARCHES, ["10.2"])
+
+    if libtorch_variants is None:
+        libtorch_variants = [
+            "shared-with-deps",
+            "shared-without-deps",
+            "static-with-deps",
+            "static-without-deps",
+        ]
+
     ret: List[Dict[str, str]] = []
-    arches = ["cpu"]
-    if os == "linux":
-        arches += CUDA_ARCHES
-    elif os == "windows":
-        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
-        arches += list_without(CUDA_ARCHES, ["10.2"])
     for arch_version in arches:
         for libtorch_variant in libtorch_variants:
             # We don't currently build libtorch for rocm
@@ -156,19 +162,29 @@ def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
     return ret
 
 
-def generate_wheels_matrix(os: str) -> List[Dict[str, str]]:
-    arches = ["cpu"]
+def generate_wheels_matrix(os: str,
+                           arches: Optional[List[str]] = None,
+                           python_versions: Optional[List[str]] = None) -> List[Dict[str, str]]:
     package_type = "wheel"
-    python_versions = FULL_PYTHON_VERSIONS
     if os == "linux":
-        arches += CUDA_ARCHES + ROCM_ARCHES
         # NOTE: We only build manywheel packages for linux
         package_type = "manywheel"
-    elif os == "windows":
-        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
-        arches += list_without(CUDA_ARCHES, ["10.2"])
-    elif os == "macos-arm64":
-        python_versions = list_without(python_versions, ["3.7"])
+
+    if python_versions is None:
+        # Define default python version
+        python_versions = FULL_PYTHON_VERSIONS
+        if os == "macos-arm64":
+            python_versions = list_without(python_versions, ["3.7"])
+
+    if arches is None:
+        # Define default compute archivectures
+        arches = ["cpu"]
+        if os == "linux":
+            arches += CUDA_ARCHES + ROCM_ARCHES
+        elif os == "windows":
+            # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
+            arches += list_without(CUDA_ARCHES, ["10.2"])
+
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
         for arch_version in arches:

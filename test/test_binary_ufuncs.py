@@ -2048,16 +2048,27 @@ class TestBinaryUfuncs(TestCase):
     @onlyCPU
     @dtypes(*get_all_dtypes())
     def test_sub(self, device, dtype):
-        m1 = torch.tensor([2.34, 4.44], dtype=dtype, device=device)
-        m2 = torch.tensor([1.23, 2.33], dtype=dtype, device=device)
+        if dtype in get_all_int_dtypes():
+            # Before Python 3.10, floats were implicitly converted to ints, but with
+            #   DeprecationWarning: an integer is required (got type float).
+            #   Implicit conversion to integers using __int__ is deprecated,
+            #   and may be removed in a future version of Python.
+            # Since Python 3.10, that attempt gives an error.
+            m1 = torch.tensor([2, 4], dtype=dtype, device=device)
+            m2 = torch.tensor([1, 2], dtype=dtype, device=device)
+            diff = torch.tensor([1, 2], dtype=dtype)
+        else:
+            m1 = torch.tensor([2.34, 4.44], dtype=dtype, device=device)
+            m2 = torch.tensor([1.23, 2.33], dtype=dtype, device=device)
+            diff = torch.tensor([1.11, 2.11], dtype=dtype)
 
         if dtype == torch.bool:
             self.assertRaises(RuntimeError, lambda: m1 - m2)
         elif (dtype == torch.bfloat16 or dtype == torch.half):
             # bfloat16 has a lower precision so we have to have a separate check for it
-            self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype), atol=0.01, rtol=0)
+            self.assertEqual(m1 - m2, diff, atol=0.01, rtol=0)
         else:
-            self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
+            self.assertEqual(m1 - m2, diff)
 
     # TODO: what is this test testing?
     @onlyCPU
