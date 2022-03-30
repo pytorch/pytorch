@@ -346,10 +346,7 @@ def _flatten_tensor_optim_state(
             state).
     """
     non_none_tensors = [t for t in pos_dim_tensors if t is not None]
-    # Check that all are tensors on CPU with the same dtype
-    cpu_device = torch.device("cpu")
-    if not all(t.device == cpu_device for t in non_none_tensors):
-        raise ValueError("All tensor optimizer state should be on CPU")
+    # Check that all are tensors with the same dtype
     dtypes = set(t.dtype for t in non_none_tensors)
     if len(dtypes) != 1:
         raise ValueError(
@@ -371,8 +368,9 @@ def _flatten_tensor_optim_state(
                 f"parameter: {tensor.shape} {shape}"
             )
     # Flatten the tensor states
+    cpu_device = torch.device("cpu")
     tensors = [
-        torch.flatten(state_value) if state_value is not None
+        torch.flatten(state_value.to(cpu_device)) if state_value is not None
         else torch.flatten(torch.zeros(
             size=shape, dtype=dtype, device=cpu_device,
         ))
@@ -513,14 +511,15 @@ def _get_flat_param_to_fsdp_module(
     return flat_param_to_fsdp_module
 
 
-def _get_flat_param_id_to_param(
+def _get_param_id_to_param(
     model: torch.nn.Module,
     optim_input: Optional[Union[
         List[Dict[str, Any]], Iterable[torch.nn.Parameter],
     ]] = None,
 ) -> List[torch.nn.Parameter]:
     """
-    Constructs a mapping from flattened parameter IDs to flattened parameters.
+    Constructs a mapping from parameter IDs to parameters. This may be used
+    both for models with ``FlatParameter`` s and without.
 
     NOTE: We critically assume that, whether the optimizer input is a list of
     parameters or a list of parameter groups, :class:`torch.optim.Optimizer`
@@ -539,9 +538,9 @@ def _get_flat_param_id_to_param(
             input was ``model.parameters()``. (Default: ``None``)
 
     Returns:
-        flat_param_id_to_param (List[torch.nn.Parameter]): Mapping from
-            flattened parameter IDs to flattened parameters, where the
-            parameter ID is implicitly the index in the :class:`list`.
+        param_id_to_param (List[torch.nn.Parameter]): Mapping from parameter
+            IDs to parameters, where the parameter ID is implicitly the index
+            in the :class:`list`.
     """
     # Assume the standard case of passing `model.parameters()` to the optimizer
     # if `optim_input` is not specified
@@ -570,7 +569,7 @@ def _get_flat_param_id_to_param(
     if all_tensors:
         return params  # type: ignore[return-value]
     assert all_dicts
-    flat_param_id_to_param = []
+    param_id_to_param = []
     for param_group in params:
         has_params_key = "params" in param_group  # type: ignore[operator]
         assert has_params_key, \
@@ -579,8 +578,21 @@ def _get_flat_param_id_to_param(
         for param in param_group["params"]:  # type: ignore[index]
             # Implicitly map `flat_param_id` (current length of the list) to
             # `param`
-            flat_param_id_to_param.append(param)
-    return flat_param_id_to_param  # type: ignore[return-value]
+            param_id_to_param.append(param)
+    return param_id_to_param  # type: ignore[return-value]
+
+
+def _get_param_to_param_id(
+    model: torch.nn.Module,
+    optim_input: Optional[Union[
+        List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+    ]] = None,
+) -> Dict[torch.nn.Parameter, int]:
+    """Constructs the inverse mapping of :func:`_get_param_id_to_param`."""
+    param_id_to_param = _get_param_id_to_param(model, optim_input)
+    return {
+        param: param_id for param_id, param in enumerate(param_id_to_param)
+    }
 
 
 def _get_unflat_to_flat_param_ids(

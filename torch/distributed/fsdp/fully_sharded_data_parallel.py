@@ -47,8 +47,9 @@ from .flatten_params_wrapper import (
 from .optim_utils import (
     OPTIM_TARGET_RANK,
     _flatten_optim_state,
-    _get_flat_param_id_to_param,
     _get_flat_param_to_fsdp_module,
+    _get_param_id_to_param,
+    _get_param_to_param_id,
     _unflatten_optim_state,
 )
 from .utils import _apply_to_tensors, _replace_by_prefix
@@ -187,6 +188,11 @@ class StateDictType(Enum):
     FULL_STATE_DICT = auto()
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
+
+
+class OptimStateKeyType(Enum):
+    PARAM_NAME = auto()
+    PARAM_ID = auto()
 
 
 class FullyShardedDataParallel(nn.Module):
@@ -2095,7 +2101,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # Handle the "state" part of the optimizer state dict
         param_to_unflat_param_names = _get_param_to_unflat_param_names(model)
-        flat_param_id_to_param = _get_flat_param_id_to_param(model, optim_input)
+        flat_param_id_to_param = _get_param_id_to_param(model, optim_input)
         flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
         for flat_param_id, param in enumerate(flat_param_id_to_param):  # type: ignore[assignment]
             # Do not include parameters without state to avoid empty mappings
@@ -2219,7 +2225,7 @@ class FullyShardedDataParallel(nn.Module):
                 "\"param_groups\" to be a valid optimizer state dict"
             )
 
-        flat_param_id_to_param = _get_flat_param_id_to_param(model, optim_input)
+        flat_param_id_to_param = _get_param_id_to_param(model, optim_input)
         flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
         param_to_unflat_param_names = _get_param_to_unflat_param_names(model)
 
@@ -2272,6 +2278,107 @@ class FullyShardedDataParallel(nn.Module):
             "param_groups": sharded_osd_param_groups,
         }
         return sharded_optim_state_dict
+
+    @staticmethod
+    def rekey_optim_state_dict(
+        optim_state_dict: Dict[str, Any],
+        optim_state_key_type: OptimStateKeyType,
+        model: torch.nn.Module,
+        optim_input: Optional[Union[
+            List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+        ]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Re-keys the optimizer state dict ``optim_state_dict`` to use the key
+        type ``optim_state_key_type``. This can be used to achieve
+        compatibility between optimizer state dicts from models with FSDP
+        instances and ones without.
+
+        To re-key an FSDP full optimizer state dict (i.e. from
+        :meth:`full_optim_state_dict`) to use parameter IDs and be loadable to
+        a non-wrapped model::
+
+            >>> wrapped_model, wrapped_optim = ...
+            >>> full_osd = FSDP.full_optim_state_dict(wrapped_model, wrapped_optim)
+            >>> nonwrapped_model, nonwrapped_optim = ...
+            >>> rekeyed_osd = FSDP.rekey_optim_state_dict(full_osd, OptimStateKeyType.PARAM_ID, nonwrapped_model)
+            >>> nonwrapped_optim.load_state_dict(rekeyed_osd)
+
+        To re-key a normal optimizer state dict from a non-wrapped model to be
+        loadable to a wrapped model::
+
+            >>> nonwrapped_model, nonwrapped_optim = ...
+            >>> osd = nonwrapped_optim.state_dict()
+            >>> rekeyed_osd = FSDP.rekey_optim_state_dict(osd, OptimStateKeyType.PARAM_NAME, nonwrapped_model)
+            >>> wrapped_model, wrapped_optim = ...
+            >>> sharded_osd = FSDP.shard_full_optim_state_dict(rekeyed_osd, wrapped_model)
+            >>> wrapped_optim.load_state_dict(sharded_osd)
+
+        Returns:
+            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
+                using the parameter keys specified by ``optim_state_key_type``.
+        """
+        assert optim_state_key_type in \
+            (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)
+        osd = optim_state_dict  # alias
+        # Validate that the existing parameter keys are uniformly typed
+        uses_param_name_mask = [
+            type(param_key) is str for param_key in osd["state"]
+        ]
+        uses_param_id_mask = [
+            type(param_key) is int for param_key in osd["state"]
+        ]
+        if (any(uses_param_name_mask) and not all(uses_param_name_mask)) or \
+                (any(uses_param_id_mask) and not all(uses_param_id_mask)):
+            error_msg = f"Invalid parameter keys: {osd['state'].keys()}"
+            raise ValueError(error_msg)
+        # Return directly if the existing key type matches the target key type
+        if (optim_state_key_type == OptimStateKeyType.PARAM_NAME and
+            all(uses_param_name_mask)) or \
+            (optim_state_key_type == OptimStateKeyType.PARAM_ID and
+                all(uses_param_id_mask)):
+            return osd
+        # Otherwise, actually perform the re-keying
+        new_osd = {}
+        if optim_state_key_type == OptimStateKeyType.PARAM_NAME:  # ID -> name
+            param_id_to_param = _get_param_id_to_param(model, optim_input)
+            param_to_param_name = _get_param_to_param_name(model)
+            param_id_to_param_name: List[str] = [
+                param_to_param_name[param] for param in param_id_to_param
+            ]
+            new_osd["state"] = {
+                param_id_to_param_name[param_id]: param_state
+                for param_id, param_state in osd["state"].items()
+            }
+            new_osd["param_groups"] = copy.deepcopy(osd["param_groups"])
+            for param_group in new_osd["param_groups"]:
+                param_group["params"] = sorted([
+                    param_id_to_param_name[param_id]
+                    for param_id in param_group["params"]
+                ])
+            return new_osd
+        elif optim_state_key_type == OptimStateKeyType.PARAM_ID:  # name -> ID
+            param_name_to_param = _get_param_name_to_param(model)
+            param_to_param_id = _get_param_to_param_id(model, optim_input)
+            # Because not all model parameters may be passed as the optimizer
+            # input, we may need to drop some parameters from this mapping
+            param_name_to_param_id = {
+                param_name: param_to_param_id[param]
+                for param_name, param in param_name_to_param.items()
+                if param in param_to_param_id
+            }
+            new_osd["state"] = {
+                param_name_to_param_id[param_name]: param_state
+                for param_name, param_state in osd["state"].items()
+            }
+            new_osd["param_groups"] = copy.deepcopy(osd["param_groups"])
+            for param_group in new_osd["param_groups"]:
+                param_group["params"] = sorted([
+                    param_name_to_param_id[param_name]
+                    for param_name in param_group["params"]
+                ])
+            return new_osd
+        return new_osd  # should never reach here
 
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
@@ -2389,3 +2496,44 @@ def _get_param_to_unflat_param_names(
 
     f(param_to_unflat_param_names, model, "")
     return param_to_unflat_param_names
+
+
+def _get_param_to_param_name(
+    model: torch.nn.Module,
+) -> Dict[torch.nn.Parameter, str]:
+    """
+    Constructs a mapping from parameters to their parameter names. ``model``
+    should not contain any :class:`FullyShardedDataParallel` instances, which
+    means that none of the parameters should be ``FlatParameter`` s. As a
+    result, compared to :meth:`_get_param_to_unflat_param_names`, the mapped
+    values may be flattened from singleton :class:`list` s to the contained
+    names themselves.
+
+    Args:
+        model (torch.nn.Module): Root module, which should not contain any
+            :class:`FullyShardedDataParallel` instances.
+    """
+    param_to_param_names = _get_param_to_unflat_param_names(model)
+    for param_names in param_to_param_names.values():
+        assert len(param_names) > 0, "`_get_param_to_unflat_param_names()` " \
+            "should not construct empty lists"
+        if len(param_names) > 1:
+            raise RuntimeError(
+                "Each parameter should only map to one parameter name but got "
+                f"{len(param_names)}"
+            )
+    param_to_param_name = {
+        param: param_names[0]
+        for param, param_names in param_to_param_names.items()
+    }
+    return param_to_param_name
+
+
+def _get_param_name_to_param(
+    model: torch.nn.Module,
+) -> Dict[str, torch.nn.Parameter]:
+    """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
+    return {
+        param_name: param
+        for param, param_name in _get_param_to_param_name(model).items()
+    }
