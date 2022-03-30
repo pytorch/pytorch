@@ -279,6 +279,11 @@ class TestTesting(TestCase):
             check(size, None, None, False, False)
             check(size, 2, 4, True, True)
 
+    def test_make_tensor_complex32(self, device):
+        # verify that we can generate torch.complex32 tensor
+        t = make_tensor((1, 2, 3), dtype=torch.complex32, device=device)
+        self.assertEqual(t.dtype, torch.complex32)
+
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
