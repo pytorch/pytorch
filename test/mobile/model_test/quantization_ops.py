@@ -23,7 +23,7 @@ class GeneralQuantModule(torch.nn.Module):
         input1 = torch.randn(1, 16, 4)
         input2 = torch.randn(1, 16, 4, 4)
         input3 = torch.randn(1, 16, 4, 4, 4)
-        return len(
+        return (
             self.func.add(a, b),
             self.func.cat((a, a), 0),
             self.func.mul(a, b),
@@ -92,7 +92,7 @@ class DynamicQuantModule:
             trans_input = torch.randn(1, 16, 2)
             tgt = torch.rand(1, 16, 2)
 
-            return len((
+            return (
                 self.rnn(input, h),
                 self.rnncell(input[0], h[0]),
                 self.gru(input, h),
@@ -105,7 +105,7 @@ class DynamicQuantModule:
                 self.linears[0](linear_input),
                 self.linears[1](linear_input),
                 self.linears[2](linear_input, linear_input),
-            ))
+            )
 
 
 class StaticQuantModule:
