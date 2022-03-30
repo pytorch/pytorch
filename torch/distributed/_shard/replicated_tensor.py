@@ -161,7 +161,6 @@ class ReplicatedParameter(ReplicatedTensor, torch.nn.Parameter):
 
         replicated_tensor = ReplicatedTensor(tensor, process_group)
         r = torch.Tensor._make_subclass(cls, replicated_tensor, requires_grad)      # type: ignore[arg-type]
-        r.process_group = process_group
 
         # Ensure both tensors share grads.
         r.grad = tensor.grad
