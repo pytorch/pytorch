@@ -1,4 +1,5 @@
 import functools
+from inspect import isfunction, ismethod
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
@@ -93,11 +94,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
-        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
         if DILL_AVAILABLE:
             state_dict = {}
             for k, v in self.__dict__.items():
-                if callable(v):
+                if isfunction(v) and not ismethod(v):
                     state_dict[k] = serialize_fn(v)
                 else:
                     state_dict[k] = v
@@ -196,11 +196,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
-        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
         if DILL_AVAILABLE:
             state_dict = {}
             for k, v in self.__dict__.items():
-                if callable(v):
+                if isfunction(v) and not ismethod(v):
                     state_dict[k] = serialize_fn(v)
                 else:
                     state_dict[k] = v

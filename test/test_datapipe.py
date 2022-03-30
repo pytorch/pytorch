@@ -2015,19 +2015,23 @@ class TestCircularSerialization(TestCase):
         def noop(self, x):
             return x + 1
 
-        def __init__(self):
-            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.noop)
+        def __init__(self, fn):
+            self.fn = fn
+            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.noop).map(self.fn)
 
         def __iter__(self):
             yield from self._dp
 
     def test_circular_serialization_with_pickle(self):
-        assert list(self._CustomIterDataPipe()) == list(pickle.loads(pickle.dumps(self._CustomIterDataPipe())))
+        assert list(self._CustomIterDataPipe(_fake_fn)) ==\
+               list(pickle.loads(pickle.dumps(self._CustomIterDataPipe(_fake_fn))))
 
-    # TODO: Ensure this works with `dill` installed
-    # @skipIfNoDill
-    # def test_circular_serialization_with_dill(self):
-    #     assert list(self._CustomIterDataPipe()) == list(dill.loads(dill.dumps(self._CustomIterDataPipe())))
+    @skipIfNoDill
+    def test_circular_serialization_with_dill(self):
+        assert list(self._CustomIterDataPipe(lambda x: x + 1)) == \
+               list(pickle.loads(pickle.dumps(self._CustomIterDataPipe(lambda x: x + 1))))
+        assert list(self._CustomIterDataPipe(lambda x: x + 1)) ==\
+               list(dill.loads(dill.dumps(self._CustomIterDataPipe(lambda x: x + 1))))
 
 
 class TestSharding(TestCase):
