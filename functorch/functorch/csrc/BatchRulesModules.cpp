@@ -295,7 +295,7 @@ template <typename F, F Func, typename A, typename B, typename C, typename... T>
 struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-      OptionalArrayRef<long> output_size, IntArrayRef input_size,
+      OptionalArrayRef<int64_t> output_size, IntArrayRef input_size,
       T... extra_args) {
     auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
     TORCH_INTERNAL_ASSERT(input_size.size() > 0);
