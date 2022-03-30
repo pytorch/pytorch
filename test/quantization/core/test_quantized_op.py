@@ -829,6 +829,44 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                              msg="AddReLU.out failed")
 
+    """Tests the correctness of the cudnn add and add_relu op
+    (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qadd_relu_cudnn(self):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        # NB: This is a strange size so that we exercise both the vectorized
+        # implementation (64-element chunks at at time) as well as the scalar
+        # implementation
+        A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
@@ -4274,9 +4312,9 @@ class TestQuantizedConv(TestCase):
         dilations = (dilation, dilation)
 
         if use_relu:
-            qconv = torch.ops.quantized.conv2d_relu_cudnn
+            qconv = torch.ops.quantized.conv2d_relu
         else:
-            qconv = torch.ops.quantized.conv2d_cudnn
+            qconv = torch.ops.quantized.conv2d
         conv_op = torch.nn.Conv2d(
             input_channels,
             output_channels,
@@ -4287,7 +4325,7 @@ class TestQuantizedConv(TestCase):
             groups,
         ).to(torch.device("cuda"))
         self._test_qconv_impl(
-            qconv, None, conv_op, batch_size,
+            qconv, torch.ops.quantized.conv2d_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),
             output_channels_per_group, groups, kernels, strides, pads, None,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
@@ -4363,13 +4401,14 @@ class TestQuantizedConv(TestCase):
         weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
         scale = 1.0
         zero_point = 0
-        conv_op = torch.ops.quantized.conv2d_cudnn
+        conv_op = torch.ops.quantized.conv2d
+        weight_prepacked = torch.ops.quantized.conv2d_prepack(weight_int8, None, stride, padding, dilation, groups)
         with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
             for i in range(30):
-                conv_op(input_int8, weight_int8, None, stride, padding, dilation, groups, scale, zero_point)
+                conv_op(input_int8, weight_prepacked, scale, zero_point)
                 prof.step()
 
         print("int8 benchmark result:")

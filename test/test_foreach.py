@@ -11,7 +11,7 @@ from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db,
     foreach_reduce_op_db)
@@ -166,14 +166,6 @@ class TestForeach(TestCase):
         self._binary_test(
             dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True)
 
-    # note(mkozuki): Why ROCm?
-    # ROCm is supposed to compile slow path as in
-    # https://github.com/pytorch/pytorch/blob/7e032f18cf1405804c4f787b05ea2de5e08a091e/aten/src/ATen/native/ForeachUtils.h#L148-L164,  # noqa: E501
-    # Therefore `[torch.add(*args, alpha=alpha) for args in zip(tensors1, tensors2)]` and
-    # `torch._foreach_add(tensors1, tensors2, alpha=alpha)`
-    # are expected to return the same outputs, however, the outputs look unstable for torch.bfloat16 and torch.half.
-    # log: https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-linux-bionic-rocm4.2-py3.6-test1/2741/console
-    @skipCUDAIfRocm
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_fastpath(self, device, dtype, op):
@@ -195,7 +187,6 @@ class TestForeach(TestCase):
         self._binary_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False)
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
 
-    @skipCUDAIfRocm
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
@@ -234,7 +225,6 @@ class TestForeach(TestCase):
     # errors depending on the order of scalarlist. To keep actual unit test impl simple,
     # separating mixed scalarlist tests. By setting the first element of scalarlist to bool,
     # they are expected to throw bool sub error even in inplace test.
-    @skipCUDAIfRocm
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
@@ -653,6 +643,27 @@ class TestForeach(TestCase):
         # note(mkozuki): Limiting dtypes to FP32&FP64, we can safely run inplace ops.
         foreach_op_(tensors1, tensors2, tensors3)
         self.assertEqual(expected, tensors1)
+
+    # note: BFloat16 has the same number of exponent bits as FP32
+    # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
+    @onlyCUDA
+    @ops(foreach_reduce_op_db, allowed_dtypes=(torch.half, torch.bfloat16))
+    def test_foreach_l2_large_value_input(self, device, dtype, op):
+        ord, N = 2, 10
+        max_value = torch.finfo(dtype).max
+        scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
+        inputs = [t * scaler for t in op.sample_inputs(device, dtype, N, noncontiguous=False, low=1)],
+        # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
+        self.assertTrue(scaler * scaler * N > max_value)
+        fn, ref_fn, *_ = self._get_funcs(op, 3)
+        actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord)
+        expect = ref_fn(inputs, ord=ord)
+        if dtype == torch.float16:
+            # making sure the reference L2 norm values are in the range of FP16.
+            self.assertFalse(any(torch.isinf(e) for e in expect))
+        else:
+            self.assertTrue(all(torch.isinf(e) for e in expect))
+        self.assertEqual(expect, actual, equal_nan=False)
 
 
 instantiate_device_type_tests(TestForeach, globals())

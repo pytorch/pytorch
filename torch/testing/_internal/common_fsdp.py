@@ -242,6 +242,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
+        sharding_strategy=None,
         **kwargs
     ):
         super().__init__(
@@ -251,6 +252,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                sharding_strategy=sharding_strategy,
             ),
             **kwargs
         )
@@ -480,6 +482,7 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
+        sharding_strategy=None,
         save_model=True,
         clip_norm=0.3,
         norm_type=None,
@@ -509,13 +512,19 @@ class FSDPTest(MultiProcessTestCase):
                 wrap_fsdp=True,
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
-                backward_prefetch=backward_prefetch
+                backward_prefetch=backward_prefetch,
+                sharding_strategy=sharding_strategy,
             )
         except Exception as e:
             raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
 
         cpu_offload = cpu_offload or CPUOffload()  # disabled if not specified.
-        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload, backward_prefetch=backward_prefetch)
+        model = FullyShardedDataParallel(
+            model,
+            cpu_offload=cpu_offload,
+            backward_prefetch=backward_prefetch,
+            sharding_strategy=sharding_strategy,
+        )
         # Call model.cuda() after init FSDP if specified.
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             model = model.cuda()
@@ -567,7 +576,7 @@ class FSDPTest(MultiProcessTestCase):
         )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs
+        self, group, cuda_first=False, config=None, **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
@@ -588,6 +597,14 @@ class FSDPTest(MultiProcessTestCase):
             if move_to_cuda:
                 model = model.cuda()
         return model
+
+    def _get_nonwrapped_model(
+        self, group, **model_kwargs,
+    ) -> torch.nn.Module:
+        """Returns the non-wrapped model that is wrapped in
+        :meth:`_get_wrapped_model`. The model used in these two methods should
+        be kept in sync for tests that use both for parity comparisons."""
+        return TransformerWithSharedParams(group, **model_kwargs).cuda()
 
 
 def _collect_total_grad_norm_fsdp(model, norm_type, rank):
