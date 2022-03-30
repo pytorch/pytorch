@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -31,12 +32,18 @@ namespace jit {
 
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll = true);
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll_non_constant_loops = true,
+    bool const_prop_user_classes = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);
 void debugSetAutodiffSubgraphInlining(bool state);
-bool getAutodiffSubgraphInlining();
+bool TORCH_API getAutodiffSubgraphInlining();
+
+void debugSetFusionGroupInlining(bool state);
+bool getFusionGroupInlining();
 
 // Tunable parameters for deciding when to create/keep subgraphs of
 // differentiable code
@@ -66,12 +73,19 @@ struct GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack);
-
-  virtual ExecutionPlan getPlanFor(
+  c10::intrusive_ptr<Future> runAsync(
       Stack& stack,
-      size_t remaining_bailout_depth) = 0;
+      TaskLauncher taskLauncher = at::launch);
+
+  virtual const ExecutionPlan& getPlanFor(
+      Stack& stack,
+      c10::optional<size_t> remaining_bailout_depth = c10::nullopt) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
+
+  virtual bool isOptimized() const {
+    return false;
+  }
 
  protected:
   friend struct GraphExecutor;
@@ -79,16 +93,21 @@ struct GraphExecutorImplBase {
   // The unoptimized starting graph. This field is effectively const, but we
   // can't make it so because Graph::copy() is not const (and making it const is
   // not that easy at this point).
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::string function_name_;
 
   // If false, we'll run the graph as we get it, without any optimizations.
   // Useful for debugging.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t num_inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t num_outputs;
 
   // GraphExecutors can be accessed from multiple threads, so this thread needs
   // to be held every time we access the fallback or plan_cache.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex compile_mutex;
 };
 

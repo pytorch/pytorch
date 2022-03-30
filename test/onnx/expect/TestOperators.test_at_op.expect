@@ -1,6 +1,6 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "x"
@@ -13,8 +13,13 @@ graph {
       s: "add"
       type: STRING
     }
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {

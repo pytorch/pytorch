@@ -1,23 +1,23 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "x"
-    input: "y"
-    output: "2"
+    input: "onnx::Less_0"
+    input: "onnx::Less_1"
+    output: "onnx::Not_2"
     name: "Less_0"
     op_type: "Less"
   }
   node {
-    input: "2"
+    input: "onnx::Not_2"
     output: "3"
     name: "Not_1"
     op_type: "Not"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "x"
+    name: "onnx::Less_0"
     type {
       tensor_type {
         elem_type: 6
@@ -33,7 +33,7 @@ graph {
     }
   }
   input {
-    name: "y"
+    name: "onnx::Less_1"
     type {
       tensor_type {
         elem_type: 6

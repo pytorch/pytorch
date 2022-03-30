@@ -1,17 +1,17 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "x"
     input: "x"
-    output: "1"
+    output: "onnx::ReduceSum_1"
     name: "Mul_0"
     op_type: "Mul"
   }
   node {
-    input: "1"
-    output: "2"
+    input: "onnx::ReduceSum_1"
+    output: "onnx::Sqrt_2"
     name: "ReduceSum_1"
     op_type: "ReduceSum"
     attribute {
@@ -27,12 +27,12 @@ graph {
     }
   }
   node {
-    input: "2"
+    input: "onnx::Sqrt_2"
     output: "3"
     name: "Sqrt_2"
     op_type: "Sqrt"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {

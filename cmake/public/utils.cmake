@@ -1,3 +1,185 @@
+################################################################################################
+# Exclude and prepend functionalities
+function(exclude OUTPUT INPUT)
+set(EXCLUDES ${ARGN})
+foreach(EXCLUDE ${EXCLUDES})
+        list(REMOVE_ITEM INPUT "${EXCLUDE}")
+endforeach()
+set(${OUTPUT} ${INPUT} PARENT_SCOPE)
+endfunction(exclude)
+
+function(prepend OUTPUT PREPEND)
+set(OUT "")
+foreach(ITEM ${ARGN})
+        list(APPEND OUT "${PREPEND}${ITEM}")
+endforeach()
+set(${OUTPUT} ${OUT} PARENT_SCOPE)
+endfunction(prepend)
+
+
+################################################################################################
+# Clears variables from list
+# Usage:
+#   caffe_clear_vars(<variables_list>)
+macro(caffe_clear_vars)
+  foreach(_var ${ARGN})
+    unset(${_var})
+  endforeach()
+endmacro()
+
+################################################################################################
+# Prints list element per line
+# Usage:
+#   caffe_print_list(<list>)
+function(caffe_print_list)
+  foreach(e ${ARGN})
+    message(STATUS ${e})
+  endforeach()
+endfunction()
+
+################################################################################################
+# Reads set of version defines from the header file
+# Usage:
+#   caffe_parse_header(<file> <define1> <define2> <define3> ..)
+macro(caffe_parse_header FILENAME FILE_VAR)
+  set(vars_regex "")
+  set(__parnet_scope OFF)
+  set(__add_cache OFF)
+  foreach(name ${ARGN})
+    if("${name}" STREQUAL "PARENT_SCOPE")
+      set(__parnet_scope ON)
+    elseif("${name}" STREQUAL "CACHE")
+      set(__add_cache ON)
+    elseif(vars_regex)
+      set(vars_regex "${vars_regex}|${name}")
+    else()
+      set(vars_regex "${name}")
+    endif()
+  endforeach()
+  if(EXISTS "${FILENAME}")
+    file(STRINGS "${FILENAME}" ${FILE_VAR} REGEX "#define[ \t]+(${vars_regex})[ \t]+[0-9]+" )
+  else()
+    unset(${FILE_VAR})
+  endif()
+  foreach(name ${ARGN})
+    if(NOT "${name}" STREQUAL "PARENT_SCOPE" AND NOT "${name}" STREQUAL "CACHE")
+      if(${FILE_VAR})
+        if(${FILE_VAR} MATCHES ".+[ \t]${name}[ \t]+([0-9]+).*")
+          string(REGEX REPLACE ".+[ \t]${name}[ \t]+([0-9]+).*" "\\1" ${name} "${${FILE_VAR}}")
+        else()
+          set(${name} "")
+        endif()
+        if(__add_cache)
+          set(${name} ${${name}} CACHE INTERNAL "${name} parsed from ${FILENAME}" FORCE)
+        elseif(__parnet_scope)
+          set(${name} "${${name}}" PARENT_SCOPE)
+        endif()
+      else()
+        unset(${name} CACHE)
+      endif()
+    endif()
+  endforeach()
+endmacro()
+
+################################################################################################
+# Parses a version string that might have values beyond major, minor, and patch
+# and set version variables for the library.
+# Usage:
+#   caffe2_parse_version_str(<library_name> <version_string>)
+function(caffe2_parse_version_str LIBNAME VERSIONSTR)
+  string(REGEX REPLACE "^([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MAJOR "${VERSIONSTR}")
+  string(REGEX REPLACE "^[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MINOR  "${VERSIONSTR}")
+  string(REGEX REPLACE "[0-9]+\\.[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_PATCH "${VERSIONSTR}")
+  set(${LIBNAME}_VERSION_MAJOR ${${LIBNAME}_VERSION_MAJOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_MINOR ${${LIBNAME}_VERSION_MINOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_PATCH ${${LIBNAME}_VERSION_PATCH} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION "${${LIBNAME}_VERSION_MAJOR}.${${LIBNAME}_VERSION_MINOR}.${${LIBNAME}_VERSION_PATCH}" PARENT_SCOPE)
+endfunction()
+
+###
+# Removes common indentation from a block of text to produce code suitable for
+# setting to `python -c`, or using with pycmd. This allows multiline code to be
+# nested nicely in the surrounding code structure.
+#
+# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# `python` and hopes for the best. An error will be thrown if it is not found.
+#
+# Args:
+#     outvar : variable that will hold the stdout of the python command
+#     text   : text to remove indentation from
+#
+function(dedent outvar text)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  set(_fixup_cmd "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()))")
+  file(WRITE "${CMAKE_BINARY_DIR}/indented.txt" "${text}")
+  execute_process(
+    COMMAND "${_python_exe}" -c "${_fixup_cmd}"
+    INPUT_FILE "${CMAKE_BINARY_DIR}/indented.txt"
+    RESULT_VARIABLE _dedent_exitcode
+    OUTPUT_VARIABLE _dedent_text)
+  if(NOT _dedent_exitcode EQUAL 0)
+    message(ERROR " Failed to remove indentation from: \n\"\"\"\n${text}\n\"\"\"
+    Python dedent failed with error code: ${_dedent_exitcode}")
+    message(FATAL_ERROR " Python dedent failed with error code: ${_dedent_exitcode}")
+  endif()
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_dedent_text}" _dedent_text)
+  set(${outvar} "${_dedent_text}" PARENT_SCOPE)
+endfunction()
+
+
+function(pycmd_no_exit outvar exitcode cmd)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  # run the actual command
+  execute_process(
+    COMMAND "${_python_exe}" -c "${cmd}"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _output)
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+  set(${exitcode} "${_exitcode}" PARENT_SCOPE)
+endfunction()
+
+
+###
+# Helper function to run `python -c "<cmd>"` and capture the results of stdout
+#
+# Runs a python command and populates an outvar with the result of stdout.
+# Common indentation in the text of `cmd` is removed before the command is
+# executed, so the caller does not need to worry about indentation issues.
+#
+# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# `python` and hopes for the best. An error will be thrown if it is not found.
+#
+# Args:
+#     outvar : variable that will hold the stdout of the python command
+#     cmd    : text representing a (possibly multiline) block of python code
+#
+function(pycmd outvar cmd)
+  dedent(_dedent_cmd "${cmd}")
+  pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
+
+  if(NOT _exitcode EQUAL 0)
+    message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
+    message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
+  endif()
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+endfunction()
+
+
 ##############################################################################
 # Macro to update cached options.
 macro(caffe2_update_option variable value)
@@ -48,15 +230,17 @@ macro(caffe2_interface_library SRC DST)
     # In the case of static library, we will need to add whole-static flags.
     if(APPLE)
       target_link_libraries(
-          ${DST} INTERFACE -Wl,-force_load,$<TARGET_FILE:${SRC}>)
+          ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
     elseif(MSVC)
       # In MSVC, we will add whole archive in default.
       target_link_libraries(
-          ${DST} INTERFACE -WHOLEARCHIVE:$<TARGET_FILE:${SRC}>)
+         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
+      target_link_options(
+         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
     else()
       # Assume everything else is like gcc
       target_link_libraries(${DST} INTERFACE
-          "-Wl,--whole-archive,$<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
+          "-Wl,--whole-archive,\"$<TARGET_FILE:${SRC}>\" -Wl,--no-whole-archive")
     endif()
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
@@ -80,7 +264,7 @@ macro(caffe2_interface_library SRC DST)
   elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
       target_link_libraries(${DST} INTERFACE
-          "-Wl,--no-as-needed,$<TARGET_FILE:${SRC}> -Wl,--as-needed")
+          "-Wl,--no-as-needed,\"$<TARGET_FILE:${SRC}>\" -Wl,--as-needed")
     else()
       target_link_libraries(${DST} INTERFACE ${SRC})
     endif()
@@ -128,13 +312,13 @@ function(caffe2_binary_target target_name_or_src)
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
   add_executable(${__target} ${__srcs})
-  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  target_link_libraries(${__target} torch_library)
   # If we have Caffe2_MODULES defined, we will also link with the modules.
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if(USE_TBB)
-    target_include_directories(${__target} PUBLIC ${TBB_ROOT_DIR}/include)
+  if(USE_TBB AND NOT USE_SYSTEM_TBB)
+    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
   endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
@@ -154,21 +338,6 @@ function(caffe2_hip_binary_target target_name_or_src)
   target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDE})
 endfunction()
 
-##############################################################################
-# Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
-# Usage:
-#   torch_cuda_based_add_executable(cuda_target)
-#
-macro(torch_cuda_based_add_executable cuda_target)
-  if(USE_ROCM)
-    hip_add_executable(${cuda_target} ${ARGN})
-  elseif(USE_CUDA)
-    cuda_add_executable(${cuda_target} ${ARGN})
-  else()
-
-  endif()
-endmacro()
-
 
 ##############################################################################
 # Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
@@ -179,11 +348,31 @@ macro(torch_cuda_based_add_library cuda_target)
   if(USE_ROCM)
     hip_add_library(${cuda_target} ${ARGN})
   elseif(USE_CUDA)
-    cuda_add_library(${cuda_target} ${ARGN})
+    add_library(${cuda_target} ${ARGN})
   else()
   endif()
 endmacro()
 
+##############################################################################
+# Get the HIP arch flags specified by PYTORCH_ROCM_ARCH.
+# Usage:
+#   torch_hip_get_arch_list(variable_to_store_flags)
+#
+macro(torch_hip_get_arch_list store_var)
+  if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+    set(_TMP $ENV{PYTORCH_ROCM_ARCH})
+  else()
+    # Use arch of installed GPUs as default
+    execute_process(COMMAND "rocm_agent_enumerator" COMMAND bash "-c" "grep -v gfx000 | sort -u | xargs | tr -d '\n'"
+                    RESULT_VARIABLE ROCM_AGENT_ENUMERATOR_RESULT
+                    OUTPUT_VARIABLE ROCM_ARCH_INSTALLED)
+    if(NOT ROCM_AGENT_ENUMERATOR_RESULT EQUAL 0)
+      message(FATAL_ERROR " Could not detect ROCm arch for GPUs on machine. Result: '${ROCM_AGENT_ENUMERATOR_RESULT}'")
+    endif()
+    set(_TMP ${ROCM_ARCH_INSTALLED})
+  endif()
+  string(REPLACE " " ";" ${store_var} "${_TMP}")
+endmacro()
 
 ##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
@@ -219,6 +408,12 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
+  set(private_compile_options "")
+
+  # ---[ Check if warnings should be errors.
+  if(WERROR)
+    list(APPEND private_compile_options -Werror)
+  endif()
 
   if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # until they can be unified, keep these lists synced with setup.py
@@ -231,39 +426,53 @@ function(torch_compile_options libname)
       endif()
 
       target_compile_options(${libname} PUBLIC
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
-        ${MSVC_DEBINFO_OPTION}
-        /EHa
-        /DNOMINMAX
-        /wd4267
-        /wd4251
-        /wd4522
-        /wd4522
-        /wd4838
-        /wd4305
-        /wd4244
-        /wd4190
-        /wd4101
-        /wd4996
-        /wd4275
-        /bigobj
+        $<$<COMPILE_LANGUAGE:CXX>:
+          ${MSVC_RUNTIME_LIBRARY_OPTION}
+          $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
+          /EHsc
+          /DNOMINMAX
+          /wd4267
+          /wd4251
+          /wd4522
+          /wd4522
+          /wd4838
+          /wd4305
+          /wd4244
+          /wd4190
+          /wd4101
+          /wd4996
+          /wd4275
+          /bigobj>
         )
     else()
-      target_compile_options(${libname} PUBLIC
-        #    -std=c++14
+      list(APPEND private_compile_options
         -Wall
         -Wextra
         -Wno-unused-parameter
+        -Wno-unused-variable
+        -Wno-unused-function
+        -Wno-unused-result
+        -Wno-unused-local-typedefs
         -Wno-missing-field-initializers
         -Wno-write-strings
         -Wno-unknown-pragmas
+        -Wno-type-limits
+        -Wno-array-bounds
+        -Wno-unknown-pragmas
+        -Wno-sign-compare
+        -Wno-strict-overflow
+        -Wno-strict-aliasing
+        -Wno-error=deprecated-declarations
         # Clang has an unfixed bug leading to spurious missing braces
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces
         )
-
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND private_compile_options
+          -Wno-range-loop-analysis)
+      endif()
       if(NOT APPLE)
-        target_compile_options(${libname} PRIVATE
+        list(APPEND private_compile_options
           # Considered to be flaky.  See the discussion at
           # https://github.com/pytorch/pytorch/pull/9608
           -Wno-maybe-uninitialized)
@@ -273,8 +482,21 @@ function(torch_compile_options libname)
 
     if(MSVC)
     elseif(WERROR)
-      target_compile_options(${libname} PRIVATE -Werror -Wno-strict-overflow)
+      list(APPEND private_compile_options -Wno-strict-overflow)
     endif()
+  endif()
+
+  target_compile_options(${libname} PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
+  if(USE_CUDA)
+    string(FIND "${private_compile_options}" " " space_position)
+    if(NOT space_position EQUAL -1)
+      message(FATAL_ERROR "Found spaces in private_compile_options='${private_compile_options}'")
+    endif()
+    # Convert CMake list to comma-separated list
+    string(REPLACE ";" "," private_compile_options "${private_compile_options}")
+    target_compile_options(${libname} PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
   endif()
 
   if(NOT WIN32 AND NOT USE_ASAN)
@@ -285,17 +507,14 @@ function(torch_compile_options libname)
     # Unfortunately, hidden visibility messes up some ubsan warnings because
     # templated classes crossing library boundary get duplicated (but identical)
     # definitions. It's easier to just disable it.
-    target_compile_options(${libname} PRIVATE "-fvisibility=hidden")
+    target_compile_options(${libname} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  target_compile_options(${libname} PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+  target_compile_options(${libname} PRIVATE
+      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
 
-  # ---[ Check if warnings should be errors.
-  # TODO: Dedupe with WERROR check above
-  if(WERROR)
-    target_compile_options(${libname} PRIVATE -Werror)
-  endif()
 endfunction()
 
 
@@ -314,5 +533,42 @@ function(torch_set_target_props libname)
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELWITHDEBINFO "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
+  endif()
+endfunction()
+
+
+##############################################################################
+# Set old-style FindCuda.cmake compile flags from modern CMake cuda flags.
+# Usage:
+#   torch_update_find_cuda_flags()
+function(torch_update_find_cuda_flags)
+  # Convert -O2 -Xcompiler="-O2 -Wall" to "-O2;-Xcompiler=-O2,-Wall"
+  if(USE_CUDA)
+    separate_arguments(FLAGS UNIX_COMMAND "${CMAKE_CUDA_FLAGS}")
+    string(REPLACE " " "," FLAGS "${FLAGS}")
+    set(CUDA_NVCC_FLAGS ${FLAGS} PARENT_SCOPE)
+
+    separate_arguments(FLAGS_DEBUG UNIX_COMMAND "${CMAKE_CUDA_FLAGS_DEBUG}")
+    string(REPLACE " " "," FLAGS_DEBUG "${FLAGS_DEBUG}")
+    set(CUDA_NVCC_FLAGS_DEBUG "${FLAGS_DEBUG}" PARENT_SCOPE)
+
+    separate_arguments(FLAGS_RELEASE UNIX_COMMAND "${CMAKE_CUDA_FLAGS_RELEASE}")
+    string(REPLACE " " "," FLAGS_RELEASE "${FLAGS_RELEASE}")
+    set(CUDA_NVCC_FLAGS_RELEASE "${FLAGS_RELEASE}" PARENT_SCOPE)
+
+    separate_arguments(FLAGS_MINSIZEREL UNIX_COMMAND "${CMAKE_CUDA_FLAGS_MINSIZEREL}")
+    string(REPLACE " " "," FLAGS_MINSIZEREL "${FLAGS_MINSIZEREL}")
+    set(CUDA_NVCC_FLAGS_MINSIZEREL "${FLAGS_MINSIZEREL}" PARENT_SCOPE)
+
+    separate_arguments(FLAGS_RELWITHDEBINFO UNIX_COMMAND "${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}")
+    string(REPLACE " " "," FLAGS_RELWITHDEBINFO "${FLAGS_RELWITHDEBINFO}")
+    set(CUDA_NVCC_FLAGS_RELWITHDEBINFO "${FLAGS_RELWITHDEBINFO}" PARENT_SCOPE)
+
+    message(STATUS "Converting CMAKE_CUDA_FLAGS to CUDA_NVCC_FLAGS:\n"
+                    "    CUDA_NVCC_FLAGS                = ${FLAGS}\n"
+                    "    CUDA_NVCC_FLAGS_DEBUG          = ${FLAGS_DEBUG}\n"
+                    "    CUDA_NVCC_FLAGS_RELEASE        = ${FLAGS_RELEASE}\n"
+                    "    CUDA_NVCC_FLAGS_RELWITHDEBINFO = ${FLAGS_RELWITHDEBINFO}\n"
+                    "    CUDA_NVCC_FLAGS_MINSIZEREL     = ${FLAGS_MINSIZEREL}")
   endif()
 endfunction()

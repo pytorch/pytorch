@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/quantized/Quantizer.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +31,9 @@ static void upsample_bilinear2d_out_frame(
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
+  if (channels == 0 || output_height == 0 || output_width == 0) {
+    return;
+  }
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
@@ -48,9 +52,13 @@ static void upsample_bilinear2d_out_frame(
 
   const auto rwidth =
       area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
-  for (int64_t h2 = 0; h2 < output_height; ++h2) {
+  const int64_t input_q_zero_point = input.q_zero_point();
+  const int64_t output_q_zero_point = output.q_zero_point();
+
+  for (const auto h2 : c10::irange(output_height)) {
     const auto h1r = area_pixel_compute_source_index<float>(
         rheight, h2, align_corners, /*cubic=*/false);
 
@@ -60,7 +68,7 @@ static void upsample_bilinear2d_out_frame(
     const float h1lambda = h1r - h1;
     const float h0lambda = static_cast<float>(1.) - h1lambda;
 
-    for (int64_t w2 = 0; w2 < output_width; ++w2) {
+    for (const auto w2 : c10::irange(output_width)) {
       const auto w1r = area_pixel_compute_source_index<float>(
           rwidth, w2, align_corners, /*cubic=*/false);
 
@@ -72,14 +80,15 @@ static void upsample_bilinear2d_out_frame(
       const typename scalar_t::underlying* pos1 = i_p + h1 * input_width + w1;
       typename scalar_t::underlying* pos2 = o_p + h2 * output_width + w2;
 
-      for (int64_t c = 0; c < channels; ++c) {
+      for (const auto c : c10::irange(channels)) {
+        (void)c; //Suppress unused variable warning
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
+                 w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
         // requantization
-        pos2[0] = at::quantize_val<scalar_t>(
-                      output_scale, output.q_zero_point(), result)
+        pos2[0] = at::native::quantize_val<scalar_t>(
+                      output_scale, output_q_zero_point, result)
                       .val_;
         pos1 += input_width * input_height;
         pos2 += output_width * output_height;
@@ -90,7 +99,7 @@ static void upsample_bilinear2d_out_frame(
 
 } // namespace
 
-Tensor quantized_upsample_bilinear2d_cpu(
+Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
@@ -102,7 +111,7 @@ Tensor quantized_upsample_bilinear2d_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -162,6 +171,20 @@ Tensor quantized_upsample_bilinear2d_cpu(
         });
     return output;
   }
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor upsample_bilinear2d_quantized_cpu(
+    const Tensor& input,
+    at::OptionalIntArrayRef output_size,
+      bool align_corners,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);

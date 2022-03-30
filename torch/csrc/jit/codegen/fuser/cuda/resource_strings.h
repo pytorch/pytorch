@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/frontend/code_template.h>
+#include <ATen/code_template.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
@@ -13,14 +13,16 @@ tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
-#ifdef __HIP_PLATFORM_HCC__
-static auto type_declarations_template = CodeTemplate(R"(
-#include <hip/hip_runtime.h>
+#if defined(USE_ROCM)
+static auto type_declarations_template = at::jit::CodeTemplate(R"(
+${RuntimeHeader}
 ${HalfHeader}
+${BFloat16Header}
 ${RandHeader}
 
-#define POS_INFINITY INFINITY
-#define NEG_INFINITY -INFINITY
+#define NAN __int_as_float(0x7fffffff)
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define NEG_INFINITY __int_as_float(0xff800000)
 
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
@@ -35,12 +37,14 @@ struct TensorInfo<T, 0> {
 };
 )");
 #else
-static auto type_declarations_template = CodeTemplate(R"(
+static auto type_declarations_template = at::jit::CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
+typedef unsigned long long int uint64_t;
 ${HalfHeader}
+${BFloat16Header}
 ${RandHeader}
 
 #define NAN __int_as_float(0x7fffffff)
@@ -165,20 +169,41 @@ constexpr auto rand_init = R"(
   Philox rnd(seed, idx, offset);
 )";
 
-static auto cuda_compilation_unit_template = CodeTemplate(R"(
+static auto cuda_compilation_unit_template = at::jit::CodeTemplate(R"(
 ${type_declarations}
 
 extern "C" __global__
 void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
   ${RandInit}
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-        linearIndex < totalElements;
-        linearIndex += gridDim.x * blockDim.x) {
+  // check whether do vectorized load/store and allocate buffer
+  bool flag_vec4 = true;
+  ${tensorChecks}
+  if (flag_vec4) {
+    for (IndexType linearIndex = 4 * (blockIdx.x * blockDim.x + threadIdx.x);
+         linearIndex < totalElements;
+         linearIndex += 4 * gridDim.x * blockDim.x) {
+      // Convert `linearIndex` into an offset of tensor as it is:
+      ${tensorOffsets}
+      // load 4 at a time
+      ${kernelLoad}
+      #pragma unroll 4
+      for (int i=0; i<4; i++) {
+        // calculate the results
+        ${kernelBody_vec4}
+      }
+      // store 4 at a time
+      ${kernelStore}
+    }
+  } else {
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < totalElements;
+         linearIndex += gridDim.x * blockDim.x) {
       // Convert `linearIndex` into an offset of tensor:
       ${tensorOffsets}
       // calculate the results
       ${kernelBody}
     }
+  }
 }
 )");
 
@@ -187,6 +212,12 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // with __half2float(). All mathematical operations are done on float
 // values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
+#if defined(USE_ROCM)
+constexpr auto half_support_literal =
+    R"(
+typedef __half half;
+)";
+#else
 constexpr auto half_support_literal =
     R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
@@ -229,6 +260,149 @@ constexpr auto half_support_literal =
 
 typedef __half half;
 )";
+#endif
+
+#if defined(USE_ROCM)
+constexpr auto bfloat16_support_literal =
+    R"(
+#ifndef __align__
+#define __align__(x) __attribute__((aligned(x)))
+#endif
+
+typedef struct __align__(2) {
+  unsigned short x;
+}
+__nv_bfloat16_raw;
+
+#if defined(__cplusplus)
+struct __align__(2) __nv_bfloat16 {
+  __host__ __device__ __nv_bfloat16() {}
+
+  __host__ __device__ __nv_bfloat16& operator=(const __nv_bfloat16_raw& hr) {
+    __x = hr.x;
+    return *this;
+  }
+
+  unsigned short __x;
+};
+
+__device__ unsigned short __internal_float2bfloat16(
+    const float f,
+    unsigned int& sign,
+    unsigned int& remainder) {
+  unsigned int x;
+
+  x = __float_as_uint(f);
+
+  if ((x & 0x7fffffffU) > 0x7f800000U) {
+    sign = 0U;
+    remainder = 0U;
+    return static_cast<unsigned short>(0x7fffU);
+  }
+  sign = x >> 31;
+  remainder = x << 16;
+  return static_cast<unsigned short>(x >> 16);
+}
+
+/* Definitions of intrinsics */
+__device__ __nv_bfloat16 __float2bfloat16(const float a) {
+  __nv_bfloat16 val;
+  __nv_bfloat16_raw r;
+  unsigned int sign;
+  unsigned int remainder;
+  r.x = __internal_float2bfloat16(a, sign, remainder);
+  if ((remainder > 0x80000000U) ||
+      ((remainder == 0x80000000U) && ((r.x & 0x1U) != 0U))) {
+    r.x++;
+  }
+  val = r;
+  return val;
+}
+
+__device__ float __bfloat162float(const __nv_bfloat16 a) {
+  union
+  {
+      uint32_t int32;
+      float    fp32;
+  } u = {uint32_t(a.__x) << 16};
+  return u.fp32;
+}
+#endif /* defined(__cplusplus) */
+)";
+#else
+constexpr auto bfloat16_support_literal =
+    R"(
+#define __BFLOAT16_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
+#define __BFLOAT16_TO_CUS(var) \
+  *(reinterpret_cast<const unsigned short*>(&(var)))
+
+typedef struct __align__(2) {
+  unsigned short x;
+}
+__nv_bfloat16_raw;
+
+#if defined(__cplusplus)
+struct __align__(2) __nv_bfloat16 {
+  __host__ __device__ __nv_bfloat16() {}
+
+  __host__ __device__ __nv_bfloat16& operator=(const __nv_bfloat16_raw& hr) {
+    __x = hr.x;
+    return *this;
+  }
+
+ protected:
+  unsigned short __x;
+};
+
+#if defined(__CUDACC__)
+__device__ unsigned short __internal_float2bfloat16(
+    const float f,
+    unsigned int& sign,
+    unsigned int& remainder) {
+  unsigned int x;
+
+  x = __float_as_uint(f);
+
+  if ((x & 0x7fffffffU) > 0x7f800000U) {
+    sign = 0U;
+    remainder = 0U;
+    return static_cast<unsigned short>(0x7fffU);
+  }
+  sign = x >> 31;
+  remainder = x << 16;
+  return static_cast<unsigned short>(x >> 16);
+}
+
+/* Definitions of intrinsics */
+__device__ __nv_bfloat16 __float2bfloat16(const float a) {
+  __nv_bfloat16 val;
+#if __CUDA_ARCH__ >= 800
+  asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(__BFLOAT16_TO_US(val)) : "f"(a));
+#else
+  __nv_bfloat16_raw r;
+  unsigned int sign;
+  unsigned int remainder;
+  r.x = __internal_float2bfloat16(a, sign, remainder);
+  if ((remainder > 0x80000000U) ||
+      ((remainder == 0x80000000U) && ((r.x & 0x1U) != 0U))) {
+    r.x++;
+  }
+  val = r;
+#endif
+  return val;
+}
+
+__device__ float __bfloat162float(const __nv_bfloat16 a) {
+  float val;
+  asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(__BFLOAT16_TO_CUS(a)));
+  return val;
+}
+#endif /* defined(__CUDACC__) */
+#endif /* defined(__cplusplus) */
+#undef __BFLOAT16_TO_US
+#undef __BFLOAT16_TO_CUS
+)";
+#endif
 
 } // namespace cuda
 } // namespace fuser

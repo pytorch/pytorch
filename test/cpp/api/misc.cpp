@@ -22,26 +22,27 @@ void torch_warn() {
 
 TEST(UtilsTest, WarnOnce) {
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     torch_warn_once_A();
     torch_warn_once_A();
     torch_warn_once_B();
     torch_warn_once_B();
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn once"), 1);
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn something else once"), 1);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "warn once"), 1);
+    ASSERT_EQ(
+        count_substr_occurrences(warnings.str(), "warn something else once"),
+        1);
   }
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     torch_warn();
     torch_warn();
     torch_warn();
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn multiple times"), 3);
+    ASSERT_EQ(
+        count_substr_occurrences(warnings.str(), "warn multiple times"), 3);
   }
 }
 
@@ -80,4 +81,23 @@ TEST_F(AutogradTest, CanTakeDerivativesOfZeroDimTensors) {
 TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
+}
+
+TEST(UtilsTest, AmbiguousOperatorDefaults) {
+  auto tmp = at::empty({}, at::kCPU);
+  at::_test_ambiguous_defaults(tmp);
+  at::_test_ambiguous_defaults(tmp, 1);
+  at::_test_ambiguous_defaults(tmp, 1, 1);
+  at::_test_ambiguous_defaults(tmp, 2, "2");
+}
+
+int64_t get_first_element(c10::OptionalIntArrayRef arr) {
+  return arr.value()[0];
+}
+
+TEST(OptionalArrayRefTest, DanglingPointerFix) {
+  // Ensure that the converting constructor of `OptionalArrayRef` does not
+  // create a dangling pointer when given a single value
+  ASSERT_TRUE(get_first_element(300) == 300);
+  ASSERT_TRUE(get_first_element({400}) == 400);
 }

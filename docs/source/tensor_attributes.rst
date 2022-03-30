@@ -12,26 +12,34 @@ Each ``torch.Tensor`` has a :class:`torch.dtype`, :class:`torch.device`, and :cl
 torch.dtype
 -----------
 
-.. class:: torch.dtype
+.. class:: dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
-:class:`torch.Tensor`. PyTorch has eleven different data types:
+:class:`torch.Tensor`. PyTorch has twelve different data types:
 
-========================   ===========================================   ===========================
+========================== ===========================================   ===========================
 Data type                  dtype                                         Legacy Constructors
-========================   ===========================================   ===========================
+========================== ===========================================   ===========================
 32-bit floating point      ``torch.float32`` or ``torch.float``          ``torch.*.FloatTensor``
 64-bit floating point      ``torch.float64`` or ``torch.double``         ``torch.*.DoubleTensor``
 64-bit complex             ``torch.complex64`` or ``torch.cfloat``
-128-bit floating point     ``torch.complex128`` or ``torch.cdouble``
-16-bit floating point      ``torch.float16`` or ``torch.half``           ``torch.*.HalfTensor``
+128-bit complex            ``torch.complex128`` or ``torch.cdouble``
+16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           ``torch.*.HalfTensor``
+16-bit floating point [2]_ ``torch.bfloat16``                            ``torch.*.BFloat16Tensor``
 8-bit integer (unsigned)   ``torch.uint8``                               ``torch.*.ByteTensor``
 8-bit integer (signed)     ``torch.int8``                                ``torch.*.CharTensor``
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              ``torch.*.IntTensor``
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
 Boolean                    ``torch.bool``                                ``torch.*.BoolTensor``
-========================   ===========================================   ===========================
+========================== ===========================================   ===========================
+
+.. [1] Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
+  significand bits. Useful when precision is important.
+
+.. [2] Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
+  significand bits. Useful when range is important, since it has the same
+  number of exponent bits as ``float32``
 
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
@@ -100,11 +108,12 @@ Promotion Examples::
 When the output tensor of an arithmetic operation is specified, we allow casting to its `dtype` except that:
   * An integral output tensor cannot accept a floating point tensor.
   * A boolean output tensor cannot accept a non-boolean tensor.
+  * A non-complex output tensor cannot accept a complex tensor
 
 Casting Examples::
 
     # allowed:
-    >>> float_tensor *= double_tensor
+    >>> float_tensor *= float_tensor
     >>> float_tensor *= int_tensor
     >>> float_tensor *= uint_tensor
     >>> float_tensor *= bool_tensor
@@ -117,6 +126,7 @@ Casting Examples::
     >>> int_tensor *= float_tensor
     >>> bool_tensor *= int_tensor
     >>> bool_tensor *= uint_tensor
+    >>> float_tensor *= complex_float_tensor
 
 
 .. _device-doc:
@@ -124,7 +134,7 @@ Casting Examples::
 torch.device
 ------------
 
-.. class:: torch.device
+.. class:: device
 
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
@@ -194,11 +204,14 @@ Via a string and device ordinal:
 torch.layout
 ------------
 
-.. class:: torch.layout
+.. class:: layout
+
+.. warning::
+  The ``torch.layout`` class is in beta and subject to change.
 
 A :class:`torch.layout` is an object that represents the memory layout of a
 :class:`torch.Tensor`. Currently, we support ``torch.strided`` (dense Tensors)
-and have experimental support for ``torch.sparse_coo`` (sparse COO Tensors).
+and have beta support for ``torch.sparse_coo`` (sparse COO Tensors).
 
 ``torch.strided`` represents dense Tensors and is the memory layout that
 is most commonly used. Each strided tensor has an associated
@@ -211,7 +224,7 @@ to perform many tensor operations efficiently.
 
 Example::
 
-    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
     >>> x.stride()
     (5, 1)
 
@@ -221,9 +234,9 @@ Example::
 For more information on ``torch.sparse_coo`` tensors, see :ref:`sparse-docs`.
 
 torch.memory_format
-------------
+-------------------
 
-.. class:: torch.memory_format
+.. class:: memory_format
 
 A :class:`torch.memory_format` is an object representing the memory format on which a :class:`torch.Tensor` is
 or will be allocated.
@@ -234,10 +247,10 @@ Possible values are:
   Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
 
 - ``torch.channels_last``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in 
-  ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order. 
+  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in
+  ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order.
 
 - ``torch.preserve_format``:
-  Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is 
-  allocated in dense non-overlapping memory, the output tensor strides will be copied from the input. 
+  Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is
+  allocated in dense non-overlapping memory, the output tensor strides will be copied from the input.
   Otherwise output strides will follow ``torch.contiguous_format``

@@ -34,7 +34,6 @@ RegisterOperators reg_fused_operators({Operator(
             dim);
         drop(stack, num_inputs);
         pack(stack, std::move(result));
-        return 0;
       };
     },
     aliasAnalysisIsSpecialCase())});

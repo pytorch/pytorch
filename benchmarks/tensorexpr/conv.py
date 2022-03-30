@@ -1,9 +1,9 @@
-import benchmark
+from . import benchmark
 
 
 class ConvImplBench(benchmark.Benchmark):
-    def __init__(self, case, mode, device, kernel_size, N, iC, H, W, oC):
-        super().__init__(mode, device)
+    def __init__(self, case, mode, device, dtype, kernel_size, N, iC, H, W, oC):
+        super().__init__(mode, device, dtype)
         self.case = case
         self.kernel_size = kernel_size
         self.N = N
@@ -41,13 +41,12 @@ class ConvImplBench(benchmark.Benchmark):
             algorithmic_count = {"i": 1 + (1 + 1), "o": 1 + (1 + 1), "k": 1 + (1 + 1)}
 
         buffer_size = {
-            "i": self.N * self.iC * self.H * self.W * 4,
-            "o": self.N * self.oC * self.H * self.W * 4,
+            "i": self.N * self.iC * self.H * self.W,
+            "o": self.N * self.oC * self.H * self.W,
             "k": self.oC
             * (self.iC / self.groups)
             * self.kernel_size
-            * self.kernel_size
-            * 4,
+            * self.kernel_size,
         }
         sol_size = 0
         algorithmic_size = 0

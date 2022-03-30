@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from hypothesis import given
+
+
+
+
+from hypothesis import given, settings
 import hypothesis.strategies as st
 from multiprocessing import Process, Queue
 
@@ -26,7 +26,6 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 op_engine = 'GLOO'
-
 
 class TemporaryDirectory:
     def __enter__(self):
@@ -213,10 +212,11 @@ class TestCase(hu.HypothesisTestCase):
                 workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(deadline=10000)
     def test_broadcast(self, comm_size, blob_size, num_blobs, device_option,
                        use_float16):
         TestCase.test_counter += 1
@@ -328,10 +328,11 @@ class TestCase(hu.HypothesisTestCase):
                     (num_blobs * comm_size) * (num_blobs * comm_size - 1) / 2)
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(deadline=10000)
     def test_allreduce(self, comm_size, blob_size, num_blobs, device_option,
                        use_float16):
         TestCase.test_counter += 1
@@ -416,10 +417,11 @@ class TestCase(hu.HypothesisTestCase):
             workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(deadline=10000)
     def test_reduce_scatter(self, comm_size, blob_size, num_blobs,
                             device_option, use_float16):
         TestCase.test_counter += 1
@@ -496,10 +498,11 @@ class TestCase(hu.HypothesisTestCase):
             workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(max_examples=10, deadline=None)
     def test_allgather(self, comm_size, blob_size, num_blobs, device_option,
                        use_float16):
         TestCase.test_counter += 1
@@ -522,6 +525,7 @@ class TestCase(hu.HypothesisTestCase):
                     use_float16=use_float16)
 
     @given(device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_forked_cw(self, device_option):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
@@ -568,6 +572,7 @@ class TestCase(hu.HypothesisTestCase):
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_barrier(self, comm_size, device_option):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
@@ -618,6 +623,7 @@ class TestCase(hu.HypothesisTestCase):
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_close_connection(self, comm_size, device_option):
         import time
         start_time = time.time()
@@ -679,6 +685,7 @@ class TestCase(hu.HypothesisTestCase):
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_io_error(self, comm_size, device_option):
         TestCase.test_counter += 1
         with self.assertRaises(IoError):

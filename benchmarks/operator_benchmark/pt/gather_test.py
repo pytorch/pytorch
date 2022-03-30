@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 import numpy
@@ -35,15 +30,17 @@ gather_configs_long = op_bench.cross_product_configs(
 
 class GatherBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, dim, device):
-        self.input_one = torch.rand(M, N, device=device)
-        self.dim = dim
         min_val = M if dim == 0 else N
         numpy.random.seed((1 << 32) - 1)
-        self.index = torch.tensor(numpy.random.randint(0, min_val, (M, N)), device=device)
+        self.inputs = {
+            "input_one": torch.rand(M, N, device=device),
+            "dim": dim,
+            "index": torch.tensor(numpy.random.randint(0, min_val, (M, N)), device=device)
+        }
         self.set_module_name("gather")
 
-    def forward(self):
-        return torch.gather(self.input_one, self.dim, self.index)
+    def forward(self, input_one, dim: int, index):
+        return torch.gather(input_one, dim, index)
 
 
 op_bench.generate_pt_test(gather_configs_short + gather_configs_long,

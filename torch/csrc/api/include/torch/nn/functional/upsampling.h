@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/nn/functional/pooling.h>
 #include <torch/nn/options/upsampling.h>
 
@@ -47,14 +48,14 @@ inline std::vector<int64_t> _interp_output_size(
     // the result for ints is the same with/without recompute_scale_factor
     bool is_float_scale_factor = false;
     for (double scale : scale_factors) {
-      is_float_scale_factor = floor(scale) == scale;
+      is_float_scale_factor = floor(scale) != scale;
       if (is_float_scale_factor) {
         break;
       }
     }
     if (is_float_scale_factor) {
-      TORCH_WARN("The default behavior for interpolate/upsample with float scale_factor will change "
-                 "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+      TORCH_WARN("The default behavior for interpolate/upsample with float scale_factor changed "
+                 "in 1.6.0 to align with other frameworks/libraries, and uses scale_factor directly, "
                  "instead of relying on the computed output size. "
                  "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                  "See the documentation of nn.Upsample for details. ");
@@ -62,7 +63,7 @@ inline std::vector<int64_t> _interp_output_size(
   }
 
   std::vector<int64_t> ret;
-  for (int64_t i = 0; i < dim; i++) {
+  for (const auto i : c10::irange(dim)) {
     ret.emplace_back(static_cast<int64_t>(floor(input.size(i + 2) * scale_factors[i])));
   }
   return ret;
@@ -76,7 +77,8 @@ inline Tensor interpolate(
   const c10::optional<std::vector<double>>& scale_factor,
   InterpolateFuncOptions::mode_t mode,
   c10::optional<bool> align_corners,
-  c10::optional<bool> recompute_scale_factor) {
+  c10::optional<bool> recompute_scale_factor,
+  bool antialias) {
   if (c10::get_if<enumtype::kNearest>(&mode) ||
       c10::get_if<enumtype::kArea>(&mode)) {
     if (align_corners != c10::nullopt) {
@@ -98,7 +100,7 @@ inline Tensor interpolate(
 
   auto scale_factor_len = input.dim() - 2;
   std::vector<c10::optional<double>> scale_factor_list(scale_factor_len, c10::nullopt);
-  if (scale_factor != c10::nullopt && recompute_scale_factor.has_value() && !recompute_scale_factor.value()) {
+  if (scale_factor != c10::nullopt && !recompute_scale_factor.value_or(false)) {
     auto _scale_factor_repeated = *scale_factor;
     scale_factor_list = {};
     for (const auto& elem : _scale_factor_repeated) {
@@ -106,14 +108,28 @@ inline Tensor interpolate(
     }
   }
 
+  if (antialias && !(input.dim() == 4 && (c10::get_if<enumtype::kBilinear>(&mode) ) ) ) {
+      TORCH_CHECK(
+          false,
+          "Anti-alias option is only supported for bilinear mode");
+  }
+
   auto closed_over_args = std::make_tuple(input, size, scale_factor, recompute_scale_factor);
   if (input.dim() == 3 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest1d(input, _interp_output_size(1, closed_over_args), scale_factor_list.at(0));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kNearest>(&mode)) {
-    return torch::upsample_nearest2d(input, _interp_output_size(2, closed_over_args), 
+    return torch::upsample_nearest2d(input, _interp_output_size(2, closed_over_args),
                                      scale_factor_list.at(0), scale_factor_list.at(1));
   } else if (input.dim() == 5 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest3d(input, _interp_output_size(3, closed_over_args),
+                                     scale_factor_list.at(0), scale_factor_list.at(1), scale_factor_list.at(2));
+  } else if (input.dim() == 3 && c10::get_if<enumtype::kNearestExact>(&mode)) {
+    return torch::_upsample_nearest_exact1d(input, _interp_output_size(1, closed_over_args), scale_factor_list.at(0));
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kNearestExact>(&mode)) {
+    return torch::_upsample_nearest_exact2d(input, _interp_output_size(2, closed_over_args),
+                                     scale_factor_list.at(0), scale_factor_list.at(1));
+  } else if (input.dim() == 5 && c10::get_if<enumtype::kNearestExact>(&mode)) {
+    return torch::_upsample_nearest_exact3d(input, _interp_output_size(3, closed_over_args),
                                      scale_factor_list.at(0), scale_factor_list.at(1), scale_factor_list.at(2));
   } else if (input.dim() == 3 && c10::get_if<enumtype::kArea>(&mode)) {
     return detail::adaptive_avg_pool1d(input, _interp_output_size(1, closed_over_args));
@@ -132,7 +148,11 @@ inline Tensor interpolate(
     TORCH_CHECK(false, "Got 4D input, but linear mode needs 3D input");
   } else if (input.dim() == 4 && c10::get_if<enumtype::kBilinear>(&mode)) {
     TORCH_INTERNAL_ASSERT(align_corners != c10::nullopt);
-    return torch::upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), *align_corners, 
+    if (antialias) {
+      return torch::_upsample_bilinear2d_aa(input, _interp_output_size(2, closed_over_args), *align_corners,
+                                            scale_factor_list.at(0), scale_factor_list.at(1));
+    }
+    return torch::upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), *align_corners,
                                       scale_factor_list.at(0), scale_factor_list.at(1));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kTrilinear>(&mode)) {
     TORCH_CHECK(false, "Got 4D input, but trilinear mode needs 5D input");
@@ -146,7 +166,7 @@ inline Tensor interpolate(
                                        scale_factor_list.at(0), scale_factor_list.at(1), scale_factor_list.at(2));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kBicubic>(&mode)) {
     TORCH_INTERNAL_ASSERT(align_corners != c10::nullopt);
-    return torch::upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), *align_corners, 
+    return torch::upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), *align_corners,
                                      scale_factor_list.at(0), scale_factor_list.at(1));
   } else {
     TORCH_CHECK(
@@ -177,7 +197,8 @@ inline Tensor interpolate(const Tensor& input, const InterpolateFuncOptions& opt
     options.scale_factor(),
     options.mode(),
     options.align_corners(),
-    options.recompute_scale_factor());
+    options.recompute_scale_factor(),
+    options.antialias());
 }
 
 } // namespace functional

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include "torch/csrc/jit/tensorexpr/eval.h"
 
 namespace torch {
@@ -168,21 +169,9 @@ class PaddedBuffer : public PaddedBufferBase {
 
   // Verify the watermarks in the paddings are intact.
   void ValidateWatermark() const {
-    for (int i = 0; i < kPaddingSize; i++) {
-      ASSERT_EQ(
-          data_[i],
-          kPaddingValue,
-          "left-side watermark broken: index: ",
-          i,
-          ", name: ",
-          name());
-      ASSERT_EQ(
-          data_[i + total_size_ + kPaddingSize],
-          kPaddingValue,
-          "right-side watermark broken: index: ",
-          i,
-          ", name: ",
-          name());
+    for (const auto i : c10::irange(kPaddingSize)) {
+      ASSERT_EQ(data_[i], kPaddingValue);
+      ASSERT_EQ(data_[i + total_size_ + kPaddingSize], kPaddingValue);
     }
   }
 
@@ -190,14 +179,8 @@ class PaddedBuffer : public PaddedBufferBase {
     ValidateWatermark();
     DCHECK(backup_data_.size() == data_.size())
         << "Please make sure you have call Backup() before calling CheckBackup()";
-    for (int i = 0; i < total_size_; i++) {
-      ASSERT_EQ(
-          data_[i + kPaddingSize],
-          backup_data_[i + kPaddingSize],
-          "mismatch against backup, index: ",
-          i,
-          ", name: ",
-          name());
+    for (const auto i : c10::irange(total_size_)) {
+      ASSERT_EQ(data_[i + kPaddingSize], backup_data_[i + kPaddingSize]);
     }
   }
 
@@ -209,7 +192,7 @@ class PaddedBuffer : public PaddedBufferBase {
 
 template <typename T>
 inline CodeGen::CallArg::CallArg(const PaddedBuffer<T>& buffer)
-    : ptr_(const_cast<T*>(buffer.data())) {}
+    : data_(const_cast<T*>(buffer.data())) {}
 
 template <typename T>
 std::string CompareErrorMsg(
@@ -217,7 +200,9 @@ std::string CompareErrorMsg(
     const PaddedBuffer<T>& v2,
     int index) {
   std::ostringstream oss;
-  oss << "index: " << index << ", names: " << v1.name() << ", " << v2.name();
+  oss << "index: " << index << ", v1: (" << v1.name() << ", " << v1(index)
+      << ")"
+      << ", v2: (" << v2.name() << ", " << v2(index) << ")";
   return oss.str();
 }
 
@@ -230,9 +215,8 @@ void ExpectAllEqual(const PaddedBuffer<T>& f1, const PaddedBuffer<T>& f2) {
   ASSERT_EQ(v1.size(), v2.size());
   f1.ValidateWatermark();
   f2.ValidateWatermark();
-  for (int i = 0; i < total_size; i++) {
-    ASSERT_EQ(
-        v1[kPaddingSize + i], v2[kPaddingSize + i], CompareErrorMsg(f1, f2, i));
+  for (const auto i : c10::irange(total_size)) {
+    ASSERT_EQ(v1[kPaddingSize + i], v2[kPaddingSize + i]);
   }
 }
 
@@ -248,12 +232,8 @@ void ExpectAllNear(
   ASSERT_EQ(v1.size(), v2.size());
   f1.ValidateWatermark();
   f2.ValidateWatermark();
-  for (int i = 0; i < total_size; i++) {
-    ASSERT_NEAR(
-        v1[kPaddingSize + i],
-        v2[kPaddingSize + i],
-        abs_error,
-        CompareErrorMsg(f1, f2, i));
+  for (const auto i : c10::irange(total_size)) {
+    ASSERT_NEAR(v1[kPaddingSize + i], v2[kPaddingSize + i], abs_error);
   }
 }
 

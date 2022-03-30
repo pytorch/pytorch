@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
@@ -19,12 +20,18 @@ static thread_local int64_t current_context_id_ = kInvalidContextId;
 // Lock to ensure DistAutogradContainer is initialized only once.
 static std::mutex dist_container_init_lock_;
 
-DistAutogradContainer::DistAutogradContainer()
+DistAutogradContainer::DistAutogradContainer(uint32_t num_shards)
     : next_context_id_(0),
       worker_id_(0),
       initialized_(false),
+      autograd_contexts_(num_shards),
+      num_shards_(num_shards),
       next_autograd_message_id_(0),
-      max_id_(0) {}
+      max_id_(0) {
+  // num_shards has to be a power of 2 for the modulo trick in 'getShard'
+  // to work.
+  TORCH_INTERNAL_ASSERT((num_shards & (num_shards - 1)) == 0);
+}
 
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   std::lock_guard<std::mutex> guard(dist_container_init_lock_);
@@ -35,8 +42,16 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
 
   auto& container = getInstanceInternal();
   TORCH_CHECK(
-      !container.initialized_,
-      "Container is already initialized! Cannot initialize it twice!");
+      !container.initialized_ || (worker_id == container.worker_id_),
+      "Container is already initialized with worker_id: ",
+      container.worker_id_,
+      ", cannot initialize with different worker_id: ",
+      worker_id);
+
+  if (container.initialized_) {
+    LOG(INFO) << "DistAutogradContainer is already initialized";
+    return container;
+  }
 
   container.worker_id_ = worker_id;
   container.next_context_id_ = static_cast<int64_t>(worker_id)
@@ -50,6 +65,29 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   return container;
 }
 
+uint32_t DistAutogradContainer::computeNumShards() {
+  uint32_t num_shards = 1;
+  auto num_hw_threads = std::thread::hardware_concurrency();
+  if (num_hw_threads == 0) {
+    num_shards = kNumDefaultShards;
+  } else {
+    // Compute the next power of 2 which is higher than twice the hardware
+    // concurrency.
+    while (num_shards < num_hw_threads * 2) {
+      num_shards <<= 1;
+    }
+  }
+  VLOG(1) << "Number of shards for DistAutogradContainer: " << num_shards;
+  return num_shards;
+}
+
+inline DistAutogradContainer::ContextsShard& DistAutogradContainer::getShard(
+    int64_t context_id) {
+  // num_shards_ has to be a power of 2 for this modulo trick to work (validated
+  // during init).
+  return autograd_contexts_[context_id & (num_shards_ - 1)];
+}
+
 DistAutogradContainer& DistAutogradContainer::getInstance() {
   auto& instance = getInstanceInternal();
   TORCH_CHECK(
@@ -61,7 +99,8 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
   // Leaky singleton to avoid module destructor race.
-  static DistAutogradContainer* container = new DistAutogradContainer();
+  static DistAutogradContainer* container =
+      new DistAutogradContainer(computeNumShards());
   return *container;
 }
 
@@ -72,14 +111,15 @@ int64_t DistAutogradContainer::newAutogradMessageId() {
 }
 
 ContextPtr DistAutogradContainer::getOrCreateContext(int64_t context_id) {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  auto it = autograd_context_.find(context_id);
-  if (it != autograd_context_.end()) {
+  auto& shard = getShard(context_id);
+  std::lock_guard<std::mutex> guard(shard.lock);
+  auto it = shard.contexts.find(context_id);
+  if (it != shard.contexts.end()) {
     return it->second;
   }
 
   auto& context =
-      autograd_context_
+      shard.contexts
           .emplace(
               std::piecewise_construct,
               std::forward_as_tuple(context_id),
@@ -98,20 +138,23 @@ const ContextPtr DistAutogradContainer::newContext() {
       current_context_id_ == kInvalidContextId,
       "Already have an autograd context id for this thread.");
 
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  // Check for overflow into workerId_ section.
-  TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
+  auto context_id = next_context_id_++;
+  current_context_id_ = context_id;
 
+  // Check for overflow into workerId_ section.
+  TORCH_INTERNAL_ASSERT(context_id < max_id_);
+
+  auto& shard = getShard(context_id);
+  std::lock_guard<std::mutex> guard(shard.lock);
   auto& context =
-      autograd_context_
+      shard.contexts
           .emplace(
               std::piecewise_construct,
-              std::forward_as_tuple(next_context_id_),
+              std::forward_as_tuple(context_id),
               std::forward_as_tuple(
-                  std::make_shared<DistAutogradContext>(next_context_id_)))
+                  std::make_shared<DistAutogradContext>(context_id)))
           .first->second;
 
-  current_context_id_ = next_context_id_++;
   return context;
 }
 
@@ -125,43 +168,59 @@ ContextPtr DistAutogradContainer::currentContext() {
       "Current thread doesn't have a valid autograd context. Please wrap your "
       "code using: `with torch.distributed.autograd.context() as context_id` "
       "to generate a valid context");
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  auto it = autograd_context_.find(current_context_id_);
+
+  auto& shard = getShard(current_context_id_);
+  std::lock_guard<std::mutex> guard(shard.lock);
+  auto it = shard.contexts.find(current_context_id_);
   TORCH_CHECK(
-      it != autograd_context_.end(),
+      it != shard.contexts.end(),
       "Couldn't find autograd context "
       "data for current autograd context id");
   return it->second;
 }
 
 void DistAutogradContainer::releaseContextIfPresent(int64_t context_id) {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  auto& shard = getShard(context_id);
+  std::unique_lock<std::mutex> lock(shard.lock);
+  auto it = shard.contexts.find(context_id);
+
   // no-op if the context does not exist on this thread. This could happen if an
   // in-flight RPC has already released the context on this thread.
-  if (autograd_context_.find(context_id) == autograd_context_.end()) {
+  if (it == shard.contexts.end()) {
     return;
   }
-  sendReleaseContextRpc(context_id);
-  eraseContextIdAndReset(context_id);
+
+  auto knownWorkerIds = it->second->getKnownWorkerIds();
+  eraseContextIdAndReset(shard, context_id);
+
+  // Unlock since we no longer need the lock.
+  lock.unlock();
+  sendReleaseContextRpc(knownWorkerIds, context_id);
 }
 
 void DistAutogradContainer::releaseContext(int64_t context_id) {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  auto& shard = getShard(context_id);
+  std::unique_lock<std::mutex> lock(shard.lock);
+  auto it = shard.contexts.find(context_id);
 
   TORCH_CHECK(
-      autograd_context_.find(context_id) != autograd_context_.end(),
+      it != shard.contexts.end(),
       "Could not find autograd context with id: ",
       context_id);
 
-  sendReleaseContextRpc(context_id);
-  eraseContextIdAndReset(context_id);
+  auto knownWorkerIds = it->second->getKnownWorkerIds();
+  eraseContextIdAndReset(shard, context_id);
+
+  // Unlock since we no longer need the lock.
+  lock.unlock();
+  sendReleaseContextRpc(knownWorkerIds, context_id);
 }
 
-void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
+void DistAutogradContainer::sendReleaseContextRpc(
+    const std::unordered_set<rpc::worker_id_t>& workerIds,
+    int64_t context_id) {
   // Best-effort notification to other workers to clean up their Dist autograd
   // context, in order to reduce memory usage.
-  auto workerIds =
-      autograd_context_.find(context_id)->second->getKnownWorkerIds();
   // agent.send() or getCurrentRpcAgent may throw an error in the case of an
   // ungraceful shutdown, where we are shutting down RPC and also processing
   // this message in a separate thread concurrently. In this case, don't throw
@@ -188,13 +247,13 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
           options);
 
       cleanupFuture->addCallback(
-          [](const rpc::Message& message /* unused */,
-             const c10::optional<torch::utils::FutureError>& error) {
-            if (error) {
+          [worker_id](rpc::JitFuture& future) {
+            if (future.hasError()) {
               std::string errorMsg = c10::str(
-                  "Could not release Dist Autograd Context after ",
-                  kNumCleanupContextRetries,
-                  " attempts.");
+                  "Could not release Dist Autograd Context on node ",
+                  worker_id,
+                  ": ",
+                  future.tryRetrieveErrorMessage());
               LOG(ERROR) << errorMsg;
               return;
             }
@@ -207,8 +266,11 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   }
 }
 
-void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
-  autograd_context_.erase(context_id);
+void DistAutogradContainer::eraseContextIdAndReset(
+    DistAutogradContainer::ContextsShard& shard,
+    int64_t context_id) {
+  // We already have the shard lock here.
+  shard.contexts.erase(context_id);
 
   if (current_context_id_ == context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
@@ -217,20 +279,23 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
 }
 
 void DistAutogradContainer::isValidContext(int64_t context_id) {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  auto& shard = getShard(context_id);
+  std::lock_guard<std::mutex> guard(shard.lock);
   TORCH_CHECK(
-      autograd_context_.find(context_id) != autograd_context_.end(),
+      shard.contexts.find(context_id) != shard.contexts.end(),
       "Could not find autograd context with id: ",
       context_id);
 }
 
 ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  auto& shard = getShard(context_id);
+  std::lock_guard<std::mutex> guard(shard.lock);
+  auto it = shard.contexts.find(context_id);
   TORCH_CHECK(
-      autograd_context_.find(context_id) != autograd_context_.end(),
+      it != shard.contexts.end(),
       "Could not find autograd context with id: ",
       context_id);
-  return autograd_context_.at(context_id);
+  return it->second;
 }
 
 int64_t DistAutogradContainer::getMaxId() {
@@ -253,8 +318,12 @@ void DistAutogradContainer::clearCurrentContext() {
 }
 
 size_t DistAutogradContainer::numAutogradContexts() const {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  return autograd_context_.size();
+  size_t ret = 0;
+  for (const auto& shard : autograd_contexts_) {
+    std::lock_guard<std::mutex> guard(shard.lock);
+    ret += shard.contexts.size();
+  }
+  return ret;
 }
 
 int64_t DistAutogradContainer::currentContextId() {

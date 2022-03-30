@@ -1,8 +1,11 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
-#include "pickler.h"
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch {
 namespace jit {
@@ -13,12 +16,16 @@ using TypeResolver =
 using ObjLoader = std::function<
     c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
 
+class DeserializationStorageContext;
+
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
 // PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be
 // deleted at some point, the Pickler doesn't produce it and it's only around to
 // support models saved before 1.1
-class Unpickler {
+class TORCH_API Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+
+  using TypeParserT = c10::TypePtr (*)(const std::string&);
 
  public:
   // tensors inside the pickle are references to the tensor_table.
@@ -26,29 +33,41 @@ class Unpickler {
   // to resolve any JIT type. class_resolver and type_resolver are not merged
   // here because some use cases need to get strong class type that
   // type_resolver_ can not return.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
-      const std::vector<at::Tensor>* tensor_table)
-      : reader_(reader),
+      c10::ArrayRef<at::Tensor> tensor_table,
+      TypeParserT type_parser = defaultTypeParser)
+      : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
+        use_storage_device_(false),
+        type_parser_(type_parser),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device)
-      : reader_(reader),
-        tensor_table_(nullptr),
+      c10::optional<at::Device> device,
+      bool use_storage_device = false,
+      TypeParserT type_parser = defaultTypeParser,
+      std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
+      : reader_(std::move(reader)),
+        tensor_table_(),
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         device_(std::move(device)),
+        use_storage_device_(use_storage_device),
+        type_parser_(type_parser),
+        storage_context_(std::move(storage_context)),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
@@ -69,6 +88,11 @@ class Unpickler {
   // the version manually.
   void set_version(uint64_t version_number) {
     version_ = version_number;
+  }
+
+  static c10::TypePtr defaultTypeParser(const std::string& str) {
+    ScriptTypeParser parser;
+    return parser.parseType(str);
   }
 
  private:
@@ -96,6 +120,7 @@ class Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
 #endif
@@ -123,7 +148,7 @@ class Unpickler {
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
-  const std::vector<at::Tensor>* tensor_table_;
+  c10::ArrayRef<at::Tensor> tensor_table_;
 
   // When deserializing types on lists and dicts, cache the type here
   // so we don't have to parse the same type multiple times. Strings
@@ -138,6 +163,16 @@ class Unpickler {
 
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
+  // When set to true, Unpickler will ignore the pickled device and use the
+  // device of the DataPtr returned by the read_record_ function. The default
+  // value of this flag is false.
+  const bool use_storage_device_;
+
+  TypeParserT type_parser_{defaultTypeParser};
+
+  // Used for torch.package to enable sharing of storages across
+  // ScriptModules and eager modules
+  std::shared_ptr<DeserializationStorageContext> storage_context_;
 
   // See [type tag serialization]
   uint64_t version_;

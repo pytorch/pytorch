@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/div_rtn.h>
 
 #include <ATen/native/im2col.h>
 #include <ATen/native/im2col_shape_check.h>
+#include <c10/util/irange.h>
 
 // Note [im2col/col2im output padding]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -127,7 +127,7 @@ static void col2im_out_cpu_template(
   if (input.dim() == 2) {
     // Force batch
     batched_input = false;
-    input.resize_({1, input.size(0), input.size(1)});
+    input = input.view({1, input.size(0), input.size(1)});
   }
 
   int64_t batch_size = input.size(0);
@@ -137,7 +137,7 @@ static void col2im_out_cpu_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   output.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
       input.scalar_type(), "col2im_out_cpu", [&] {
         Tensor input_n = Tensor();
         Tensor output_n = Tensor();
@@ -151,7 +151,7 @@ static void col2im_out_cpu_template(
                 stride_width +
             1;
 
-        for (int64_t elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
@@ -187,20 +187,19 @@ void col2im_backward_out_cpu_template(
     IntArrayRef padding,
     IntArrayRef stride) {
   // im2col_out_cpu checks size of kernel_size, dilation, padding and stride
-  im2col_out_cpu(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
+  at::native::im2col_out_cpu(
+      grad_output, kernel_size, dilation, padding, stride, grad_input);
 }
 
 } // namespace
 
-Tensor& col2im_out_cpu(
-    Tensor& output,
-    const Tensor& input,
+Tensor& col2im_out_cpu(const Tensor& input,
     IntArrayRef output_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& output) {
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
   return output;
@@ -220,13 +219,12 @@ Tensor col2im_cpu(
   return output;
 }
 
-Tensor& col2im_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& col2im_backward_out_cpu(const Tensor& grad_output,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& grad_input) {
   col2im_backward_out_cpu_template(
       grad_input, grad_output, kernel_size, dilation, padding, stride);
   return grad_input;

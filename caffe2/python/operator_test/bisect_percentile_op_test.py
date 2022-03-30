@@ -1,7 +1,4 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from typing import List
 
 import hypothesis.strategies as st
 
@@ -115,7 +112,7 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
 
     @given(
         N=st.integers(min_value=20, max_value=100),
-        lengths=st.lists(
+        lengths_in=st.lists(
             elements=st.integers(min_value=2, max_value=10),
             min_size=2,
             max_size=5,
@@ -126,9 +123,9 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
         **hu.gcs_cpu_only
     )
     def test_bisect_percentil_op_large(
-        self, N, lengths, max_value, discrete, p, gc, dc
+        self, N: int, lengths_in: List[int], max_value: int, discrete: bool, p: float, gc, dc
     ):
-        lengths = np.array(lengths, dtype=np.int32)
+        lengths = np.array(lengths_in, dtype=np.int32)
         D = len(lengths)
 
         if discrete:

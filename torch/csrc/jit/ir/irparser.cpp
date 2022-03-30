@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir/irparser.h>
+
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -70,9 +71,13 @@ struct ParsedLiteral {
   int64_t i = 0;
   std::string s = "";
   double f = 0.0;
+  c10::complex<double> c = c10::complex<double>(0, 0);
+  TypePtr ty;
   std::vector<int64_t> is;
   std::vector<std::string> ss;
   std::vector<double> fs;
+  std::vector<c10::complex<double>> cs;
+  std::vector<TypePtr> tys;
 };
 
 struct VarWithType {
@@ -139,6 +144,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
+  std::pair<TypePtr, c10::optional<c10::AliasInfo>> type_alias;
   ParsedLiteral r;
   switch (token.kind) {
     case TK_STRINGLITERAL:
@@ -149,12 +155,19 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
     case '-':
       str = "-";
       L.next();
-      L.expect(TK_NUMBER);
+      if (L.cur().kind != TK_NUMBER) {
+        throw ErrorReport(token.range)
+            << "Expected a number after '-' but got:" << token.text();
+      }
       // Fallthrough
     case TK_NUMBER:
       str += L.cur().text();
-
-      if (str.find('.') != std::string::npos ||
+      if (str.find('j') != std::string::npos) {
+        r.k = AttributeKind::c;
+        auto imag = c10::stod(str.substr(0, str.size() - 1));
+        r.c = c10::complex<double>(0, imag);
+      } else if (
+          str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
         r.f = c10::stod(str);
@@ -164,6 +177,13 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       }
       L.next();
       return r;
+    case TK_IDENT:
+      // Type literal
+      r.k = AttributeKind::ty;
+      type_alias = type_parser.parseType();
+      AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
+      r.ty = type_alias.first;
+      return r;
     default:
       throw ErrorReport(token.range)
           << "Could not parse literal" << token.text();
@@ -172,15 +192,11 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
 
 /** \brief Parse attribute and add it to the node N.
  *
- * The function determines the attribute type (string, int, float, list of
- * strings, list of ints, list of floats, and a list of tensors (currently only
- * for empty lists)).
- * An attribute looks like the following:
- *   AttrName=AttrValue
- *  Where AttrValue can be a list or a scalar literal, e.g.:
- *   size = 27
- *   name = "Bob"
- *   coefs = [1.2, 3.4, 0.6]
+ * The function determines the attribute type (string, int, float, complex, list
+ * of strings, list of ints, list of floats, list of complex, and a list of
+ * tensors (currently only for empty lists)). An attribute looks like the
+ * following: AttrName=AttrValue Where AttrValue can be a list or a scalar
+ * literal, e.g.: size = 27 name = "Bob" coefs = [1.2, 3.4, 0.6]
  */
 void IRParser::parseAttr(Node* n) {
   std::string attrname = L.expect(TK_IDENT).text();
@@ -188,9 +204,11 @@ void IRParser::parseAttr(Node* n) {
   if (L.cur().kind == '[') {
     // list
     AttributeKind k = AttributeKind::ts;
-    std::vector<int64_t> is;
-    std::vector<std::string> ss;
-    std::vector<double> fs;
+    c10::List<int64_t> is;
+    c10::List<std::string> ss;
+    c10::List<double> fs;
+    c10::List<c10::complex<double>> cs;
+    std::vector<TypePtr> tys;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
       ParsedLiteral r = parseScalarLiteral(n);
@@ -210,22 +228,38 @@ void IRParser::parseAttr(Node* n) {
           AT_ASSERT(!elem_num++ || k == AttributeKind::fs);
           k = AttributeKind::fs;
           break;
+        case AttributeKind::c:
+          cs.push_back(r.c);
+          AT_ASSERT(!elem_num++ || k == AttributeKind::cs);
+          k = AttributeKind::cs;
+          break;
+        case AttributeKind::ty:
+          tys.push_back(r.ty);
+          AT_ASSERT(!elem_num++ || k == AttributeKind::tys);
+          k = AttributeKind::tys;
+          break;
         default:
           throw ErrorReport(L.cur().range) << "Unexpected attr type";
       }
     });
     switch (k) {
       case AttributeKind::ts:
-        n->ts_(Symbol::attr(attrname), {});
+        n->ival_(Symbol::attr(attrname), IValue());
         break;
       case AttributeKind::ss:
-        n->ss_(Symbol::attr(attrname), ss);
+        n->ival_(Symbol::attr(attrname), IValue(ss));
         break;
       case AttributeKind::fs:
-        n->fs_(Symbol::attr(attrname), fs);
+        n->ival_(Symbol::attr(attrname), IValue(fs));
+        break;
+      case AttributeKind::cs:
+        n->ival_(Symbol::attr(attrname), IValue(cs));
         break;
       case AttributeKind::is:
-        n->is_(Symbol::attr(attrname), is);
+        n->ival_(Symbol::attr(attrname), IValue(is));
+        break;
+      case AttributeKind::tys:
+        n->tys_(Symbol::attr(attrname), tys);
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -242,6 +276,12 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::f:
         n->f_(Symbol::attr(attrname), r.f);
+        break;
+      case AttributeKind::c:
+        n->c_(Symbol::attr(attrname), r.c);
+        break;
+      case AttributeKind::ty:
+        n->ty_(Symbol::attr(attrname), r.ty);
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -366,12 +406,11 @@ void IRParser::parseOperator(Block* b) {
         // Don't currently support checking against type variables
         // TODO: support?
         if (!schema_return_type->hasFreeVariables() &&
-            !v.type->isSubtypeOf(schema_return_type)) {
+            !v.type->isSubtypeOf(*schema_return_type)) {
           throw ErrorReport(source_range)
-              << "Annotated type " << v.type->python_str()
+              << "Annotated type " << v.type->repr_str()
               << " does not match schema type "
-              << schema_return_type->python_str() << " for operator "
-              << *schema;
+              << schema_return_type->repr_str() << " for operator " << *schema;
         }
         vmap[v.name]->setType(v.type);
       }

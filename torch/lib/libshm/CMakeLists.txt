@@ -1,6 +1,6 @@
 project(libshm C CXX)
-cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
-cmake_policy(VERSION 2.6)
+cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
+cmake_policy(VERSION 2.8.12)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
 include(${TORCH_ROOT}/cmake/public/threads.cmake)
@@ -23,11 +23,14 @@ else()
 endif()
 
 add_library(shm SHARED core.cpp)
+if(HAVE_SOVERSION)
+  set_target_properties(shm PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 
 target_include_directories(shm PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   )
 
 add_executable(torch_shm_manager manager.cpp)
@@ -64,13 +67,13 @@ if(UNIX AND NOT APPLE)
     # site above though in case there was a reason we were testing
     # against clock_gettime. In principle, the choice of symbol you
     # test for shouldn't matter.
-    set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
+    set(CMAKE_REQUIRED_LIBRARIES caffe2::Threads)
     check_library_exists(rt shm_open "sys/mman.h" NEED_RT_AND_PTHREAD)
     unset(CMAKE_REQUIRED_LIBRARIES)
     if(NEED_RT_AND_PTHREAD)
       message(STATUS "Needs it, linking against pthread and rt")
-      target_link_libraries(shm rt Threads::Threads)
-      target_link_libraries(torch_shm_manager rt Threads::Threads)
+      target_link_libraries(shm rt caffe2::Threads)
+      target_link_libraries(torch_shm_manager rt caffe2::Threads)
     endif()
   endif()
 endif()

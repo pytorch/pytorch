@@ -8,6 +8,7 @@
 #include "caffe2/operators/rnn/recurrent_network_executor.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 C10_DECLARE_bool(caffe2_rnn_executor);
 
@@ -46,7 +47,7 @@ struct Link {
   int32_t window{1};
 };
 
-struct CAFFE2_API ScratchWorkspaces {
+struct TORCH_API ScratchWorkspaces {
   std::vector<std::shared_ptr<Workspace>> stepWorkspaces;
   std::shared_ptr<Workspace> sharedBlobsWs = nullptr;
 };
@@ -59,7 +60,7 @@ inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
       t;
 }
 
-CAFFE2_API std::map<string, string> GetRecurrentMapping(
+TORCH_API std::map<string, string> GetRecurrentMapping(
     const std::vector<detail::Link>& links,
     bool backward);
 
@@ -102,7 +103,7 @@ void repeatCopy(
     const T* src,
     T* dst,
     Context* context) {
-  for (int i = 0; i < repeat_n; ++i) {
+  for (const auto i : c10::irange(repeat_n)) {
     context->template CopySameDevice<T>(n, src, dst + i * n);
   }
 }
@@ -158,15 +159,15 @@ void initializeRecurrentInput(
   }
 }
 
-CAFFE2_API void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef);
+TORCH_API void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef);
 
-CAFFE2_API void AddApplyLinkOps(
+TORCH_API void AddApplyLinkOps(
     const vector<Link>& links,
     std::string timestep,
     const DeviceOption& device_option,
     NetDef* netdef);
 
-CAFFE2_API void extractLinks(
+TORCH_API void extractLinks(
     OperatorBase* op,
     const std::string& internalArg,
     const std::string& externalArg,
@@ -174,7 +175,7 @@ CAFFE2_API void extractLinks(
     const std::string& windowArg,
     std::vector<detail::Link>* links);
 
-CAFFE2_API NetDef
+TORCH_API NetDef
 extractNetDef(const OperatorDef& op, const std::string& argName);
 } // namespace detail
 
@@ -226,7 +227,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
         this->template GetRepeatedArgument<int>("initial_recurrent_state_ids");
     CAFFE_ENFORCE_EQ(states.size(), inputs.size(), "states/inputs mismatch");
     std::vector<detail::RecurrentInput> ris;
-    for (auto i = 0; i < states.size(); ++i) {
+    for (const auto i : c10::irange(states.size())) {
       // States need to be "global" (since they are shared between
       // forward and backward).
       sharedWs->CreateBlob(states[i]);
@@ -251,7 +252,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     CAFFE_ENFORCE(
         dst.size() == offset.size(), "alias_dst/alias_offset mismatch");
     std::vector<detail::OffsetAlias> aliases;
-    for (auto i = 0; i < src.size(); ++i) {
+    for (const auto i : c10::irange(src.size())) {
       detail::OffsetAlias oc;
       oc.src = src[i];
       oc.dst = dst[i];
@@ -321,6 +322,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     // have to be stored in step workspaces but can be shared.
     initializeBlobsToRecomputeOnBackward(sharedBlobsWs.get());
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (has_backward_pass && seqLen > stepWorkspaces.size()) {
       stepWorkspaces.resize(seqLen);
     }
@@ -339,7 +341,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
       stepWorkspaces.resize(num_workspaces_on_fwd_only);
     }
 
-    for (auto t = 0; t < seqLen; ++t) {
+    for (const auto t : c10::irange(seqLen)) {
       auto& currentStepWorkspace =
           (has_backward_pass ? stepWorkspaces[t] :
               stepWorkspaces[t % num_workspaces_on_fwd_only]);
@@ -468,7 +470,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   }
 
   void renameOpInputOutput(std::string from_name, std::string to_name) {
-    for (int j = 0; j < stepNetDef_.op_size(); j++) {
+    for (const auto j : c10::irange(stepNetDef_.op_size())) {
       auto* op = stepNetDef_.mutable_op(j);
       for (int i = 0; i < op->input_size(); i++) {
         if (op->input(i) == from_name) {
@@ -493,7 +495,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         param.size(),
         " != ",
         param_grads.size());
-    for (int i = 0; i < param.size(); ++i) {
+    for (const auto i : c10::irange(param.size())) {
       detail::Param p;
       // Forward inputs come after [outputs_with_grads] gradient inputs
       p.param = operator_def.input(param[i] + gradInputs_.size());
@@ -520,17 +522,17 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto& offset =
         this->template GetRepeatedArgument<int32_t>("alias_offset");
 
-    for (auto i = 0; i < recurrent.size(); ++i) {
+    for (const auto i : c10::irange(recurrent.size())) {
       detail::RecurrentGradient rg;
       rg.param = recurrent[i];
       rg.grad = remappedName(recurrent[i] + "_grad");
 
-      for (int j = 0; j < alias_src.size(); ++j) {
+      for (const auto j : c10::irange(alias_src.size())) {
         if (alias_src[j] != recurrent[i]) {
           continue;
         }
         int idx = -1;
-        for (int k = 0; k < gradInputs_.size(); ++k) {
+        for (const auto k : c10::irange(gradInputs_.size())) {
           if (gradInputs_[k] == j) {
             idx = k;
           }
@@ -568,7 +570,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         "backward_link_offset",
         "",
         &links);
-    for (int i = 0; i < links.size(); i++) {
+    for (const auto i : c10::irange(links.size())) {
       links[i] = remappedLink(links[i]);
     }
     return links;
@@ -708,7 +710,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     // This code assumes that there are several inputs
     // sequences. Actually it is not supported by the rest of the code,
     // and numSequences_ is a constant, equal to 1.
-    for (int i = 0; i < numSequences_; ++i) {
+    for (const auto i : c10::irange(numSequences_)) {
       // Offseting as the first gradInputs_.size() inputs of the op
       // are from GO. Then all I(0..N).
       const int gradientInputIndex = i + gradInputs_.size();
@@ -782,7 +784,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
 
     CAFFE_ENFORCE_EQ(recurrentInputIds_.size(), recurrentGradients_.size());
-    for (int i = 0; i < recurrentInputIds_.size(); ++i) {
+    for (const auto i : c10::irange(recurrentInputIds_.size())) {
       // See GetRecurrentNetworkGradient to understand offseting here
       // Outputs of the gradient are inputs of the forward pass.
       // So we need to offset on all inputs that go before recurrent

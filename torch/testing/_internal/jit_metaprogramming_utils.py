@@ -1,5 +1,4 @@
 # Torch
-from torch._six import PY2
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
     unpack_variables
@@ -10,11 +9,17 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_utils import is_iterable_of_tensors
+
 from copy import deepcopy
+from typing import List, Union
 import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf
+
+# TODO: include files like this should not set the default dtype
+torch.set_default_dtype(torch.double)
 
 L = 20
 M = 10
@@ -63,21 +68,21 @@ nn_functional_tests = [
     ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
-    ('dropout', (S, S, S), (0.5,), '', (True,
-                                        ['aten::bernoulli_',
-                                         'aten::empty_like', 'aten::mul', 'aten::div'])),
+    ('dropout', (S, S, S), (0.5,), '', (True, 'aten::native_dropout')),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
-    ('dropout3d', (S, S, S), (0.5,)),
+    ('dropout2d', (S, S, S, S), (0.5,), 'batched'),
+    ('dropout3d', (S, S, S, S), (0.5,)),
+    ('dropout3d', (S, S, S, S, S), (0.5,), 'batched'),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
     ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
     ('relu', (S, S, S), (), '', (True,)),
     ('relu', (S, S, S), (), 'inplace'),
     ('glu', (S - 1, S - 1, S - 1), (),),
-    ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5), '', (True,)),
     ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
-    ('relu6', (S, S, S), (),),
+    ('relu6', (S, S, S), (), '', (True,)),
     ('relu6', (S, S, S), (True), 'inplace'),
     ('elu', (S, S, S), (0.9,),),
     ('elu', (S, S, S), (0.9, True), 'inplace'),
@@ -85,27 +90,58 @@ nn_functional_tests = [
     ('selu', (S, S, S), (True), 'inplace'),
     ('celu', (S, S, S), (0.9,),),
     ('celu', (S, S, S), (0.9, True), 'inplace'),
-    ('leaky_relu', (S, S, S), (0.02,),),
+    ('leaky_relu', (S, S, S), (0.02,), '', (True,)),
     ('leaky_relu', (S, S, S), (0.02,), 'inplace'),
     ('rrelu', (S, S), (0.1, 0.3, False),),
     ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
-    ('hardshrink', (S, S, S), (0.4,),),
+    ('hardshrink', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
-    ('softplus', (S, S, S), (),),
+    ('softplus', (S, S, S), (), '', (True,)),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,), '', (True,)),
     ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
     ('tanh', (S, S, S), (), '', (True,)),
     ('sigmoid', (S, S, S), (), '', (True,)),
     ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
-    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
+    ('linear', (S, S), ((M, S),), '', (True, ['aten::linear'])),
+    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::linear'])),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (False, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), None, None, True, ),
+        'training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (0, S, S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+         non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), True, ),
+        'size_zero', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (0, S, S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+         non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), True, ),
+        'size_zero_inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+         non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), True, ),
+        'with_weight_and_bias_training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            None, non_differentiable(torch.ones(S)), True, ),
+        'with_only_bias_training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            non_differentiable(torch.randn(S)), None, True, ),
+        'with_only_weight_training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            None, None, False, ),
+        'inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), False, ),
+        'with_weight_and_bias_inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            None, non_differentiable(torch.ones(S)), False, ),
+        'with_only_bias_inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            non_differentiable(torch.randn(S)), None, False, ),
+        'with_only_weight_inference', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -118,24 +154,27 @@ nn_functional_tests = [
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
-    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '',),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('huber_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('huber_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
-    ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
+    ('margin_ranking_loss', (S,), ((S,), (S,)),),
     ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
     ('pixel_shuffle', (1, 9, 4, 4), (3,),),
+    ('pixel_unshuffle', (1, 1, 12, 12), (3,),),
     ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
     ('pad', (3, 3, 4, 2), ([1, 1],),),
     ('pairwise_distance', (S, S), ((S, S),),),
@@ -225,8 +264,17 @@ def the_method({}):
     return {}
 '''
 
+def value_to_literal(value):
+    if isinstance(value, str):
+        # Quotes string and escapes special characters
+        return ascii(value)
+    if isinstance(value, torch.Tensor):
+        return 'torch.' + str(value)
+    else:
+        return str(value)
+
 def get_call(method_name, func_type, args, kwargs):
-    kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
+    kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
     if(func_type == 'method'):
         args = args[1:]
@@ -235,34 +283,39 @@ def get_call(method_name, func_type, args, kwargs):
     argument_str += ', ' if len(args) and len(kwargs) else ''
     argument_str += kwargs_str
 
-    if func_type == 'functional':
+    if func_type == 'functional' or func_type == 'function':
         call = 'torch.{}({})'.format(method_name, argument_str)
     elif func_type == 'method':
         call = '{}.{}({})'.format(self_arg, method_name, argument_str)
     elif func_type == 'nn_functional':
         call = 'torch.nn.functional.{}({})'.format(method_name, argument_str)
     else:
-        raise 'Unsupported function type'
+        raise TypeError('Unsupported function type')
 
     return call
 
 def get_constant(x):
     if x == inf:
-        return 'float(\'inf\')' if PY2 else 'math.inf'
+        return 'math.inf'
     if x == -inf:
-        return 'float(\'-inf\')' if PY2 else '-math.inf'
+        return '-math.inf'
     return x
 
 def get_script_args(args):
-    formals = []
-    tensors = []
-    actuals = []
+    formals: List[str] = []
+    tensors: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+    actuals: List[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):
             name = 'i{}'.format(len(formals))
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif is_iterable_of_tensors(arg):
+            name = 'i{}'.format(len(formals))
+            formals.append(name + ': List[torch.Tensor]')
+            actuals.append(name)
+            tensors.append(list(arg))
         elif isinstance(arg, str):
             actuals.append("'{}'".format(arg))
         else:
@@ -278,18 +331,47 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
     CU = torch.jit.CompilationUnit(script)
     return CU.the_method, tensors
 
-# create a script function from (name, func_type, output_process_fn),
-# returns a function takes in (args, kwargs) and runs the compiled function and
-# then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+# create a script function from (name, func_type),
+# returns a function takes in (args, kwargs) and runs the compiled function
+def create_script_fn(self, method_name, func_type):
+    # function returns tuple containing original output and
+    # filtered output to be used in checking gradients
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
-        output = output_process_fn(fn(*tensors))
-        script_fn.last_graph = fn.graph_for(*tensors)
+        output = fn(*tensors)
+        # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
+        script_fn.last_graph = fn.graph_for(*tensors)  # type: ignore[attr-defined]
         return output
     return script_fn
 
+# make a new function where all non-tensor arguments in 'args' have been partially
+# applied, and all tensor arguments remain.
+# used to trace functions when some arguments are not tensors
+def partial_apply_nontensors(fn, args, **kwargs):
+    source = ['t' if (isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)) else 's' for arg in args]
+
+    def new_fn(*tensors_):
+        tensors = iter(tensors_)
+        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
+
+    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)]
+
+# create a trace function from input fn
+def create_traced_fn(self, fn):
+    def traced_fn(*inputs, **kwargs):
+        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        # `check_trace` is set to False because check_trace is run with @no_grad
+        # Also, `check_against_reference` already does all the checks
+        # against python function
+        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
+        self.assertExportImport(traced.graph, inputs_tensors)
+        output = traced(*inputs_tensors)
+        # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
+        traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
+        traced_fn.graph = traced.graph  # type: ignore[attr-defined]
+        return output
+    return traced_fn
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
@@ -309,10 +391,11 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 
     # jit doesn't support sparse tensors.
-    'test_to_sparse'
+    'test_to_sparse',
+    'test_to_sparse_dim',
 }
 
-# generates a script function and set of example inputs 
+# generates a script function and set of example inputs
 # from a specified test in the format of nn_functional_tests
 def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name='', *extra_args):
     test_name = 'test_nn_' + name
@@ -333,7 +416,7 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
 
     f_args_variable = (self_variable,) + args_variable
     f_args_tensor = (self_tensor,) + args_tensor
-    with torch.jit._disable_emit_hooks():
+    with torch._jit_internal._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)
     return script_fn, inputs
 
@@ -425,9 +508,20 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         if self:
             self.assertExportImportModule(module, tensors)
             module(*args)
-        create_script_module.last_graph = module.graph
+        # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
+        create_script_module.last_graph = module.graph  # type: ignore[attr-defined]
         return module
     return script_module
+
+def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='method'):
+    formals, tensors, actuals = get_script_args(args)
+    call = get_call(method_name, func_type, actuals, kwargs)
+    script = script_template.format(', '.join(formals), call)
+    CU = torch.jit.CompilationUnit(script)
+    # to clean up IR
+    torch._C._jit_pass_inline(CU.the_method.graph)
+    torch._C._jit_pass_constant_propagation(CU.the_method.graph)
+    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
     if 'module_name' in kwargs:
@@ -438,11 +532,21 @@ def get_nn_module_name_from_kwargs(**kwargs):
         return kwargs['constructor'].__name__
 
 def get_nn_mod_test_name(**kwargs):
-    name = get_nn_module_name_from_kwargs(**kwargs)
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    if 'fullname' in kwargs:
+        test_name = kwargs['fullname']
+    else:
+        test_name = get_nn_module_name_from_kwargs(**kwargs)
+        if 'desc' in kwargs:
+            test_name = "{}_{}".format(test_name, kwargs['desc'])
     return 'test_nn_{}'.format(test_name)
+
+def get_nn_module_class_from_kwargs(**kwargs):
+    name = get_nn_module_name_from_kwargs(**kwargs)
+    index = name.find("_")
+    if index == -1:
+        return name
+    else:
+        return name[0:name.find("_")]
 
 def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     name = get_nn_module_name_from_kwargs(**kwargs)
@@ -472,8 +576,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
         constructor_args = kwargs.get('constructor_args', ())
 
     # Set up inputs from tuple of sizes or constructor fn
+    input_dtype = torch.double
     if 'input_fn' in kwargs:
         input = kwargs['input_fn']()
+        if isinstance(input, torch.Tensor):
+            input = (input,)
+
+        if all(tensor.is_complex() for tensor in input):
+            input_dtype = torch.cdouble
     else:
         input = (kwargs['input_size'],)
 
@@ -486,9 +596,9 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     elif 'target_fn' in kwargs:
         if torch.is_tensor(input):
             input = (input,)
-        input = input + (kwargs['target_fn'](),) 
+        input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input)
+    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 

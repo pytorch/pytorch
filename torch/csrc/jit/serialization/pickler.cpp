@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <aten/src/ATen/quantized/Quantizer.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
@@ -13,15 +14,11 @@ namespace jit {
 
 using ::c10::IValue;
 
-thread_local bool add_type_tags = false;
-bool getTypeTags() {
-  return add_type_tags;
-}
-
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Pickler::~Pickler() {
   flush();
 }
@@ -54,6 +51,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushTuple(ivalue);
   } else if (ivalue.isDouble()) {
     pushDouble(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    pushComplexDouble(ivalue);
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
@@ -95,18 +94,22 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
-    if (memorized_class_types_ != nullptr) {
-      // Memorize every class type the Pickler encountered
+    if (memoized_class_types_ != nullptr) {
+      // memoize every class type the Pickler encountered
       // This is used to make sure we capture all the run-time types
       // and serialize them properly for class/interface polymorphism
-      memorized_class_types_->emplace_back(type);
+      memoized_class_types_->emplace_back(type);
     }
-    pushGlobal(type->name()->prefix(), type->name()->name());
+    auto type_name = type->name().value();
+    if (type_renamer_) {
+      type_name = type_renamer_(type);
+    }
+    pushGlobal(type_name.prefix(), type_name.name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
-      Function* getstate = type->getMethod("__getstate__");
-      pushIValue((*getstate)({obj}));
+      Function& getstate = type->getMethod("__getstate__");
+      pushIValue(getstate({obj}));
     } else {
       push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
       push<PickleOpCode>(PickleOpCode::MARK);
@@ -122,8 +125,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isCapsule()) {
     std::stringstream err;
     err << "Cannot serialize custom bound C++ class";
-    if (memorized_class_types_ && memorized_class_types_->size()) {
-      if (auto qualname = memorized_class_types_->back()->name()) {
+    if (memoized_class_types_ && memoized_class_types_->size()) {
+      if (auto qualname = memoized_class_types_->back()->name()) {
         err << " " << qualname->qualifiedName();
       }
     }
@@ -131,7 +134,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     TORCH_CHECK(
         torch::distributed::rpc::getAllowJitRRefPickle() == true,
         "RRef jit pickling is only allowed inside RPC calls.");
@@ -140,6 +143,13 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     TORCH_CHECK(
         false, "RRef pickling is only supported with the distributed package");
 #endif
+  } else if (ivalue.isEnum()) {
+    auto enum_holder = ivalue.toEnumHolder();
+    const auto& qualified_class_name =
+        enum_holder->type()->qualifiedClassName();
+    pushGlobal(qualified_class_name.prefix(), qualified_class_name.name());
+    pushIValue(enum_holder->value());
+    push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -160,7 +170,7 @@ void Pickler::pushDevice(const IValue& ivalue) {
   }
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
@@ -286,18 +296,21 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
       std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  pushString(c10::to_string(tensor_data_.size()));
+  std::string root_key = get_tensor_id_ != nullptr
+      ? get_tensor_id_(tensor)
+      : c10::to_string(tensor_data_.size());
+  pushString(root_key);
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().size());
+  pushInt(tensor.storage().nbytes() / tensor.element_size());
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
   // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
-  tensor_data_.push_back(getWriteableTensorData(tensor));
+  tensor_data_.push_back(tensor);
 }
 
 void Pickler::pushBytes(const std::string& string) {
@@ -340,6 +353,56 @@ void Pickler::pushTensor(const IValue& ivalue) {
   }
 }
 
+void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
+  pushGlobal("torch._utils", "_rebuild_sparse_tensor");
+  push<PickleOpCode>(PickleOpCode::MARK);
+  // layout
+  auto layout = static_cast<int>(tensor.layout());
+  pushInt(layout);
+  switch (layout) {
+    case static_cast<int>(c10::Layout::Sparse):
+      // size
+      push<PickleOpCode>(PickleOpCode::MARK);
+      for (auto size : tensor.sizes()) {
+        pushInt(size);
+      }
+      push<PickleOpCode>(PickleOpCode::TUPLE);
+      // requires grad
+      pushIValue(tensor.requires_grad());
+      // indices
+      pushTensor(tensor._indices());
+      // values
+      pushTensor(tensor._values());
+      break;
+    case static_cast<int>(c10::Layout::SparseCsr):
+      push<PickleOpCode>(PickleOpCode::MARK);
+      for (auto size : tensor.sizes()) {
+        pushInt(size);
+      }
+      push<PickleOpCode>(PickleOpCode::TUPLE);
+
+      pushIValue(tensor.requires_grad());
+      pushTensor(tensor.crow_indices());
+      pushTensor(tensor.col_indices());
+      pushTensor(tensor.values());
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Unsupported sparse tensor layout type in serialization ",
+          static_cast<c10::Layout>(layout));
+      break;
+  }
+  // backward_hooks
+  pushGlobal("collections", "OrderedDict");
+  push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
+  // Construct the collections.OrderedDict for the backward_hooks
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+  // Call torch._utils._rebuild_sparse_coo_tensor
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
+
 void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // In contrast to tensor references, literal tensors are included in the
   // pickle program binary blob. They are written to the file after the STOP
@@ -348,7 +411,13 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   //
   // The format here is the same one used by `torch.save()`. The code for the
   // format can be found in `torch/serialization.py`.
-  auto tensor = ivalue.toTensor();
+  auto& tensor = ivalue.toTensor();
+
+  if (tensor.is_sparse() || tensor.is_sparse_csr()) {
+    pushLiteralSparseTensor(tensor);
+    return;
+  }
+
   bool quantized = tensor.is_quantized();
   // The arguments to this function are:
   //    storage, storage_offset, size, stride, requires_grad, backward_hooks
@@ -385,12 +454,11 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
         pushDouble(tensor.q_scale());
         pushInt(tensor.q_zero_point());
         break;
+      case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
-            tensor.quantizer().get());
-        pushTensor(quantizer->scales());
-        pushTensor(quantizer->zero_points());
-        pushInt(quantizer->axis());
+        pushTensor(tensor.q_per_channel_scales());
+        pushTensor(tensor.q_per_channel_zero_points());
+        pushInt(tensor.q_per_channel_axis());
       } break;
       default:
         TORCH_CHECK(
@@ -446,9 +514,10 @@ void Pickler::pushSpecializedList(
 
 static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double flipped;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
-  for (size_t i = 0; i < sizeof(double); ++i) {
+  for (const auto i : c10::irange(sizeof(double))) {
     out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
   return *reinterpret_cast<double*>(out_bytes);
@@ -458,6 +527,14 @@ void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
+}
+void Pickler::pushComplexDouble(const IValue& value) {
+  c10::complex<double> d = value.toComplexDouble();
+  pushGlobal("builtins", "complex");
+  pushIValue(d.real());
+  pushIValue(d.imag());
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushLong(const std::string& data) {
@@ -489,42 +566,42 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // ivalue to the stack as a string so we can preserve type tags across
 // serialization
 void Pickler::startTypeTag() {
-  if (getTypeTags()) {
-    pushGlobal("torch.jit._pickle", "restore_type_tag");
-  }
+  pushGlobal("torch.jit._pickle", "restore_type_tag");
 }
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
-  if (getTypeTags()) {
-    TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+  TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
-    // Push the dict type
-    TORCH_INTERNAL_ASSERT(ivalue.type());
-    pushString(ivalue.type()->python_str());
-
-    // Pop the dict and type into a tuple
-    push<PickleOpCode>(PickleOpCode::TUPLE2);
-
-    // Call function via reduce
-    push<PickleOpCode>(PickleOpCode::REDUCE);
+  // Push the dict type
+  TORCH_INTERNAL_ASSERT(ivalue.type());
+  auto type = ivalue.type();
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    type = dyn->fallback();
   }
+  pushString(type->annotation_str());
+
+  // Pop the dict and type into a tuple
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+
+  // Call function via reduce
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  auto dict = ivalue.toGenericDict();
 
   startTypeTag();
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  if (dict_items.size() >= 0) {
+  if (dict.size() >= 0) {
     push<PickleOpCode>(PickleOpCode::MARK);
 
     // Sort the dict for deterministic keys
-    for (const auto& pair : dict_items) {
-      pushIValue(pair.first);
-      pushIValue(pair.second);
+    for (const auto& entry : dict) {
+      pushIValue(entry.key());
+      pushIValue(entry.value());
     }
 
     push<PickleOpCode>(PickleOpCode::SETITEMS);
@@ -595,26 +672,29 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 }
 
-WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
+WriteableTensorData getWriteableTensorData(
+    const at::Tensor& tensor,
+    bool to_cpu) {
   WriteableTensorData result;
   result.tensor_ = tensor;
-  result.size_ = tensor.element_size() * tensor.storage().size();
+  result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+  if (tensor.storage().device_type() != DeviceType::CPU && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    result.tensor_ = at::empty({0}, tensor.options())
-                         .set_(
-                             tensor.storage(),
-                             /* storage_offset = */ 0,
-                             /* size = */
-                             {static_cast<int64_t>(tensor.storage().size())},
-                             /* stride = */ {1})
-                         .cpu();
+    result.tensor_ =
+        at::empty({0}, tensor.options())
+            .set_(
+                tensor.storage(),
+                /* storage_offset = */ 0,
+                /* size = */
+                {static_cast<int64_t>(
+                    tensor.storage().nbytes() / tensor.element_size())},
+                /* stride = */ {1})
+            .cpu();
     TORCH_CHECK(
-        result.tensor_.element_size() * result.tensor_.storage().size() ==
-            result.size_,
+        result.tensor_.storage().nbytes() == result.size_,
         "Storage tensor size did not match record size");
   }
   return result;
@@ -622,7 +702,7 @@ WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = cls->getMethod("__getstate__");
+  auto getstate = cls->findMethod("__getstate__");
   if (getstate == nullptr) {
     return false;
   }
@@ -642,7 +722,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
 
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
-  auto setstate = cls->getMethod("__setstate__");
+  auto setstate = cls->findMethod("__setstate__");
   if (!setstate) {
     return false;
   }
@@ -660,9 +740,9 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
       set_schema.returns().size(),
       " return values");
   TORCH_CHECK(
-      set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
+      set_schema.returns().at(0).type()->isSubtypeOf(*NoneType::get()),
       "'__setstate__' must return None, but found value of type",
-      set_schema.returns().at(0).type()->python_str());
+      set_schema.returns().at(0).type()->annotation_str());
 
   // Check that the return type of __getstate__ matches the input to
   // __setstate__
@@ -670,11 +750,11 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   auto set_type = set_schema.arguments().at(1).type();
 
   TORCH_CHECK(
-      get_type->isSubtypeOf(set_type),
+      get_type->isSubtypeOf(*set_type),
       "'__getstate__'s return type (",
-      get_type->python_str(),
+      get_type->annotation_str(),
       ") does not match '__setstate__'s argument type (",
-      set_type->python_str(),
+      set_type->annotation_str(),
       ")");
 
   return true;

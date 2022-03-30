@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/guard_elimination.h>
+
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -22,6 +23,8 @@ struct GuardElimination {
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
+    removeDominatedGuards(graph_->block());
+    GRAPH_DUMP("After removeDominatedGuards", graph_);
     eliminateRedundantGuards(graph_->block());
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
@@ -114,6 +117,65 @@ struct GuardElimination {
     }
   }
 
+  void removeDominatedGuards(Block* b) {
+    // If a Node guards a value which isn't mutated, then that node
+    // can replace all other guards of the value which it dominates
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+      auto n = *it;
+      if (n->kind() == prim::Guard) {
+        Value* input = n->input();
+        if (aliasDb_->hasWriters(input)) {
+          continue;
+        }
+        Value* guard_output = n->output();
+
+        // find all uses of the input that the guard node dominates
+        std::vector<Use> uses = input->uses();
+        while (uses.size() > 0) {
+          auto use = uses.at(uses.size() - 1);
+          uses.pop_back();
+
+          // not all uses are guarded
+          if (use.user->kind() != prim::Guard) {
+            continue;
+          }
+
+          if (!use.user->isDominatedBy(n)) {
+            continue;
+          }
+
+          // the dominated guard type may be different from the dominator
+          // if it is only executed for a subtype, or if it is executed
+          // in a different global context for grad enabled
+          // check that the types are equal before continuing
+
+          auto dominator_type = guard_output->type();
+          auto dominated_type = use.user->output()->type();
+
+          if (*dominator_type == *dominated_type) {
+            use.user->replaceInput(use.offset, guard_output);
+          }
+        }
+
+        // remove redundant dominated guards
+        std::vector<Use> users = n->output()->uses();
+        for (auto use : users) {
+          auto user = use.user;
+          if (user->kind() == prim::Guard) {
+            GRAPH_UPDATE(
+                "Removing dominated guard ", user, " and replacing with ", n);
+            user->output()->replaceAllUsesWith(guard_output);
+            user->destroy();
+          }
+        }
+      } else {
+        for (Block* ib : n->blocks()) {
+          removeDominatedGuards(ib);
+        }
+      }
+    }
+  }
+
   // we need to make sure there are no ops in between guardee's
   // output and its guard except for other guards as they can
   // invalidate shape information.
@@ -170,9 +232,9 @@ struct GuardElimination {
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
-           !input->type()->expect<TensorType>()->isSummarized()) ||
+           !input->type()->expectRef<TensorType>().isSummarized()) ||
           input->node()->kind() == prim::Constant ||
-          (allow_numbers && input->type()->isSubtypeOf(NumberType::get())) ||
+          (allow_numbers && input->type()->isSubtypeOf(*NumberType::get())) ||
           except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
@@ -281,8 +343,6 @@ struct GuardElimination {
       case aten::where:
       case aten::_cast_Float:
       case aten::_cast_Long:
-      case aten::_sigmoid_backward:
-      case aten::_tanh_backward:
       case aten::__and__:
       case aten::__or__:
       case aten::__xor__:
@@ -307,7 +367,7 @@ struct GuardElimination {
       case aten::conv3d:
         return checkInputs(n, std::unordered_set<size_t>{2, 6}, false);
       case aten::slice:
-        return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+        return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
             // check that the dimension argument is constant
             n->input(1)->node()->kind() == prim::Constant &&
             // the start offset is constant
@@ -319,7 +379,7 @@ struct GuardElimination {
       case aten::max_pool1d:
       case aten::max_pool2d:
       case aten::max_pool3d:
-        return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+        return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
             // check that the kernel size is constant
             n->input(1)->node()->kind() == prim::Constant &&
             // check that the stride is constant
@@ -332,7 +392,7 @@ struct GuardElimination {
             n->input(5)->node()->kind() == prim::Constant;
       case aten::unsqueeze:
         // check that the dimension argument is constant
-        return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+        return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
             n->input(1)->node()->kind() == prim::Constant;
       case aten::cat:
         // check that the dimension argument is constant
@@ -357,8 +417,8 @@ struct GuardElimination {
             // aten::size is effectively a constant
             if (asize->input()
                     ->type()
-                    ->expect<TensorType>()
-                    ->sizes()
+                    ->expectRef<TensorType>()
+                    .sizes()
                     .concrete_sizes()) {
               return true;
             }

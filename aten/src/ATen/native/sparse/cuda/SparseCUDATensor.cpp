@@ -1,8 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
@@ -22,7 +33,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   if (mask._nnz() == 0) {
     return r.zero_();
   }
-  LongTensor mask_indices = mask._indices();
+  Tensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   alias_into_sparse(r, mask_indices.clone(at::MemoryFormat::Contiguous), r_values);
@@ -33,8 +44,8 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 
   // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
   // Keeping this implementation because it is faster than flatten_indices()
-  LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
-  for (int64_t d = 0; d < mask.sparse_dim(); d++) {
+  Tensor indices = at::zeros({mask._nnz()}, mask_indices.options());
+  for (const auto d : c10::irange(mask.sparse_dim())) {
     indices.mul_(mask.size(d));
     // This used to use a buffer but I deoptimized it
     indices.add_(mask_indices.select(0, d));
@@ -42,7 +53,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 
   std::vector<int64_t> view_size(1 + mask.dense_dim());
   view_size[0] = -1;
-  for (int64_t d = 0; d < mask.dense_dim(); d++) {
+  for (const auto d : c10::irange(mask.dense_dim())) {
     view_size[d + 1] = mask.size(mask.sparse_dim() + d);
   }
 

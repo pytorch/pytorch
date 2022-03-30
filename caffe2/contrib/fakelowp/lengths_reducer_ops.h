@@ -1,8 +1,8 @@
 #pragma once
 
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
 #include "caffe2/perfkernels/typed_axpy.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
@@ -94,7 +94,7 @@ class SparseLengthsReductionFakeFp16Op final : public Operator<CPUContext> {
     float* out = out_data;
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(out, 0, sizeof(float) * block_size);
       if (current + lengths[m] > index_size) {
         return false;

@@ -34,6 +34,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
@@ -150,10 +151,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
         // append
         pos = *num_visited;
       } else {
-        auto& gen = context_.RandGenerator();
         // uniform between [0, num_visited]
-        std::uniform_int_distribution<int64_t> uniformDist(0, *num_visited);
-        pos = uniformDist(gen);
+        at::uniform_int_from_to_distribution<int64_t> uniformDist(*num_visited+1, 0);
+        pos = uniformDist(context_.RandGenerator());
         if (pos >= numToCollect_) {
           // discard
           pos = -1;

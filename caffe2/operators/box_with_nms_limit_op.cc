@@ -5,8 +5,9 @@
 namespace caffe2 {
 
 template <>
-bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
-  const auto& tscores = Input(0);
+template <typename T>
+bool BoxWithNMSLimitOp<CPUContext>::DoRunWithType() {
+const auto& tscores = Input(0);
   const auto& tboxes = Input(1);
 
   const int box_dim = rotated_ ? 5 : 4;
@@ -35,18 +36,19 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   int num_boxes_classes = get_box_cls_index(num_classes - 1) + 1;
   CAFFE_ENFORCE_EQ(num_boxes_classes * box_dim, tboxes.size(1));
 
+  // Default value for batch_size and batch_splits
   int batch_size = 1;
-  vector<float> batch_splits_default(1, tscores.size(0));
-  const float* batch_splits_data = batch_splits_default.data();
+  vector<T> batch_splits_default(1, tscores.size(0));
+  const T* batch_splits_data = batch_splits_default.data();
   if (InputSize() > 2) {
     // tscores and tboxes have items from multiple images in a batch. Get the
     // corresponding batch splits from input.
     const auto& tbatch_splits = Input(2);
     CAFFE_ENFORCE_EQ(tbatch_splits.dim(), 1);
     batch_size = tbatch_splits.size(0);
-    batch_splits_data = tbatch_splits.data<float>();
+    batch_splits_data = tbatch_splits.data<T>();
   }
-  Eigen::Map<const EArrXf> batch_splits(batch_splits_data, batch_size);
+  Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1>> batch_splits(batch_splits_data, batch_size);
   CAFFE_ENFORCE_EQ(batch_splits.sum(), N);
 
   auto* out_scores = Output(0, {0}, at::dtype<float>());
@@ -65,7 +67,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   vector<int> total_keep_per_batch(batch_size);
   int offset = 0;
   for (int b = 0; b < batch_splits.size(); ++b) {
-    int num_boxes = batch_splits(b);
+    int num_boxes = batch_splits[b];
     Eigen::Map<const ERArrXXf> scores(
         tscores.data<float>() + offset * tscores.size(1),
         num_boxes,
@@ -102,7 +104,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
             -1, /* topN */
             legacy_plus_one_);
       } else {
-        std::sort(
+        std::stable_sort(
             inds.data(),
             inds.data() + inds.size(),
             [&cur_scores](int lhs, int rhs) {
@@ -146,7 +148,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
           }
         }
 
-        std::sort(
+        std::stable_sort(
             ret.data(),
             ret.data() + ret.size(),
             [this, &scores](const KeepIndex& lhs, const KeepIndex& rhs) {
@@ -204,6 +206,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
           cur_scores, utils::AsEArrXt(cur_keep), &cur_out_scores);
       utils::GetSubArrayRows(
           cur_boxes, utils::AsEArrXt(cur_keep), &cur_out_boxes);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int k = 0; k < cur_keep.size(); k++) {
         cur_out_classes[k] =
             static_cast<float>(j - !output_classes_include_bg_cls_);
@@ -336,31 +339,4 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
 
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    BoxWithNMSLimit2,
-    "__caffe2::BoxWithNMSLimit("
-      "Tensor scores, "
-      "Tensor boxes, "
-      "Tensor batch_splits, "
-      "float score_thresh, "
-      "float nms, "
-      "int detections_per_im, "
-      "bool soft_nms_enabled, "
-      "str soft_nms_method, "
-      "float soft_nms_sigma, "
-      "float soft_nms_min_score_thres, "
-      "bool rotated, "
-      "bool cls_agnostic_bbox_reg, "
-      "bool input_boxes_include_bg_cls, "
-      "bool output_classes_include_bg_cls, "
-      "bool legacy_plus_one "
-    ") -> ("
-      "Tensor scores, "
-      "Tensor boxes, "
-      "Tensor classes, "
-      "Tensor batch_splits, "
-      "Tensor keeps, "
-      "Tensor keeps_size"
-    ")",
-    caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
 // clang-format on

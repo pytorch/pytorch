@@ -13,13 +13,13 @@ There’s four main use cases
 * You’re writing a new operator that isn’t supposed to be part of the public PyTorch API.
 * You’re writing a new operator but don’t want to change the core pytorch code base, say you’re developing a shared library with operators.
 * You’re writing a C++ extension for PyTorch or you’re using inline c++ in your .py model files.
-* You’re writing a backend library like XLA or MSNPU that adds new kernels to all operators defined in `native_functions.yaml`.
+* You’re writing a backend library like XLA or ORT that adds new kernels to all operators defined in `native_functions.yaml`.
 
 For these use cases, the custom operator API is the better solution.
 
 ### What is the price for using the custom operator API instead of `native_functions.yaml`?
 
-If you’re just using the custom operator API to add new kernels for existing operators (e.g. the XLA/MSNPU example above), then you’re fine and don’t pay any price. If, however, you define a new operator purely using the custom op API, i.e. your operator never shows up in `native_functions.yaml`, then you need to be aware of a few caveats.
+If you’re just using the custom operator API to add new kernels for existing operators (e.g. the XLA/ORT example above), then you’re fine and don’t pay any price. If, however, you define a new operator purely using the custom op API, i.e. your operator never shows up in `native_functions.yaml`, then you need to be aware of a few caveats.
 
 * It will not get a C++ API generated. There will not be `Tensor::your_op()` methods or `at::your_op()` functions to call your operator.
 * The API for calling the operator from Python looks a little bit different. It needs to be called through `torch.ops.your_op()` instead of `torch._C`.
@@ -40,11 +40,11 @@ namespace { Tensor my_kernel_cpu(const Tensor& a, const Tensor& b) {...} }
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op",  torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 It is recommended to put your kernel into an anonymous namespace because that allows for better linker optimizations and smaller binary size.
-The dispatch key argument (i.e. `CPUTensorId()`) takes care that this kernel is only called for tensors from the CPU backend, more on that below.
+The dispatch key argument (i.e. `CPU()`) takes care that this kernel is only called for tensors from the CPU backend, more on that below.
 
 ### As lambdas
 
@@ -53,7 +53,7 @@ Very short and simple kernels can be written as lambdas directly in the registra
 ```
 static auto registry = torch::RegisterOperators()
     .op("my_namespace::my_op", torch::RegisterOperators::options()
-        .kernel(CPUTensorId(), [] (const Tensor& a) -> Tensor{...}));
+        .kernel(CPU(), [] (const Tensor& a) -> Tensor{...}));
 ```
 
 These lambdas must be stateless, i.e. not have a closure. The registration will fail if the lambda has a closure.
@@ -97,9 +97,9 @@ Multiple operator registrations can be chained into the same registry by calling
 ```
 static auto registry = torch::RegisterOperators()
     .op("my_namespace::my_op_1", torch::RegisterOperators::options()
-        .kernel<MyKernel1>(CPUTensorId()))
+        .kernel<MyKernel1>(CPU()))
     .op("my_namespace::my_op_2", torch::RegisterOperators::options()
-        .kernel<MyKernel2>(CPUTensorId()));
+        .kernel<MyKernel2>(CPU()));
 ```
 
 ## Multiple Backends
@@ -114,9 +114,9 @@ Tensor my_kernel_cuda(const Tensor& a, const Tensor& b) {...}
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op",  torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()))
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()))
    .op("my_namespace::my_op",  torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cuda), &my_kernel_cuda>(CUDATensorId()));
+       .kernel<decltype(my_kernel_cuda), &my_kernel_cuda>(CUDA()));
 ```
 
 Note that here, the CPU and CUDA kernel were registered directly next to each other, but that's not necessary. You could even put them into different shared libraries if you want and as long as both are loaded into your process, things will work as you expect.
@@ -133,7 +133,7 @@ namespace { Tensor my_kernel_cpu(const Tensor& a, const Tensor& b) {...} }
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op(Tensor a, Tensor b) -> Tensor",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 Or with annotations:
@@ -146,7 +146,7 @@ namespace {
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op(Tensor(a) x, int y = 3, int? z = None) -> Tensor(a|b)",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 If the schema is explicitly specified but doesn't match the kernel signature, you will get an error when registering it.
@@ -163,7 +163,7 @@ namespace {
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op", torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 ### Supported Input and output types
@@ -174,13 +174,13 @@ The kernel function can take any of the following types as inputs or outputs:
 * `double` (note: `float` is not supported)
 * `int64_t` (note: other integer types like `int`, `uint64_t`, `int32_t`, `...` are not supported)
 * `bool`
-* `std::string`
+* `c10::string_view`
 * `at::Scalar` (this is a type that can hold either an integer or a floating point value)
 * `at::optional<T>` with T being any type from the list above
 
 The kernel function can take and return list inputs by using `torch::List<T>`. `T` must be one of the supported types from above excluding `at::Scalar`.
 
-The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `std::string`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
+The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `c10::string_view`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
 
 When taken as input, any of these types can be taken by value (i.e. `Tensor`) or by const-reference (i.e. `const Tensor&`). We recommend taking all arguments by value, even Tensors. They will be moved in, so there is no performance overhead.
 
@@ -202,10 +202,10 @@ namespace {
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op.overload1(Tensor a) -> Tensor",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu_1), &my_kernel_cpu>(CPUTensorId()))
+         .kernel<decltype(my_kernel_cpu_1), &my_kernel_cpu>(CPU()))
    .op("my_namespace::my_op.overload2(Tensor a, Tensor b) -> Tensor",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu_2), &my_kernel_cpu>(CPUTensorId()));
+         .kernel<decltype(my_kernel_cpu_2), &my_kernel_cpu>(CPU()));
 ```
 
 Kernels registered for the same overload must have exactly matching schemas, but kernels registered for different overloads are allowed to have different schemas. This also works when different overloads come from different shared libraries.
@@ -254,5 +254,3 @@ Also, there's some requirements on the operator schema for it to be callable fro
 * Except for `Tensor` or `Tensor[]`, only arguments of type `int`, `double` and `bool` are supported. These can be in any position in the argument list and will be read from the caffe2 operator arguments, based on the argument name in the operator schema.
 * We do not support lists (`int[]`, `double[]` or `bool[]`) or optionals (`int?`, `double?`, `bool?`) yet.
 * The operator must return a single `Tensor` or multiple tensors as in `(Tensor, Tensor, Tensor)`. It cannot return a list `Tensor[]`, optional `Tensor?` or any primitive types.
-    
-

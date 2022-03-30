@@ -16,7 +16,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testForwardNull() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue input = IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
@@ -25,7 +25,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqBool() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     for (boolean value : new boolean[] {false, true}) {
       final IValue input = IValue.from(value);
       assertTrue(input.isBool());
@@ -38,7 +38,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqInt() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     for (long value : new long[] {Long.MIN_VALUE, -1024, -1, 0, 1, 1024, Long.MAX_VALUE}) {
       final IValue input = IValue.from(value);
       assertTrue(input.isLong());
@@ -51,7 +51,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqFloat() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     double[] values =
         new double[] {
           -Double.MAX_VALUE,
@@ -86,7 +86,7 @@ public abstract class PytorchTestBase {
     }
     final Tensor inputTensor = Tensor.fromBlob(inputTensorData, inputTensorShape);
 
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue input = IValue.from(inputTensor);
     assertTrue(input.isTensor());
     assertTrue(inputTensor == input.toTensor());
@@ -103,7 +103,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqDictIntKeyIntValue() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final Map<Long, IValue> inputMap = new HashMap<>();
 
     inputMap.put(Long.MIN_VALUE, IValue.from(-Long.MIN_VALUE));
@@ -127,7 +127,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqDictStrKeyIntValue() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final Map<String, IValue> inputMap = new HashMap<>();
 
     inputMap.put("long_min_value", IValue.from(Long.MIN_VALUE));
@@ -151,7 +151,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testListIntSumReturnTuple() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     for (int n : new int[] {0, 1, 128}) {
       long[] a = new long[n];
@@ -178,7 +178,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testOptionalIntIsNone() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     assertFalse(module.runMethod("optionalIntIsNone", IValue.from(1l)).toBool());
     assertTrue(module.runMethod("optionalIntIsNone", IValue.optionalNull()).toBool());
@@ -186,7 +186,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testIntEq0None() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     assertTrue(module.runMethod("intEq0None", IValue.from(0l)).isNull());
     assertTrue(module.runMethod("intEq0None", IValue.from(1l)).toLong() == 1l);
@@ -194,7 +194,7 @@ public abstract class PytorchTestBase {
 
   @Test(expected = IllegalArgumentException.class)
   public void testRunUndefinedMethod() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     module.runMethod("test_undefined_method_throws_exception");
   }
 
@@ -241,7 +241,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqString() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     String[] values =
         new String[] {
           "smoketest",
@@ -260,7 +260,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testStr3Concat() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     String[] values =
         new String[] {
           "smoketest",
@@ -281,7 +281,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEmptyShape() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final long someNumber = 43;
     final IValue input = IValue.from(Tensor.fromBlob(new long[] {someNumber}, new long[] {}));
     final IValue output = module.runMethod("newEmptyShapeWithItem", input);
@@ -293,7 +293,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testAliasWithOffset() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue output = module.runMethod("testAliasWithOffset");
     assertTrue(output.isTensorList());
     Tensor[] tensors = output.toTensorList();
@@ -303,7 +303,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testNonContiguous() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue output = module.runMethod("testNonContiguous");
     assertTrue(output.isTensor());
     Tensor value = output.toTensor();
@@ -311,5 +311,83 @@ public abstract class PytorchTestBase {
     assertArrayEquals(new long[] {100, 300}, value.getDataAsLongArray());
   }
 
-  protected abstract String assetFilePath(String assetName) throws IOException;
+  @Test
+  public void testChannelsLast() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] data = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(data, inputShape, MemoryFormat.CHANNELS_LAST);
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
+    final IValue outputNCHW = module.runMethod("contiguous", IValue.from(inputNHWC));
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
+        new long[] {1, 3, 2, 2},
+        new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104});
+    final IValue outputNHWC = module.runMethod("contiguousChannelsLast", IValue.from(inputNHWC));
+    assertIValueTensor(outputNHWC, MemoryFormat.CHANNELS_LAST, inputShape, data);
+  }
+
+  @Test
+  public void testChannelsLast3d() throws IOException {
+    long[] shape = new long[] {1, 2, 2, 2, 2};
+    long[] dataNCHWD = new long[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    long[] dataNHWDC = new long[] {1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16};
+
+    Tensor inputNHWDC = Tensor.fromBlob(dataNHWDC, shape, MemoryFormat.CHANNELS_LAST_3D);
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
+    final IValue outputNCHWD = module.runMethod("contiguous", IValue.from(inputNHWDC));
+    assertIValueTensor(outputNCHWD, MemoryFormat.CONTIGUOUS, shape, dataNCHWD);
+
+    Tensor inputNCHWD = Tensor.fromBlob(dataNCHWD, shape, MemoryFormat.CONTIGUOUS);
+    final IValue outputNHWDC =
+        module.runMethod("contiguousChannelsLast3d", IValue.from(inputNCHWD));
+    assertIValueTensor(outputNHWDC, MemoryFormat.CHANNELS_LAST_3D, shape, dataNHWDC);
+  }
+
+  @Test
+  public void testChannelsLastConv2d() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] dataNCHW = new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104};
+    Tensor inputNCHW = Tensor.fromBlob(dataNCHW, inputShape, MemoryFormat.CONTIGUOUS);
+    long[] dataNHWC = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(dataNHWC, inputShape, MemoryFormat.CHANNELS_LAST);
+
+    long[] weightShape = new long[] {3, 3, 1, 1};
+    long[] dataWeightOIHW = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNCHW = Tensor.fromBlob(dataWeightOIHW, weightShape, MemoryFormat.CONTIGUOUS);
+    long[] dataWeightOHWI = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNHWC = Tensor.fromBlob(dataWeightOHWI, weightShape, MemoryFormat.CHANNELS_LAST);
+
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
+
+    final IValue outputNCHW =
+        module.runMethod("conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 4, 6, 8, 11, 12, 13, 14, -101, -102, -103, -104});
+
+    final IValue outputNHWC =
+        module.runMethod("conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
+    assertIValueTensor(
+        outputNHWC,
+        MemoryFormat.CHANNELS_LAST,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 11, -101, 4, 12, -102, 6, 13, -103, 8, 14, -104});
+  }
+
+  static void assertIValueTensor(
+      final IValue ivalue,
+      final MemoryFormat memoryFormat,
+      final long[] expectedShape,
+      final long[] expectedData) {
+    assertTrue(ivalue.isTensor());
+    Tensor t = ivalue.toTensor();
+    assertEquals(memoryFormat, t.memoryFormat());
+    assertArrayEquals(expectedShape, t.shape());
+    assertArrayEquals(expectedData, t.getDataAsLongArray());
+  }
+
+  protected abstract Module loadModel(String assetName) throws IOException;
 }

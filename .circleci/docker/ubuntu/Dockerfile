@@ -33,23 +33,22 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ADD requirements-ci.txt /opt/conda/requirements-ci.txt
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
+RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
-# Install non-standard Python versions (via Travis binaries)
-ARG TRAVIS_PYTHON_VERSION
-ARG TRAVIS_DL_URL_PREFIX
-ENV PATH /opt/python/$TRAVIS_PYTHON_VERSION/bin:$PATH
-ADD ./common/install_travis_python.sh install_travis_python.sh
-RUN bash ./install_travis_python.sh && rm install_travis_python.sh
+# Install lcov for C++ code coverage
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
@@ -85,6 +84,18 @@ RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
 
+# (optional) Install Vulkan SDK
+ARG VULKAN_SDK_VERSION
+ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
+RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
+RUN rm install_vulkan_sdk.sh
+
+# (optional) Install swiftshader
+ARG SWIFTSHADER
+ADD ./common/install_swiftshader.sh install_swiftshader.sh
+RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
+RUN rm install_swiftshader.sh
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 ADD ./common/install_cmake.sh install_cmake.sh
@@ -96,6 +107,10 @@ ARG NINJA_VERSION
 ADD ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
+
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
@@ -110,6 +125,9 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

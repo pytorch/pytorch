@@ -15,10 +15,10 @@
 
 ## @package device_reduce_sum_bench
 # Module caffe2.experiments.python.device_reduce_sum_bench
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import argparse
 import itertools

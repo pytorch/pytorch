@@ -15,11 +15,14 @@ namespace int8 {
 class Int8LeakyReluOp final : public Operator<CPUContext> {
  public:
   explicit Int8LeakyReluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), ws_(ws) {
+      : Operator<CPUContext>(operator_def, ws) {
     const float alpha = this->template GetSingleArgument<float>("alpha", 0.01);
     CAFFE_ENFORCE_GT(alpha, 0.0);
     CAFFE_ENFORCE_LT(alpha, 1.0);
     this->alpha_ = alpha;
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+    this->ws_ = ws;
+#endif
   }
 
   ~Int8LeakyReluOp() {
@@ -34,8 +37,7 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     const int32_t Y_zero_point =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
-    const float Y_scale =
-        this->template GetSingleArgument<float>("Y_scale", 1);
+    const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     CHECK_GE(Y_zero_point, std::numeric_limits<uint8_t>::min());
     CHECK_LE(Y_zero_point, std::numeric_limits<uint8_t>::max());
 
@@ -55,14 +57,16 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
 
     if (this->qnnpackOperator_ == nullptr) {
       const qnnp_status createStatus = qnnp_create_leaky_relu_nc_q8(
-        1 /* channels */,
-        this->alpha_,
-        static_cast<uint8_t>(X_zero_point), X_scale,
-        static_cast<uint8_t>(Y_zero_point), Y_scale,
-        0 /* output min */,
-        255 /* output max */,
-        0 /* flags */,
-        &qnnpackOperator_);
+          1 /* channels */,
+          this->alpha_,
+          static_cast<uint8_t>(X_zero_point),
+          X_scale,
+          static_cast<uint8_t>(Y_zero_point),
+          Y_scale,
+          0 /* output min */,
+          255 /* output max */,
+          0 /* flags */,
+          &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,
           "failed to create QNNPACK Leaky ReLU operator");
@@ -80,7 +84,7 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Leaky ReLU operator");
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, nullptr /* thread pool */);
 #else
@@ -98,7 +102,9 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
 
  private:
   float alpha_;
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
+#endif
   // QNNPACK Leaky ReLU operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

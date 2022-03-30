@@ -12,15 +12,15 @@
 #   make
 #
 
-from __future__ import absolute_import
-from __future__ import unicode_literals
-from __future__ import print_function
-from distutils import sysconfig
+
+
+
+import sysconfig
 import sys
 
 flags = [
     '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
-    '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_python_inc()),
+    '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_path('include')),
 ]
 
 print(' '.join(flags), end='')

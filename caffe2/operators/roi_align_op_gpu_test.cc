@@ -195,8 +195,7 @@ void CreateAndRun(
 
 } // namespace
 
-// See https://github.com/pytorch/pytorch/issues/35547
-TEST(RoiAlignTest, DISABLED_ON_WINDOWS(CheckCPUGPUEqual)) {
+TEST(RoiAlignTest, CheckCPUGPUEqual) {
   if (!caffe2::HasCudaGPU())
     return;
 

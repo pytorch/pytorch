@@ -12,13 +12,14 @@ class IDEEPTransposeOp final : public IDEEPOperator {
   IDEEPTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         axes_(this->template GetRepeatedArgument<int>("axes")){ }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPTransposeOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
     auto* Y = Output(OUTPUT);
 
-    Y->transpose_from(X, axes_);
+    Y->transpose_from(X.to_public(nullptr, X.get_data_type()), axes_);
 
     return true;
   }

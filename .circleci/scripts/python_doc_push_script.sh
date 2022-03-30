@@ -7,46 +7,72 @@ sudo apt-get -y install expect-dev
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
+source "$pt_checkout/.jenkins/pytorch/common_utils.sh"
+
 echo "python_doc_push_script.sh: Invoked with $*"
 
 set -ex
 
-# Argument 1: Where to copy the built documentation to
-# (pytorch.github.io/$install_path)
-install_path="$1"
-if [ -z "$install_path" ]; then
-echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
-  exit 1
-fi
+# for statements like ${1:-${DOCS_INSTALL_PATH:-docs/}}
+# the order of operations goes:
+#   1. Check if there's an argument $1
+#   2. If no argument check for environment var DOCS_INSTALL_PATH
+#   3. If no environment var fall back to default 'docs/'
 
+# NOTE: It might seem weird to gather the second argument before gathering the first argument
+#       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
+#       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the docs we are building.
-version="$2"
+version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
 echo "error: python_doc_push_script.sh: version (arg2) not specified"
   exit 1
 fi
 
-is_master_doc=false
-if [ "$version" == "master" ]; then
-  is_master_doc=true
+# Argument 1: Where to copy the built documentation to
+# (pytorch.github.io/$install_path)
+install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
+if [ -z "$install_path" ]; then
+echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
+  exit 1
+fi
+
+is_main_doc=false
+if [ "$version" == "main" ]; then
+  is_main_doc=true
 fi
 
 # Argument 3: The branch to push to. Usually is "site"
-branch="$3"
+branch="${3:-${DOCS_BRANCH:-site}}"
 if [ -z "$branch" ]; then
 echo "error: python_doc_push_script.sh: branch (arg3) not specified"
   exit 1
 fi
 
-# Argument 4: (optional) If present, we will NOT do any pushing. Used for testing.
-dry_run=false
-if [ "$4" != "" ]; then
-  dry_run=true
-fi
+echo "install_path: $install_path  version: $version"
 
-echo "install_path: $install_path  version: $version  dry_run: $dry_run"
 
-git clone https://github.com/pytorch/pytorch.github.io -b $branch
+build_docs () {
+  set +e
+  set -o pipefail
+  make $1 2>&1 | tee /tmp/docs_build.txt
+  code=$?
+  if [ $code -ne 0 ]; then
+    set +x
+    echo =========================
+    grep "WARNING:" /tmp/docs_build.txt
+    echo =========================
+    echo Docs build failed. If the failure is not clear, scan back in the log
+    echo for any WARNINGS or for the line "build finished with problems"
+    echo "(tried to echo the WARNINGS above the ==== line)"
+    echo =========================
+  fi
+  set -ex
+  return $code
+}
+
+
+git clone https://github.com/pytorch/pytorch.github.io -b $branch --depth 1
 pushd pytorch.github.io
 
 export LC_ALL=C
@@ -54,26 +80,38 @@ export PATH=/opt/conda/bin:$PATH
 
 rm -rf pytorch || true
 
-# Install TensorBoard in python 3 so torch.utils.tensorboard classes render
-pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
-
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
-git clone https://github.com/pytorch/vision
-pushd vision
-conda install -q pillow
-time python setup.py install
-popd
 pushd docs
-rm -rf source/torchvision
-cp -a ../vision/docs/source source/torchvision
 
 # Build the docs
-pip -q install -r requirements.txt || true
-if [ "$is_master_doc" = true ]; then
-  make html
+pip -q install -r requirements.txt
+if [ "$is_main_doc" = true ]; then
+  build_docs html
+  [ $? -eq 0 ] || exit $?
+  make coverage
+  # Now we have the coverage report, we need to make sure it is empty.
+  # Count the number of lines in the file and turn that number into a variable
+  # $lines. The `cut -f1 ...` is to only parse the number, not the filename
+  # Skip the report header by subtracting 2: the header will be output even if
+  # there are no undocumented items.
+  #
+  # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
+  # be documented then removed from there.
+  lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
+  undocumented=$(($lines - 2))
+  if [ $undocumented -lt 0 ]; then
+    echo coverage output not found
+    exit 1
+  elif [ $undocumented -gt 0 ]; then
+    echo undocumented objects found:
+    cat build/coverage/python.txt
+    exit 1
+  fi
 else
-  make html-stable
+  # skip coverage, format for stable or tags
+  build_docs html-stable
+  [ $? -eq 0 ] || exit $?
 fi
 
 # Move them into the docs repo
@@ -81,14 +119,6 @@ popd
 popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
-
-# Add the version handler by search and replace.
-# XXX: Consider moving this to the docs Makefile or site build
-if [ "$is_master_doc" = true ]; then
-  find "$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\1 \&#x25BC</a>@g"
-else
-  find "$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>$version \&#x25BC</a>@g"
-fi
 
 # Prevent Google from indexing $install_path/_modules. This folder contains
 # generated source files.
@@ -101,23 +131,11 @@ git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
-git commit -m "auto-generating sphinx docs" || true
+git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
-if [ "$dry_run" = false ]; then
-  echo "Pushing to pytorch.github.io:$branch"
-  set +x
-/usr/bin/expect <<DONE
-  spawn git push origin $branch
-  expect "Username*"
-  send "pytorchbot\n"
-  expect "Password*"
-  send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
-  expect eof
-DONE
-  set -x
-else
-  echo "Skipping push due to dry_run"
+if [[ "${WITH_PUSH:-}" == true ]]; then
+  git push -u origin "${branch}"
 fi
 
 popd

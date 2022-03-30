@@ -1,13 +1,8 @@
 """
 This module converts objects into numpy array.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import numpy as np
 import torch
-import six
 
 
 def make_np(x):
@@ -20,7 +15,7 @@ def make_np(x):
     """
     if isinstance(x, np.ndarray):
         return x
-    if isinstance(x, six.string_types):  # Caffe2 will pass name of blob(s) to fetch
+    if isinstance(x, str):  # Caffe2 will pass name of blob(s) to fetch
         return _prepare_caffe2(x)
     if np.isscalar(x):
         return np.array([x])
@@ -31,9 +26,7 @@ def make_np(x):
 
 
 def _prepare_pytorch(x):
-    if isinstance(x, torch.autograd.Variable):
-        x = x.data
-    x = x.cpu().numpy()
+    x = x.detach().cpu().numpy()
     return x
 
 

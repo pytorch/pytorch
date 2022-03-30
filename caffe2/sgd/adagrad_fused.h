@@ -11,7 +11,8 @@ template <
     typename Tdata, // embedding and momentum types
     typename T, // everything else
     typename TLengths,
-    typename adagradT>
+    typename adagradT,
+    bool is_mean = false>
 class SparseAdagradFusedWithSparseLengthsSumGradientOp final
     : public Operator<CPUContext> {
  public:
@@ -19,7 +20,12 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradFusedWithSparseLengthsSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -70,7 +76,23 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
         Input(MOMENT_1).numel());
 
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    if (is_mean) {
+      grad_buffer_.ResizeLike(Input(GRAD));
+    }
+    auto* grad_buffer_data =
+        is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
+    if (is_mean) {
+      for (const auto rangeIndex : c10::irange(numSegments)) {
+        for (const auto tmpIndex : c10::irange(block_size)) {
+          auto offsetI = rangeIndex * block_size;
+          grad_buffer_data[offsetI + tmpIndex] = lengths[rangeIndex] > 0
+              ? gradIn[offsetI + tmpIndex] / lengths[rangeIndex]
+              : gradIn[offsetI + tmpIndex];
+        }
+      }
+    }
+
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -94,7 +116,10 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
             Input(PARAM).numel());
 
         if (block_size == 1) {
-          float gi = gradIn[offsetI];
+          float gi = std::fma(
+              weight_decay_,
+              paramIn[idx],
+              is_mean ? grad_buffer_data[offsetI] : gradIn[offsetI]);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] =
               paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
@@ -110,7 +135,7 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
               paramIn + offsetIdx,
               &paramIn[idx_pref * block_size],
 
-              gradIn + offsetI,
+              is_mean ? grad_buffer_data + offsetI : gradIn + offsetI,
 
               momentIn + offsetIdx,
               &momentIn[idx_pref * block_size],
@@ -122,7 +147,8 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
               &momentOut[idx_pref * block_size],
 
               epsilon_,
-              lr[0]);
+              lr[0],
+              weight_decay_);
         }
       }
     }
@@ -133,7 +159,9 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   adagradT kernel_;
+  Tensor grad_buffer_{CPU};
 
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
@@ -147,7 +175,11 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -211,7 +243,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     // ignores this dependency and fuses these two loops.
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -245,7 +277,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     CAFFE_ENFORCE_EQ(dataIndex, n);
 
     dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -253,12 +285,12 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         auto offsetIdx = idx * block_size;
         auto localOffset = dataIndex - start;
 
-        for (int i = 0; i < block_size; ++i) {
+        for (const auto i : c10::irange(block_size)) {
           temp_grad[i] = auxParamIn[localOffset] * gradIn[offsetI + i];
         }
 
         if (block_size == 1) {
-          float gi = temp_grad[0];
+          float gi = std::fma(weight_decay_, paramIn[idx], temp_grad[0]);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] =
               paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
@@ -286,7 +318,8 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
               &momentOut[idx_pref * block_size],
 
               epsilon_,
-              lr[0]);
+              lr[0],
+              weight_decay_);
         }
       }
     }
@@ -296,6 +329,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   adagradT kernel_;
 
   INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS);
@@ -314,7 +348,11 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -371,7 +409,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
 
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -402,12 +440,12 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
             auxGrad + dataIndex,
             &context_);
 
-        for (int i = 0; i < block_size; ++i) {
+        for (const auto i : c10::irange(block_size)) {
           temp_grad[i] = auxParamIn[localOffset] * gradIn[offsetI + i];
         }
 
         if (block_size == 1) {
-          float gi = temp_grad[0];
+          float gi = std::fma(weight_decay_, paramIn[idx], temp_grad[0]);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] =
               paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
@@ -435,7 +473,8 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
               &momentOut[idx_pref * block_size],
 
               epsilon_,
-              lr[0]);
+              lr[0],
+              weight_decay_);
         }
       }
     }
@@ -446,6 +485,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   adagradT kernel_;
 
   INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS);

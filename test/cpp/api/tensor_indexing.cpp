@@ -83,27 +83,27 @@ TEST(TensorIndexingTest, TestNoIndices) {
   ASSERT_THROWS_WITH(tensor.index_put_(indices, value), "Passing an empty index list to Tensor::index_put_() is not valid syntax");
 }
 
-TEST(TensorIndexingTest, TestAdvancedIndexingWithArrayRefOfTensor) {
+TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index(at::ArrayRef<torch::Tensor>({index}));
+    torch::Tensor result = at::index(tensor, {index});
     torch::Tensor result_with_init_list = tensor.index({index});
-    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+    ASSERT_TRUE(result.equal(result_with_init_list));
   }
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index_put_(at::ArrayRef<torch::Tensor>({index}), torch::ones({20}));
+    torch::Tensor result = at::index_put_(tensor, {index}, torch::ones({20}));
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({20}));
-    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+    ASSERT_TRUE(result.equal(result_with_init_list));
   }
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index_put_(at::ArrayRef<torch::Tensor>({index}), torch::ones({1, 20}));
+    torch::Tensor result = at::index_put_(tensor, {index}, torch::ones({1, 20}));
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({1, 20}));
-    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+    ASSERT_TRUE(result.equal(result_with_init_list));
   }
 }
 
@@ -159,14 +159,13 @@ TEST(TensorIndexingTest, TestBoolIndices) {
     auto uint8Indices = torch::tensor({1, 0, 0}, torch::kUInt8);
 
     {
-      std::stringstream buffer;
-      CerrRedirect cerr_redirect(buffer.rdbuf());
+      WarningCapture warnings;
 
       ASSERT_EQ(v.index({boolIndices}).sizes(), v.index({uint8Indices}).sizes());
       assert_tensor_equal(v.index({boolIndices}), v.index({uint8Indices}));
       assert_tensor_equal(v.index({boolIndices}), torch::tensor({true}, torch::kBool));
 
-      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+      ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
     }
   }
 }
@@ -174,7 +173,7 @@ TEST(TensorIndexingTest, TestBoolIndices) {
 TEST(TensorIndexingTest, TestBoolIndicesAccumulate) {
   auto mask = torch::zeros({10}, torch::kBool);
   auto y = torch::ones({10, 10});
-  y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
+  y.index_put_({mask}, {y.index({mask})}, /*accumulate=*/true);
   assert_tensor_equal(y, torch::ones({10, 10}));
 }
 
@@ -192,13 +191,12 @@ TEST(TensorIndexingTest, TestByteMask) {
     auto v = torch::randn({5, 7, 3});
     auto mask = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
     {
-      std::stringstream buffer;
-      CerrRedirect cerr_redirect(buffer.rdbuf());
+      WarningCapture warnings;
 
       ASSERT_EQ(v.index({mask}).sizes(), torch::IntArrayRef({3, 7, 3}));
       assert_tensor_equal(v.index({mask}), torch::stack({v[0], v[2], v[3]}));
 
-      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+      ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
     }
   }
   {
@@ -211,13 +209,12 @@ TEST(TensorIndexingTest, TestByteMaskAccumulate) {
   auto mask = torch::zeros({10}, torch::kUInt8);
   auto y = torch::ones({10, 10});
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
     assert_tensor_equal(y, torch::ones({10, 10}));
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
 }
 
@@ -227,12 +224,11 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
   auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
   auto mask2 = torch::tensor({1, 1, 1}, torch::kByte);
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
 }
 
@@ -325,12 +321,14 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
 TEST(TensorIndexingTest, TestEmptyNdimIndexBool) {
   torch::Device device(torch::kCPU);
   auto x = torch::randn({5}, device);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}), c10::Error);
 }
 
 TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
   torch::Device device(torch::kCUDA);
   auto x = torch::randn({5}, device);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}), c10::Error);
 }
 
@@ -404,6 +402,7 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
     a.index_put_({"..."}, neg_ones_expanded * 4);
     assert_tensor_equal(a, neg_ones * 4);
     if (a.dim() == 0) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
       ASSERT_THROW(a.index_put_({Slice()}, neg_ones_expanded * 5), c10::Error);
     }
   }
@@ -448,7 +447,9 @@ TEST(TensorIndexingTest, TestSetitemExpansionError) {
     a.sizes().end());
   auto a_expanded = a.expand(tensor_sizes);
   // NumPy: ValueError
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index_put_({true}, a_expanded), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index_put_({true_tensor}, a_expanded), c10::Error);
 }
 
@@ -470,7 +471,9 @@ TEST(TensorIndexingTest, TestGetitemScalars) {
 
   // scalar indexed with scalar
   auto r = torch::randn({});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(r.index({Slice()}), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(r.index({zero}), c10::Error);
   assert_tensor_equal(r, r.index({"..."}));
 }
@@ -492,7 +495,9 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
 
   // scalar indexed with scalars
   auto r = torch::randn({});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(r.index_put_({Slice()}, 8.8), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(r.index_put_({zero}, 8.8), c10::Error);
   r.index_put_({"..."}, 9.9);
   ASSERT_TRUE(r.allclose(torch::tensor(9.9)));
@@ -539,12 +544,11 @@ TEST(TensorIndexingTest, TestByteTensorAssignment) {
   auto value = torch::tensor({3., 4., 5., 6.});
 
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     x.index_put_({b}, value);
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 1);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 1);
   }
 
   assert_tensor_equal(x.index({0}), value);
@@ -639,6 +643,7 @@ TEST(NumpyTests, TestEmptyFancyIndex) {
   assert_tensor_equal(a.index({torch::tensor({}, torch::kLong)}), torch::tensor({}, torch::kLong));
 
   b = torch::tensor({}).to(torch::kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({b}), c10::Error);
 }
 
@@ -677,6 +682,7 @@ TEST(NumpyTests, TestSingleIntIndex) {
   assert_tensor_equal(a.index({-1}), torch::tensor({7, 8, 9}));
 
   // Index out of bounds produces IndexError
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({1 << 30}), c10::Error);
   // NOTE: According to the standard (http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0543r0.html),
   // for signed integers, if during the evaluation of an expression, the result is not mathematically defined
@@ -705,14 +711,13 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
   ASSERT_THROWS_WITH(arr.index({index}), "mask");
 
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     index = torch::empty({4, 4}, torch::kByte).zero_();
     ASSERT_THROWS_WITH(arr.index({index}), "mask");
     ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
 }
 
@@ -766,6 +771,7 @@ TEST(NumpyTests, TestBooleanIndexingWeirdness) {
   auto a = torch::ones({2, 3, 4});
   ASSERT_EQ(a.index({false, true, "..."}).sizes(), torch::IntArrayRef({0, 2, 3, 4}));
   assert_tensor_equal(torch::ones({1, 2}), a.index({true, torch::tensor({0, 1}), true, true, torch::tensor({1}), torch::tensor({{2}})}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({false, torch::tensor({0, 1}), "..."}), c10::Error);
 }
 
@@ -776,6 +782,7 @@ TEST(NumpyTests, TestBooleanIndexingWeirdnessTensors) {
   auto a = torch::ones({2, 3, 4});
   ASSERT_EQ(a.index({false, true, "..."}).sizes(), torch::IntArrayRef({0, 2, 3, 4}));
   assert_tensor_equal(torch::ones({1, 2}), a.index({true_tensor, torch::tensor({0, 1}), true_tensor, true_tensor, torch::tensor({1}), torch::tensor({{2}})}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({false_tensor, torch::tensor({0, 1}), "..."}), c10::Error);
 }
 
@@ -810,7 +817,9 @@ TEST(NumpyTests, TestEverythingReturnsViews) {
 
 TEST(NumpyTests, TestBroaderrorsIndexing) {
   auto a = torch::zeros({5, 5});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({torch::tensor({0, 1}), torch::tensor({0, 1, 2})}), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index_put_({torch::tensor({0, 1}), torch::tensor({0, 1, 2})}, 0), c10::Error);
 }
 
@@ -818,11 +827,15 @@ TEST(NumpyTests, TestTrivialFancyOutOfBounds) {
   auto a = torch::zeros({5});
   auto ind = torch::ones({20}, torch::kInt64);
   ind.index_put_({-1}, 10);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({ind}), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index_put_({ind}, 0), c10::Error);
   ind = torch::ones({20}, torch::kInt64);
   ind.index_put_({0}, 11);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({ind}), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index_put_({ind}, 0), c10::Error);
 }
 

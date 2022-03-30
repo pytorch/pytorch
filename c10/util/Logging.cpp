@@ -1,6 +1,9 @@
-#include "c10/util/Logging.h"
-#include "c10/util/Backtrace.h"
-#include "c10/util/Flags.h"
+#include <c10/util/Backtrace.h>
+#include <c10/util/Flags.h>
+#include <c10/util/Logging.h>
+#ifdef FBCODE_CAFFE2
+#include <folly/synchronization/SanitizeThread.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,13 +20,9 @@ C10_DEFINE_bool(
     "of throwing an exception.");
 
 namespace c10 {
-namespace enforce_detail {
-/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
-  msg_ = new std::string(std::move(msg));
-}
-} // namespace enforce_detail
 
 namespace {
+// NOLINTNEXTLINE(modernize-redundant-void-arg)
 std::function<string(void)>* GetFetchStackTrace() {
   static std::function<string(void)> func = []() {
     return get_backtrace(/*frames_to_skip=*/1);
@@ -44,11 +43,19 @@ void ThrowEnforceNotMet(
     const void* caller) {
   c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
   if (FLAGS_caffe2_use_fatal_for_enforce) {
-    LOG(FATAL) << e.msg_stack()[0];
+    LOG(FATAL) << e.msg();
   }
   throw e;
 }
 
+void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+  ThrowEnforceNotMet(file, line, condition, std::string(msg), caller);
+}
 
 void ThrowEnforceFiniteNotMet(
     const char* file,
@@ -56,18 +63,30 @@ void ThrowEnforceFiniteNotMet(
     const char* condition,
     const std::string& msg,
     const void* caller) {
-    throw c10::EnforceFiniteError(
-      file, line, condition, msg, (*GetFetchStackTrace())(), caller
-    );
+  throw c10::EnforceFiniteError(
+      file, line, condition, msg, (*GetFetchStackTrace())(), caller);
 }
 
+void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+  ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
+}
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
-Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(msg, str(" (", source_location, ")\n", (*GetFetchStackTrace())())) {
-}
+Error::Error(SourceLocation source_location, std::string msg)
+    : Error(
+          std::move(msg),
+          str("Exception raised from ",
+              source_location,
+              " (most recent call first):\n",
+              (*GetFetchStackTrace())())) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
+using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;
 
 namespace {
 bool IsAPIUsageDebugMode() {
@@ -85,6 +104,11 @@ APIUsageLoggerType* GetAPIUsageLogger() {
       IsAPIUsageDebugMode() ? &APIUsageDebug : [](const string&) {};
   return &func;
 };
+
+DDPUsageLoggerType* GetDDPUsageLogger() {
+  static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
+  return &func;
+};
 } // namespace
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
@@ -92,9 +116,22 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
+void SetPyTorchDDPUsageLogger(
+    std::function<void(const DDPLoggingData&)> logger) {
+  TORCH_CHECK(logger);
+  *GetDDPUsageLogger() = logger;
+}
+
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
+}
+
+void LogPyTorchDDPUsage(const DDPLoggingData& ddpData) try {
+  if (auto logger = GetDDPUsageLogger())
+    (*logger)(ddpData);
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -108,8 +145,13 @@ bool LogAPIUsageFakeReturn(const std::string& event) try {
   // static destructor race
   return true;
 }
-} // namespace detail
 
+namespace {
+
+void setLogLevelFlagFromEnv();
+
+} // namespace
+} // namespace detail
 } // namespace c10
 
 #if defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
@@ -147,7 +189,7 @@ using fLI::FLAGS_v;
 
 C10_DEFINE_int(
     caffe2_log_level,
-    google::GLOG_ERROR,
+    google::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
 // Google glog's api does not have an external function that allows one to check
@@ -161,30 +203,54 @@ bool IsGoogleLoggingInitialized();
 } // namespace google
 
 namespace c10 {
-bool InitCaffeLogging(int* argc, char** argv) {
-  if (*argc == 0)
-    return true;
+namespace {
+
+void initGoogleLogging(char const* name) {
 #if !defined(_MSC_VER)
   // This trick can only be used on UNIX platforms
   if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized())
 #endif
   {
-    ::google::InitGoogleLogging(argv[0]);
+    ::google::InitGoogleLogging(name);
 #if !defined(_MSC_VER)
     // This is never defined on Windows
+#if !defined(__XROS__)
     ::google::InstallFailureSignalHandler();
 #endif
+#endif
   }
+}
+
+} // namespace
+
+void initLogging() {
+  detail::setLogLevelFlagFromEnv();
+
   UpdateLoggingLevelsFromFlags();
+}
+
+bool InitCaffeLogging(int* argc, char** argv) {
+  if (*argc == 0) {
+    return true;
+  }
+
+  initGoogleLogging(argv[0]);
+
+  UpdateLoggingLevelsFromFlags();
+
   return true;
 }
 
 void UpdateLoggingLevelsFromFlags() {
+#ifdef FBCODE_CAFFE2
+  // TODO(T82645998): Fix data race exposed by TSAN.
+  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
+#endif
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
   // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (FLAGS_caffe2_log_level < google::GLOG_ERROR) {
+  if (FLAGS_caffe2_log_level < google::GLOG_WARNING) {
     FLAGS_logtostderr = 1;
   }
   // Also, transfer the caffe2_log_level verbose setting to glog.
@@ -207,12 +273,17 @@ void ShowLogInfoToStderr() {
 
 C10_DEFINE_int(
     caffe2_log_level,
-    ERROR,
+    c10::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {
+
+void initLogging() {
+  detail::setLogLevelFlagFromEnv();
+}
+
 bool InitCaffeLogging(int* argc, char** argv) {
-  // When doing InitCaffeLogging, we will assume that caffe's flag paser has
+  // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)
     return true;
@@ -223,10 +294,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
               << std::endl;
     return false;
   }
-  if (FLAGS_caffe2_log_level > FATAL) {
-    std::cerr << "The log level of Caffe2 has to be no larger than FATAL("
-              << FATAL << "). Capping it to FATAL." << std::endl;
-    FLAGS_caffe2_log_level = FATAL;
+  if (FLAGS_caffe2_log_level > GLOG_FATAL) {
+    std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
+              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << std::endl;
+    FLAGS_caffe2_log_level = GLOG_FATAL;
   }
   return true;
 }
@@ -234,7 +305,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
 void UpdateLoggingLevelsFromFlags() {}
 
 void ShowLogInfoToStderr() {
-  FLAGS_caffe2_log_level = INFO;
+  FLAGS_caffe2_log_level = GLOG_INFO;
 }
 
 MessageLogger::MessageLogger(const char* file, int line, int severity)
@@ -258,7 +329,7 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
   stream_ << "["
-          << CAFFE2_SEVERITY_PREFIX[std::min(4, FATAL - severity_)]
+          << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
           //<< std::setfill('0')
           //<< " " << std::setw(2) << timeinfo->tm_hour
@@ -285,12 +356,12 @@ MessageLogger::~MessageLogger() {
       ANDROID_LOG_DEBUG, // VLOG(1)
       ANDROID_LOG_VERBOSE, // VLOG(2) .. VLOG(N)
   };
-  int android_level_index = FATAL - std::min(FATAL, severity_);
+  int android_level_index = GLOG_FATAL - std::min(GLOG_FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
   __android_log_print(level, tag_, "%s", stream_.str().c_str());
   // Indicate termination if needed.
-  if (severity_ == FATAL) {
+  if (severity_ == GLOG_FATAL) {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
 #else // !ANDROID
@@ -300,12 +371,12 @@ MessageLogger::~MessageLogger() {
     // Simulating the glog default behavior: if the severity is above INFO,
     // we flush the stream so that the output appears immediately on std::cerr.
     // This is expected in some of our tests.
-    if (severity_ > INFO) {
+    if (severity_ > GLOG_INFO) {
       std::cerr << std::flush;
     }
   }
 #endif // ANDROID
-  if (severity_ == FATAL) {
+  if (severity_ == GLOG_FATAL) {
     DealWithFatal();
   }
 }
@@ -313,3 +384,53 @@ MessageLogger::~MessageLogger() {
 } // namespace c10
 
 #endif // !C10_USE_GLOG
+
+namespace c10 {
+namespace detail {
+namespace {
+
+void setLogLevelFlagFromEnv() {
+  const char* level_str = std::getenv("TORCH_CPP_LOG_LEVEL");
+
+  // Not set, fallback to the default level (i.e. WARNING).
+  std::string level{level_str != nullptr ? level_str : ""};
+  if (level.empty()) {
+    return;
+  }
+
+  std::transform(
+      level.begin(), level.end(), level.begin(), [](unsigned char c) {
+        return toupper(c);
+      });
+
+  if (level == "0" || level == "INFO") {
+    FLAGS_caffe2_log_level = 0;
+
+    return;
+  }
+  if (level == "1" || level == "WARNING") {
+    FLAGS_caffe2_log_level = 1;
+
+    return;
+  }
+  if (level == "2" || level == "ERROR") {
+    FLAGS_caffe2_log_level = 2;
+
+    return;
+  }
+  if (level == "3" || level == "FATAL") {
+    FLAGS_caffe2_log_level = 3;
+
+    return;
+  }
+
+  std::cerr
+      << "`TORCH_CPP_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
+         "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
+         "`2`, and `3`."
+      << std::endl;
+}
+
+} // namespace
+} // namespace detail
+} // namespace c10

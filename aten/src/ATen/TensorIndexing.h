@@ -1,9 +1,17 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <ATen/core/TensorBody.h>
-#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Functions.h>
+#include <ATen/ScalarOps.h>
+
+// TODO: try to remove this
+// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#include <ATen/NativeFunctions.h>
+
+#include <ATen/core/List.h>
 
 namespace at {
 namespace indexing {
@@ -13,12 +21,12 @@ const int64_t INDEX_MIN = std::numeric_limits<int64_t>::min();
 
 enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
-constexpr c10::nullopt_t None{c10::nullopt_t::init()};
+constexpr c10::nullopt_t None = c10::nullopt;
 
-struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
-CAFFE2_API extern const EllipsisIndexType Ellipsis;
+struct TORCH_API EllipsisIndexType final { EllipsisIndexType() {} };
+TORCH_API extern const EllipsisIndexType Ellipsis;
 
-struct CAFFE2_API Slice final {
+struct TORCH_API Slice final {
  public:
   // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
   Slice(
@@ -68,7 +76,7 @@ struct CAFFE2_API Slice final {
   int64_t step_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 
 // `at::indexing::TensorIndex` is used for converting C++ tensor indices such as
 // `{None, "...", Ellipsis, 0, true, Slice(1, None, 2), torch::tensor({1, 2})}`
@@ -95,31 +103,39 @@ CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `:3:2`                  | `Slice(None, 3, 2)`
 // `1:3:2`                 | `Slice(1, 3, 2)`
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
-struct CAFFE2_API TensorIndex final {
+struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(at::indexing::EllipsisIndexType) : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
     TORCH_CHECK_VALUE(
       strcmp(str, "...") == 0,
       "Expected \"...\" to represent an ellipsis index, but got \"", str, "\"");
   }
 
   // Case 3: Integer value
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int64_t integer) : integer_(integer), type_(TensorIndexType::Integer) {}
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
 
   // Case 4: Boolean value
   template <class T,
             class = typename std::enable_if<std::is_same<bool, T>::value>::type >
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Slice slice) : slice_(std::move(slice)), type_(TensorIndexType::Slice) {}
 
   // Case 6: Tensor value
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Tensor tensor) : tensor_(std::move(tensor)), type_(TensorIndexType::Tensor) {}
 
   inline bool is_none() const {
@@ -170,8 +186,8 @@ struct CAFFE2_API TensorIndex final {
   TensorIndexType type_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
 
 namespace impl {
 static inline Tensor applySlice(
@@ -201,7 +217,7 @@ static inline Tensor applySelect(
     int64_t dim,
     int64_t index,
     int64_t real_dim,
-    const at::Device& self_device,
+    const at::Device& /*self_device*/,
     const IntArrayRef& self_sizes) {
   TORCH_CHECK_INDEX(
     !(index == 0 && dim == 0 && self_sizes.size() == 0),
@@ -222,9 +238,9 @@ static inline Tensor applySelect(
 static inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool value) {
   // booleans add a dimension of size 1. true indexes this dimension as if 0:, false as empty.
   if (value) {
-    return at::native::zeros({1}, {}, self.options().dtype(kLong));
+    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
   } else {
-    return at::native::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, {}, self.options().dtype(kLong));
   }
 }
 
@@ -245,11 +261,7 @@ static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const 
   }
 }
 
-static inline Tensor scalarToTensorCPUOrCUDA(Scalar v, const TensorOptions& options) {
-  return at::native::scalar_tensor(v, options);
-}
-
-static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOptions& options) {
+static inline Tensor scalarToTensorNonNativeDeviceType(const Scalar& v, const TensorOptions& options) {
   return at::scalar_tensor(v, options);
 }
 
@@ -260,15 +272,11 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   (*dim_ptr)++;
 };
 
-static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
-  std::vector<Tensor> converted_inds(indices.size());
-  for (size_t i = 0; i < indices.size(); ++i) {
-    const auto &ind = indices[i];
-    if (ind.defined()) {
-      converted_inds[i] = ind.to(ind.options().device(self.device()));
-    } else {
-      converted_inds[i] = std::move(indices[i]);
-    }
+static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& /*self*/, std::vector<Tensor>&& indices) {
+  c10::List<c10::optional<Tensor>> converted_inds;
+  converted_inds.reserve(indices.size());
+  for (const auto &i: indices){
+    converted_inds.push_back(std::move(i));
   }
   return converted_inds;
 }
@@ -315,9 +323,9 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 //
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
-static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
-    return impl::scalarToTensorCPUOrCUDA(v, options);
+static inline Tensor scalarToTensor(const Scalar& v, const TensorOptions& options, const at::Device& self_device) {
+  if (self_device == at::kCPU) {
+    return at::detail::scalar_tensor_static(v, options.dtype_opt()->toScalarType(), self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }
@@ -328,7 +336,7 @@ static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, cons
 // strip away unit dimensions from the left of 'src'
 static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
-  for (size_t i = 0; i < sizes.size(); ++i) {
+  for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] != 1) {
       first_non1_src = i;
       break;
@@ -339,9 +347,19 @@ static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
 }
 
 static inline void copy_to(const Tensor& dst, const Tensor& src) {
-  Tensor b_src;
-  std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
-  dst.copy_(b_src);
+  if (dst.sizes().equals(src.sizes())) {
+    // A shortcut to avoid generating hard-coded constant sizes during tracing.
+    // This is not a perfect solution: when src & dst have different shapes, constants will still
+    // appear. Users can workaround that case by dst[index..] = src.reshape(..)
+    dst.copy_(src);
+    return;
+  } else if (src.sizes().size() == 0 && src.device().type() == at::kCPU) {
+    dst.fill_(src.item());
+    return;
+  }
+  auto src_view = src.view(slicePrefix1sSize(src.sizes()));
+  c10::MaybeOwned<Tensor> b_src = expand_inplace(dst, src_view, "setitem");
+  dst.copy_(*b_src);
 }
 
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
@@ -422,7 +440,7 @@ static inline Tensor applySlicing(
     "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     result = handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
@@ -524,7 +542,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
+static inline void set_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 

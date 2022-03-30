@@ -1,10 +1,16 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
-  name: "torch-jit-export"
+  node {
+    input: "onnx::Identity_0"
+    output: "1"
+    name: "Identity_0"
+    op_type: "Identity"
+  }
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Identity_0"
     type {
       tensor_type {
         elem_type: 1
@@ -17,7 +23,7 @@ graph {
     }
   }
   output {
-    name: "0"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1

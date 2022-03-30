@@ -5,7 +5,8 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -98,6 +99,7 @@ Tensor q_avg_pool3d(
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int kD, kW, kH, dD, dW, dH, padD, padW, padH;
   std::tie(kW, kH, kD) = get_kernel(kernel_size);
   std::tie(dW, dH, dD) = get_stride(stride, kW, kH, kD);
@@ -128,65 +130,35 @@ Tensor q_avg_pool3d(
       input_nhwc.q_zero_point(),
       c10::nullopt);
   // fast path for channel last: qavg_pool_2d_nhwc_stub
-  if (output_shape.size() == 4) {
-    qavg_pool3d_nhwc_stub(
-        input_nhwc.device().type(),
-        input_nhwc,
-        output,
-        0,
-        nInputPlane,
-        inputWidth,
-        inputHeight,
-        inputDepth,
-        outputWidth,
-        outputHeight,
-        outputDepth,
-        kW,
-        kH,
-        kD,
-        dW,
-        dH,
-        dD,
-        padW,
-        padH,
-        padD,
-        count_include_pad,
-        divisor_override);
-  } else {
-    at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-      for (auto b = start; b < end; b++) {
-        qavg_pool3d_nhwc_stub(
-            input_nhwc.device().type(),
-            input_nhwc,
-            output,
-            b,
-            nInputPlane,
-            inputWidth,
-            inputHeight,
-            inputDepth,
-            outputWidth,
-            outputHeight,
-            outputDepth,
-            kW,
-            kH,
-            kD,
-            dW,
-            dH,
-            dD,
-            padW,
-            padH,
-            padD,
-            count_include_pad,
-            divisor_override);
-      }
-    });
-  }
+  qavg_pool3d_nhwc_stub(
+      input_nhwc.device().type(),
+      input_nhwc,
+      output,
+      nbatch,
+      nInputPlane,
+      inputWidth,
+      inputHeight,
+      inputDepth,
+      outputWidth,
+      outputHeight,
+      outputDepth,
+      kW,
+      kH,
+      kD,
+      dW,
+      dH,
+      dD,
+      padW,
+      padH,
+      padD,
+      count_include_pad,
+      divisor_override);
   return output;
 }
 
 } // namespace
 
-Tensor quantized_avg_pool3d(
+Tensor avg_pool3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -195,7 +167,7 @@ Tensor quantized_avg_pool3d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   Tensor output;
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_avg_pool3d", [&]() {
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
     output = q_avg_pool3d<scalar_t>(
         input,
         kernel_size,

@@ -1,0 +1,74 @@
+{
+  "__comment": "@generated DO NOT EDIT MANUALLY, Generation script: .github/scripts/generate_ci_workflows.py",
+  "label_rules": {
+    "ciflow/all": [
+      "linux-binary-libtorch-cxx11-abi",
+      "linux-binary-libtorch-pre-cxx11",
+      "linux-binary-manywheel",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release",
+      "windows-binary-wheel"
+    ],
+    "ciflow/binaries": [
+      "linux-binary-conda",
+      "linux-binary-libtorch-cxx11-abi",
+      "linux-binary-libtorch-pre-cxx11",
+      "linux-binary-manywheel",
+      "macos-arm64-binary-conda",
+      "macos-arm64-binary-wheel",
+      "macos-binary-conda",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "macos-binary-wheel",
+      "windows-binary-conda",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release",
+      "windows-binary-wheel"
+    ],
+    "ciflow/binaries_conda": [
+      "linux-binary-conda",
+      "macos-arm64-binary-conda",
+      "macos-binary-conda",
+      "windows-binary-conda"
+    ],
+    "ciflow/binaries_libtorch": [
+      "linux-binary-libtorch-cxx11-abi",
+      "linux-binary-libtorch-pre-cxx11",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release"
+    ],
+    "ciflow/binaries_wheel": [
+      "linux-binary-manywheel",
+      "macos-arm64-binary-wheel",
+      "macos-binary-wheel",
+      "windows-binary-wheel"
+    ],
+    "ciflow/default": [
+      "linux-binary-conda",
+      "linux-binary-libtorch-cxx11-abi",
+      "linux-binary-libtorch-pre-cxx11",
+      "linux-binary-manywheel",
+      "macos-arm64-binary-conda",
+      "macos-arm64-binary-wheel",
+      "macos-binary-conda",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "macos-binary-wheel",
+      "windows-binary-conda",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release",
+      "windows-binary-wheel"
+    ],
+    "ciflow/trunk": [
+      "linux-binary-libtorch-cxx11-abi",
+      "linux-binary-libtorch-pre-cxx11",
+      "linux-binary-manywheel",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release",
+      "windows-binary-wheel"
+    ]
+  },
+  "version": "v1"
+}

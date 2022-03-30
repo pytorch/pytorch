@@ -1,0 +1,17 @@
+dependencies:
+  - python=PYTHON_VERSION
+  - numpy
+  - ninja
+  - pyyaml
+  - mkl
+  - mkl-include
+  - setuptools
+  - cmake
+  - cffi
+  - typing_extensions
+  - future
+  - six
+  - requests
+  - dataclasses
+  - pip:
+    - -r ../../requirements.txt

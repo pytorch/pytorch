@@ -501,7 +501,7 @@ void fma16(
     Word16* result,
     Word32* fsr_o) {
   Word16 res;
-  Word32 fsr;
+  Word32 fsr = 0;
   // Call fp utility
   fp_mac_h(b, input, a, 0, fcr, fsr_i, &res, &fsr);
   // Output result
@@ -513,7 +513,6 @@ float fake_fma_fp16_slow(float v1, float v2, float v3) {
   uint32_t fcr_val = 0;
   uint32_t fsr_val = 0x00000F80;
   uint32_t exception_flags = 0;
-  uint16_t result;
 
   uint16_t hv1, hv2, hv3, hresult;
   hv1 = _cvtss_sh(v1, 0);

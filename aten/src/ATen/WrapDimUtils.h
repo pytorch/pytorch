@@ -2,11 +2,15 @@
 
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Tensor.h>
 
 namespace at {
 
 static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
+  // if dim_post_expr is 0 and wrap_scalar is true, then dim must be in the range [-1, 0].
+  // This is a special case for scalar tensors and manifests in e.g. torch.sum(scalar_tensor, 0)
+  // Otherwise, dim should be in the range [-dim_post_expr, dim_post_expr-1].
   return c10::maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
 }
 
@@ -30,14 +34,15 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
 }
 
-// wrap each of dims basing on dim_post_expr
-static inline void maybe_wrap_dims(std::vector<int64_t>& dims, int64_t dim_post_expr) {
+// wrap each dim in the dims array, taking dim_post_expr as the true number of dimensions
+static inline void maybe_wrap_dims_n(int64_t* dims, int64_t ndims, int64_t dim_post_expr) {
   if (dim_post_expr <= 0) {
     dim_post_expr = 1; // this will make range [-1, 0]
   }
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
-  for (auto& dim : dims) {
+  for (const auto i : c10::irange(ndims)) {
+    auto &dim = dims[i];
     if (dim < min || dim > max) {
       TORCH_CHECK_INDEX(false,
         "Dimension out of range (expected to be in range of [",
@@ -45,6 +50,13 @@ static inline void maybe_wrap_dims(std::vector<int64_t>& dims, int64_t dim_post_
     }
     if (dim < 0) dim += dim_post_expr;
   }
+}
+
+// Wrap each dim in a contiguous container, taking dim_post_expr as the true number of dimensions
+// E.g. could also be std::array or c10::SmallVector
+template <typename Container>
+inline void maybe_wrap_dims(Container& dims, int64_t dim_post_expr) {
+  return maybe_wrap_dims_n(dims.data(), dims.size(), dim_post_expr);
 }
 
 // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
@@ -74,7 +86,7 @@ static inline int64_t legacy_cat_wrap_dim(int64_t dim, TensorList tensors) {
 
 // wrap negative dims in a vector
 static inline void wrap_all_dims(std::vector<int64_t>& dims_to_wrap, int64_t tensor_total_dims) {
-  for (size_t i = 0; i < dims_to_wrap.size(); i++) {
+  for (const auto i : c10::irange(dims_to_wrap.size())) {
     dims_to_wrap[i] = maybe_wrap_dim(dims_to_wrap[i], tensor_total_dims);
   }
 }

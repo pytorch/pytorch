@@ -5,63 +5,135 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <ATen/cpp_custom_type_hack.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <ATen/native/quantized/cpu/xnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <torch/library.h>
 
-namespace at {
-namespace native {
+#include <c10/util/irange.h>
+
 namespace {
+// To have a sanity check for maximum matrix size.
+constexpr int64_t kReasonableMaxDim = 1000000;
+} // namespace
 
 template <int kSpatialDim = 2>
 bool ConvDimChecks(
     int64_t act_dims,
     int64_t stride_dims,
     int64_t padding_dims,
-    int64_t dilation_dims) {
+    int64_t output_padding_dims,
+    int64_t dilation_dims,
+    std::string func_name,
+    bool transpose = false) {
   TORCH_CHECK(
       act_dims == kSpatialDim + 2,
-      "quantized::conv",
+      func_name,
       kSpatialDim,
       "d(): Expected activation tensor to have ",
       kSpatialDim + 2,
-      " dimensions.");
+      " dimensions, got ",
+      act_dims);
   TORCH_CHECK(
       stride_dims == kSpatialDim,
-      "quantized::conv",
+      func_name,
       kSpatialDim,
       "d(): Expected stride tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      stride_dims);
   TORCH_CHECK(
       padding_dims == kSpatialDim,
-      "quantized::conv",
+      func_name,
       kSpatialDim,
       "d(): Expected padding tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      padding_dims);
+  TORCH_CHECK(
+      !transpose || (output_padding_dims == kSpatialDim),
+      func_name,
+      kSpatialDim,
+      "d(): Expected output padding tensor to have ",
+      kSpatialDim,
+      " dimensions, got ",
+      output_padding_dims);
   TORCH_CHECK(
       dilation_dims == kSpatialDim,
-      "quantized::conv",
+      func_name,
       kSpatialDim,
       "d(): Expected dilation tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      dilation_dims);
   return true;
+}
+
+inline int64_t compute_deconv_shape(int64_t input,
+                                    int64_t kernel,
+                                    int64_t stride,
+                                    int64_t input_padding,
+                                    int64_t output_padding,
+                                    int64_t dilation) {
+  int64_t out = (input - 1) * stride - 2 * input_padding
+                + dilation * (kernel - 1) + output_padding + 1;
+  return out;
+}
+
+template <int64_t kSpatialDim>
+at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
+    int64_t N, int64_t M,
+    const std::vector<int64_t>& input_shape,
+    const std::vector<int64_t>& kernel,
+    const torch::List<int64_t>& stride,
+    const torch::List<int64_t>& input_padding,
+    const torch::List<int64_t>& output_padding,
+    const torch::List<int64_t>& dilation) {
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
+  output_shape.resize(kSpatialDim + 2);
+  output_shape[0] = N;  // Batch size
+  output_shape[1] = M;  // Output channels
+  for (const auto idx : c10::irange(kSpatialDim)) {
+    output_shape[idx + 2] = compute_deconv_shape(input_shape[idx],
+                                                 kernel[idx],
+                                                 stride[idx],
+                                                 input_padding[idx],
+                                                 output_padding[idx],
+                                                 dilation[idx]);
+    TORCH_CHECK(output_shape[idx + 2] > 0,
+                "Output dimension is zero for ", idx, " axis;"
+                " kernel: ", kernel[idx],
+                ", stride: ", stride[idx],
+                ", input padding: ", input_padding[idx],
+                ", output padding: ", output_padding[idx],
+                ", dilation: ", dilation[idx])
+    TORCH_CHECK(output_shape[idx + 2] < kReasonableMaxDim,
+                "Output dimension is beyound reasonable maximum for ", idx,
+                " axis;"
+                " kernel: ", kernel[idx],
+                ", stride: ", stride[idx],
+                ", input padding: ", input_padding[idx],
+                ", output padding: ", output_padding[idx],
+                ", dilation: ", dilation[idx]);
+  }
+  return output_shape;
 }
 
 #ifdef USE_FBGEMM
 
 template <int kSpatialDim = 2>
-SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
+at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
     int N,
     int M,
     const std::array<int, kSpatialDim>& output_image_shape);
 
 template <>
-SmallVector<int64_t, 4> MakeConvOutputShape<2>(
+at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
     int N,
     int M,
     const std::array<int, 2>& output_image_shape) {
@@ -69,7 +141,7 @@ SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 }
 
 template <>
-SmallVector<int64_t, 5> MakeConvOutputShape<3>(
+at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
     int N,
     int M,
     const std::array<int, 3>& output_image_shape) {
@@ -84,21 +156,36 @@ SmallVector<int64_t, 5> MakeConvOutputShape<3>(
 
 #ifdef USE_PYTORCH_QNNPACK
 
+template <size_t kSpatialDim>
+std::array<int64_t, kSpatialDim> MakeInputShape(
+    int64_t D,
+    int64_t H,
+    int64_t W);
+
+template <>
+std::array<int64_t, 2> MakeInputShape(int64_t /*D*/, int64_t H, int64_t W) {
+  return {H, W};
+}
+template <>
+std::array<int64_t, 3> MakeInputShape(int64_t D, int64_t H, int64_t W) {
+  return {D, H, W};
+}
+
 template <int kSpatialDim>
-SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
+at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
     int N, // mini-batch
     int M, // output channels
-    const std::vector<int>& input_image_shape,
+    const std::array<int64_t, kSpatialDim>& input_image_shape,
     const std::vector<int64_t>& kernel,
     const torch::List<int64_t>& stride,
     const torch::List<int64_t>& padding,
     const torch::List<int64_t>& dilation);
 
 template <>
-SmallVector<int64_t, 4> MakeConvOutputShape<2>(
+at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
     int N, // mini-batch
     int M, // output channels
-    const std::vector<int>& input_image_shape,
+    const std::array<int64_t, 2>& input_image_shape,
     const std::vector<int64_t>& kernel,
     const torch::List<int64_t>& stride,
     const torch::List<int64_t>& padding,
@@ -113,10 +200,10 @@ SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 }
 
 template <>
-SmallVector<int64_t, 5> MakeConvOutputShape<3>(
+at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
     int N, // mini-batch
     int M, // output channels
-    const std::vector<int>& input_image_shape,
+    const std::array<int64_t, 3>& input_image_shape,
     const std::vector<int64_t>& kernel,
     const torch::List<int64_t>& stride,
     const torch::List<int64_t>& padding,
@@ -134,6 +221,1109 @@ SmallVector<int64_t, 5> MakeConvOutputShape<3>(
 }
 
 #endif // USE_PYTORCH_QNNPACK
+
+#ifdef USE_FBGEMM
+template <int kSpatialDim>
+const float* PackedConvWeight<kSpatialDim>::GetBiasData(at::Tensor* bias_ptr) {
+  const float* bias_data = nullptr;
+  if (bias.has_value()) {
+    *bias_ptr = bias.value();
+    TORCH_CHECK(
+        bias_ptr->dtype() == at::kFloat,
+        "[QConv3D] The 'bias' tensor must have 'torch.float' dtype");
+    *bias_ptr = bias_ptr->contiguous();
+    TORCH_CHECK(bias_ptr->dim() == 1, "bias should be a vector (1D Tensor)");
+    const int M = w->outputChannels();
+    TORCH_CHECK(bias_ptr->size(0) == M, "bias should have ", M, " elements.");
+    bias_data = bias_ptr->data_ptr<float>();
+  }
+  return bias_data;
+}
+
+template <int kSpatialDim>
+void PackedConvWeight<kSpatialDim>::GetQuantizationParams(
+    float act_scale,
+    float out_scale,
+    std::vector<float>* output_multiplier_float,
+    std::vector<float>* act_times_w_scale) {
+  if (q_scheme == c10::kPerTensorAffine) {
+    *act_times_w_scale = {(act_scale * w_scale[0])};
+    *output_multiplier_float = {act_times_w_scale->front() / out_scale};
+  } else if (q_scheme == c10::kPerChannelAffine) {
+    const int M = w->outputChannels();
+    output_multiplier_float->resize(M);
+    act_times_w_scale->resize(M);
+    for (const auto i : c10::irange(M)) {
+      act_times_w_scale->at(i) = (act_scale * w_scale[i]);
+      output_multiplier_float->at(i) = act_times_w_scale->at(i) / out_scale;
+    }
+  } else {
+    TORCH_CHECK(false, "[QConv", kSpatialDim, "D] Unknown quantization scheme");
+  }
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeight<kSpatialDim>::apply(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<false>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeight<kSpatialDim>::apply_relu(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<true>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+template <bool kReluFused>
+at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point) {
+  // Quantized kernels are all written with NHWC (channels last) layout in
+  // mind. Ideally, we'd be compatible with conv2d behavior and preserve the
+  // inputs layout as is (doing necessary upconversions).
+  //
+  // However, to be more robust, for now we just force output layout to always
+  // be NHWC (channels last), thus opportunistically improving perf.
+  //
+  // This might change when full memory format support lands
+  // See https://github.com/pytorch/pytorch/issues/23403
+  const std::string func_name = transpose() ? "quantized::conv_transpose"
+                                            : "quantized::conv";
+  TORCH_CHECK(
+      fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(act.scalar_type() == c10::kQUInt8,
+                func_name,
+                "(FBGEMM): Expected activation data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(act.scalar_type()));
+
+  ConvDimChecks<kSpatialDim>(
+      act.ndimension(), stride().size(), padding().size(),
+      output_padding().size(), dilation().size(), func_name, transpose());
+
+  const int N = act.size(0);
+  const int C = act.size(1);
+  const int D = kSpatialDim == 2 ? 1 : act.size(2);
+  const int H = act.size(kSpatialDim);
+  const int W = act.size(kSpatialDim + 1);
+
+  const at::Tensor act_ndhwc = kSpatialDim == 2
+      ? act.contiguous(c10::MemoryFormat::ChannelsLast)
+      : at::native::fbgemm_utils::ConvertToChannelsLast3dTensor(act);
+  const uint8_t* act_data =
+      reinterpret_cast<uint8_t*>(act_ndhwc.data_ptr<c10::quint8>());
+  auto* pack_w = w.get();
+
+  const int M = pack_w->outputChannels();
+  const int kernel_d = kSpatialDim == 2 ? 1 : kernel[0];
+  const int kernel_h = kernel[kSpatialDim - 2];
+  const int kernel_w = kernel[kSpatialDim - 1];
+  const int pad_d = kSpatialDim == 2 ? 0 : padding_[0];
+  const int pad_h = padding_[kSpatialDim - 2];
+  const int pad_w = padding_[kSpatialDim - 1];
+  const int stride_d = kSpatialDim == 2 ? 1 : stride_[0];
+  const int stride_h = stride_[kSpatialDim - 2];
+  const int stride_w = stride_[kSpatialDim - 1];
+  const int dilation_d = kSpatialDim == 2 ? 1 : dilation_[0];
+  const int dilation_h = dilation_[kSpatialDim - 2];
+  const int dilation_w = dilation_[kSpatialDim - 1];
+  const int output_padding_d = kSpatialDim == 2 ? 0 : output_padding_[0];
+  const int output_padding_h = output_padding_[kSpatialDim - 2];
+  const int output_padding_w = output_padding_[kSpatialDim - 1];
+
+  if (kSpatialDim == 2) {
+    TORCH_CHECK(
+        C == pack_w->inputChannels(),
+        "[QConv2D] Given groups=",
+        groups_,
+        ", weight of size ",
+        M,
+        ", ",
+        kernel_h,
+        ", ",
+        kernel_w,
+        ", ",
+        pack_w->inputChannels(),
+        ", expected input (NCHW) ",
+        N,
+        ", ",
+        C,
+        ", ",
+        H,
+        ", ",
+        W,
+        " to have ",
+        pack_w->inputChannels(),
+        " channels, but got ",
+        C,
+        " channels instead");
+  } else {
+    TORCH_CHECK(
+        C == pack_w->inputChannels(),
+        "[QConv3D] Given groups=",
+        groups_,
+        ", weight of size ",
+        M,
+        ", ",
+        kernel_d,
+        ", ",
+        kernel_h,
+        ", ",
+        kernel_w,
+        ", ",
+        pack_w->inputChannels(),
+        ", expected input (NCDHW) ",
+        N,
+        ", ",
+        C,
+        ", ",
+        D,
+        ", ",
+        H,
+        ", ",
+        W,
+        " to have ",
+        pack_w->inputChannels(),
+        " channels, but got ",
+        C,
+        " channels instead");
+  }
+
+  fbgemm::conv_param_t<kSpatialDim> conv_p =
+      at::native::fbgemm_utils::MakeFbgemmConvParam<kSpatialDim>(
+          N, // Batch size
+          C, // Number of input channels
+          M, // Number of output channels
+          kSpatialDim == 2 ? std::vector<int>{H, W} : std::vector<int>{D, H, W},
+          groups_,
+          kSpatialDim == 2 ? std::vector<int>{kernel_h, kernel_w}
+                           : std::vector<int>{kernel_d, kernel_h, kernel_w},
+          kSpatialDim == 2 ? std::vector<int>{stride_h, stride_w}
+                           : std::vector<int>{stride_d, stride_h, stride_w},
+          kSpatialDim == 2 ? std::vector<int>{pad_h, pad_w}
+                           : std::vector<int>{pad_d, pad_h, pad_w},
+          kSpatialDim == 2
+              ? std::vector<int>{dilation_h, dilation_w}
+              : std::vector<int>{dilation_d, dilation_h, dilation_w},
+          kSpatialDim == 2
+              ? std::vector<int>{output_padding_h, output_padding_w}
+              : std::vector<int>{output_padding_d,
+                                 output_padding_h,
+                                 output_padding_w},
+          transpose());
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  const float act_scale = act.q_scale();
+  const int32_t act_zero_point = act.q_zero_point();
+
+  at::Tensor bias;
+  const float* bias_data = GetBiasData(&bias);
+
+  TORCH_CHECK(
+      w_scale.size() == w_zp.size(),
+      "Weight scales and zero points vectors should have the same size.");
+  std::vector<float> output_multiplier_float;
+  std::vector<float> act_times_w_scale;
+  GetQuantizationParams(
+      act_scale, output_scale, &output_multiplier_float, &act_times_w_scale);
+
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
+  if (transpose()) {
+    output_shape = MakeDeConvOutputShape<kSpatialDim>(
+        N,
+        M,
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
+        kernel,
+        stride(),
+        padding(),
+        output_padding(),
+        dilation());
+
+    // if use direct convolution implementation, compute the col_offsets
+    // of the weight matrix at model initialization stage.
+    // We need to know the shape of output matrix
+    // to compute col_offsets for direct convolution.
+    // Hence it cannot be called from inside weight packing function
+    // like other quantized conv implementation
+    if (pack_w->getPackedWForDirectconv().get() &&
+        pack_w->getPackedWForDirectconv().get()->is_first_call()) {
+          pack_w->getPackedWForDirectconv().get()->col_offsets_with_zero_pt_s8acc32_DirectConvT(
+              conv_p,
+              w_zp.data(),
+              col_offsets,
+              M);
+    }
+  } else {
+    output_shape = MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
+  }
+  if (N > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        "[QConv",
+        kSpatialDim,
+        "D] each dimension of output tensor should be greater than 0");
+  }
+  at::Tensor output = kSpatialDim == 2
+      ? at::_empty_affine_quantized(
+            output_shape,
+            device(c10::kCPU)
+                .dtype(c10::kQUInt8)
+                .memory_format(c10::MemoryFormat::ChannelsLast),
+            output_scale,
+            output_zero_point,
+            c10::nullopt)
+      : at::native::fbgemm_utils::MakeEmptyAffineQuantizedChannelsLast3dTensor(
+            output_shape[0],
+            output_shape[1],
+            output_shape[2],
+            output_shape[3],
+            output_shape[4],
+            device(c10::kCPU).dtype(c10::kQUInt8),
+            output_scale,
+            output_zero_point);
+  at::Tensor buffer =
+      at::empty(output.sizes(), output.options().dtype(c10::kInt));
+  const int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    fbgemm::DoNothing<> kNoOpObj{};
+    for (const auto task_id : c10::irange(begin, end)) {
+      if (q_scheme == c10::kPerTensorAffine) {
+        fbgemm::ReQuantizeOutput<
+            kReluFused,
+            fbgemm::QuantizationGranularity::TENSOR,
+            float>
+            output_proc_obj(
+                kNoOpObj,
+                output_multiplier_float.data(),
+                output_zero_point,
+                act_zero_point,
+                w_zp.data(),
+                nullptr, /* row offset buffer */
+                col_offsets.data(),
+                bias_data,
+                M,
+                groups_,
+                act_times_w_scale.data());
+        fbgemm::fbgemmConv<decltype(output_proc_obj), kSpatialDim, int32_t>(
+            conv_p,
+            act_data,
+            *pack_w,
+            reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+            buffer.data_ptr<int32_t>(),
+            output_proc_obj,
+            task_id /* thread_id*/,
+            num_tasks /* num_threads */);
+      } else if (q_scheme == c10::kPerChannelAffine) {
+        fbgemm::ReQuantizeOutput<
+            kReluFused,
+            fbgemm::QuantizationGranularity::OUT_CHANNEL,
+            float>
+            output_proc_obj(
+                kNoOpObj,
+                output_multiplier_float.data(),
+                output_zero_point,
+                act_zero_point,
+                w_zp.data(),
+                nullptr, /* row offset buffer */
+                col_offsets.data(),
+                bias_data,
+                M,
+                groups_,
+                act_times_w_scale.data());
+
+        fbgemm::fbgemmConv<decltype(output_proc_obj), kSpatialDim, int32_t>(
+            conv_p,
+            act_data,
+            *pack_w,
+            reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+            buffer.data_ptr<int32_t>(),
+            output_proc_obj,
+            task_id /* thread_id*/,
+            num_tasks /* num_threads */);
+      }
+    }
+  });
+
+  return output;
+}
+
+template at::Tensor PackedConvWeight<2>::apply(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeight<2>::apply_relu(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeight<3>::apply(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeight<3>::apply_relu(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeight<2>::apply_impl<false>(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeight<3>::apply_impl<false>(
+  const at::Tensor& act,
+  double output_scale,
+  int64_t output_zero_point);
+
+#endif // USE_FBGEMM
+
+#ifdef USE_PYTORCH_QNNPACK
+
+#ifdef USE_XNNPACK
+template <int kSpatialDim>
+template <typename scalar_t, bool kReluFused>
+at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
+    const at::Tensor& act, double output_scale, int64_t output_zero_point) {
+  using underlying_t = typename scalar_t::underlying;
+
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
+
+  const std::string func_name = transpose()
+      ? "quantized::conv_transpose (xnnpack)"
+      : "quantized::conv (xnnpack)";
+  TORCH_CHECK(
+      kSpatialDim == 2,
+      func_name, ": xnnpack does not currently support 3d convolution.");
+
+  /*
+   * NB:
+   * [de]conv_prepack prepares weights (values, scale, and zero_points) ahead of
+   * time during prepack() call assuming the activation will be uint8_t. But it
+   * may not always be the case. A solution may involve making prepack routine
+   * aware of the input qdtype. But currently all the pieces are not ready to
+   * pass that model level info to the prepack function. So, for now, here in
+   * this function we have to massage weights if we learn the input qdtype is
+   * not uint8_t. This involves copying and converting uint8_t to int8_t
+   * whenever necessary. To add to that, since XNNPACK, as of writing this,
+   * doesn't support per_channel weights for quint8_t, we add following assert
+   * makes sure we don't run into that case. Also take shortcuts when processing
+   * weights, which means we have to revisit and fix some weight massging logic
+   * when we enable the missing feature in XNNPACK.
+   *
+   * Table below summarizes how the weights are handled,
+   *
+   * .-------------------------------------------------------------------------.
+   * | input_qdtype |              uint8_t            |            int8_t      |
+   * | per_channel  |       yes       |       no      |      yes     |    no   |
+   * |-------------------------------------------------------------------------|
+   * | zero_points  | at::zeros()*    | orig_zp + 128 | at:zeros()** | orig_zp |
+   * | scale        |            dtype = float, no changes needed              |
+   * | values       |        always processed before passing to XNNPACK        |
+   * .-------------------------------------------------------------------------.
+   *
+   * Notes: * - zero_points for uint8_t + per_channel: no support in xnnpack, need
+   * to fix when support is added. ** - zero_points for int8_t: symmetric
+   * quantization means XNNPACK will ignore kernel zero point(s).
+   */
+
+  if ((std::is_same<underlying_t, c10::quint8>::value )) {
+    TORCH_CHECK(!per_channel(),
+      func_name, ": xnnpack does not currently have per_channel support with activation dtype of c10::quint8."
+    );
+  }
+
+  // More checks
+  ConvDimChecks<kSpatialDim>(
+      act.ndimension(),
+      stride().size(),
+      padding().size(),
+      output_padding().size(),
+      dilation().size(),
+      func_name,
+      transpose());
+
+  const int64_t N = act.size(0);
+  const int64_t H = act.size(2);
+  const int64_t W = act.size(3);
+  const int64_t D = 1;
+  const int64_t M = bias.size(0);
+
+  const auto act_nhwc = act.contiguous(c10::MemoryFormat::ChannelsLast);
+  const auto act_input_scale = act_nhwc.q_scale();
+
+  auto status = xnn_status_invalid_state;
+
+  // Create an operator iff necessary
+  if (!xnnp_convolution_op ||
+      (!input_scale.has_value() || input_scale.value() != act_input_scale)) {
+    xnn_operator_t xnnp_op = nullptr;
+
+    // Update the input scale so we may cache the op
+    input_scale = act_input_scale;
+
+    // create an empty tensor for packing the weights
+    const at::Tensor weight_contig =
+        orig_weight.contiguous(c10::MemoryFormat::ChannelsLast);
+    const float* w_scales_data = w_scales.data_ptr<float>();
+    underlying_t w_zp = 0;
+    at::Tensor weight_tensor;
+
+    if (!per_channel()) {
+      w_zp = static_cast<underlying_t>(
+          weight_contig.q_zero_point() +
+          (std::is_same<underlying_t, uint8_t>::value ? 128 : 0));
+
+      weight_tensor = at::native::empty_affine_quantized(
+          weight_contig.sizes(),
+          c10::CppTypeToScalarType<scalar_t>::value,
+          c10::nullopt /* layout */,
+          c10::kCPU,
+          c10::nullopt /* pin_memory */,
+          w_scales_data[0],
+          w_zp,
+          c10::MemoryFormat::ChannelsLast);
+    } else { /* per_channel */
+      weight_tensor = at::native::empty_per_channel_affine_quantized(
+          weight_contig.sizes(),
+          w_scales,
+          at::zeros(w_scales.sizes(), at::kInt), /* see comment above about w_zp */
+          weight_contig.q_per_channel_axis(),
+          c10::CppTypeToScalarType<scalar_t>::value,
+          c10::nullopt /* layout */,
+          c10::kCPU,
+          c10::nullopt /* pin_memory */,
+          c10::MemoryFormat::ChannelsLast);
+    }
+
+    // copy from the original weight and take care of dtype change if necessary
+    at::native::xnnp_utils::q8_copy_int8_weight_and_add_offset<scalar_t>(
+        weight_contig, weight_tensor);
+    const at::Tensor xnnp_weight =
+        at::native::xnnp_utils::convert_conv_weights_to_channel_last_tensor<
+            kSpatialDim>(weight_tensor, groups(), transpose());
+
+    auto output_min = kReluFused
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        ? activationLimits<underlying_t>(output_scale, output_zero_point, Activation::RELU).first
+        : std::numeric_limits<underlying_t>::min();
+    auto output_max = kReluFused
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        ? activationLimits<underlying_t>(output_scale, output_zero_point, Activation::RELU).second
+        : std::numeric_limits<underlying_t>::max();
+
+
+    // Original bias was float, so we requantize it here.
+    at::Tensor qbias;
+    if (per_channel()) {
+      auto bias_quant_scales =
+          weight_contig.q_per_channel_scales() * act_input_scale;
+      auto bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
+      qbias = at::native::quantize_per_channel(
+          bias, bias_quant_scales, bias_zp, 0, c10::kQInt32);
+    } else {
+      qbias = at::native::quantize_per_tensor(
+          bias, weight_contig.q_scale() * act_input_scale, 0, c10::kQInt32);
+    }
+
+    status = at::native::xnnp_utils::xnnp_create_convolution2d_nhwc(
+        padding()[0],
+        padding()[1],
+        padding()[0],
+        padding()[1],
+        kernel_[0],
+        kernel_[1],
+        stride()[0],
+        stride()[1],
+        dilation()[0],
+        dilation()[1],
+        groups(),
+        !transpose() ? orig_weight.size(1) : orig_weight.size(0) / groups(),
+        !transpose() ? orig_weight.size(0) / groups() : orig_weight.size(1),
+        !transpose() ? orig_weight.size(1) * groups() : orig_weight.size(0),
+        !transpose() ? orig_weight.size(0) : orig_weight.size(1) * groups(),
+        act_nhwc.q_zero_point(),
+        act_input_scale,
+        w_zp, /* will be ignored for Q[SC]8, see comment
+                above about w_zp*/
+        w_scales_data,
+        reinterpret_cast<const underlying_t*>(
+            xnnp_weight.template data_ptr<scalar_t>()),
+        reinterpret_cast<int32_t*>(qbias.template data_ptr<c10::qint32>()),
+        output_zero_point,
+        output_scale,
+        output_min,
+        output_max,
+        0,
+        &xnnp_op,
+        per_channel(),
+        transpose());
+
+    xnnp_convolution_op = xnnpack_operator(xnnp_op);
+    TORCH_CHECK(
+        status == xnn_status_success,
+        func_name,
+        ": xnn create operator failed(",
+        status,
+        ")");
+  }
+
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
+  const auto input_shape = MakeInputShape<kSpatialDim>(D, H, W);
+  if (transpose()) {
+    output_shape = MakeDeConvOutputShape<kSpatialDim>(
+        N, M, {H, W}, kernel_, stride(), padding(), output_padding(), dilation());
+  } else {
+    output_shape = MakeConvOutputShape<kSpatialDim>(
+        N, M, input_shape, kernel_, stride(), padding(), dilation());
+  }
+
+  if (act_nhwc.numel() > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        func_name, ": ", kSpatialDim, "d (xnnpack): each dimension of output tensor should be greater than 0.")
+  }
+
+  // Allocate output Tensor and a buffer for XNNPACK to use
+  at::Tensor output = at::native::empty_affine_quantized(
+      output_shape,
+      c10::CppTypeToScalarType<scalar_t>::value,
+      c10::nullopt /* layout */,
+      c10::kCPU,
+      c10::nullopt /* pin_memory */,
+      output_scale,
+      output_zero_point,
+      c10::MemoryFormat::ChannelsLast);
+
+  // Setup the operator
+  status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
+      xnnp_convolution_op.get(),
+      N,
+      H,
+      W,
+      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
+      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
+      caffe2::pthreadpool_(),
+      per_channel(),
+      transpose(),
+      output_padding()[0],
+      output_padding()[1]);
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn setup operator failed(",
+      status,
+      ")");
+
+  // Run the operator
+  status = xnn_run_operator(
+      xnnp_convolution_op.get(), /* xnn_operator_t op */
+      caffe2::pthreadpool_()); /* pthreadpool_t threadpool */
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn run operator failed(",
+      status,
+      ")");
+
+  return output;
+}
+
+#endif // USE_XNNPACK
+
+template <int kSpatialDim>
+template <bool kReluFused>
+at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point) {
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
+  const std::string func_name = transpose() ? "quantized::conv_transpose"
+                                            : "quantized::conv";
+  TORCH_CHECK(!(kReluFused && transpose()),
+              kSpatialDim == 2,
+              func_name, kSpatialDim,
+              "d (qnnpack): ConvTranspose cannot be fused with ReLU.");
+  TORCH_CHECK(act.scalar_type() == c10::kQUInt8,
+              func_name,
+              "(qnnpack): Expected activation data type ",
+              toString(c10::kQUInt8),
+              " but got ",
+              toString(act.scalar_type()));
+  ConvDimChecks<kSpatialDim>(
+      act.ndimension(), stride().size(), padding().size(),
+      output_padding().size(), dilation().size(), func_name, transpose());
+
+  auto* pack_w = w.get();
+
+  // TODO Can be replaced with packB->getOutputChannels() when update pre-pack
+  // to actually do the packing.
+  const int out_ch_idx = transpose() ? 1 : 0;
+  const auto out_ch = bias.size(0);
+  // inputs are in semantic NCHW format
+  const int N = act.size(0);
+  const int C = act.size(1);
+  const int D = kSpatialDim == 3 ? act.size(2) : 1;
+  const int H = act.size(kSpatialDim);
+  const int W = act.size(kSpatialDim + 1);
+  const int M = out_ch; // output channels
+
+  const auto channels_last = kSpatialDim == 2
+      ? c10::MemoryFormat::ChannelsLast
+      : c10::MemoryFormat::ChannelsLast3d;
+  const at::Tensor act_ndhwc = act.contiguous(channels_last);
+
+  auto output_min = kReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
+            .first
+      : std::numeric_limits<uint8_t>::min();
+  auto output_max = kReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
+            .second
+      : std::numeric_limits<uint8_t>::max();
+
+  double act_input_scale = act_ndhwc.q_scale();
+
+  // Re-quantizing the bias based on input scale and weight scale.
+  if (!input_scale.has_value() || input_scale.value() != act_input_scale) {
+    TORCH_CHECK(M == (transpose() ? groups() : 1) * orig_weight.size(out_ch_idx),
+        "Output channel size of weight and bias must match.");
+    TORCH_CHECK(C == (transpose() ? 1 : groups()) * orig_weight.size(1 - out_ch_idx),
+        "Input channel size of weight and bias must match.");
+
+    // Get the original weight and adjust it to uint8 from int8
+    auto weight_contig = orig_weight.contiguous(channels_last);
+    auto bias_fp32 = bias;
+    int8_t* w_data =
+        reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
+
+    float* weight_scales_data = w_scales.data_ptr<float>();
+    // We calculate requant scale here as the vector holding the requant scale
+    // is owned by this module. The pointer is then passed to qnnpack backend.
+    generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        w_scales, act_input_scale, output_scale, requantization_scales);
+
+    // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
+    // This allocation is actually used only for packing weight and thus will be freed.
+    // Still we should be consistent. Fix this.
+    at::Tensor qnnp_weight = at::_empty_affine_quantized(
+        weight_contig.sizes(),
+        at::device(c10::kCPU).dtype(c10::kQUInt8).memory_format(channels_last),
+        weight_scales_data[0],
+        w_zero_points[0],
+        c10::nullopt);
+    auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
+    auto wt_numel = weight_contig.numel();
+    for (const auto i : c10::irange(wt_numel)) {
+      qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+    }
+    at::Tensor qbias;
+    // Original bias was float, so we requantize it here.
+    if (convolution_op->per_channel) {
+      at::Tensor bias_quant_scales =
+          weight_contig.q_per_channel_scales() * act_input_scale;
+      at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
+      qbias = at::native::quantize_per_channel(
+          bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
+    } else {
+      qbias = at::native::quantize_per_tensor(
+          bias_fp32,
+          weight_contig.q_scale() * act_input_scale,
+          0,
+          c10::kQInt32);
+    }
+
+    // Update the input scale to not pack again.
+    input_scale = act_input_scale;
+    w.reset();
+    w = std::make_unique<qnnpack::PrePackConvWeights>(
+        convolution_op.get(),
+        w_zero_points.data(),
+        reinterpret_cast<uint8_t*>(qnnp_w_data),
+        reinterpret_cast<int32_t*>(qbias.template data_ptr<c10::qint32>()));
+    pack_w = w.get();
+    if (at::globalContext().releaseWeightsWhenPrepacking()) {
+        // On mobile, we release the original weight by resetting the intrusive_ptr.
+        // Calling unpack after this will throw an assertion.
+        orig_weight.reset();
+    }
+
+    // Set padding buffer to zero point. This can only be done if we want
+    // to do it only once.
+    if (zero_buffer_size) {
+      memset(
+          convolution_op->zero_buffer,
+          act_ndhwc.q_zero_point(),
+          zero_buffer_size);
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
+  const auto input_shape = MakeInputShape<kSpatialDim>(D, H, W);
+  if (transpose()) {
+    output_shape = MakeDeConvOutputShape<kSpatialDim>(
+        N,
+        M,
+        {H, W},
+        kernel_,
+        stride(),
+        padding(),
+        output_padding(),
+        dilation());
+  } else {
+    output_shape = MakeConvOutputShape<kSpatialDim>(
+        N, M, input_shape, kernel_, stride(), padding(), dilation());
+  }
+
+  if (act_ndhwc.numel() > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        func_name,
+        kSpatialDim,
+        "d (qnnpack): each dimension of output tensor should "
+        "be greater than 0.")
+  }
+
+  // Allocate output Tensor and a buffer for QNNPACK to use
+  at::Tensor output = at::native::empty_affine_quantized(
+      output_shape,
+      c10::kQUInt8,
+      c10::nullopt /* layout */,
+      c10::kCPU,
+      c10::nullopt /* pin_memory */,
+      output_scale,
+      output_zero_point,
+      channels_last);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  pytorch_qnnp_status run_status;
+  if (transpose()) {
+    run_status = qnnpack::qnnpackDeConv(
+        convolution_op.get(),
+        pack_w->getPackedWeights(),
+        N,
+        H,
+        W,
+        act_ndhwc.q_zero_point(),
+        reinterpret_cast<uint8_t*>(act_ndhwc.template data_ptr<c10::quint8>()),
+        w_zero_points.data(),
+        requantization_scales.data(),
+        output.q_zero_point(),
+        output_min,
+        output_max,
+        reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
+        caffe2::pthreadpool_());
+  } else {
+    run_status = qnnpack::qnnpackConv(
+        convolution_op.get(),
+        pack_w->getPackedWeights(),
+        N,
+        D,
+        H,
+        W,
+        act_ndhwc.q_zero_point(),
+        reinterpret_cast<uint8_t*>(act_ndhwc.template data_ptr<c10::quint8>()),
+        w_zero_points.data(),
+        requantization_scales.data(),
+        output.q_zero_point(),
+        output_min,
+        output_max,
+        reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
+        caffe2::pthreadpool_());
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      run_status == pytorch_qnnp_status_success,
+      "failed to run quantized::conv2d (qnnpack) operator");
+
+  return output;
+}
+
+#ifdef USE_XNNPACK
+bool can_use_xnnp(
+    c10::ScalarType dtype,
+    int kSpatialDim,
+    bool per_channel,
+    bool transpose) {
+  if (!at::native::xnnpack::available()) {
+    return false;
+  }
+  bool supported_dtypes = dtype == c10::kQInt8;
+  bool invalid_config =
+      (kSpatialDim != 2 /* No support for 3d convolution */
+        || (dtype == c10::kQInt8 && transpose &&
+            per_channel)); /* int8_t deconv does not support per-channel */
+  if (supported_dtypes && invalid_config) {
+    /* don't want this to fall through to QNNPACK */
+    const std::string func_name =
+        transpose ? "quantized::conv_transpose" : "quantized::conv";
+    TORCH_CHECK(
+        false,
+        func_name,
+        " (xnnpack): Unsupported conv config for dtype KQInt8");
+  }
+  return supported_dtypes && !invalid_config;
+}
+#endif  // USE_XNNPACK
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+#ifdef USE_XNNPACK
+  if (can_use_xnnp(input.scalar_type(), kSpatialDim, per_channel(), transpose())) {
+    return apply_impl_xnnp<c10::qint8, false>(
+        input, output_scale, output_zero_point);
+  } /* fall through for unsupported types, configs, or shapes */
+#endif // USE_XNNPACK
+  return apply_impl<false>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_relu(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+#ifdef USE_XNNPACK
+  if (can_use_xnnp(input.scalar_type(), kSpatialDim, per_channel(), transpose())) {
+    return apply_impl_xnnp<c10::qint8, true>(
+        input, output_scale, output_zero_point);
+  } /* fall through for unsupported types, configs, or shapes */
+#endif // USE_XNNPACK
+  return apply_impl<true>(input, output_scale, output_zero_point);
+}
+
+template at::Tensor PackedConvWeightsQnnp<2>::apply(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<2>::apply_relu(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<3>::apply(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<3>::apply_relu(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<2>::apply_impl<false>(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<false>(
+  const at::Tensor& act,
+  double output_scale,
+  int64_t output_zero_point);
+
+#endif // USE_PYTORCH_QNNPACK
+
+#if AT_MKLDNN_ENABLED()
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<false>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_relu(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<true>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+template <bool kReluFused>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point) {
+  std::string func_name = "quantized::conv";
+  if (transpose()) {
+    func_name += "_transpose";
+  }
+  func_name += std::to_string(kSpatialDim) + "d";
+  if (kReluFused) {
+    func_name += "_relu";
+  }
+  ConvDimChecks<kSpatialDim>(
+      act.ndimension(), stride().size(), padding().size(),
+      output_padding().size(), dilation().size(), func_name, transpose());
+  TORCH_CHECK(act.scalar_type() == c10::ScalarType::QUInt8,
+      func_name, " (ONEDNN): data type of input should be QUint8.");
+
+  // src
+  auto act_contig = act.contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
+  auto src_dims = act_contig.sizes().vec();
+  auto src_data_type = dnnl::memory::data_type::u8;
+  auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
+      kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+  ideep::tensor src;
+  src.init(src_desc, act_contig.data_ptr());
+  // weights & bias
+  ideep::tensor& weights = *(weight_.get());
+  bool with_bias = bias_.has_value();
+  const auto& kernel_size = weights.get_dims();
+  // dst
+  const std::vector<int64_t>& input_size = src.get_dims();
+  std::vector<int64_t> output_sizes;
+  if (transpose()) {
+    // Prepacked weight format: [o, i, ...]
+    const int N = act.size(0); // batch size
+    const int C = act.size(1); // input channels
+    const int M = weights.get_dim(0); // output channels
+    const int D = kSpatialDim == 2 ? 1 : act.size(2); // input depth
+    const int H = act.size(kSpatialDim); // input height
+    const int W = act.size(kSpatialDim + 1); // input width
+    const int KH = weights.get_dim(kSpatialDim); // kernel height
+    const int KW = weights.get_dim(kSpatialDim + 1); // kernel width
+    const int KD = kSpatialDim == 2 ? 1 : weights.get_dim(2); // kernel depth
+    TORCH_CHECK(C == groups() * weights.get_dim(1), // weight: [o, i, ...]
+                func_name, " (ONEDNN): input channel number should be ",
+                groups() * weights.get_dim(1), ", but got ", C);
+    auto output_shape = MakeDeConvOutputShape<kSpatialDim>(
+        N,
+        M,
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
+        kSpatialDim == 2 ? std::vector<int64_t>{KH, KW} : std::vector<int64_t>{KD, KH, KW},
+        stride(),
+        padding(),
+        output_padding(),
+        dilation());
+    output_sizes = c10::IntArrayRef(output_shape).vec();
+  } else {
+    output_sizes = at::native::conv_output_size(input_size, kernel_size, padding().vec(), stride().vec(), dilation().vec());
+  }
+  ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
+  at::Tensor output = at::_empty_affine_quantized(
+      dst_dims,
+      device(c10::kCPU)
+          .dtype(c10::kQUInt8)
+          .memory_format(kSpatialDim == 2 ?
+              c10::MemoryFormat::ChannelsLast :
+              c10::MemoryFormat::ChannelsLast3d),
+      output_scale,
+      output_zero_point,
+      c10::nullopt);
+  if (output.numel() == 0) {
+    return output;
+  }
+  ideep::tensor dst({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+                    output.data_ptr());
+  // Parameters
+  const ideep::dims& strides = stride().vec();
+  const ideep::dims& dilates = dilation().vec();
+  const ideep::dims& padding_l = padding().vec();
+  const ideep::dims& padding_r = padding().vec();
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/act.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::scale_t& weights_scales = weights.get_scale();
+  const ideep::scale_t& dst_scales = ideep::scale_t(weights_scales.size(), 1.0/output_scale); // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::zero_point_t src_zero_points = ideep::zero_point_t(1, act.q_zero_point());
+  const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
+  ideep::attr_t op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL}); // runtime src zero point
+  if (with_bias) {
+    // Bias might be modified outside (e.g. by quantization bias correction).
+    // If so, update the prepacked bias as well.
+    if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
+    }
+    const auto& b = bias_.value();
+    if (transpose()) {
+      ideep::convolution_transpose_forward::compute_v2(
+          src, weights, b, dst_dims, dst,
+          strides, padding_l, padding_r, dilates,
+          groups(), src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
+          op_attr, dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    } else {
+      ideep::convolution_forward::compute_v2(
+          src, weights, b, dst_dims, dst,
+          strides, dilates, padding_l, padding_r, groups(),
+          src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
+          op_attr, dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    }
+  } else {
+    if (transpose()) {
+      ideep::convolution_transpose_forward::compute_v2(
+          src, weights, dst_dims, dst,
+          strides, padding_l, padding_r, dilates,
+          groups(), src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
+          op_attr, dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    } else {
+      ideep::convolution_forward::compute_v2(
+          src, weights, dst_dims, dst,
+          strides, dilates, padding_l, padding_r, groups(),
+          src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
+          op_attr, dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    }
+  }
+  return output;
+}
+
+template at::Tensor PackedConvWeightsOnednn<2>::apply(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsOnednn<2>::apply_relu(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsOnednn<3>::apply(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+#endif // #if AT_MKLDNN_ENABLED()
+
+namespace at {
+namespace native {
+namespace {
 
 /*
  * FBGEMM uses vpmaddubsw instruction to multiply activations (uint8_t) and
@@ -165,504 +1355,100 @@ SmallVector<int64_t, 5> MakeConvOutputShape<3>(
  *
  */
 template <int kSpatialDim, bool kReluFused>
-class QConvInt8 final : public c10::OperatorKernel {
+class QConvInt8 final {
  public:
-  Tensor operator()(
+  static Tensor run(
       Tensor act,
-      Tensor packed_weight,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
-      int64_t groups,
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    auto& ctx = at::globalContext();
-
-#ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      return FbgemmConv(
-          act,
-          packed_weight,
-          stride,
-          padding,
-          dilation,
-          groups,
-          output_scale,
-          output_zero_point);
-    }
-#endif // USE_FBGEMM
-
-#ifdef USE_PYTORCH_QNNPACK
-    if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      TORCH_CHECK(kSpatialDim == 2, "QNNPACK only suuports Conv2d now.");
-      return QnnpackConv(
-          act,
-          packed_weight,
-          stride,
-          padding,
-          dilation,
-          groups,
-          output_scale,
-          output_zero_point);
-    }
-#endif
-
-    TORCH_CHECK(
-        false,
-        "Didn't find engine for operation quantized::conv ",
-        toString(ctx.qEngine()));
-  }
-
- private:
-#ifdef USE_FBGEMM
-  static const float* GetBiasData(
-      const PackedConvWeight<kSpatialDim>& pack_data,
-      Tensor* bias) {
-    const float* bias_data = nullptr;
-    if (pack_data.bias.has_value()) {
-      *bias = pack_data.bias.value();
-      TORCH_CHECK(
-          bias->dtype() == at::kFloat,
-          "[QConv3D] The 'bias' tensor must have 'torch.float' dtype");
-      *bias = bias->contiguous();
-      TORCH_CHECK(bias->dim() == 1, "bias should be a vector (1D Tensor)");
-      const int M = pack_data.w->outputChannels();
-      TORCH_CHECK(bias->size(0) == M, "bias should have ", M, " elements.");
-      bias_data = bias->data_ptr<float>();
-    }
-    return bias_data;
-  }
-
-  static void GetQuantizationParams(
-      const PackedConvWeight<kSpatialDim>& pack_data,
-      float act_scale,
-      float out_scale,
-      std::vector<float>* output_multiplier_float,
-      std::vector<float>* act_times_w_scale) {
-    if (pack_data.q_scheme == kPerTensorAffine) {
-      *act_times_w_scale = {(act_scale * pack_data.w_scale[0])};
-      *output_multiplier_float = {act_times_w_scale->front() / out_scale};
-    } else if (pack_data.q_scheme == kPerChannelAffine) {
-      const int M = pack_data.w->outputChannels();
-      output_multiplier_float->resize(M);
-      act_times_w_scale->resize(M);
-      for (int i = 0; i < M; ++i) {
-        act_times_w_scale->at(i) = (act_scale * pack_data.w_scale[i]);
-        output_multiplier_float->at(i) = act_times_w_scale->at(i) / out_scale;
-      }
+    if (kReluFused) {
+      return packed_weight->apply_relu(act, output_scale, output_zero_point);
     } else {
-      TORCH_CHECK(
-          false, "[QConv", kSpatialDim, "D] Unknown quantization scheme");
+      return packed_weight->apply(act, output_scale, output_zero_point);
     }
   }
-
-  at::Tensor FbgemmConv(
-      Tensor act,
-      Tensor packed_weight,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
-      int64_t groups,
-      double output_scale,
-      int64_t output_zero_point) {
-    // Quantized kernels are all written with NHWC (channels last) layout in
-    // mind. Ideally, we'd be compatible with conv2d behavior and preserve the
-    // inputs layout as is (doing necessary upconversions).
-    //
-    // However, to be more robust, for now we just force output layout to always
-    // be NHWC (channels last), thus opportunistically improving perf.
-    //
-    // This might change when full memory format support lands
-    // See https://github.com/pytorch/pytorch/issues/23403
-    TORCH_CHECK(
-        fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-    ConvDimChecks<kSpatialDim>(
-        act.ndimension(), stride.size(), padding.size(), dilation.size());
-
-    const int N = act.size(0);
-    const int C = act.size(1);
-    const int D = kSpatialDim == 2 ? 1 : act.size(2);
-    const int H = act.size(kSpatialDim);
-    const int W = act.size(kSpatialDim + 1);
-
-    const Tensor act_nhwc = kSpatialDim == 2
-        ? act.contiguous(MemoryFormat::ChannelsLast)
-        : fbgemm_utils::ConvertToChannelsLast3dTensor(act);
-    const uint8_t* act_data =
-        reinterpret_cast<uint8_t*>(act_nhwc.data_ptr<c10::quint8>());
-    PackedConvWeight<kSpatialDim>& pack_data =
-        cpp_custom_type_hack::cast<PackedConvWeight<kSpatialDim>>(
-            packed_weight);
-    auto* pack_w = pack_data.w.get();
-    const auto& col_offsets = pack_data.col_offsets;
-    const auto& kernel = pack_data.kernel;
-
-    const int M = pack_w->outputChannels();
-    const int kernel_d = kSpatialDim == 2 ? 1 : kernel[0];
-    const int kernel_h = kernel[kSpatialDim - 2];
-    const int kernel_w = kernel[kSpatialDim - 1];
-    const int pad_d = kSpatialDim == 2 ? 0 : padding[0];
-    const int pad_h = padding[kSpatialDim - 2];
-    const int pad_w = padding[kSpatialDim - 1];
-    const int stride_d = kSpatialDim == 2 ? 1 : stride[0];
-    const int stride_h = stride[kSpatialDim - 2];
-    const int stride_w = stride[kSpatialDim - 1];
-    const int dilation_d = kSpatialDim == 2 ? 1 : dilation[0];
-    const int dilation_h = dilation[kSpatialDim - 2];
-    const int dilation_w = dilation[kSpatialDim - 1];
-
-    if (kSpatialDim == 2) {
-      TORCH_CHECK(
-          C == pack_w->inputChannels(),
-          "[QConv2D] Given groups=",
-          groups,
-          ", weight of size ",
-          M,
-          ", ",
-          kernel_h,
-          ", ",
-          kernel_w,
-          ", ",
-          pack_w->inputChannels(),
-          ", expected input (NCHW) ",
-          N,
-          ", ",
-          C,
-          ", ",
-          H,
-          ", ",
-          W,
-          " to have ",
-          pack_w->inputChannels(),
-          " channels, but got ",
-          C,
-          " channels instead");
-    } else {
-      TORCH_CHECK(
-          C == pack_w->inputChannels(),
-          "[QConv3D] Given groups=",
-          groups,
-          ", weight of size ",
-          M,
-          ", ",
-          kernel_d,
-          ", ",
-          kernel_h,
-          ", ",
-          kernel_w,
-          ", ",
-          pack_w->inputChannels(),
-          ", expected input (NCDHW) ",
-          N,
-          ", ",
-          C,
-          ", ",
-          D,
-          ", ",
-          H,
-          ", ",
-          W,
-          " to have ",
-          pack_w->inputChannels(),
-          " channels, but got ",
-          C,
-          " channels instead");
-    }
-
-    fbgemm::conv_param_t<kSpatialDim> conv_p =
-        fbgemm_utils::MakeFbgemmConvParam<kSpatialDim>(
-            N, // Batch size
-            C, // Number of input channels
-            M, // Number of output channels
-            kSpatialDim == 2 ? std::vector<int>{H, W}
-                             : std::vector<int>{D, H, W},
-            groups,
-            kSpatialDim == 2 ? std::vector<int>{kernel_h, kernel_w}
-                             : std::vector<int>{kernel_d, kernel_h, kernel_w},
-            kSpatialDim == 2 ? std::vector<int>{stride_h, stride_w}
-                             : std::vector<int>{stride_d, stride_h, stride_w},
-            kSpatialDim == 2 ? std::vector<int>{pad_h, pad_w}
-                             : std::vector<int>{pad_d, pad_h, pad_w},
-            kSpatialDim == 2
-                ? std::vector<int>{dilation_h, dilation_w}
-                : std::vector<int>{dilation_d, dilation_h, dilation_w});
-
-    const float act_scale = act.q_scale();
-    const int32_t act_zero_point = act.q_zero_point();
-
-    Tensor bias;
-    const float* bias_data = GetBiasData(pack_data, &bias);
-
-    TORCH_CHECK(
-        pack_data.w_scale.size() == pack_data.w_zp.size(),
-        "Weight scales and zero points vectors should have the same size.");
-    std::vector<float> output_multiplier_float;
-    std::vector<float> act_times_w_scale;
-    GetQuantizationParams(
-        pack_data,
-        act_scale,
-        output_scale,
-        &output_multiplier_float,
-        &act_times_w_scale);
-
-    const SmallVector<int64_t, kSpatialDim + 2> output_shape =
-        MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
-    TORCH_CHECK(
-        std::all_of(
-            output_shape.begin(),
-            output_shape.end(),
-            [](int64_t i) { return i > 0; }),
-        "[QConv",
-        kSpatialDim,
-        "D] each dimension of output tensor should be greater than 0");
-
-    Tensor output = kSpatialDim == 2
-        ? _empty_affine_quantized(
-              output_shape,
-              device(kCPU)
-                .dtype(kQUInt8)
-                .memory_format(MemoryFormat::ChannelsLast),
-              output_scale,
-              output_zero_point,
-              c10::nullopt)
-        : fbgemm_utils::MakeEmptyAffineQuantizedChannelsLast3dTensor(
-              output_shape[0],
-              output_shape[1],
-              output_shape[2],
-              output_shape[3],
-              output_shape[4],
-              device(kCPU).dtype(kQUInt8),
-              output_scale,
-              output_zero_point);
-    Tensor buffer = at::empty(output.sizes(), output.options().dtype(at::kInt));
-    const int num_tasks = at::get_num_threads();
-    at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-      fbgemm::DoNothing<> kNoOpObj{};
-      for (int task_id = begin; task_id < end; ++task_id) {
-        if (pack_data.q_scheme == kPerTensorAffine) {
-          fbgemm::ReQuantizeOutput<
-              kReluFused,
-              fbgemm::QuantizationGranularity::TENSOR,
-              float>
-              output_proc_obj(
-                  kNoOpObj,
-                  output_multiplier_float.data(),
-                  output_zero_point,
-                  act_zero_point,
-                  pack_data.w_zp.data(),
-                  nullptr, /* row offset buffer */
-                  col_offsets.data(),
-                  bias_data,
-                  M,
-                  groups,
-                  act_times_w_scale.data());
-          fbgemm::fbgemmConv<decltype(output_proc_obj), kSpatialDim, int32_t>(
-              conv_p,
-              act_data,
-              *pack_w,
-              reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-              buffer.data_ptr<int32_t>(),
-              output_proc_obj,
-              task_id /* thread_id*/,
-              num_tasks /* num_threads */);
-        } else if (pack_data.q_scheme == kPerChannelAffine) {
-          fbgemm::ReQuantizeOutput<
-              kReluFused,
-              fbgemm::QuantizationGranularity::OUT_CHANNEL,
-              float>
-              output_proc_obj(
-                  kNoOpObj,
-                  output_multiplier_float.data(),
-                  output_zero_point,
-                  act_zero_point,
-                  pack_data.w_zp.data(),
-                  nullptr, /* row offset buffer */
-                  col_offsets.data(),
-                  bias_data,
-                  M,
-                  groups,
-                  act_times_w_scale.data());
-
-          fbgemm::fbgemmConv<decltype(output_proc_obj), kSpatialDim, int32_t>(
-              conv_p,
-              act_data,
-              *pack_w,
-              reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-              buffer.data_ptr<int32_t>(),
-              output_proc_obj,
-              task_id /* thread_id*/,
-              num_tasks /* num_threads */);
-        }
-      }
-    });
-
-    return output;
-  }
-#endif
-
-#ifdef USE_PYTORCH_QNNPACK
-  at::Tensor QnnpackConv(
-      Tensor act,
-      Tensor packed_weight,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
-      int64_t groups,
-      double output_scale,
-      int64_t output_zero_point) {
-    ConvDimChecks<kSpatialDim>(
-        act.ndimension(), stride.size(), padding.size(), dilation.size());
-
-    PackedConvWeightsQnnp& pack_data =
-        cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
-    auto* pack_w = pack_data.w.get();
-    const auto& kernel = pack_data.kernel;
-    // Adjust weight zero point, similar to weight data.
-    const auto kernel_zp = pack_data.w_zp + 128;
-    const auto& kernel_scale = pack_data.w_scale;
-
-    const uint32_t kernel_h = kernel[0];
-    const uint32_t kernel_w = kernel[1];
-    // TODO Can be replaced with packB->getOutputChannels() when update pre-pack
-    // to actually do the packing.
-    const auto out_ch = pack_data.bias.size(0);
-    // inputs are in semantic NCHW format
-    const int N = act.size(0);
-    const int C = act.size(1);
-    const int H = act.size(2);
-    const int W = act.size(3);
-    const int M = out_ch; // output channels
-
-    const Tensor act_nhwc = act.contiguous(MemoryFormat::ChannelsLast);
-
-    const uint32_t stride_h = stride[0];
-    const uint32_t stride_w = stride[1];
-    const uint32_t pad_h = padding[0];
-    const uint32_t pad_w = padding[1];
-    const uint32_t dilation_h = dilation[0];
-    const uint32_t dilation_w = dilation[1];
-
-    auto output_min = kReluFused
-        ? activationLimits(output_scale, output_zero_point, Activation::RELU)
-              .first
-        : std::numeric_limits<uint8_t>::min();
-    auto output_max = kReluFused
-        ? activationLimits(output_scale, output_zero_point, Activation::RELU)
-              .second
-        : std::numeric_limits<uint8_t>::max();
-    qnnpack::conv_param_t conv_p(
-        {kernel_w, kernel_h},
-        {stride_w, stride_h},
-        {dilation_w, dilation_h},
-        {pad_h, pad_w, pad_h, pad_w},
-        groups,
-        C,
-        M,
-        kernel_zp,
-        kernel_scale,
-        output_min,
-        output_max);
-
-    auto input_scale = act_nhwc.q_scale();
-
-    // Re-quantizing the bias based on input scale and weight scale.
-    if (!pack_data.input_scale.has_value() ||
-        pack_data.input_scale.value() != input_scale) {
-      // Get the original weight and adjust it to uint8 from int8
-      auto weight_contig =
-          pack_data.orig_weight.contiguous(MemoryFormat::ChannelsLast);
-      auto bias_fp32 = pack_data.bias;
-      int8_t* w_data =
-          reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
-      Tensor qnnp_weight = at::_empty_affine_quantized(
-          weight_contig.sizes(),
-          at::device(kCPU)
-             .dtype(kQUInt8)
-             .memory_format(MemoryFormat::ChannelsLast),
-          kernel_scale,
-          kernel_zp,
-          c10::nullopt);
-      auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-      auto wt_numel = weight_contig.numel();
-      for (int i = 0; i < wt_numel; ++i) {
-        qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
-      }
-      // Original bias was float, so we requantize it here.
-      auto bias = at::quantize_per_tensor(
-          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
-      // Update the input scale to not pack again.
-      pack_data.input_scale = input_scale;
-      pack_data.w.reset();
-      pack_data.w = std::make_unique<qnnpack::PrePackConvWeights>(
-          conv_p,
-          reinterpret_cast<uint8_t*>(qnnp_w_data),
-          reinterpret_cast<int32_t*>(bias.data_ptr<c10::qint32>()));
-      pack_w = pack_data.w.get();
-    }
-    TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
-    const auto output_shape = MakeConvOutputShape<kSpatialDim>(
-        N, M, {H, W}, kernel, stride, padding, dilation);
-    TORCH_CHECK(
-        std::all_of(
-            output_shape.begin(),
-            output_shape.end(),
-            [](int64_t i) { return i > 0; }),
-        "quantized::conv2d (qnnpack): each dimension of output tensor should "
-        "be greater than 0.")
-
-    // Allocate output Tensor and a buffer for QNNPACK to use
-    Tensor output = at::_empty_affine_quantized(
-        output_shape,
-        at::device(kCPU)
-           .dtype(kQUInt8)
-           .memory_format(MemoryFormat::ChannelsLast),
-        output_scale,
-        output_zero_point,
-        c10::nullopt);
-
-    const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
-        conv_p,
-        pack_w->getPackedWeights(),
-        N,
-        H,
-        W,
-        act_nhwc.q_scale(),
-        act_nhwc.q_zero_point(),
-        reinterpret_cast<uint8_t*>(act_nhwc.data_ptr<c10::quint8>()),
-        output.q_scale(),
-        output.q_zero_point(),
-        reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-        caffe2::mobile_pthreadpool());
-
-    TORCH_INTERNAL_ASSERT(
-        run_status == pytorch_qnnp_status_success,
-        "failed to run quantized::conv2d (qnnpack) operator");
-
-    return output;
-  }
-#endif
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::conv2d",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("_quantized::conv2d",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv2d_relu",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("_quantized::conv2d_relu",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv3d",
-            c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv3d_relu",
-            c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
-                DispatchKey::QuantizedCPUTensorId));
+template <bool kReluFused>
+class QConv1dInt8 final {
+ public:
+  static Tensor run(
+      Tensor act,
+      const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    at::Tensor output;
+    // N, C, L -> N, C, 1, L
+    act = act.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
+    if (kReluFused) {
+      output = packed_weight->apply_relu(act, output_scale, output_zero_point);
+    } else {
+      output = packed_weight->apply(act, output_scale, output_zero_point);
+    }
+    // N, C, 1, L -> N, C, L
+    return output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+  }
+};
+
+// kernel for maintaining backward compatibility
+template <int kSpatialDim, bool kReluFused>
+class QConvInt8ForBC final {
+ public:
+  static Tensor run(
+      Tensor act,
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
+      torch::List<int64_t> /*stride*/,
+      torch::List<int64_t> /*padding*/,
+      torch::List<int64_t> /*dilation*/,
+      int64_t /*groups*/,
+      double output_scale,
+      int64_t output_zero_point) {
+    if (kReluFused) {
+      TORCH_WARN_ONCE(
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
+          + c10::to_string(kSpatialDim) + "d_relu, " +
+          "have been removed, please update your model to remove these arguments.");
+      return packed_weight->apply_relu(act, output_scale, output_zero_point);
+    } else {
+      TORCH_WARN_ONCE(
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
+          + c10::to_string(kSpatialDim) + "d, " +
+          "have been removed, please update your model to remove these arguments.");
+      return packed_weight->apply(act, output_scale, output_zero_point);
+    }
+  }
+};
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"),          QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"),     QConv1dInt8<true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"),      QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d.new"),      QConvInt8<3, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu.new"), QConvInt8<3, true>::run);
+  // for backward compatibility
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d"), QConvInt8ForBC<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu"), QConvInt8ForBC<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d"), QConvInt8ForBC<3, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu"), QConvInt8ForBC<3, true>::run);
+
+  // transpose
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::conv_transpose3d"),
+      QConvInt8<3, false>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d"),      QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_relu"), QConvInt8<2, true>::run);
+
+  // transpose
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
+}
 
 } // namespace
 } // namespace native

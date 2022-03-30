@@ -6,9 +6,12 @@
 // Containers
 #include <torch/nn/modules/container/any.h>
 #include <torch/nn/modules/container/functional.h>
+#include <torch/nn/modules/container/moduledict.h>
 #include <torch/nn/modules/container/modulelist.h>
 #include <torch/nn/modules/container/named_any.h>
 #include <torch/nn/modules/container/sequential.h>
+#include <torch/nn/modules/container/parameterdict.h>
+#include <torch/nn/modules/container/parameterlist.h>
 
 // Layers
 #include <torch/nn/modules/adaptive.h>
@@ -28,3 +31,6 @@
 #include <torch/nn/modules/upsampling.h>
 #include <torch/nn/modules/activation.h>
 #include <torch/nn/modules/normalization.h>
+#include <torch/nn/modules/transformerlayer.h>
+#include <torch/nn/modules/transformercoder.h>
+#include <torch/nn/modules/transformer.h>

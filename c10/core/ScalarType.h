@@ -1,14 +1,20 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <c10/util/Optional.h>
-#include <c10/util/typeid.h>
+#include <c10/util/OptionalArrayRef.h>
+#include <c10/util/complex.h>
+#include <c10/util/qint32.h>
+#include <c10/util/qint8.h>
+#include <c10/util/quint2x4.h>
+#include <c10/util/quint4x2.h>
+#include <c10/util/quint8.h>
 
 #include <complex>
 #include <cstdint>
-#include <iostream>
+#include <ostream>
 
 namespace c10 {
 
@@ -30,15 +36,16 @@ namespace c10 {
   _(at::Half, Half) /* 5 */                              \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(at::ComplexHalf, ComplexHalf) /* 8 */                \
-  _(std::complex<float>, ComplexFloat) /* 9 */           \
-  _(std::complex<double>, ComplexDouble) /* 10 */        \
+  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
+  _(c10::complex<float>, ComplexFloat) /* 9 */           \
+  _(c10::complex<double>, ComplexDouble) /* 10 */        \
   _(bool, Bool) /* 11 */                                 \
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
-  _(at::BFloat16, BFloat16) /* 15 */
-
+  _(at::BFloat16, BFloat16) /* 15 */                     \
+  _(c10::quint4x2, QUInt4x2) /* 16 */                    \
+  _(c10::quint2x4, QUInt2x4) /* 17 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -52,11 +59,25 @@ namespace c10 {
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
-  _(std::complex<float>, ComplexFloat)                             \
-  _(std::complex<double>, ComplexDouble)                           \
+  _(c10::complex<float>, ComplexFloat)                             \
+  _(c10::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
   _(at::BFloat16, BFloat16)
 
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
+  _(uint8_t, Byte)                             \
+  _(int8_t, Char)                              \
+  _(int16_t, Short)                            \
+  _(int, Int)                                  \
+  _(int64_t, Long)                             \
+  _(at::Half, Half)                            \
+  _(float, Float)                              \
+  _(double, Double)                            \
+  _(c10::complex<c10::Half>, ComplexHalf)      \
+  _(c10::complex<float>, ComplexFloat)         \
+  _(c10::complex<double>, ComplexDouble)       \
+  _(bool, Bool)                                \
+  _(at::BFloat16, BFloat16)
 
 enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
@@ -66,88 +87,57 @@ enum class ScalarType : int8_t {
   NumOptions
 };
 
+constexpr uint16_t NumScalarTypes =
+    static_cast<uint16_t>(ScalarType::NumOptions);
+
 namespace impl {
 
-// These are used to map ScalarTypes to C++ types.  Feel free to add more or even
-// macro generate this; the examples here are just those we have found to be
-// necessary.
+// These are used to map ScalarTypes to C++ types.
 
 template <c10::ScalarType N>
 struct ScalarTypeToCPPType;
 
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Half> {
-  using type = c10::Half;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::BFloat16> {
-  using type = c10::BFloat16;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Bool> {
-  using type = bool;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Byte> {
-  using type = uint8_t;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Long> {
-  using type = int64_t;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-// These are used to map C++ types to ScalarTypes.
-
-template <typename>
-struct CPPTypeToScalarType {
-  constexpr static c10::ScalarType value = c10::ScalarType::Undefined;
-};
-
-#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
-  template <>                                                                  \
-  struct CPPTypeToScalarType<cpp_type> {                                       \
-    constexpr static c10::ScalarType value = c10::ScalarType::scalar_type;     \
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type)                \
+  template <>                                                                \
+  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {                 \
+    using type = cpp_type;                                                   \
+                                                                             \
+    /* This is a workaround for the CUDA bug which prevents */               \
+    /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
+    /* ambiguous reference which can't to be resolved. For some reason it */ \
+    /* cant pick between at::detail and at::cuda::detail. */                 \
+    /* For repro example, please see: */                                     \
+    /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
+    /* TODO: remove once the bug is fixed. */                                \
+    static type t;                                                           \
   };
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
-#undef SPECIALIZE_CPPTypeToScalarType
+#undef SPECIALIZE_ScalarTypeToCPPType
 
-}
+} // namespace impl
+
+template <typename T>
+struct CppTypeToScalarType;
+
+#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type)                  \
+  template <>                                                                  \
+  struct CppTypeToScalarType<cpp_type>                                         \
+      : std::                                                                  \
+            integral_constant<c10::ScalarType, c10::ScalarType::scalar_type> { \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
+
+#undef SPECIALIZE_CppTypeToScalarType
+
+#define AT_FORALL_INT_TYPES(_) \
+  _(uint8_t, Byte)             \
+  _(int8_t, Char)              \
+  _(int16_t, Short)            \
+  _(int, Int)                  \
+  _(int64_t, Long)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
@@ -158,98 +148,61 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
   _(float, Float)                 \
   _(double, Double)
 
-#define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _)                          \
-  _(uint8_t, Byte)                                                         \
-  _(int8_t, Char)                                                          \
-  _(int16_t, Short)                                                        \
-  _(int, Int)                                                              \
-  _(int64_t, Long)                                                         \
-  _(float, Float)                                                          \
-  _(double, Double)                                                        \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE>::t), SCALARTYPE)
+#define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _) \
+  _(uint8_t, Byte)                                \
+  _(int8_t, Char)                                 \
+  _(int16_t, Short)                               \
+  _(int, Int)                                     \
+  _(int64_t, Long)                                \
+  _(float, Float)                                 \
+  _(double, Double)                               \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
+             ::c10::ScalarType::SCALARTYPE>::t),  \
+    SCALARTYPE)
 
-#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _)                                \
-  _(uint8_t, Byte)                                                                              \
-  _(int8_t, Char)                                                                               \
-  _(int16_t, Short)                                                                             \
-  _(int, Int)                                                                                   \
-  _(int64_t, Long)                                                                              \
-  _(float, Float)                                                                               \
-  _(double, Double)                                                                             \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::t), SCALARTYPE1) \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::t), SCALARTYPE2)
+#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _) \
+  _(uint8_t, Byte)                                               \
+  _(int8_t, Char)                                                \
+  _(int16_t, Short)                                              \
+  _(int, Int)                                                    \
+  _(int64_t, Long)                                               \
+  _(float, Float)                                                \
+  _(double, Double)                                              \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
+             ::c10::ScalarType::SCALARTYPE1>::t),                \
+    SCALARTYPE1)                                                 \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
+             ::c10::ScalarType::SCALARTYPE2>::t),                \
+    SCALARTYPE2)
 
-#define AT_FORALL_SCALAR_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, _)                   \
-  _(uint8_t, Byte)                                                                              \
-  _(int8_t, Char)                                                                               \
-  _(int16_t, Short)                                                                             \
-  _(int, Int)                                                                                   \
-  _(int64_t, Long)                                                                              \
-  _(float, Float)                                                                               \
-  _(double, Double)                                                                             \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::t), SCALARTYPE1) \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::t), SCALARTYPE2) \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE3>::t), SCALARTYPE3)
+#define AT_FORALL_SCALAR_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, _) \
+  _(uint8_t, Byte)                                                            \
+  _(int8_t, Char)                                                             \
+  _(int16_t, Short)                                                           \
+  _(int, Int)                                                                 \
+  _(int64_t, Long)                                                            \
+  _(float, Float)                                                             \
+  _(double, Double)                                                           \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
+             ::c10::ScalarType::SCALARTYPE1>::t),                             \
+    SCALARTYPE1)                                                              \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
+             ::c10::ScalarType::SCALARTYPE2>::t),                             \
+    SCALARTYPE2)                                                              \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
+             ::c10::ScalarType::SCALARTYPE3>::t),                             \
+    SCALARTYPE3)
 
-#define AT_FORALL_QINT_TYPES(_)  \
-  _(c10::qint8, QInt8)           \
-  _(c10::quint8, QUInt8)         \
-  _(c10::qint32, QInt32)
+#define AT_FORALL_QINT_TYPES(_) \
+  _(c10::qint8, QInt8)          \
+  _(c10::quint8, QUInt8)        \
+  _(c10::qint32, QInt32)        \
+  _(c10::quint4x2, QUInt4x2)    \
+  _(c10::quint2x4, QUInt2x4)
 
-#define AT_FORALL_COMPLEX_TYPES(_)             \
-  _(std::complex<float>, ComplexFloat)         \
-  _(std::complex<double>, ComplexDouble)
-
-static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype, name) \
-  case ScalarType::name:         \
-    return caffe2::TypeMeta::Make<ctype>();
-
-  switch (scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    case ScalarType::Undefined:
-      return caffe2::TypeMeta();
-    default:
-      AT_ERROR(
-          "Unrecognized Scalartype ",
-          scalar_type,
-          " (please report this error)");
-  }
-#undef DEFINE_CASE
-}
-
-static inline c10::optional<ScalarType> tryTypeMetaToScalarType(
-    caffe2::TypeMeta dtype) {
-#define DEFINE_IF(ctype, name)                    \
-  if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
-    return {ScalarType::name};                    \
-  }
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_IF)
-#undef DEFINE_IF
-  if (dtype == caffe2::TypeMeta()) {
-    return {ScalarType::Undefined};
-  }
-  return c10::nullopt;
-}
-
-static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
-  if (auto scalar_type = tryTypeMetaToScalarType(dtype)) {
-    return *scalar_type;
-  }
-  AT_ERROR(
-      "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
-}
-
-static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
-  if (auto mt = tryTypeMetaToScalarType(m)) {
-    return (*mt) == t;
-  }
-  return false;
-}
-
-static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
-  return t == m;
-}
+#define AT_FORALL_COMPLEX_TYPES(_)     \
+  _(c10::complex<float>, ComplexFloat) \
+  _(c10::complex<double>, ComplexDouble)
 
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
@@ -278,12 +231,13 @@ static inline size_t elementSize(ScalarType t) {
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_ELEMENTSIZE_CASE)
     default:
-      AT_ERROR("Unknown ScalarType");
+      TORCH_CHECK(false, "Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
 }
 
-C10_DEPRECATED_MESSAGE("isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
+C10_DEPRECATED_MESSAGE(
+    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
 static inline bool isIntegralType(ScalarType t) {
   return (
       t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
@@ -291,9 +245,9 @@ static inline bool isIntegralType(ScalarType t) {
 }
 
 static inline bool isIntegralType(ScalarType t, bool includeBool) {
-  bool isIntegral = (
-      t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-      t == ScalarType::Long || t == ScalarType::Short);
+  bool isIntegral =
+      (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
+       t == ScalarType::Long || t == ScalarType::Short);
 
   return includeBool ? isIntegral || (t == ScalarType::Bool) : isIntegral;
 }
@@ -312,7 +266,9 @@ static inline bool isComplexType(ScalarType t) {
 
 static inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
-  return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
+  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
+      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
+      t == ScalarType::QUInt2x4;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
@@ -336,6 +292,10 @@ static inline ScalarType toUnderlying(ScalarType t) {
       return ScalarType::Char;
     case ScalarType::QInt32:
       return ScalarType::Int;
+    case ScalarType::QUInt4x2:
+      return ScalarType::Byte;
+    case ScalarType::QUInt2x4:
+      return ScalarType::Byte;
     default:
       return t;
   }
@@ -343,27 +303,30 @@ static inline ScalarType toUnderlying(ScalarType t) {
 
 static inline bool isSignedType(ScalarType t) {
   TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
-  #define CASE_SIGNED(ctype, name) \
-    case ScalarType::name: \
-      return std::numeric_limits<ctype>::is_signed;
+#define CASE_SIGNED(ctype, name) \
+  case ScalarType::name:         \
+    return std::numeric_limits<ctype>::is_signed;
 
   switch (t) {
-    case ScalarType::ComplexFloat: \
-    case ScalarType::ComplexDouble: \
-      return true; \
-    AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
+    case ScalarType::ComplexHalf:
+    case ScalarType::ComplexFloat:
+    case ScalarType::ComplexDouble:
+      return true;
+      AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
     default:
-      AT_ERROR("Unknown ScalarType");
+      TORCH_CHECK(false, "Unknown ScalarType");
   }
-  #undef CASE_SIGNED
+#undef CASE_SIGNED
 }
 
 static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
-static inline ScalarType toValueType(ScalarType t) {
+static inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
+    case ScalarType::ComplexHalf:
+      return ScalarType::Half;
     case ScalarType::ComplexFloat:
       return ScalarType::Float;
     case ScalarType::ComplexDouble:
@@ -373,22 +336,47 @@ static inline ScalarType toValueType(ScalarType t) {
   }
 }
 
+static inline ScalarType toComplexType(ScalarType t) {
+  switch (t) {
+    case ScalarType::Half:
+      return ScalarType::ComplexHalf;
+    case ScalarType::Float:
+      return ScalarType::ComplexFloat;
+    case ScalarType::Double:
+      return ScalarType::ComplexDouble;
+    case ScalarType::ComplexHalf:
+      return ScalarType::ComplexHalf;
+    case ScalarType::ComplexFloat:
+      return ScalarType::ComplexFloat;
+    case ScalarType::ComplexDouble:
+      return ScalarType::ComplexDouble;
+    default:
+      TORCH_CHECK(false, "Unknown Complex ScalarType for ", t);
+  }
+}
+
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
 static inline bool canCast(const ScalarType from, const ScalarType to) {
+  // We disallow complex -> non complex, e.g., float_tensor *= complex is
+  // disallowed.
+  if (isComplexType(from) && !isComplexType(to)) {
+    return false;
+  }
   // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
   if (isFloatingType(from) && isIntegralType(to, false)) {
     return false;
   }
 
   // Treat bool as a distinct "category," to be consistent with type promotion
-  // rules (e.g. `bool_tensor + 5 -> int64_tensor`). If `5` was in the same category
-  // as `bool_tensor`, we would not promote.
-  // Differing categories implies `bool_tensor += 5` is disallowed.
+  // rules (e.g. `bool_tensor + 5 -> int64_tensor`). If `5` was in the same
+  // category as `bool_tensor`, we would not promote. Differing categories
+  // implies `bool_tensor += 5` is disallowed.
   //
   // NB: numpy distinguishes "unsigned" as a category to get the desired
   // `bool_tensor + 5 -> int64_tensor` behavior. We don't, because:
-  // * We don't want the performance hit of checking the runtime sign of Scalars.
+  // * We don't want the performance hit of checking the runtime sign of
+  // Scalars.
   // * `uint8_tensor + 5 -> int64_tensor` would be undesirable.
   if (from != ScalarType::Bool && to == ScalarType::Bool) {
     return false;
@@ -422,7 +410,8 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   }
 
   if (isQIntType(a) || isQIntType(b)) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be, offending types: ",
         toString(a),
         " ",
@@ -434,23 +423,23 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // corrent values for the type promotions in complex type cases.
   static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
       ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
-        /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
-        /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, u1, ud, ud, ud, ud},
-        /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, i1, ud, ud, ud, ud},
-        /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, ud},
-        /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, ud},
-        /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, ud},
-        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, ud},
-        /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, ud},
-        /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, ud},
-        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
-        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, ud, ud, ud, ud, ud},
-        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud, ud},
-        /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, ud},
-        /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* bf */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, bf},
+      /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
+      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, u1, ud, ud, ud, bf},
+      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, i1, ud, ud, ud, bf},
+      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, bf},
+      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, bf},
+      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, bf},
+      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, f4},
+      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, f4},
+      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, f8},
+      /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
+      /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, ud, ud, ud, c4},
+      /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, c8},
+      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, b1, ud, ud, ud, bf},
+      /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, ud, c4, c8, bf, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
@@ -460,5 +449,9 @@ inline std::ostream& operator<<(
     at::ScalarType scalar_type) {
   return stream << toString(scalar_type);
 }
+
+#define AT_FORAUTOCAST_SCALAR_TYPES(_) \
+  _(half, Half) /* 0 */                \
+  _(bfloat16, BFloat16) /* 1 */
 
 } // namespace c10

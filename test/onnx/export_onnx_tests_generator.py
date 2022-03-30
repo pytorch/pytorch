@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from torch.autograd import Variable
 from onnx import numpy_helper
 
@@ -129,7 +124,7 @@ def convert_tests(testcases, sets=1):
                 input = gen_input(t)
                 if (module_name != "FunctionalModule"):
                     nn_module[module_name] |= 1
-        except:  # noqa: E722
+        except:  # noqa: E722,B001
             traceback.print_exc()
             if (module_name != "FunctionalModule"):
                 nn_module[module_name] |= 2
@@ -140,6 +135,6 @@ def convert_tests(testcases, sets=1):
     print("PyTorch converted cases are stored in {}.".format(test_onnx_common.pytorch_converted_dir))
     print_stats(FunctionalModule_nums, nn_module)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     testcases = module_tests + new_module_tests
     convert_tests(testcases)

@@ -1,9 +1,9 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Dropout_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -16,17 +16,31 @@ graph {
     }
   }
   node {
+    output: "onnx::Dropout_2"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 9
+        raw_data: "\001"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "x"
-    input: "1"
-    output: "2"
-    output: "3"
-    name: "Dropout_1"
+    input: "onnx::Dropout_1"
+    input: "onnx::Dropout_2"
+    output: "onnx::ReduceMax_3"
+    output: "4"
+    name: "Dropout_2"
     op_type: "Dropout"
   }
   node {
-    input: "2"
-    output: "4"
-    name: "ReduceMax_2"
+    input: "onnx::ReduceMax_3"
+    output: "5"
+    name: "ReduceMax_3"
     op_type: "ReduceMax"
     attribute {
       name: "keepdims"
@@ -34,7 +48,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {
@@ -52,7 +66,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "5"
     type {
       tensor_type {
         elem_type: 1

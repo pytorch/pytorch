@@ -1,9 +1,14 @@
+#include <gtest/gtest.h>
+
 #include <stdexcept>
 #include "test/cpp/tensorexpr/test_base.h"
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <sstream>
 namespace torch {
@@ -11,8 +16,7 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testIRPrinterBasicValueTest() {
-  KernelScope kernel_scope;
+TEST(IRPrinter, BasicValueTest) {
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
 
@@ -21,8 +25,7 @@ void testIRPrinterBasicValueTest() {
   ASSERT_EQ(ss.str(), "2 + 3");
 }
 
-void testIRPrinterBasicValueTest02() {
-  KernelScope kernel_scope;
+TEST(IRPrinter, BasicValueTest02) {
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -34,49 +37,54 @@ void testIRPrinterBasicValueTest02() {
   ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
-void testIRPrinterLetTest01() {
-  KernelScope kernel_scope;
-  VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle(3.f);
-  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
-  ExprHandle result = Let::make(x, ExprHandle(3.f), body);
+TEST(IRPrinter, CastTest) {
+  VarHandle x("x", kHalf);
+  VarHandle y("y", kFloat);
+  ExprHandle body = ExprHandle(2.f) +
+      (Cast::make(kFloat, x) * ExprHandle(3.f) + ExprHandle(4.f) * y);
 
   std::stringstream ss;
-  ss << result;
-  ASSERT_EQ(ss.str(), "let x = 3.f in 2.f + (x * 3.f + 4.f)");
+  ss << body;
+  ASSERT_EQ(ss.str(), "2.f + (float(x) * 3.f + 4.f * y)");
 }
 
-void testIRPrinterLetTest02() {
-  KernelScope kernel_scope;
-  VarHandle x("x", kFloat);
-  VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
-  ExprHandle body =
-      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
-  ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
-  ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
+TEST(IRPrinter, FunctionName) {
+  int M = 4;
+  int N = 20;
+
+  Tensor producer = Compute(
+      "producer", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return m * n;
+      });
+
+  Tensor chunk_0 = Compute(
+      "chunk_0", {M, N / 2}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return producer.load(m, n);
+      });
+
+  Tensor chunk_1 = Compute(
+      "chunk_1", {M, N / 2}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return producer.load(m, n + ExprHandle(N / 2));
+      });
+
+  Tensor consumer = Compute(
+      "consumer", {M, N / 2}, [&](const ExprHandle& i, const ExprHandle& j) {
+        return i * chunk_1.load(i, j);
+      });
+
+  LoopNest l({chunk_0, chunk_1, consumer});
+  auto body = LoopNest::sanitizeNames(l.root_stmt());
 
   std::stringstream ss;
-  ss << e2;
-  ASSERT_EQ(
-      ss.str(), "let y = 6.f in (let x = 3.f in 2.f + (x * 3.f + 4.f * y))");
-}
+  ss << *body;
 
-void testIRPrinterCastTest() {
-  KernelScope kernel_scope;
-  VarHandle x("x", kFloat);
-  VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
-  ExprHandle body =
-      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
-  ExprHandle e1 = Let::make(x, Cast::make(kInt, ExprHandle(3.f)), body);
-  ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
+  const std::string& verification_pattern =
+      R"IR(
+ # CHECK:   for (int i_2
+ # CHECK:    for (int j_2
+ # CHECK:     consumer[i_2, j_2] = i_2 * (chunk_1[i_2, j_2])IR";
 
-  std::stringstream ss;
-  ss << e2;
-  ASSERT_EQ(
-      ss.str(),
-      "let y = 6.f in (let x = int(3.f) in 2.f + (x * 3.f + 4.f * y))");
+  torch::jit::testing::FileCheck().run(verification_pattern, ss.str());
 }
 } // namespace jit
 } // namespace torch

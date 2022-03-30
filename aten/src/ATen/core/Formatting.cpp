@@ -1,4 +1,5 @@
 #include <ATen/core/Formatting.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <cstdint>
@@ -10,6 +11,28 @@
 namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
+}
+
+std::ostream& operator<<(std::ostream & out, Scalar s) {
+  if (s.isFloatingPoint()) {
+    return out << s.toDouble();
+  }
+  if (s.isComplex()) {
+    return out << s.toComplexDouble();
+  }
+  if (s.isBoolean()) {
+    return out << (s.toBool() ? "true" : "false");
+  }
+  if (s.isIntegral(false)) {
+    return out << s.toLong();
+  }
+  throw std::logic_error("Unknown type in Scalar");
+}
+
+std::string toString(Scalar s) {
+  std::stringstream out;
+  out << s;
+  return out.str();
 }
 }
 namespace at {
@@ -44,7 +67,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   }
   bool intMode = true;
   auto self_p = self.data_ptr<double>();
-  for(int64_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
       if(z != std::ceil(z)) {
@@ -60,7 +83,9 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       break;
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double expMin;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double expMax;
   if(offset == size) {
     expMin = 1;
@@ -68,7 +93,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   } else {
     expMin = fabs(self_p[offset]);
     expMax = fabs(self_p[offset]);
-    for(int64_t i = offset; i < size; i++) {
+    for (const auto i : c10::irange(offset, size)) {
       double z = fabs(self_p[i]);
       if(std::isfinite(z)) {
         if(z < expMin) {
@@ -91,6 +116,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   }
   double scale = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   if(intMode) {
     if(expMax > 9) {
@@ -127,7 +153,8 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for(int64_t i = 0; i < indent; i++) {
+  for (const auto i : c10::irange(indent)) {
+    (void)i; //Suppress unused variable warning
     stream << " ";
   }
 }
@@ -138,7 +165,9 @@ static void printScale(std::ostream & stream, double scale) {
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double scale;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   std::tie(scale, sz) = __printFormat(stream, self);
 
@@ -163,10 +192,10 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       printScale(stream,scale);
       __printIndent(stream, indent);
     }
-    for(int64_t l = 0; l < self.size(0); l++) {
+    for (const auto l : c10::irange(self.size(0))) {
       Tensor row = self.select(0,l);
       double *row_ptr = row.data_ptr<double>();
-      for(int64_t c = firstColumn; c < lastColumn+1; c++) {
+      for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
           stream << std::endl;
@@ -193,8 +222,9 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   bool start = true;
   bool finished = false;
   counter[0] = -1;
-  for(size_t i = 1; i < counter.size(); i++)
+  for (const auto i : c10::irange(1, counter.size())) {
     counter[i] = 0;
+  }
   while(true) {
     for(int64_t i = 0; self.ndimension()-2; i++) {
       counter[i] = counter[i] + 1;
@@ -218,7 +248,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
     }
     stream << "(";
     Tensor tensor = self;
-    for(int64_t i=0; i < self.ndimension()-2; i++) {
+    for (const auto i : c10::irange(self.ndimension()-2)) {
       tensor = tensor.select(0, counter[i]);
       stream << counter[i]+1 << ",";
     }
@@ -227,6 +257,9 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   }
 }
 
+void print(const Tensor & t, int64_t linesize) {
+  print(std::cout,t,linesize);
+}
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
   FormatGuard guard(stream);
   if(!tensor_.defined()) {
@@ -241,6 +274,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor;
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+    } else if (tensor_.is_mkldnn()) {
+      stream << "MKLDNN Tensor: ";
+      tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
@@ -249,14 +285,16 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double scale;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t sz;
         std::tie(scale, sz) =  __printFormat(stream, tensor);
         if(scale != 1) {
           printScale(stream, scale);
         }
         double* tensor_p = tensor.data_ptr<double>();
-        for(int64_t i = 0; i < tensor.size(0); i++) {
+        for (const auto i : c10::irange(tensor.size(0))) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
@@ -271,15 +309,34 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         __printTensor(stream, tensor, linesize);
       }
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
-      for(int64_t i = 1; i < tensor.ndimension(); i++) {
+      for (const auto i : c10::irange(1, tensor.ndimension())) {
         stream << "," << tensor.size(i);
       }
       stream << "}";
     }
     if (tensor_.is_quantized()) {
       stream << ", qscheme: " << toString(tensor_.qscheme());
-      stream << ", scale: " << tensor_.q_scale();
-      stream << ", zero_point: " << tensor_.q_zero_point();
+      if (tensor_.qscheme() == c10::kPerTensorAffine) {
+        stream << ", scale: " << tensor_.q_scale();
+        stream << ", zero_point: " << tensor_.q_zero_point();
+      } else if (tensor_.qscheme() == c10::kPerChannelAffine ||
+          tensor_.qscheme() == c10::kPerChannelAffineFloatQParams) {
+        stream << ", scales: ";
+        Tensor scales = tensor_.q_per_channel_scales();
+        print(stream, scales, linesize);
+        stream << ", zero_points: ";
+        Tensor zero_points = tensor_.q_per_channel_zero_points();
+        print(stream, zero_points, linesize);
+        stream << ", axis: " << tensor_.q_per_channel_axis();
+      }
+    }
+
+    // Proxy check for if autograd was built
+    if (tensor.getIntrusivePtr()->autograd_meta()) {
+      auto& fw_grad = tensor._fw_grad(/* level */ 0);
+      if (fw_grad.defined()) {
+        stream << ", tangent:" << std::endl << fw_grad;
+      }
     }
     stream << " ]";
   }

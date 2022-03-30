@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AsyncSchedulingNet::AsyncSchedulingNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
@@ -130,12 +131,14 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) noexcept {
               const auto& child_device_option =
                   event(child_id).GetDeviceOption();
               pool(child_device_option)
+                  // NOLINTNEXTLINE(modernize-avoid-bind)
                   ->run(std::bind(
                       &AsyncSchedulingNet::pollAndSchedule, this, child_id));
             } else if (!parents_with_callback.empty()) {
               // some parents are blocking us from scheduling a child and they
               // support callbacks
               for (auto parent_id : parents_with_callback) {
+                // NOLINTNEXTLINE(modernize-avoid-bind)
                 event(parent_id).SetCallback(std::bind(
                     &AsyncSchedulingNet::parentCallback, this, parent_id));
               }
@@ -207,6 +210,7 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
   } else {
     const auto& device_option = event(task_id).GetDeviceOption();
     pool(device_option)
+        // NOLINTNEXTLINE(modernize-avoid-bind)
         ->run(std::bind(&AsyncSchedulingNet::pollAndSchedule, this, task_id));
   }
 }
@@ -270,6 +274,8 @@ bool AsyncSchedulingNet::RunAsync() {
 
 void AsyncSchedulingNet::Cancel() {
   success_ = false;
+  NetBase::Cancel();
+
   CancelAndFinishAsyncTasks();
 }
 
@@ -280,7 +286,13 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
       // event, and in some other cases (CUDA)
       try {
         lastTaskOp(tid)->CancelAsyncCallback();
-        event(tid).SetFinished("Cancelled");
+
+        // throw and catch exception to preserve stack trace
+        try {
+          throw AsyncNetCancelled();
+        } catch (const AsyncNetCancelled& e) {
+          event(tid).SetFinishedWithException(e.what());
+        }
       } catch (const EnforceNotMet&) {
         // ignore
       }
@@ -288,10 +300,11 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
   }
 }
 
-AsyncSchedulingNet::~AsyncSchedulingNet() {
-  Wait();
-}
+  AsyncSchedulingNet::~AsyncSchedulingNet() {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    Wait();
+  }
 
-REGISTER_NET(async_scheduling, AsyncSchedulingNet);
+  REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 
 } // namespace caffe2

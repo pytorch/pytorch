@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 
@@ -1152,6 +1152,7 @@ class TestLayers(LayersTestCase):
         X=hu.arrays(dims=[5, 2]),
         num_to_collect=st.integers(min_value=3, max_value=3),
     )
+    @settings(deadline=1000)
     def testReservoirSamplingWithID(self, X, num_to_collect):
         ID = np.array([1, 2, 3, 1, 2], dtype=np.int64)
         input_record = self.new_record(
@@ -2120,6 +2121,7 @@ class TestLayers(LayersTestCase):
         enable_diagnose=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=1000)
     def testAdaptiveWeight(
         self, num, feed_weight, use_inv_var_parameterization, use_log_barrier,
         enable_diagnose, gc, dc
@@ -2177,6 +2179,7 @@ class TestLayers(LayersTestCase):
         npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def testHomotopyWeight(self, gc, dc):
         input_record = self.new_record(schema.RawTuple(2))
         data = np.random.random(2)
@@ -2477,3 +2480,37 @@ class TestLayers(LayersTestCase):
 
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
+
+    def testSparseItemwiseDropoutWithReplacement(self):
+        input_record = schema.NewRecord(self.model.net, IdList)
+        self.model.output_schema = schema.Struct()
+
+        lengths_blob = input_record.field_blobs()[0]
+        values_blob = input_record.field_blobs()[1]
+        lengths = np.array([1] * 10).astype(np.int32)
+        values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).astype(np.int64)
+        workspace.FeedBlob(lengths_blob, lengths)
+        workspace.FeedBlob(values_blob, values)
+
+        out = self.model.SparseItemwiseDropoutWithReplacement(
+            input_record, 0.0, 0.5, 1.0, -1, output_names_or_num=1)
+        self.assertEqual(schema.List(schema.Scalar(np.int64,)), out)
+
+        train_init_net, train_net = self.get_training_nets()
+        eval_net = self.get_eval_net()
+        predict_net = self.get_predict_net()
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        out_values = workspace.FetchBlob(out.items())
+        out_lengths = workspace.FetchBlob(out.lengths())
+        self.assertBlobsEqual(out_values, values)
+        self.assertBlobsEqual(out_lengths, lengths)
+
+        workspace.RunNetOnce(eval_net)
+
+        workspace.RunNetOnce(predict_net)
+        predict_values = workspace.FetchBlob("values_auto_0")
+        predict_lengths = workspace.FetchBlob("lengths_auto_0")
+        self.assertBlobsEqual(predict_values, np.array([-1] * 10).astype(np.int64))
+        self.assertBlobsEqual(predict_lengths, lengths)

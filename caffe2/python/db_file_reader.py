@@ -1,9 +1,9 @@
 ## @package db_file_reader
 # Module caffe2.python.db_file_reader
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, scope, workspace, _import_c_extension as C
 from caffe2.python.dataio import Reader
@@ -99,8 +99,9 @@ class DBFileReader(Reader):
         if field_names:
             return from_column_list(field_names)
 
-        assert os.path.exists(self.db_path), \
-            'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+        if self.db_type == "log_file_db":
+            assert os.path.exists(self.db_path), \
+                'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
         with core.NameScope(self.name):
             # blob_prefix is for avoiding name conflict in workspace
             blob_prefix = scope.CurrentNameScope()
@@ -117,7 +118,7 @@ class DBFileReader(Reader):
             )
         )
         col_names = [
-            blob_name[len(blob_prefix):] for blob_name in workspace.Blobs()
+            blob_name[len(blob_prefix):] for blob_name in sorted(workspace.Blobs())
             if blob_name.startswith(blob_prefix)
         ]
         schema = from_column_list(col_names)
@@ -156,8 +157,9 @@ class DBFileReader(Reader):
 
     def _feed_field_blobs_from_db_file(self, net):
         """Load from the DB file at db_path and feed dataset field blobs"""
-        assert os.path.exists(self.db_path), \
-            'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+        if self.db_type == "log_file_db":
+            assert os.path.exists(self.db_path), \
+                'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
         net.Load(
             [],
             self.ds.get_blobs(),
@@ -170,7 +172,8 @@ class DBFileReader(Reader):
     def _extract_db_name_from_db_path(self):
         """Extract DB name from DB path
 
-            E.g. given self.db_path=`/tmp/sample.db`,
+            E.g. given self.db_path=`/tmp/sample.db`, or
+            self.db_path = `dper_test_data/cached_reader/sample.db`
             it returns `sample`.
 
             Returns:

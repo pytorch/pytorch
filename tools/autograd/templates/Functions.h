@@ -6,17 +6,17 @@
 #include <ATen/core/functional.h>
 #include <ATen/TensorGeometry.h>
 
-#include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch { namespace autograd { namespace generated {
 
 using at::Scalar;
 using at::Tensor;
 using at::IntArrayRef;
+using at::ArrayRef;
 using at::Type;
 using at::TensorGeometry;
 using at::ScalarType;
@@ -29,6 +29,15 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
   return fmap(xs, [](const SavedVariable& x) {
     return static_cast<Tensor>(x.unpack());
   });
+}
+
+inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariable> xs) {
+  torch::List<c10::optional<Tensor>> result;
+  result.reserve(xs.size());
+  for (const SavedVariable& v : xs) {
+    result.push_back(v.unpack());
+  }
+  return result;
 }
 
 struct TypeAndSize {

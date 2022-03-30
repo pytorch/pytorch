@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -10,7 +11,8 @@
 namespace at { namespace native {
 
 void logical_and_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_and_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
+                                         iter.common_dtype(), "logical_and_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a && b;
     });
@@ -18,7 +20,8 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_or_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_or_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
+                                         iter.common_dtype(), "logical_or_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a || b;
     });
@@ -26,7 +29,8 @@ void logical_or_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_xor_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
+                                         iter.common_dtype(), "logical_xor_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return bool(a) != bool(b);
     });

@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+#include <c10/macros/Macros.h>
+
 namespace c10 {
 
 /**
@@ -9,7 +11,8 @@ namespace c10 {
 struct alignas(4) qint32 {
   using underlying = int32_t;
   int32_t val_;
-  explicit qint32(int32_t val) : val_(val) {}
+  qint32() = default;
+  C10_HOST_DEVICE explicit qint32(int32_t val) : val_(val) {}
 };
 
 } // namespace c10

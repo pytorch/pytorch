@@ -43,6 +43,7 @@ void rmsprop_update<CUDAContext>(
     CUDAContext* context) {
   RmsPropUpdate<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
       N, g, ms, mom, ng, nms, nmom, decay, momentum, epsilon, lr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 

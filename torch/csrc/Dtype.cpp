@@ -51,17 +51,19 @@ PyObject *THPDtype_is_signed(THPDtype *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDtype_reduce(THPDtype *self, PyObject *noargs)
+PyObject *THPDtype_reduce(PyObject *_self, PyObject *noargs)
 {
   /*
   * For singletons, a string is returned. The string should be interpreted
   * as the name of a global variable.
   */
+  auto self = (THPDtype*)_self;
   return THPUtils_packString(self->name);
 }
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPDtype_properties[] = {
   {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
@@ -69,8 +71,9 @@ static struct PyGetSetDef THPDtype_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDtype_methods[] = {
-  {"__reduce__", (PyCFunction)THPDtype_reduce, METH_NOARGS, nullptr},
+  {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */
 };
 
@@ -123,6 +126,26 @@ PyTypeObject THPDtypeType = {
 
 void THPDtype_init(PyObject *module)
 {
+  // Set a __dict__ with `__module__` = `torch`. This means
+  // `__module__` value will be inherited by instances
+  // (i.e. `torch.float32.__module__ == "torch"`). This will prevent
+  // Pickle from having to search all of sys.modules in order to find
+  // the module when pickling a dtype instance.
+  //
+  // We have to do this in C++ because extension types are not mutable
+  // from Python code.
+  //
+  // See https://github.com/pytorch/pytorch/issues/65077
+  TORCH_INTERNAL_ASSERT(THPDtypeType.tp_dict == nullptr);
+  auto dict = THPObjectPtr(PyDict_New());
+  if (!dict) throw python_error();
+  auto torch = THPUtils_packString("torch");
+  if (!torch) throw python_error();
+  if (PyDict_SetItemString(dict, "__module__", torch) < 0 ) {
+      throw python_error();
+  }
+  THPDtypeType.tp_dict = dict.release();
+
   if (PyType_Ready(&THPDtypeType) < 0) {
     throw python_error();
   }

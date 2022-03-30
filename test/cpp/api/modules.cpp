@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -55,6 +56,15 @@ TEST_F(ModulesTest, Conv1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
+TEST_F(ModulesTest, Conv1dSameStrided) {
+  auto options = Conv1dOptions(3, 2, 3);
+  options.stride(1).padding(torch::kSame);
+  Conv1d model_valid(options);
+  ASSERT_THROWS_WITH(
+    [&]{ Conv1d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+}
+
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(54, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3}));
@@ -95,6 +105,18 @@ TEST_F(ModulesTest, Conv2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
+TEST_F(ModulesTest, Conv2dSameStrided) {
+  auto options = Conv2dOptions(3, 2, {3, 4});
+  options.stride(1).padding(torch::kSame);
+  Conv2d model_valid(options);
+  ASSERT_THROWS_WITH(
+    [&]{ Conv2d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv2d model_invalid(options.stride({1, 2})); }(),
+    "padding='same' is not supported for strided convolutions");
+}
+
 TEST_F(ModulesTest, Conv3d) {
   Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(162, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3, 3}));
@@ -129,6 +151,18 @@ TEST_F(ModulesTest, Conv3d) {
   s.backward();
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
+}
+
+TEST_F(ModulesTest, Conv3dSameStrided) {
+  auto options = Conv3dOptions(3, 2, {3, 4, 5});
+  options.stride(1).padding(torch::kSame);
+  Conv3d model_valid(options);
+  ASSERT_THROWS_WITH(
+    [&]{ Conv3d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv3d model_invalid(options.stride({1, 2, 1})); }(),
+    "padding='same' is not supported for strided convolutions");
 }
 
 TEST_F(ModulesTest, ConvTranspose1d) {
@@ -545,6 +579,36 @@ TEST_F(ModulesTest, Flatten) {
   s.backward();
   ASSERT_TRUE(torch::equal(output, expected));
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+}
+
+TEST_F(ModulesTest, Unflatten) {
+  // Non-named tensor
+  Unflatten unflatten(UnflattenOptions(0, {2, 2}));
+  auto output = unflatten->forward(torch::tensor({1, 2, 3, 4}));
+  auto expected = torch::tensor({{1, 2}, {3, 4}});
+  ASSERT_TRUE(torch::equal(output, expected));
+
+  // Named tensor
+  auto make_dimnames = [](std::vector<std::string> names) {
+    std::vector<torch::Dimname> dimnames;
+    // NOLINTNEXTLINE(performance-for-range-copy)
+    for (auto name : names) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
+      dimnames.push_back(
+          torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
+    }
+    return dimnames;
+  };
+
+  unflatten = Unflatten(UnflattenOptions(
+      "B",
+      {std::pair<std::string, int64_t>{"B1", 2},
+       std::pair<std::string, int64_t>{"B2", 2}}));
+  output = unflatten->forward(
+      torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
+  expected = torch::tensor({{{1, 2}, {3, 4}}})
+                 .refine_names(make_dimnames({"A", "B1", "B2"}));
+  ASSERT_TRUE(torch::equal(output, expected));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
@@ -1085,7 +1149,7 @@ TEST_F(ModulesTest, LayerNorm) {
   s.backward();
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(y.size(i), 2);
   }
 
@@ -1103,7 +1167,7 @@ TEST_F(ModulesTest, GroupNorm) {
   s.backward();
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(y.size(i), 2);
   }
 
@@ -1149,7 +1213,7 @@ TEST_F(ModulesTest, Fold) {
     Fold model(FoldOptions({8, 8}, {3, 3}));
     ASSERT_THROWS_WITH(
         model(torch::randn({1, 3, 16, 16})),
-        "Input Error: Only 3D input Tensors are supported (got 4D)");
+        "Input Error: Only unbatched (2D) or batched (3D) input Tensors are supported (got 4D)");
   }
 }
 
@@ -1325,19 +1389,22 @@ TEST_F(ModulesTest, Dropout) {
 }
 
 TEST_F(ModulesTest, Dropout2d) {
+  auto p = 0.5;
   for (const auto inplace : {false, true}) {
-    Dropout2d dropout(Dropout2dOptions(0.5).inplace(inplace));
-    torch::Tensor x = torch::ones({10, 10});
+    Dropout2d dropout(Dropout2dOptions(p).inplace(inplace));
+    torch::Tensor x = torch::empty({50, 50, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
-    ASSERT_EQ(y.ndimension(), 2);
-    ASSERT_EQ(y.size(0), 10);
-    ASSERT_EQ(y.size(1), 10);
-    ASSERT_LT(y.sum().item<float>(), 130); // Probably
-    ASSERT_GT(y.sum().item<float>(), 70); // Probably
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
+    ASSERT_EQ(y.size(2), 2);
+    ASSERT_EQ(y.size(3), 2);
+    ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
+
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
     } else {
@@ -1345,26 +1412,29 @@ TEST_F(ModulesTest, Dropout2d) {
     }
 
     dropout->eval();
-    y = dropout(torch::ones({10, 10}));
-    ASSERT_EQ(y.sum().item<float>(), 100);
+    y = dropout(torch::ones({2, 2, 10, 10}));
+    ASSERT_EQ(y.sum().item<float>(), 400);
   }
 }
 
 TEST_F(ModulesTest, Dropout3d) {
   for (const auto inplace : {false, true}) {
-    Dropout3d dropout(Dropout3dOptions(0.5).inplace(inplace));
-    torch::Tensor x = torch::ones({4, 5, 5});
+    auto p = 0.5;
+    Dropout3d dropout(Dropout3dOptions(p).inplace(inplace));
+    torch::Tensor x = torch::empty({50, 50, 2, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
-    ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.size(0), 4);
-    ASSERT_EQ(y.size(1), 5);
-    ASSERT_EQ(y.size(1), 5);
-    ASSERT_LT(y.sum().item<float>(), 130); // Probably
-    ASSERT_GT(y.sum().item<float>(), 70); // Probably
+    ASSERT_EQ(y.ndimension(), 5);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
+    ASSERT_EQ(y.size(2), 2);
+    ASSERT_EQ(y.size(3), 2);
+    ASSERT_EQ(y.size(4), 2);
+    ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
+
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
     } else {
@@ -1372,8 +1442,8 @@ TEST_F(ModulesTest, Dropout3d) {
     }
 
     dropout->eval();
-    y = dropout(torch::ones({4, 5, 5}));
-    ASSERT_EQ(y.sum().item<float>(), 100);
+    y = dropout(torch::ones({4, 4, 5, 5}));
+    ASSERT_EQ(y.sum().item<float>(), 400);
   }
 }
 
@@ -1553,7 +1623,7 @@ TEST_F(ModulesTest, BatchNorm2d) {
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -1643,7 +1713,7 @@ TEST_F(ModulesTest, BatchNorm3d) {
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -2004,6 +2074,19 @@ TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HuberLossDefaultOptions) {
+  HuberLoss loss;
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2030,12 +2113,53 @@ TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HuberLossNoReduction) {
+  HuberLoss loss(/*reduction=*/torch::kNone);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   MultiLabelMarginLoss loss(torch::kNone);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, SmoothL1LossBeta) {
+  auto options = SmoothL1LossOptions().beta(0.2);
+  SmoothL1Loss loss(options);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.108333, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, HuberLossDelta) {
+  auto options = HuberLossOptions().delta(0.2);
+  HuberLoss loss(options);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0216666, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -2057,9 +2181,118 @@ TEST_F(ModulesTest, TripletMarginLoss) {
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
+TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
+  // Check that if we use torch::pairwise_distance with the default
+  // TripletMarginLoss options as our distance function, the outputs
+  // are equal (i.e., equal under defaults).
+
+  std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
+      reductions = {torch::kSum, torch::kMean, torch::kNone};
+  std::vector<float> margins = {0.5, 1.0, 1.5};
+  std::vector<bool> swaps = {true, false};
+
+  for (auto& reduction : reductions) {
+    for (auto& margin : margins) {
+      for (const auto swap : swaps) {
+        auto anchor =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+        auto positive =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+        auto negative =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+        auto basicOptions = TripletMarginLossOptions()
+                                .reduction(reduction)
+                                .margin(margin)
+                                .swap(swap);
+        auto distanceOptions =
+            TripletMarginWithDistanceLossOptions()
+                .reduction(reduction)
+                .margin(margin)
+                .swap(swap);
+        TripletMarginLoss basicLoss(basicOptions);
+        TripletMarginWithDistanceLoss distanceLoss(distanceOptions);
+
+        auto basicOutput = basicLoss->forward(anchor, positive, negative);
+        auto distanceOutput = distanceLoss->forward(anchor, positive, negative);
+        auto basicOperatorOutput = basicLoss(anchor, positive, negative);
+        auto distanceOperatorOutput = distanceLoss(anchor, positive, negative);
+
+        ASSERT_TRUE(distanceOutput.allclose(basicOutput, 1e-6, 1e-6));
+        ASSERT_TRUE(distanceOperatorOutput.allclose(distanceOutput, 1e-6, 1e-6));
+        ASSERT_TRUE(distanceOperatorOutput.allclose(basicOperatorOutput, 1e-6, 1e-6));
+
+        // handle for torch::kNone reduction
+        auto sum = distanceOutput.sum();
+        sum.backward();
+        ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+        ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+        ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+      }
+    }
+  }
+}
+
+TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
+  // Check for parity between F::triplet_margin_with_distance_loss and
+  // TripletMarginWithDistanceLoss.
+  auto pairwise_distance = [&](const torch::Tensor& x, const torch::Tensor& y) {
+    return torch::pairwise_distance(x, y);
+  };
+  auto cosine_distance = [&](const torch::Tensor& x,
+                                 const torch::Tensor& y) {
+    return 1.0 - torch::cosine_similarity(x, y);
+  };
+  std::vector<TripletMarginWithDistanceLossOptions::distance_function_t>
+      distance_functions = {pairwise_distance, cosine_distance};
+
+  std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
+      reductions = {torch::kSum, torch::kMean, torch::kNone};
+  std::vector<float> margins = {0.5, 1.0, 1.5};
+  std::vector<bool> swaps = {true, false};
+
+  for (auto& function : distance_functions) {
+    for (auto& reduction : reductions) {
+      for (auto& margin : margins) {
+        for (const auto swap : swaps) {
+          auto moduleOptions =
+              TripletMarginWithDistanceLossOptions()
+                  .distance_function(function)
+                  .reduction(reduction)
+                  .margin(margin)
+                  .swap(swap);
+          auto functionOptions =
+              torch::nn::functional::TripletMarginWithDistanceLossFuncOptions()
+                  .distance_function(function)
+                  .reduction(reduction)
+                  .margin(margin)
+                  .swap(swap);
+
+          auto anchor = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+          auto positive = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+          auto negative = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+          TripletMarginWithDistanceLoss distanceLoss(moduleOptions);
+
+          auto moduleOutput = distanceLoss->forward(anchor, positive, negative);
+          auto moduleOperatorOutput = distanceLoss(anchor, positive, negative);
+          auto functionOutput = torch::nn::functional::triplet_margin_with_distance_loss(
+            anchor, positive, negative, functionOptions);
+
+          ASSERT_TRUE(moduleOutput.allclose(functionOutput, 1e-6, 1e-6));
+          ASSERT_TRUE(moduleOperatorOutput.allclose(functionOutput, 1e-6, 1e-6));
+        }
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, NLLLoss) {
   NLLLoss loss;
-  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::dtype(torch::kFloat).requires_grad(true));
@@ -2089,6 +2322,31 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
   ASSERT_TRUE(
     CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
       ->forward(input, target).allclose(expected, 1e-04));
+
+  // label smoothing with class indices
+  loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kMean));
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  target = torch::tensor({0, 1}, torch::kLong);
+  output = loss->forward(input, target);
+  expected = torch::tensor(0.3326, torch::kFloat);
+  s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+
+  // label smoothing with with target probabilities
+  loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.2).reduction(torch::kMean));
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  target = torch::tensor({{0.8, 0.2}, {0.1, 0.9}}, torch::kFloat);
+  output = loss->forward(input, target);
+  expected = torch::tensor(0.5701, torch::kFloat);
+  s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {
@@ -2295,25 +2553,27 @@ TEST_F(ModulesTest, LeakyReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
     for (const auto negative_slope : {0.0, 0.42, 1.0}) {
-      LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
-      auto x = torch::linspace(-10.0, 10.0, size * size * size);
-      x.resize_({size, size, size});
-      if (!inplace) {
-        x.requires_grad_(true);
-      }
-      auto x_orig = x.clone();
-      auto y = model(x);
-      torch::Tensor s = y.sum();
+      for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+        LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
+        auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+        x.resize_({size, size, size});
+        if (!inplace) {
+          x.requires_grad_(true);
+        }
+        auto x_orig = x.clone();
+        auto y = model(x);
+        torch::Tensor s = y.sum();
 
-      ASSERT_EQ(s.ndimension(), 0);
-      ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-      auto y_exp = (x_orig < 0) * x_orig * negative_slope + (x_orig >= 0) * x_orig;
-      ASSERT_TRUE(torch::allclose(y, y_exp));
-      if (inplace) {
-        ASSERT_TRUE(torch::allclose(x, y_exp));
-      } else {
-        s.backward();
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+        auto y_exp = (x_orig < 0) * x_orig * negative_slope + (x_orig >= 0) * x_orig;
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        } else {
+          s.backward();
+        }
       }
     }
   }
@@ -2342,7 +2602,7 @@ TEST_F(ModulesTest, Softmax) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::exp(input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2354,7 +2614,7 @@ TEST_F(ModulesTest, Softmin) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(-input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::exp(-input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2366,7 +2626,7 @@ TEST_F(ModulesTest, LogSoftmax) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2403,7 +2663,7 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
     auto logprob_out = asfm->log_prob(x);
     NLLLoss nll_loss;
 
-    for (int64_t v = 0; v < 4; ++v) {
+    for (const auto v : c10::irange(4)) {
       auto y = torch::full({4}, v, torch::kLong);
       auto asm_out = asfm(x, y);
       auto out = asm_out.output;
@@ -2414,6 +2674,15 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
       ASSERT_TRUE(torch::allclose(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze()));
     }
   }
+  {
+    // test no batch dim
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+    auto x = torch::randn({1, 16});
+    auto y = torch::tensor({17});
+    auto x2 = x.squeeze(0);
+    auto y2 = y.squeeze(0);
+    ASSERT_TRUE(torch::allclose(asfm(x, y).output.squeeze(0), asfm(x2, y2).output));
+  }
 }
 
 TEST_F(ModulesTest, Softmax2d) {
@@ -2422,10 +2691,10 @@ TEST_F(ModulesTest, Softmax2d) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 2; j++) {
-      for (int k = 0; k < 3; k++) {
-        for (int l = 0; l < 4; l++) {
+  for (const auto i : c10::irange(1)) {
+    for (const auto j : c10::irange(2)) {
+      for (const auto k : c10::irange(3)) {
+        for (const auto l : c10::irange(4)) {
           auto expected = torch::exp(input[i][j][k][l]) / sum[i][k][l];
           ASSERT_TRUE(torch::allclose(output[i][j][k][l], expected));
         }
@@ -2514,26 +2783,28 @@ TEST_F(ModulesTest, RReLU) {
   for (const auto lower : {0.01, 0.1, 0.2}) {
     for (const auto upper : {0.3, 0.4, 0.5}) {
       for (const auto inplace : {false, true}) {
-        RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
-        auto x = torch::linspace(-10.0, 10.0, size * size * size);
-        x.resize_({size, size, size});
-        if (!inplace) {
-          x.requires_grad_(true);
-        }
-        auto x_orig = x.clone();
-        auto y = model(x);
-        torch::Tensor s = y.sum();
+        for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+          RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
+          auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+          x.resize_({size, size, size});
+          if (!inplace) {
+            x.requires_grad_(true);
+          }
+          auto x_orig = x.clone();
+          auto y = model(x);
+          torch::Tensor s = y.sum();
 
-        ASSERT_EQ(s.ndimension(), 0);
-        ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-        auto z = ((x_orig >= 0) * (x_orig == y) +
-          (x_orig < 0) * (y >= x_orig * upper) * (y <= lower * x_orig)) * 1.0;
-        ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
-        if (inplace) {
-          ASSERT_TRUE(torch::allclose(x, y));
-        } else {
-          s.backward();
+          ASSERT_EQ(s.ndimension(), 0);
+          ASSERT_EQ(y.ndimension(), 3);
+          ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+          auto z = ((x_orig >= 0) * (x_orig == y) +
+            (x_orig < 0) * (y >= x_orig * upper) * (y <= lower * x_orig)) * 1.0;
+          ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+          if (inplace) {
+            ASSERT_TRUE(torch::allclose(x, y));
+          } else {
+            s.backward();
+          }
         }
       }
     }
@@ -2589,10 +2860,29 @@ TEST_F(ModulesTest, GLU) {
 }
 
 TEST_F(ModulesTest, GELU) {
-  GELU model;
+  GELU model(GELUOptions().approximate("none"));
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+TEST_F(ModulesTest, TanhGELU) {
+  GELU model(GELUOptions().approximate("tanh"));
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
+  const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, Mish) {
+  Mish model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x * x.exp().log1p().tanh();
+  auto y = model(x);
+
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
@@ -2621,6 +2911,24 @@ TEST_F(ModulesTest, PixelShuffle) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
+}
+
+TEST_F(ModulesTest, PixelUnshuffle) {
+  PixelUnshuffle module(/*downscale_factor=*/2);
+  auto x = torch::tensor(
+      {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
+      torch::kFloat);
+  auto y_exp = torch::tensor(
+      {{{{-17, 19}, {-1, 2}},
+        {{7, 14}, {-3, 1}},
+        {{0, -2}, {-12, 14}},
+        {{-15, 0}, {-3, 9}}}},
+      torch::kFloat);
+  auto y = module(x);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 4, 2, 2}));
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
@@ -3080,6 +3388,7 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
       BCEWithLogitsLossOptions().pos_weight(pos_weight).reduction(torch::kSum)
     )(output, target).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     const auto grad = output.grad();
     ASSERT_TRUE(torch::allclose(grad, expected_grad));
   }
@@ -3106,8 +3415,8 @@ namespace detail {
     TORCH_INTERNAL_ASSERT(a.size(0) == b.size(0));
     TORCH_INTERNAL_ASSERT(a.size(1) == b.size(1));
     auto retval = torch::zeros({a.size(0), a.size(1), a.size(2), b.size(3)}, torch::kFloat32);
-    for (int i = 0; i < a.size(0); i++) {
-      for (int j = 0; j < a.size(1); j++) {
+    for (const auto i : c10::irange(a.size(0))) {
+      for (const auto j : c10::irange(a.size(1))) {
         retval[i][j] = torch::matmul(a[i][j], b[i][j]);
       }
     }
@@ -3116,9 +3425,9 @@ namespace detail {
 
   torch::Tensor _softmax(const torch::Tensor& x) {
     auto output = torch::zeros(x.sizes());
-    for (int i = 0; i < x.size(0); i++) {
-      for (int j = 0; j < x.size(1); j++) {
-        for (int k = 0; k < x.size(2); k++) {
+    for (const auto i : c10::irange(x.size(0))) {
+      for (const auto j : c10::irange(x.size(1))) {
+        for (const auto k : c10::irange(x.size(2))) {
           const auto& x_curr = x[i][j][k];
           const auto e_x = torch::exp(x_curr - torch::max(x_curr));
           output[i][j][k] = e_x / torch::sum(e_x);
@@ -3131,7 +3440,8 @@ namespace detail {
   std::tuple<torch::Tensor, torch::Tensor> _scaled_dot_attn_ref(
     const torch::Tensor& Q, const torch::Tensor& K, const torch::Tensor& V,
     at::IntArrayRef dims, const torch::Tensor& unseen_mask = {},
-    const torch::Tensor& key_padding_mask = {}) {
+    const torch::Tensor& key_padding_mask = {},
+    bool average_attn_weights = true) {
     auto QKT = _batchmatmul(
       Q,
       K.permute({0, 1, 3, 2}) / std::sqrt(dims[3])
@@ -3141,10 +3451,10 @@ namespace detail {
     const auto s1 = QKT.size(2);
     const auto s2 = QKT.size(3);
     if (unseen_mask.defined() || key_padding_mask.defined()) {
-      for (int i = 0; i < b1; i++) {
-        for (int j = 0; j < b2; j++) {
-          for (int m = 0; m < s1; m++) {
-            for (int n = 0; n < s2; n++) {
+      for (const auto i : c10::irange(b1)) {
+        for (const auto j : c10::irange(b2)) {
+          for (const auto m : c10::irange(s1)) {
+            for (const auto n : c10::irange(s2)) {
               if (unseen_mask.defined() && unseen_mask[m][n].item<double>() == 0) {
                 QKT[i][j][m][n] = -std::numeric_limits<double>::infinity();
               }
@@ -3158,7 +3468,10 @@ namespace detail {
     }
     auto reference = _softmax(QKT);
     auto ref_attn_weight = reference;
-    ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    if (average_attn_weights) {
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    }
     reference = _batchmatmul(reference, V);
     return std::tie(reference, ref_attn_weight);
   }
@@ -3176,30 +3489,39 @@ namespace detail {
   }
 
   torch::Tensor _fc(torch::Tensor X, torch::Tensor X_weight, torch::Tensor X_bias) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto X_fc_b = X_bias;
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto X_fc_w = X_weight;
     return torch::matmul(X, torch::t(X_fc_w)) + X_fc_b;
   }
 
   void _multihead_attn_test_helper(bool add_key_padding_mask = false,
     bool add_bias_kv = false, bool add_zero_attn = false,
-    bool saved_kv = false, bool same_embed_dim = false) {
+    bool saved_kv = false, bool same_embed_dim = false,
+    bool average_attn_weights = true) {
     std::random_device device;
     std::mt19937 generator(device());
     std::uniform_int_distribution<int> d_2_10(2, 10);
     std::uniform_int_distribution<int> d_3_10(3, 10);
-    for (int i = 0; i < 100; i++) {
+    bool registration_checked = false;
+    for (const auto i : c10::irange(100)) {
+      (void)i; // Suppress unused variable warning
       const auto batch_sz = d_2_10(generator);
       const auto seq_len = d_2_10(generator);
       const auto d_head = d_3_10(generator);
       const auto nheads = d_3_10(generator);
       const auto d_model = d_head * nheads;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int kv_dim;
       if (same_embed_dim) {
         kv_dim = d_model;
       } else {
         std::uniform_int_distribution<int> d(5, 20);
         kv_dim = d(generator);
+        while (kv_dim == d_model) {
+          kv_dim = d(generator);
+        }
       }
       std::vector<int64_t> dims {batch_sz, seq_len, kv_dim};
       torch::Tensor saved_k;
@@ -3221,6 +3543,7 @@ namespace detail {
       }
       const auto decoder_state = torch::rand({batch_sz, d_model});
       const torch::Tensor K = torch::rand(dims);
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       const torch::Tensor V = K;
       const torch::Tensor Q = decoder_state.clone().resize_({batch_sz, 1, d_model});
       auto attn_mask = torch::randint(0, 2, {1, seq_len});
@@ -3228,6 +3551,7 @@ namespace detail {
       attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
       attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, double(0.0));
 
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       const torch::Tensor decoder_state_tensor = decoder_state;
       const torch::Tensor source_hid_tensor = K.transpose(0, 1);
 
@@ -3238,18 +3562,41 @@ namespace detail {
           .vdim(kv_dim);
       const auto multihead_attn_module = MultiheadAttention(options);
 
+      if (!registration_checked) {
+        // make sure parameters are all registered correctly
+        auto named_parameters = multihead_attn_module->named_parameters();
+        if (same_embed_dim) {
+          ASSERT_TRUE(named_parameters.contains("in_proj_weight"));
+        }
+        else {
+          ASSERT_TRUE(named_parameters.contains("q_proj_weight"));
+          ASSERT_TRUE(named_parameters.contains("k_proj_weight"));
+          ASSERT_TRUE(named_parameters.contains("v_proj_weight"));
+        }
+        if (add_bias_kv) {
+          ASSERT_TRUE(named_parameters.contains("bias_k"));
+          ASSERT_TRUE(named_parameters.contains("bias_v"));
+        }
+        // make sure sub modules are all registered correctly
+        auto submodules = multihead_attn_module->named_children();
+        ASSERT_TRUE(submodules.contains("out_proj"));
+        registration_checked = true;
+      }
+
       torch::Tensor bias_k;
       torch::Tensor bias_v;
       if (add_bias_kv) {
         bias_k = multihead_attn_module->bias_k.detach();
         bias_v = multihead_attn_module->bias_v.detach();
       } else {
-        bias_k = {};
-        bias_v = {};
+        bias_k.reset();
+        bias_v.reset();
       }
 
       torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       torch::Tensor _V = source_hid_tensor;
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       torch::Tensor _K = source_hid_tensor;
 
       torch::Tensor result;
@@ -3275,6 +3622,7 @@ namespace detail {
           .attn_mask(attn_mask_tensor)
           .static_k(saved_k_tensor)
           .static_v(saved_v_tensor)
+          .average_attn_weights(average_attn_weights)
         );
       } else {
         std::tie(result, result_weight) = F::multi_head_attention_forward(
@@ -3301,6 +3649,7 @@ namespace detail {
           .v_proj_weight(multihead_attn_module->v_proj_weight)
           .static_k(saved_k_tensor)
           .static_v(saved_v_tensor)
+          .average_attn_weights(average_attn_weights)
         );
       }
       result = result.squeeze(0).detach();
@@ -3371,10 +3720,12 @@ namespace detail {
           V_split,
           Q_split.sizes(),
           attn_mask,
-          key_padding_mask
+          key_padding_mask,
+          average_attn_weights
       );
       const auto combined_attn_heads = _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
       auto reference = _fc(combined_attn_heads, multihead_attn_module->out_proj->weight, multihead_attn_module->out_proj->bias);
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       reference = torch::squeeze(reference, /*axis=*/1);
 
       // result = reference
@@ -3392,83 +3743,93 @@ namespace detail {
 TEST_F(ModulesTest, MultiheadAttention) {
   using namespace ::detail;
 
-  // test_multihead_attn_add_zero_attn
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+  for (auto average_attn_weights : {false, true}) {
+    // test_multihead_attn_add_zero_attn
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_add_bias_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_add_bias_kv
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/true,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_no_masking():
-  _multihead_attn_test_helper();
+    // test_multihead_attn_no_masking():
+    _multihead_attn_test_helper();
 
-  // test_multihead_attn_key_padding_mask
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_key_padding_mask
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_saved_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_saved_kv
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_add_bias_kv_zero_attn
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
-
-  // test_multihead_attn_all_arguments1
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
-  );
-
-  ASSERT_THROWS_WITH(
-    // test_multihead_attn_all_arguments2
+    // test_multihead_attn_add_bias_kv_zero_attn
     _multihead_attn_test_helper(
       /*add_key_padding_mask=*/true,
       /*add_bias_kv=*/true,
       /*add_zero_attn=*/true,
-      /*saved_kv=*/true,
-      /*same_embed_dim=*/false
-    ),
-    "bias cannot be added to static key"
-  );
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_all_arguments3
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/true
-  );
+    // test_multihead_attn_all_arguments1
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
+
+    ASSERT_THROWS_WITH(
+      // test_multihead_attn_all_arguments2
+      _multihead_attn_test_helper(
+        /*add_key_padding_mask=*/true,
+        /*add_bias_kv=*/true,
+        /*add_zero_attn=*/true,
+        /*saved_kv=*/true,
+        /*same_embed_dim=*/false,
+        /*average_attn_weights=*/average_attn_weights
+      ),
+      "bias cannot be added to static key"
+    );
+
+    // test_multihead_attn_all_arguments3
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/true,
+      /*average_attn_weights=*/average_attn_weights
+    );
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
@@ -3476,8 +3837,22 @@ TEST_F(ModulesTest, PrettyPrintIdentity) {
 }
 
 TEST_F(ModulesTest, PrettyPrintFlatten) {
-  ASSERT_EQ(c10::str(Flatten()), "torch::nn::Flatten()");
-  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))), "torch::nn::Flatten()");
+  ASSERT_EQ(c10::str(Flatten()),
+    "torch::nn::Flatten(start_dim=1, end_dim=-1)");
+  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))),
+    "torch::nn::Flatten(start_dim=2, end_dim=4)");
+}
+
+TEST_F(ModulesTest, PrettyPrintUnflatten) {
+  ASSERT_EQ(
+      c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
+      "torch::nn::Unflatten(dim=0, unflattened_size={2, 2})");
+  ASSERT_EQ(
+      c10::str(Unflatten(UnflattenOptions(
+          "B",
+          {std::pair<std::string, int64_t>{"B1", 2},
+           std::pair<std::string, int64_t>{"B2", 2}}))),
+      "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 
 TEST_F(ModulesTest, ReflectionPad1d) {
@@ -3526,6 +3901,58 @@ TEST_F(ModulesTest, ReflectionPad2d) {
   }
 }
 
+TEST_F(ModulesTest, ReflectionPad3d) {
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}},
+                                     {{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions({0, 1, 1, 0, 1, 2}));
+    auto input = torch::arange(16, torch::kFloat).reshape({1, 1, 4, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}},
+                                     {{2., 3., 2.},
+                                      {0., 1., 0.},
+                                      {2., 3., 2.}},
+                                     {{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}},
+                                     {{10., 11., 10.},
+                                      {8., 9., 8.},
+                                      {10., 11., 10.}},
+                                     {{14., 15., 14.},
+                                      {12., 13., 12.},
+                                      {14., 15., 14.}},
+                                     {{10., 11., 10.},
+                                      {8., 9., 8.},
+                                      {10., 11., 10.}},
+                                     {{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}}}}}, torch::kFloat);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 7, 3, 3}));
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
 TEST_F(ModulesTest, ReplicationPad1d) {
   {
     ReplicationPad1d m(ReplicationPad1dOptions(2));
@@ -3768,10 +4195,10 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   auto crossmaplrn2d = CrossMapLRN2d(3);
   auto output = crossmaplrn2d(input);
   output.sum().backward();
-  
+
   ASSERT_TRUE(input.grad().allclose(grad_expected));
   ASSERT_TRUE(output.allclose(expected));
-  
+
   /// size change
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
   output = crossmaplrn2d(input);
@@ -4287,6 +4714,9 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
   ASSERT_EQ(
       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum))),
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum).padding_idx(5))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum, padding_idx=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintL1Loss) {
@@ -4325,6 +4755,20 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintTripletMarginWithDistanceLoss) {
+  auto distanceOptions = TripletMarginWithDistanceLossOptions()
+                             .distance_function([&](const torch::Tensor& x,
+                                                    const torch::Tensor& y) {
+                               return torch::pairwise_distance(x, y, 2.0, 1e-6);
+                             })
+                             .margin(1.5)
+                             .swap(true)
+                             .reduction(torch::kMean);
+  ASSERT_EQ(
+      c10::str(TripletMarginWithDistanceLoss(distanceOptions)),
+      "torch::nn::TripletMarginWithDistanceLoss(margin=1.5, swap=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNLLLoss) {
@@ -4572,6 +5016,12 @@ TEST_F(ModulesTest, PrettyPrintSigmoid) {
 TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
   ASSERT_EQ(c10::str(PixelShuffle(PixelShuffleOptions(5))),
             "torch::nn::PixelShuffle(upscale_factor=5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPixelUnshuffle) {
+  ASSERT_EQ(
+      c10::str(PixelUnshuffle(PixelUnshuffleOptions(5))),
+      "torch::nn::PixelUnshuffle(downscale_factor=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintSoftplus) {

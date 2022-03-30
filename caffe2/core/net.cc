@@ -97,6 +97,12 @@ bool NetBase::RunAsync() {
   return DoRunAsync();
 }
 
+void NetBase::Cancel() {
+  for (auto& op : GetOperators()) {
+    op->Cancel();
+  }
+}
+
 namespace {
 const std::string kSimpleNet = "simple";
 
@@ -225,6 +231,7 @@ std::vector<float> NetBase::TEST_Benchmark(
   }
   auto millis = timer.MilliSeconds();
   LOG(INFO) << "Main runs finished. Milliseconds per iter: "
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             << millis / main_runs
             << ". Iters per second: " << 1000.0 * main_runs / millis;
 
@@ -232,6 +239,7 @@ std::vector<float> NetBase::TEST_Benchmark(
     LOG(INFO) << "Net does not support per-op benchmark; "
                  "to run it, switch to a simple net type";
   }
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return std::vector<float>{millis / main_runs};
 }
 

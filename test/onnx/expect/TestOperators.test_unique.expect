@@ -1,9 +1,9 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "x"
+    input: "input"
     output: "1"
     output: "2"
     output: "3"
@@ -21,9 +21,9 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "x"
+    name: "input"
     type {
       tensor_type {
         elem_type: 1
@@ -51,7 +51,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 2
+            dim_param: "Unique1_dim_0"
           }
           dim {
             dim_value: 3
@@ -73,7 +73,7 @@ graph {
         elem_type: 7
         shape {
           dim {
-            dim_value: 2
+            dim_param: "Unique4_dim_0"
           }
         }
       }

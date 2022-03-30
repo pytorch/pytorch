@@ -13,7 +13,7 @@
 #endif
 
 /*! \brief The current version of dlpack */
-#define DLPACK_VERSION 020
+#define DLPACK_VERSION 60
 
 /*! \brief DLPACK_DLL prefix for windows */
 #ifdef _WIN32
@@ -26,25 +26,24 @@
 #define DLPACK_DLL
 #endif
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 /*!
- * \brief The device type in DLContext.
+ * \brief The device type in DLDevice.
  */
 typedef enum {
   /*! \brief CPU device */
   kDLCPU = 1,
   /*! \brief CUDA GPU device */
-  kDLGPU = 2,
+  kDLCUDA = 2,
   /*!
-   * \brief Pinned CUDA GPU device by cudaMallocHost
-   * \note kDLCPUPinned = kDLCPU | kDLGPU
+   * \brief Pinned CUDA CPU memory by cudaMallocHost
    */
-  kDLCPUPinned = 3,
+  kDLCUDAHost = 3,
   /*! \brief OpenCL devices. */
   kDLOpenCL = 4,
   /*! \brief Vulkan buffer for next generation graphics. */
@@ -56,30 +55,57 @@ typedef enum {
   /*! \brief ROCm GPUs for AMD GPUs */
   kDLROCM = 10,
   /*!
+   * \brief Pinned ROCm CPU memory allocated by hipMallocHost
+   */
+  kDLROCMHost = 11,
+  /*!
    * \brief Reserved extension device type,
    * used for quickly test extension device
    * The semantics can differ depending on the implementation.
    */
   kDLExtDev = 12,
+  /*!
+   * \brief CUDA managed/unified memory allocated by cudaMallocManaged
+   */
+  kDLCUDAManaged = 13,
 } DLDeviceType;
 
 /*!
- * \brief A Device context for Tensor and operator.
+ * \brief A Device for Tensor and operator.
  */
 typedef struct {
   /*! \brief The device type used in the device. */
   DLDeviceType device_type;
-  /*! \brief The device index */
+  /*!
+   * \brief The device index.
+   * For vanilla CPU memory, pinned memory, or managed memory, this is set to 0.
+   */
   int device_id;
-} DLContext;
+} DLDevice;
 
 /*!
  * \brief The type code options DLDataType.
  */
 typedef enum {
+  /*! \brief signed integer */
   kDLInt = 0U,
+  /*! \brief unsigned integer */
   kDLUInt = 1U,
+  /*! \brief IEEE floating point */
   kDLFloat = 2U,
+  /*!
+   * \brief Opaque handle type, reserved for testing purposes.
+   * Frameworks need to agree on the handle data type for the exchange to be
+   * well-defined.
+   */
+  kDLOpaqueHandle = 3U,
+  /*! \brief bfloat16 */
+  kDLBfloat = 4U,
+  /*!
+   * \brief complex number
+   * (C/C++/Python layout: compact struct per complex number)
+   */
+  kDLComplex = 5U,
 } DLDataTypeCode;
 
 /*!
@@ -89,6 +115,7 @@ typedef enum {
  *   - float: type_code = 2, bits = 32, lanes=1
  *   - float4(vectorized 4 float): type_code = 2, bits = 32, lanes=4
  *   - int8: type_code = 0, bits = 8, lanes=1
+ *   - std::complex<float>: type_code = 5, bits = 64, lanes = 1
  */
 typedef struct {
   /*!
@@ -110,13 +137,27 @@ typedef struct {
  */
 typedef struct {
   /*!
-   * \brief The opaque data pointer points to the allocated data.
-   *  This will be CUDA device pointer or cl_mem handle in OpenCL.
-   *  This pointer is always aligns to 256 bytes as in CUDA.
+   * \brief The opaque data pointer points to the allocated data. This will be
+   * CUDA device pointer or cl_mem handle in OpenCL. This pointer is always
+   * aligned to 256 bytes as in CUDA.
+   *
+   * For given DLTensor, the size of memory required to store the contents of
+   * data is calculated as follows:
+   *
+   * \code{.c}
+   * static inline size_t GetDataSize(const DLTensor* t) {
+   *   size_t size = 1;
+   *   for (tvm_index_t i = 0; i < t->ndim; ++i) {
+   *     size *= t->shape[i];
+   *   }
+   *   size *= (t->dtype.bits * t->dtype.lanes + 7) / 8;
+   *   return size;
+   * }
+   * \endcode
    */
   void* data;
-  /*! \brief The device context of the tensor */
-  DLContext ctx;
+  /*! \brief The device of the tensor */
+  DLDevice device;
   /*! \brief Number of dimensions */
   int ndim;
   /*! \brief The data type of the pointer*/
@@ -124,8 +165,8 @@ typedef struct {
   /*! \brief The shape of the tensor */
   int64_t* shape;
   /*!
-   * \brief strides of the tensor,
-   *  can be NULL, indicating tensor is compact.
+   * \brief strides of the tensor (in number of elements, not bytes)
+   *  can be NULL, indicating tensor is compact and row-majored.
    */
   int64_t* strides;
   /*! \brief The offset in bytes to the beginning pointer to data */
@@ -145,14 +186,15 @@ typedef struct DLManagedTensor {
   /*! \brief the context of the original host framework of DLManagedTensor in
    *   which DLManagedTensor is used in the framework. It can also be NULL.
    */
-  void * manager_ctx;
+  void* manager_ctx;
   /*! \brief Destructor signature void (*)(void*) - this should be called
    *   to destruct manager_ctx which holds the DLManagedTensor. It can be NULL
    *   if there is no way for the caller to provide a reasonable destructor.
+   *   The destructors deletes the argument self as well.
    */
-  void (*deleter)(struct DLManagedTensor * self);
+  void (*deleter)(struct DLManagedTensor* self);
 } DLManagedTensor;
 #ifdef __cplusplus
-}  // DLPACK_EXTERN_C
+} // DLPACK_EXTERN_C
 #endif
-#endif  // DLPACK_DLPACK_H_
+#endif // DLPACK_DLPACK_H_

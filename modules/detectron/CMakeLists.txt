@@ -10,11 +10,12 @@ if(BUILD_CAFFE2_OPS)
   # Note(ilijar): Since Detectron ops currently have no
   # CPU implementation, we only build GPU ops for now.
   if(USE_CUDA)
-    CUDA_ADD_LIBRARY(
+    add_library(
         caffe2_detectron_ops_gpu SHARED
         ${Detectron_CPU_SRCS}
         ${Detectron_GPU_SRCS})
 
+    torch_set_target_props(caffe2_detectron_ops_gpu)
     target_link_libraries(caffe2_detectron_ops_gpu torch ${OpenMP_link})
     install(TARGETS caffe2_detectron_ops_gpu DESTINATION lib)
     if(MSVC)
@@ -27,11 +28,17 @@ if(BUILD_CAFFE2_OPS)
         caffe2_detectron_ops_hip SHARED
         ${Detectron_CPU_SRCS}
         ${Detectron_HIP_SRCS})
+    torch_set_target_props(caffe2_detectron_ops_hip)
     target_compile_options(caffe2_detectron_ops_hip PRIVATE ${HIP_CXX_FLAGS})
     target_link_libraries(caffe2_detectron_ops_hip torch)
     install(TARGETS caffe2_detectron_ops_hip DESTINATION lib)
   elseif(NOT IOS_PLATFORM)
     add_library(caffe2_detectron_ops SHARED ${Detectron_CPU_SRCS})
+    if(HAVE_SOVERSION)
+      set_target_properties(caffe2_detectron_ops PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+    endif()
+    torch_set_target_props(caffe2_detectron_ops)
     target_link_libraries(caffe2_detectron_ops torch ${OpenMP_link})
     install(TARGETS caffe2_detectron_ops DESTINATION lib)
     if(MSVC)

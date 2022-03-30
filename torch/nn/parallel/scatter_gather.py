@@ -1,6 +1,12 @@
 import torch
 from ._functions import Scatter, Gather
 
+def is_namedtuple(obj):
+    # Check if type was created from collections.namedtuple or a typing.NamedTuple.
+    return (
+        isinstance(obj, tuple) and hasattr(obj, "_asdict") and hasattr(obj, "_fields")
+    )
+
 
 def scatter(inputs, target_gpus, dim=0):
     r"""
@@ -11,12 +17,14 @@ def scatter(inputs, target_gpus, dim=0):
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
+        if is_namedtuple(obj):
+            return [type(obj)(*args) for args in zip(*map(scatter_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
-            return list(map(list, zip(*map(scatter_map, obj))))
+            return [list(i) for i in zip(*map(scatter_map, obj))]
         if isinstance(obj, dict) and len(obj) > 0:
-            return list(map(type(obj), zip(*map(scatter_map, obj.items()))))
+            return [type(obj)(i) for i in zip(*map(scatter_map, obj.items()))]
         return [obj for targets in target_gpus]
 
     # After scatter_map is called, a scatter_map cell will exist. This cell
@@ -36,9 +44,9 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     inputs = scatter(inputs, target_gpus, dim) if inputs else []
     kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
     if len(inputs) < len(kwargs):
-        inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
+        inputs.extend(() for _ in range(len(kwargs) - len(inputs)))
     elif len(kwargs) < len(inputs):
-        kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
+        kwargs.extend({} for _ in range(len(inputs) - len(kwargs)))
     inputs = tuple(inputs)
     kwargs = tuple(kwargs)
     return inputs, kwargs
@@ -46,8 +54,8 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
 
 def gather(outputs, target_device, dim=0):
     r"""
-    Gathers tensors from different GPUs on a specified device
-      (-1 means the CPU).
+    Gathers tensors from different GPUs on a specified device.
+    Use 'cpu' for CPU to avoid a deprecation warning.
     """
     def gather_map(outputs):
         out = outputs[0]
@@ -56,10 +64,12 @@ def gather(outputs, target_device, dim=0):
         if out is None:
             return None
         if isinstance(out, dict):
-            if not all((len(out) == len(d) for d in outputs)):
+            if not all(len(out) == len(d) for d in outputs):
                 raise ValueError('All dicts must have the same number of keys')
-            return type(out)(((k, gather_map([d[k] for d in outputs]))
-                              for k in out))
+            return type(out)((k, gather_map([d[k] for d in outputs]))
+                             for k in out)
+        if is_namedtuple(out):
+            return type(out)._make(map(gather_map, zip(*outputs)))
         return type(out)(map(gather_map, zip(*outputs)))
 
     # Recursive function calls like this create reference cycles.

@@ -47,8 +47,10 @@ class Int8FCOp final : public Operator<CPUContext> {
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       pthreadpool_t threadpool =
           reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
       if (this->qnnpackObject_ == nullptr) {
         const qnnp_status createStatus = qnnp_create_fully_connected_nc_q8(
@@ -104,7 +106,7 @@ class Int8FCOp final : public Operator<CPUContext> {
         lastOutputPointer_ = Y->t.template mutable_data<uint8_t>();
       }
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       const qnnp_status runStatus =
           qnnp_run_operator(this->qnnpackObject_, nullptr /* thread pool */);
 #else

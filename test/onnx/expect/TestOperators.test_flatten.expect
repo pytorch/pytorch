@@ -1,31 +1,70 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
-    name: "Constant_0"
+    input: "onnx::Shape_0"
+    output: "onnx::Slice_1"
+    name: "Shape_0"
+    op_type: "Shape"
+  }
+  node {
+    input: "onnx::Slice_1"
+    output: "onnx::Concat_2"
+    name: "Slice_1"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    output: "onnx::Concat_3"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
       t {
         dims: 1
         data_type: 7
-        raw_data: "\030\000\000\000\000\000\000\000"
+        raw_data: "\377\377\377\377\377\377\377\377"
       }
       type: TENSOR
     }
   }
   node {
-    input: "0"
-    input: "1"
-    output: "2"
-    name: "Reshape_1"
+    input: "onnx::Concat_2"
+    input: "onnx::Concat_3"
+    output: "onnx::Reshape_4"
+    name: "Concat_3"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Shape_0"
+    input: "onnx::Reshape_4"
+    output: "5"
+    name: "Reshape_4"
     op_type: "Reshape"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Shape_0"
     type {
       tensor_type {
         elem_type: 1
@@ -47,7 +86,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "5"
     type {
       tensor_type {
         elem_type: 1

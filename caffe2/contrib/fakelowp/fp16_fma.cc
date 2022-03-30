@@ -65,12 +65,13 @@ void fma_fp16(int N, const float* A, const float* B, float* Out) {
 
     __m256i cmp = _mm256_cmpgt_epi64(_mm256_set1_epi64x(-14), mExpv);
 
-    __m256i mExpoBouncer = _mm256_and_pd(cmp, _mm256_set1_epi64x(28));
-    mExpoBouncer = _mm256_or_pd(
+    __m256i mExpoBouncer = _mm256_and_si256(cmp, _mm256_set1_epi64x(28));
+    mExpoBouncer = _mm256_or_si256(
         mExpoBouncer,
-        _mm256_andnot_pd(cmp, _mm256_add_epi64(_mm256_set1_epi64x(42), mExpv)));
+        _mm256_andnot_si256(
+            cmp, _mm256_add_epi64(_mm256_set1_epi64x(42), mExpv)));
 
-    __m256 mBouncer = _mm256_add_epi64(
+    __m256i mBouncer = _mm256_add_epi64(
         _mm256_set1_epi64x(dbl_threehalf),
         _mm256_slli_epi64(mExpoBouncer, shift_bits));
 
@@ -114,6 +115,15 @@ void fma_fp16(int N, const float* A, const float* B, float* Out) {
     Out_.F = (Bouncer.F + Out_.F) - Bouncer.F;
     Out[n] = Out_.F;
   }
+}
+
+float fmafp32_avx_emulation(float v1, float v2, float v3) {
+  __m256 v1Vec = _mm256_set1_ps(v1);
+  __m256 v2Vec = _mm256_set1_ps(v2);
+  __m256 v3Vec = _mm256_set1_ps(v3);
+  __m256 resVec = _mm256_fmadd_ps(v1Vec, v2Vec, v3Vec);
+  float *result = (float *)&resVec;
+  return *result;
 }
 
 } // namespace fake_fp16

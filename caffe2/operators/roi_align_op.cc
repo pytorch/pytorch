@@ -84,7 +84,7 @@ std::vector<BilinearInterpolationParam<T>> MakeBilinearInterpolationParams(
 } // namespace
 
 template <>
-bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
+C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
     int64_t N,
     int64_t C,
     int64_t H,
@@ -170,7 +170,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
 }
 
 template <>
-bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
+C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
     int64_t N,
     int64_t C,
     int64_t H,
@@ -302,20 +302,6 @@ using RoIAlignCPUOp = caffe2::RoIAlignOp<T, CPUContext>;
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     RoIAlign,
     "_caffe2::RoIAlign("
-    "    Tensor features,"
-    "    Tensor rois,"
-    "    str order,"
-    "    float spatial_scale,"
-    "    int pooled_h,"
-    "    int pooled_w,"
-    "    int sampling_ratio,"
-    "    bool aligned"
-    ") -> Tensor",
-    caffe2::RoIAlignCPUOp<float>);
-
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    RoIAlign2,
-    "__caffe2::RoIAlign("
     "    Tensor features,"
     "    Tensor rois,"
     "    str order,"

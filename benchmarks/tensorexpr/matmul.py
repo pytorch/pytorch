@@ -1,19 +1,20 @@
-import benchmark
+from . import benchmark
 import numpy as np
 
 
 class MatMulBench(benchmark.Benchmark):
-    def __init__(self, mode, device, B, M, N, K):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, B, M, N, K):
+        super().__init__(mode, device, dtype)
         self.B = B
         self.M = M
         self.N = N
         self.K = K
-        self.d1 = self.rand([B, M, N], device=device, requires_grad=self.requires_grad)
-        self.d2 = self.rand([B, N, K], device=device, requires_grad=self.requires_grad)
+        self.d1 = self.rand([B, M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d2 = self.rand([B, N, K], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.inputs = [self.d1, self.d2]
 
-    def forward(self):
-        y = self.matmul(self.d1, self.d2)
+    def forward(self, d1, d2):
+        y = self.matmul(d1, d2)
         return y
 
     def reference(self):
@@ -39,7 +40,6 @@ class MatMulBench(benchmark.Benchmark):
             + self.B * self.M * self.N
             + self.B * self.N * self.K
         )
-        buffer_size *= 4
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,

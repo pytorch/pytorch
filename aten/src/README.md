@@ -7,7 +7,6 @@ multiple variants of the library, summarized here:
 * TH = TorcH
 * THC = TorcH Cuda
 * THCS = TorcH Cuda Sparse (now defunct)
-* THCUNN = TorcH CUda Neural Network (see cunn)
 * THNN = TorcH Neural Network (now defunct)
 * THS = TorcH Sparse (now defunct)
 
@@ -18,7 +17,7 @@ multiple variants of the library, summarized here:
 PyTorch employs reference counting in order to permit tensors to provide
 differing views on a common underlying storage.  For example, when you call
 view() on a Tensor, a new THTensor is allocated with differing dimensions,
-but it shares the same THStorage with the original tensor.
+but it shares the same c10::StorageImpl with the original tensor.
 
 Unfortunately, this means we are in the business of manually tracking reference
 counts inside our C library code.  Fortunately, for most of our library code implementing
@@ -64,9 +63,9 @@ of freeing it.  If that function holds on to a pointer to the object, it
 will `retain` it itself.
 
 ```
-  THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
+  THByteStorage *inferred_size = THByteStorage_newInferSize(size, numel);
   THTensor_(setStorage)(self, tensor->storage, tensor->storageOffset, inferred_size, NULL);
-  THLongStorage_free(inferred_size);
+  c10::raw::intrusive_ptr::decref(inferred_size);
 ```
 
 Sometimes, you have a tensor in hand which you'd like to use directly, but
@@ -106,38 +105,3 @@ function call, e.g., `kernel = THTensor_(newContiguous2D)(k_)`.
   to call `THError` before performing any allocations, since in some cases we
   sketchily throw a C++ exception and try to recover (in particular, the test
   suite does this.)
-
-## The C interface
-
-Historically, the Torch libraries were implemented in C.  Since then, we have slowly
-started rewriting bits of pieces of Torch in C++ (usually because there is some
-C++ feature which would be really helpful for writing something.)  However,
-Torch has *always been*, and *will always be* a library that provides a C ABI
-interface, even if, at some point in the future, its internal implementation
-is entirely done in a C++ library that heavily uses C++ idioms.  (At the moment,
-all of the source files are C++, but they are mostly C code that happens to be
-compiled as C++).
-
-In order to achieve this, the `TH_API` macro (called `THC_API` in `THC`) plays
-a crucial role: it declares a function as having C-linkage, which means that the
-C++ compiler doesn't mangle its name and a C client can link against it.
-
-As a developer, here is what you need to know:
-
-1. If you add a function to the public API of Torch, you *must* mark it with
-   `TH_API` or `THC_API` (depending if you are in CPU or CUDA land).
-   This will ensure it is built with C-linkage (and on Windows, it
-   will also ensure that the symbol is exported from the DLL; otherwise it
-   won't be visible.)
-
-2. C++ features should ONLY be used in `.cpp` and `.hpp` files, and not in
-   `.h` files.  If you need to use a C++ type in a header file, you should
-   define this in a separate, C++ only header `.hpp`, and declare it opaquely
-   in the `.h`. Search for `mutex` for an example of this principle being applied.
-   (This convention is OPPOSITE from the prevailing convention in PyTorch and
-   ATen, where C++ headers are defined in `.h` files.)
-
-Arguably, the "C-compatible" headers should live in a separate directory,
-distinct from the C++ code.  We think this might be a good thing to do
-eventually, and would make the code structure more clear, but we have not
-done it at the moment.

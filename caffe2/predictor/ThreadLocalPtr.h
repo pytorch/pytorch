@@ -123,7 +123,7 @@ class ThreadLocalPtrImpl {
 template <typename T>
 class ThreadLocalPtr {
  public:
-  auto* operator-> () {
+  auto* operator->() {
     return get();
   }
 
@@ -135,7 +135,7 @@ class ThreadLocalPtr {
     return impl_.get<T>();
   }
 
-  auto* operator-> () const {
+  auto* operator->() const {
     return get();
   }
 

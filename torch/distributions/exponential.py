@@ -20,7 +20,7 @@ class Exponential(ExponentialFamily):
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
     arg_constraints = {'rate': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
     _mean_carrier_measure = 0
 
@@ -68,8 +68,6 @@ class Exponential(ExponentialFamily):
         return 1 - torch.exp(-self.rate * value)
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return -torch.log(1 - value) / self.rate
 
     def entropy(self):

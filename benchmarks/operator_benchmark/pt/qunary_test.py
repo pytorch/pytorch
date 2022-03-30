@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 
 import operator_benchmark as op_bench
 import torch
@@ -35,13 +30,15 @@ class QUnaryOpBenchmark(op_bench.TorchBenchmarkBase):
         f_input = torch.rand(M, N)
         scale = 1.0
         zero_point = 0
-        self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
+        self.inputs = {
+            "q_input": torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=dtype)
+        }
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.q_input)
+    def forward(self, q_input):
+        return self.op_func(q_input)
 
 
 # TODO: Uncomment the ops whenever they are implemented for quantized tensor.
@@ -158,17 +155,19 @@ qunary_ops_topk_configs_long = op_bench.cross_product_configs(
 
 class QTopkOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, dtype, k):
-        self.k = k
         f_input = torch.rand(M, N)
         scale = 1.0
         zero_point = 0
-        self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
+        self.inputs = {
+            "q_input": torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
-                                                 dtype=dtype)
+                                                 dtype=dtype),
+            "k": k
+        }
         self.set_module_name('qtopk')
 
-    def forward(self):
-        return torch.topk(self.q_input, self.k)
+    def forward(self, q_input, k: int):
+        return torch.topk(q_input, k)
 
 op_bench.generate_pt_test(qunary_ops_topk_configs_short + qunary_ops_topk_configs_long,
                           QTopkOpBenchmark)

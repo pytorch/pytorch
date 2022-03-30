@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
 
 namespace caffe2 {
 
@@ -20,7 +21,7 @@ void adam_update(
     float correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -44,11 +45,48 @@ void adam_compute(
     float correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
     nw[i] = w[i] + lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+  }
+}
+
+template <typename Context>
+void adam_compute_smart_decay(
+    int N,
+    long int t,
+    const float* w,
+    const float* g,
+    const float* m,
+    const float* v,
+    const int64_t* lastSeenIn,
+    float* nw,
+    float* nm,
+    float* nv,
+    int64_t* lastSeenOut,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    //float correction,
+    const float* lr,
+    Context* /*context*/) {
+  float k = (float)(t - lastSeenIn[0]);
+  lastSeenOut[0] = t;
+  for (const auto i : c10::irange(N)) {
+    float gi = g[i];
+    // The number of steps since this param was last seen.
+    // We don't need integer precision for k.  Float is fine and it's faster to convert here.
+    // Same as sparse Adam except v is decayed by beta2^k rather than beta2
+    // Catchup = \sum_{i=1}^{k-1}\beta_1^i = \beta_1 \left(\frac{1-\beta_1^k}{1-\beta_1}\right)
+    float catchup = 0.0;
+    if (k > 1) {
+        catchup = m[i] * beta1 * (1 - powf(beta1, k-1)) / (1 - beta1);
+    }
+    float mi = nm[i] = m[i] * powf(beta1, k) + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * powf(beta2, k) + gi * gi * (1 - beta2);
+    nw[i] = w[i] + (lr[0] * (mi + catchup)) / (std::sqrt(vi) + eps_hat);
   }
 }
 
@@ -69,7 +107,7 @@ void adam_compute_output_grad(
     float correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -97,7 +135,7 @@ void radam_update(
     float r_correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -131,7 +169,7 @@ void radam_compute(
     float r_correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -166,7 +204,7 @@ void radam_compute_output_grad(
     float r_correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -295,8 +333,9 @@ class SparseAdamOp final : public Operator<Context> {
     const auto rho_inf = T(2.) / (T(1.) - beta2_) - T(1.);
     const auto rho_t = rho_inf -
         T(2.) * t * std::pow(beta2_, t) / (T(1.) - std::pow(beta2_, t));
-    const auto r_correction =
-        std::sqrt(rho_inf / ((rho_inf - T(4.)) * (rho_inf - T(2.))));
+    const T r_correction = enableRAdam_
+        ? std::sqrt(rho_inf / ((rho_inf - T(4.)) * (rho_inf - T(2.))))
+        : 0;
 
     auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
@@ -311,7 +350,7 @@ class SparseAdamOp final : public Operator<Context> {
     auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
 
     if (OutputSize() == 3) {
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -405,7 +444,7 @@ class SparseAdamOp final : public Operator<Context> {
     } else {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -509,6 +548,86 @@ class SparseAdamOp final : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class SmartDecaySparseAdamOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SmartDecaySparseAdamOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+
+  bool RunOnDevice() override {
+    // Enforce shapes
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_1).numel());
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_2).numel());
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(0), Input(LAST_SEEN).numel());
+    CAFFE_ENFORCE_EQ(
+        Input(PARAM).size_from_dim(1),
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
+
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, Input(INDICES));
+  }
+
+  template <typename SIndex>
+  bool DoRunWithType() {
+    const auto* lr = Input(LR).template data<T>();
+    const auto iter =
+        OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
+
+    const int64_t t = iter + 1;
+
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
+    auto n = Input(GRAD).numel() / block_size;
+
+    const auto* paramIn = Input(PARAM).template data<T>();
+    const auto* indices = Input(INDICES).template data<SIndex>();
+    const auto* gradIn = Input(GRAD).template data<T>();
+    const auto* moment1In = Input(MOMENT_1).template data<T>();
+    const auto* moment2In = Input(MOMENT_2).template data<T>();
+    const int64_t* lastSeenIn = Input(LAST_SEEN).template data<int64_t>();
+    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
+    auto* moment1Out = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
+    auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
+    int64_t* lastSeenOut = Output(OUTPUT_LAST_SEEN)->template mutable_data<int64_t>();
+
+    for (const auto i : c10::irange(n)) {
+        auto idx = indices[i];
+        auto offsetI = i * block_size;
+        auto offsetIdx = idx * block_size;
+        adam_compute_smart_decay(
+            block_size,
+            t,
+            paramIn + offsetIdx,
+            gradIn + offsetI,
+            moment1In + offsetIdx,
+            moment2In + offsetIdx,
+            lastSeenIn + idx,
+            paramOut + offsetIdx,
+            moment1Out + offsetIdx,
+            moment2Out + offsetIdx,
+            lastSeenOut + idx,
+            beta1_,
+            beta2_,
+            epsilon_,
+            lr,
+            &context_);
+    }
+
+    return true;
+  }
+
+ protected:
+  T beta1_;
+  T beta2_;
+  T epsilon_;
+  INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, LAST_SEEN, INDICES, GRAD, LR, ITER);
+  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_LAST_SEEN);
+};
+
+template <typename T, class Context>
 class RowWiseSparseAdamOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -554,7 +673,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
 
     if (OutputSize() == 3) {
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -600,13 +719,13 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
           float* nm2 = moment2Out + idx;
 
           float m2_sum = 0.;
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float gj = g[j];
             m2_sum += gj * gj;
           }
           float vi = nm2[0] =
               m2[0] * beta2_ + (m2_sum / block_size) * (1 - beta2_);
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
             nw[j] = w[j] + lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
           }
@@ -615,7 +734,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     } else {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -662,13 +781,13 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
           float* ng = gradOut + offsetI;
 
           float m2_sum = 0.;
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float gj = g[j];
             m2_sum += gj * gj;
           }
           float vi = nm2[0] =
               m2[0] * beta2_ + (m2_sum / block_size) * (1 - beta2_);
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
             float ngi = ng[j] = correction * mi / (std::sqrt(vi) + epsilon_);
             nw[j] = w[j] + lr[0] * ngi;

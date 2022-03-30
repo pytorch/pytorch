@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <thread>
 #include "c10/util/thread_name.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
@@ -339,7 +340,7 @@ class WorkersPool {
     CreateWorkers(workers_count);
     DCHECK_LE(workers_count, (int)workers_.size());
     counter_to_decrement_when_ready_.Reset(workers_count);
-    for (size_t task = 1; task < tasks.size(); ++task) {
+    for (const auto task : c10::irange(1, tasks.size())) {
       workers_[task - 1]->StartWork(tasks[task].get());
     }
     // Execute the remaining workload immediately on the current thread.

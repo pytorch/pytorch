@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/script.h>
 #include <torch/cuda.h>
 
@@ -44,7 +45,7 @@ void get_operator_from_registry_and_execute() {
   const auto manual = custom_op(torch::ones(5), 2.0, 3);
 
   TORCH_INTERNAL_ASSERT(output.size() == 3);
-  for (size_t i = 0; i < output.size(); ++i) {
+  for (const auto i : c10::irange(output.size())) {
     TORCH_INTERNAL_ASSERT(output[i].allclose(torch::ones(5) * 2));
     TORCH_INTERNAL_ASSERT(output[i].allclose(manual[i]));
   }
@@ -53,9 +54,10 @@ void get_operator_from_registry_and_execute() {
 void get_autograd_operator_from_registry_and_execute() {
   torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
   torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
+  torch::Tensor z = torch::randn({5,5}, torch::requires_grad());
 
   torch::Tensor output =
-    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y);
+    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y, c10::optional<torch::Tensor>());
 
   TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y));
   auto go = torch::ones({}, torch::requires_grad());
@@ -63,16 +65,30 @@ void get_autograd_operator_from_registry_and_execute() {
 
   TORCH_INTERNAL_ASSERT(torch::allclose(x.grad(), y + torch::ones({5,5})));
   TORCH_INTERNAL_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
+
+  // Test with optional argument.
+  at::zero_(x.mutable_grad());
+  at::zero_(y.mutable_grad());
+  output = helpers::get_operator_from_registry_and_execute<torch::Tensor>(
+      "custom::op_with_autograd", x, 2, y, z);
+
+  TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y + z));
+  go = torch::ones({}, torch::requires_grad());
+  output.sum().backward(go, false, true);
+
+  TORCH_INTERNAL_ASSERT(torch::allclose(x.grad(), y + torch::ones({5,5})));
+  TORCH_INTERNAL_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
+  TORCH_INTERNAL_ASSERT(torch::allclose(z.grad(), torch::ones({5,5})));
 }
 
 void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
-  at::AutoNonVariableTypeMode _var_guard(true);
+  at::AutoDispatchBelowAutograd guard;
 
   torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
   torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
 
   torch::Tensor output =
-    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y);
+    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y, c10::optional<torch::Tensor>());
 
   TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y));
 }

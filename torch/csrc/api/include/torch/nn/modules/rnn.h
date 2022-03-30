@@ -16,14 +16,13 @@
 #include <memory>
 #include <vector>
 
-using namespace torch::nn::utils::rnn;
-
 namespace torch {
 namespace nn {
 
 namespace detail {
 /// Base class for all RNN implementations (intended for code sharing).
 template <typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit RNNImplBase(const RNNOptionsBase& options_);
@@ -56,6 +55,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   std::vector<Tensor> all_weights() const;
 
   /// The RNN's options.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   RNNOptionsBase options_base;
 
  protected:
@@ -77,8 +77,11 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   Tensor permute_hidden(Tensor hx, const Tensor& permutation) const;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::string> flat_weights_names_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<std::string>> all_weights_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<Tensor> flat_weights_;
 };
 } // namespace detail
@@ -86,7 +89,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.RNN.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::RNNOptions` class to learn what
@@ -96,6 +99,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 /// ```
 /// RNN model(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
@@ -107,7 +111,7 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, Tensor> forward_with_packed_input(const torch::nn::utils::rnn::PackedSequence& packed_input, Tensor hx = {});
 
   RNNOptions options;
 
@@ -130,7 +134,7 @@ TORCH_MODULE(RNN);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer long-short-term-memory (LSTM) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.LSTM.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LSTMOptions` class to learn what
@@ -140,6 +144,7 @@ TORCH_MODULE(RNN);
 /// ```
 /// LSTM model(LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
@@ -152,13 +157,15 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::optional<std::tuple<Tensor, Tensor>>())})
 
  public:
-  std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
-    const PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
+    const torch::nn::utils::rnn::PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
 
   LSTMOptions options;
 
  protected:
   void check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes) const;
+
+  std::tuple<int64_t, int64_t, int64_t> get_expected_cell_size(const Tensor& input, const Tensor& batch_sizes) const;
 
   std::tuple<Tensor, Tensor> permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation) const;
 
@@ -180,7 +187,7 @@ TORCH_MODULE(LSTM);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer gated recurrent unit (GRU) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.GRU.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GRUOptions` class to learn what
@@ -190,6 +197,7 @@ TORCH_MODULE(LSTM);
 /// ```
 /// GRU model(GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
@@ -201,7 +209,7 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, Tensor> forward_with_packed_input(const torch::nn::utils::rnn::PackedSequence& packed_input, Tensor hx = {});
 
   GRUOptions options;
 
@@ -226,6 +234,7 @@ TORCH_MODULE(GRU);
 namespace detail {
 /// Base class for all RNNCell implementations (intended for code sharing).
 template <typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit RNNCellImplBase(const RNNCellOptionsBase& options_);
@@ -266,6 +275,7 @@ class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
 /// ```
 /// RNNCell model(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kReLU));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNCellImpl : public detail::RNNCellImplBase<RNNCellImpl> {
  public:
   RNNCellImpl(int64_t input_size, int64_t hidden_size)
@@ -303,6 +313,7 @@ TORCH_MODULE(RNNCell);
 /// ```
 /// LSTMCell model(LSTMCellOptions(20, 10).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LSTMCellImpl : public detail::RNNCellImplBase<LSTMCellImpl> {
  public:
   LSTMCellImpl(int64_t input_size, int64_t hidden_size)
@@ -337,6 +348,7 @@ TORCH_MODULE(LSTMCell);
 /// ```
 /// GRUCell model(GRUCellOptions(20, 10).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GRUCellImpl : public detail::RNNCellImplBase<GRUCellImpl> {
  public:
   GRUCellImpl(int64_t input_size, int64_t hidden_size)

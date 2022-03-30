@@ -9,5 +9,11 @@
 
 #define AT_CUDNN_ENABLED() @AT_CUDNN_ENABLED@
 #define AT_ROCM_ENABLED() @AT_ROCM_ENABLED@
+#define AT_MAGMA_ENABLED() @AT_MAGMA_ENABLED@
+
+// Needed for hipMAGMA to correctly identify implementation
+#if (AT_ROCM_ENABLED() && AT_MAGMA_ENABLED())
+#define HAVE_HIP 1
+#endif
 
 #define NVCC_FLAGS_EXTRA "@NVCC_FLAGS_EXTRA@"

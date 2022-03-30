@@ -1,32 +1,63 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 
-/docs/cpp @goldsborough @ebetica @yf225
-/torch/csrc/api/ @ebetica @goldsborough @yf225
-/test/cpp/api/ @ebetica @goldsborough @yf225
-/torch/lib/c10d/ @pietern @mrshenli @zhaojuanmao
-/torch/csrc/distributed/ @pietern @mrshenli @zhaojuanmao
-/torch/distributed/ @apaszke @pietern @mrshenli @zhaojuanmao
-/test/test_c10d.py @pietern @mrshenli @zhaojuanmao
-/torch/utils/cpp_extension.py @goldsborough @fmassa @soumith @ezyang
+/torch/utils/cpp_extension.py @fmassa @soumith @ezyang
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
-/torch/csrc/api/data/ @apaszke
-/torch/csrc/autograd/ @apaszke @albanD
-/torch/csrc/jit/ @apaszke
-/torch/nn/ @apaszke
-/torch/autograd/ @apaszke @albanD
-/torch/jit/ @apaszke
-/torch/utils/data/ @apaszke
+/torch/csrc/autograd/ @albanD @soulitzer
+/torch/autograd/ @albanD @soulitzer
+/tools/autograd/ @albanD @soulitzer
+/torch/nn/ @albanD @jbschlosser
+/torch/optim/ @albanD
+/test/test_public_bindings.py @albanD
+/docs/source/conf.py @albanD
+/aten/src/ATen/native/native_functions.yaml @bdhirsh
 
-# Distributed RPC Framework.
-/torch/csrc/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
-/torch/csrc/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
-/torch/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
-/torch/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
-/torch/distributed/optim @mrshenli @pritamdamania87 @zhaojuanmao @aazzolini
+# Tensorpipe RPC Agent.
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+
+# Distributed package
+# This list is mostly if you'd like to be tagged as reviewer, feel free to add
+# or remove yourself from it.
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
 
 # Distributed tests
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao
+# This list is mostly if you'd like to be tagged as reviewer, feel free to add
+# or remove yourself from it.
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+
+# ONNX Export
+/torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx/ @bowenbao @shubhambhokare1
+/torch/onnx/ @bowenbao @shubhambhokare1
+/test/onnx/ @bowenbao @shubhambhokare1
+
+# Docker
+/.circleci/docker/ @jeffdaily @jithunnair-amd
+
+# Github Actions
+# This list is for people wanting to be notified every time there's a change
+# related to Github Actions
+/.github/ @seemethere @janeyx99 @atalman
+
+# Custom Test Infrastructure
+/test/run_test.py @pytorch-dev-infra
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/common_utils.py @pytorch-dev-infra
+
+# Parametrizations
+/torch/nn/utils/parametriz*.py @lezcano
+
+# torch.linalg
+# docs
+/torch/linalg/ @lezcano @IvanYashchuk
+# code
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+# tests
+/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk

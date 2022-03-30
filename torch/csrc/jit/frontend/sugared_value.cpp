@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -16,41 +18,43 @@ struct NoneValue : SugaredValue {
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   auto& g = *m.graph();
-  if (!attributes.empty())
+  if (!kwargs.empty())
     throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
 
-  std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
+  std::vector<Value*> lowered_inputs = toValues(*m.graph(), args);
   g.insertNode(g.create(prim::Print, lowered_inputs, 0)->setSourceRange(loc));
   return std::make_shared<NoneValue>();
 }
 
-static const std::unordered_map<std::string, std::string>&
-builtin_cast_methods() {
-  static std::unordered_map<std::string, std::string> builtin_cast_methods = {
-      {"byte", "_cast_Byte"},
-      {"char", "_cast_Char"},
-      {"double", "_cast_Double"},
-      {"float", "_cast_Float"},
-      {"int", "_cast_Int"},
-      {"long", "_cast_Long"},
-      {"short", "_cast_Short"},
-      {"half", "_cast_Half"}};
-  return builtin_cast_methods;
+static const std::unordered_map<std::string, at::ScalarType>&
+builtin_cast_method_to_scalar_type() {
+  static std::unordered_map<std::string, at::ScalarType> mapping = {
+      {"byte", at::kByte},
+      {"char", at::kChar},
+      {"double", at::kDouble},
+      {"float", at::kFloat},
+      {"cfloat", at::kComplexFloat},
+      {"cdouble", at::kComplexDouble},
+      {"int", at::kInt},
+      {"long", at::kLong},
+      {"short", at::kShort},
+      {"half", at::kHalf}};
+  return mapping;
 }
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, self));
+      emitBuiltinCall(loc, *m.graph(), symbol, args, kwargs, self));
 }
 
 // older versions of gcc/clang have a bug where enums can't be used as keys
@@ -63,17 +67,31 @@ struct EnumClassHash {
   }
 };
 
+bool SimpleValue::hasAttr(
+    const SourceRange& loc,
+    GraphFunction& m,
+    const std::string& field) {
+  auto class_type = value_->type()->cast<ClassType>();
+  if (!class_type) {
+    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
+                           << value_->type()->repr_str() << " instead";
+  }
+
+  return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
+      class_type->hasConstant(field);
+}
+
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value_->type()->isSubtypeOf(TensorType::get())) {
-    if (builtin_cast_methods().count(field)) {
-      return std::make_shared<BuiltinFunction>(
-          Symbol::aten(builtin_cast_methods().at(field)),
+  if (value_->type()->isSubtypeOf(*TensorType::get())) {
+    if (builtin_cast_method_to_scalar_type().count(field)) {
+      return std::make_shared<TensorCastValue>(
+          builtin_cast_method_to_scalar_type().at(field),
           NamedValue(loc, "self", value_));
     }
   }
@@ -84,6 +102,10 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       std::unordered_map<std::string, std::string>,
       EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
+      {TypeKind::OptionalType,
+       {
+           {"unchecked_unwrap_optional", "prim"},
+       }},
       {TypeKind::TensorType,
        {
            {"dtype", "prim"},
@@ -92,15 +114,28 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"data", "prim"},
            {"shape", "prim"},
            {"is_cuda", "prim"},
+           {"is_xpu", "prim"},
            {"is_sparse", "prim"},
+           {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},
            {"is_quantized", "prim"},
+           {"is_vulkan", "prim"},
+           {"is_meta", "prim"},
            {"is_leaf", "aten"},
+           {"is_nested", "prim"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
            {"T", "prim"},
+           {"H", "prim"},
+           {"mT", "aten"},
+           {"mH", "aten"},
+           {"is_ort", "prim"},
            {"ndim", "prim"},
            {"name", "prim"},
+           {"real", "aten"},
+           {"imag", "aten"},
+           {"retains_grad", "aten"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -120,7 +155,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
     if (tuple_type->schema()) {
       auto attrs = tuple_type->schema()->arguments();
-      for (size_t i = 0; i < attrs.size(); i++) {
+      for (const auto i : c10::irange(attrs.size())) {
         if (attrs[i].name() == field) {
           auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
           auto out_type = tuple_type->elements().at(i);
@@ -134,7 +169,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->getMethod(field)) {
+    if (classType->findMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -142,36 +177,78 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       auto n = g.insertNode(g.createGetAttr(value_, field));
       return std::make_shared<SimpleValue>(n->output());
     }
+    // Check and see if it's a getter attribute.
+    auto prop = classType->getProperty(field);
+    if (prop) {
+      return MethodValue(value_, prop->getter->name())
+          .call(loc, m, {}, {}, /*n_binders=*/1);
+    }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
-    if (auto schema = iface->getMethod(field)) {
+    if (iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
+    }
+  } else if (auto enum_type = value_->type()->cast<EnumType>()) {
+    // Handle access to Enum's `name` and `value` attribute.
+    auto& g = *m.graph();
+
+    if (field == "name") {
+      auto n = g.insertNode(g.createEnumName(value_));
+      return std::make_shared<SimpleValue>(n->output());
+    }
+
+    if (field == "value") {
+      auto n = g.insertNode(g.createEnumValue(value_));
+      return std::make_shared<SimpleValue>(n->output());
     }
   }
 
   // none of the more-specific cases worked, so see if this is a builtin method
+  // If field is a type, then call the aten::to op
+  if (field == "type") {
+    if (auto builtin = BuiltinFunction::tryCreate(
+            Symbol::aten("to"), NamedValue(loc, "self", value_))) {
+      return builtin;
+    }
+  }
+
   if (auto builtin = BuiltinFunction::tryCreate(
           Symbol::aten(field), NamedValue(loc, "self", value_))) {
     return builtin;
   }
 
   // Handle calling tolist() on a Tensor.
-  if (value_->type()->isSubtypeOf(TensorType::get()) && field == "tolist") {
+  if (value_->type()->isSubtypeOf(*TensorType::get()) && field == "tolist") {
     return SpecialFormValue::create(prim::tolist);
   }
 
+  // Handle calling __getitem__() directly on a Tensor, it needs special
+  // handling because desired method name (`__getitem__`) doesn't match `aten`
+  // operator name of `aten::index`.
+  if (value_->type()->isSubtypeOf(*TensorType::get()) &&
+      field == "__getitem__") {
+    return SpecialFormValue::create(aten::index);
+  }
+
   ErrorReport report(loc);
-  report << "Tried to access nonexistent attribute or method '" << field
-         << "' of type '" << value_->type()->python_str() << "'.";
-  if (value_->type()->kind() == ClassType::Kind) {
-    report << " Did you forget to initialize an attribute in __init__()?";
+  report << "'" << value_->type()->repr_str()
+         << "' object has no attribute or method '" << field << "'.";
+  if (auto classType = value_->type()->cast<ClassType>()) {
+    if (classType->isUnresolvedClassAttribute(field)) {
+      report
+          << " '" << field
+          << "' is defined as a class attribute which currently is not"
+             " supported. Consider converting this to an instance attribute.";
+    } else {
+      report << " Did you forget to initialize an attribute in __init__()?";
+    }
   }
   throw report;
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
@@ -190,13 +267,16 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     Node* unpack =
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
+  } else if (value_->type()->kind() == TypeKind::AnyTupleType) {
+    throw ErrorReport(loc)
+        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]";
   }
-  throw ErrorReport(loc) << value_->type()->python_str()
+  throw ErrorReport(loc) << value_->type()->repr_str()
                          << " cannot be used as a tuple";
 }
 
 static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
-  if (attrType->isSubtypeOf(classType)) {
+  if (attrType->isSubtypeOf(*classType)) {
     return true;
   }
 
@@ -212,14 +292,13 @@ static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
 
 void SimpleValue::setAttr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field,
     Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-class: "
-                           << value_->type()->python_str();
+                           << " on a non-class: " << value_->type()->repr_str();
   }
   auto expectedType = classType->findAttribute(field);
   if (!expectedType) {
@@ -241,7 +320,7 @@ void SimpleValue::setAttr(
         throw ErrorReport(loc)
             << "Assignment to attribute '" << field
             << "' cannot be of a type that contains class "
-            << "'" << classType->python_str() << "'.\n"
+            << "'" << classType->repr_str() << "'.\n"
             << "Classes that recursively contain instances of themselves"
             << " are not yet supported";
       }
@@ -257,6 +336,18 @@ void SimpleValue::setAttr(
             << "Initialize the field at the top level first";
       }
     } else {
+      // Check and see if it's a setter attribute.
+      auto prop = classType->getProperty(field);
+      if (prop && prop->setter) {
+        MethodValue(value_, prop->setter->name())
+            .call(loc, m, {newValue}, {}, /*n_binders=*/1);
+        return;
+      }
+
+      if (prop && !prop->setter) {
+        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
+      }
+
       throw ErrorReport(loc)
           << "Tried to set nonexistent attribute: " << field
           << ". Did you forget to initialize it in __init__()?";
@@ -267,10 +358,10 @@ void SimpleValue::setAttr(
 
   // Check type correctness
   const auto newType = newValue->type();
-  if (!newType->isSubtypeOf(expectedType)) {
+  if (!newType->isSubtypeOf(*expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << expectedType->python_str() << " but got "
-                           << newType->python_str();
+                           << expectedType->repr_str() << " but got "
+                           << newType->repr_str();
   }
 
   auto& g = *m.graph();
@@ -279,15 +370,15 @@ void SimpleValue::setAttr(
 
 std::shared_ptr<SugaredValue> SimpleValue::call(
     const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   // allow our 'fake' closures to be called, used for fork serialization
   // at the moment, but can be expanded later
   Node* self = getValue()->node();
   if (self->kind() == prim::TupleConstruct && self->inputs().size() == 2 &&
-      self->inputs().at(0)->node()->kind() == prim::Function) {
+      self->inputs().at(0)->node()->kind() == prim::Closure) {
     std::shared_ptr<Graph> graph =
         self->inputs().at(0)->node()->g(attr::Subgraph);
     Value* context = self->inputs().at(1);
@@ -306,59 +397,71 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     auto ret = StrongFunctionPtr(std::move(cu), fn);
 
     std::vector<NamedValue> ctx_inputs = {close_context};
-    ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
-    return FunctionValue(ret).call(loc, m, ctx_inputs, attributes, n_binders);
+    ctx_inputs.insert(ctx_inputs.end(), args.begin(), args.end());
+    return FunctionValue(ret).call(loc, m, ctx_inputs, kwargs, n_binders);
   }
 
   if (auto class_type = getValue()->type()->cast<ClassType>()) {
-    return attr(loc, m, "__call__")
-        ->call(loc, m, inputs, attributes, n_binders);
+    return attr(loc, m, "__call__")->call(loc, m, args, kwargs, n_binders);
   }
 
-  return SugaredValue::call(loc, m, inputs, attributes, n_binders);
+  return SugaredValue::call(loc, m, args, kwargs, n_binders);
 }
 
-Value* SimpleValue::len(const SourceRange& loc, Function& m) {
+Value* SimpleValue::len(const SourceRange& loc, GraphFunction& m) {
   // List, Tuple, Tensor, fill in missing information desugaring
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
   if (val_type->cast<ListType>() || val_type->cast<StringType>() ||
-      val_type->isSubtypeOf(TensorType::get())) {
+      val_type->isSubtypeOf(*TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
-    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
                            << " object is not iterable";
   }
 }
 
 SugaredValuePtr SimpleValue::getitem(
     const SourceRange& loc,
-    Function& m,
-    Value* idx) {
+    GraphFunction& m,
+    Value* idx,
+    TypePtr type_hint) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
 
   // if it's a List/String/Dict, emit a regular __getitem__ op
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
   } else if (auto dict_type = val_type->cast<DictType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
-  } else if (val_type->isSubtypeOf(TensorType::get())) {
+  } else if (val_type->isSubtypeOf(*TensorType::get())) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::select, {val, 0, idx}, {}, loc));
   } else if (auto class_type = val_type->cast<ClassType>()) {
+    // Check if this is an indexing operation enabled by a type hint.
+    // The ModuleDict has already been checked during IR generation to make
+    // sure its contents implement the module interface referred to by
+    // type_hint.
+    if (class_type->is_module() && type_hint) {
+      auto res = g.insert(prim::ModuleContainerIndex, {val, idx}, {}, loc);
+      res->setType(type_hint);
+      return std::make_shared<SimpleValue>(res);
+    }
+
+    // Defer to the __getitem__ attr on the class.
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
-    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
                            << " object is not subscriptable";
   }
 }
 
-SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
+SugaredValuePtr SimpleValue::iter(const SourceRange& loc, GraphFunction& m) {
   auto value = getValue();
   auto type = value->type();
   // built-in iterable types
@@ -379,21 +482,21 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
     }
     return std::make_shared<SugaredTupleValue>(tup_sugared);
   } else {
-    throw ErrorReport(loc) << "'" << type->python_str() << "'"
+    throw ErrorReport(loc) << "'" << type->repr_str() << "'"
                            << " object is not iterable";
   }
 }
 
 RangeValue::RangeValue(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
-          << "all inputs of range must be ints, found " << typ->python_str()
+          << "all inputs of range must be ints, found " << typ->repr_str()
           << " in argument " << c10::guts::to_string(i);
     }
   }
@@ -424,11 +527,11 @@ RangeValue::RangeValue(
   static_len_ = static_len;
 }
 
-SugaredValuePtr RangeValue::iter(const SourceRange& loc, Function& m) {
+SugaredValuePtr RangeValue::iter(const SourceRange& loc, GraphFunction& m) {
   return shared_from_this();
 };
 
-Value* RangeValue::len(const SourceRange& loc, Function& m) {
+Value* RangeValue::len(const SourceRange& loc, GraphFunction& m) {
   if (static_len_) {
     return insertConstant(*m.graph(), *static_len_, loc);
   }
@@ -442,8 +545,9 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
 
 SugaredValuePtr RangeValue::getitem(
     const SourceRange& loc,
-    Function& m,
-    Value* idx) {
+    GraphFunction& m,
+    Value* idx,
+    TypePtr type_hint) {
   if (has_only_end_) {
     return std::make_shared<SimpleValue>(idx);
   } else {
@@ -456,7 +560,7 @@ SugaredValuePtr RangeValue::getitem(
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   std::vector<SugaredValuePtr> base_iters{};
 
-  for (SugaredValuePtr sv : children_) {
+  for (SugaredValuePtr& sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
       // merge child iters with the base_iters
@@ -473,7 +577,7 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   return base_iters;
 }
 
-Value* IterableTree::len(const SourceRange& loc, Function& m) {
+Value* IterableTree::len(const SourceRange& loc, GraphFunction& m) {
   // if it's a iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
@@ -492,8 +596,9 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
 
 SugaredValuePtr IterableTree::getitem(
     const SourceRange& loc,
-    Function& m,
-    Value* idx) {
+    GraphFunction& m,
+    Value* idx,
+    TypePtr type_hint) {
   std::vector<SugaredValuePtr> child_items;
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
@@ -503,8 +608,8 @@ SugaredValuePtr IterableTree::getitem(
 
 void IterableTree::addChild(
     const SourceRange& range,
-    Function& m,
-    const SugaredValuePtr iter_value) {
+    GraphFunction& m,
+    const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
     unroll_length_ = child_len;
@@ -526,67 +631,75 @@ void IterableTree::addChild(
 
 std::shared_ptr<SugaredValue> MagicMethod::call(
     const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  if (inputs.size() > 0) {
-    Value* self = inputs[0].value(*m.graph());
+  if (args.size() > 0) {
+    Value* self = args[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
       return SimpleValue(self)
           .attr(loc, m, desugared_name_)
-          ->call(loc, m, inputs.slice(1), attributes, n_binders);
+          ->call(loc, m, args.slice(1), kwargs, n_binders);
     }
   }
   TORCH_INTERNAL_ASSERT(base_value_);
-  return base_value_->call(loc, m, inputs, attributes, n_binders);
+  return base_value_->call(loc, m, args, kwargs, n_binders);
 }
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   AT_ASSERT(n_binders <= 1);
 
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
-  if (!type_->getMethod("__init__")) {
+  if (!type_->findMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
   }
 
   // Call the init function
-  MethodValue(self, "__init__").call(loc, m, inputs, attributes, n_binders);
+  MethodValue(self, "__init__").call(loc, m, args, kwargs, n_binders);
 
   return std::make_shared<SimpleValue>(self);
 }
 
 std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field) {
+  // Allow import_source.cpp to resolve calls to a submodule's
+  // hooks. Edge case because normally you wouldn't allow a module to
+  // call functions of a submodule
+  if (Function* hook = type_->findHook(field)) {
+    return std::make_shared<FunctionValue>(hook);
+  }
+
   if (field != "__new__") {
-    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
+    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
+                           << type_->annotation_str();
   }
   return SpecialFormValue::create(prim::CreateObject);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   auto& g = *m.graph();
 
   auto schema = type_->schema();
   TORCH_INTERNAL_ASSERT(schema);
   auto qualname = type_->name();
-  auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
+  auto matched_schema = matchSchema(*schema, loc, g, args, kwargs);
 
   auto self =
       g.insertNode(
@@ -613,13 +726,49 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
         continue;
       }
       const auto concrete_type = tryEvalTypeVariables(formal_type, type_env);
-      if (!concrete_type || !self->type()->isSubtypeOf(concrete_type)) {
+      if (!concrete_type || !self->type()->isSubtypeOf(*concrete_type)) {
         continue;
       }
       return std::make_shared<BuiltinFunction>(symbol, self);
     }
   }
   return nullptr;
+}
+
+std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
+    const SourceRange& loc,
+    GraphFunction& m,
+    const std::string& field) {
+  const auto& names_values = enum_type_->enumNamesValues();
+  auto it = std::find_if(
+      names_values.begin(),
+      names_values.end(),
+      [&field](const at::EnumNameValue& nv) { return nv.first == field; });
+  if (it == names_values.end()) {
+    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
+                           << " has no attribute '" << field << "'";
+  }
+  auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+      enum_type_, it->first, it->second);
+  return std::make_shared<SimpleValue>(
+      m.graph()->insertConstant(IValue(enum_holder), loc));
+}
+
+SugaredValuePtr SugaredEnumClass::iter(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  const auto& names_values = enum_type_->enumNamesValues();
+  auto enum_value_ivalues = c10::impl::GenericList(enum_type_);
+  enum_value_ivalues.reserve(names_values.size());
+  for (const auto& name_value : names_values) {
+    auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+        enum_type_, name_value.first, name_value.second);
+    enum_value_ivalues.emplace_back(enum_holder);
+  }
+
+  auto enum_values_list_constant = std::make_shared<SimpleValue>(
+      m.graph()->insertConstant(enum_value_ivalues, loc));
+  return enum_values_list_constant;
 }
 
 } // namespace jit

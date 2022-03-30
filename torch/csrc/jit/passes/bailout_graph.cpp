@@ -1,8 +1,11 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
+
 #include <ATen/core/function.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
@@ -108,7 +111,7 @@ struct BailOutGraphBuilderForNode {
       const at::ArrayRef<Value*> block_outputs,
       const at::ArrayRef<Value*> carried_deps) {
     TORCH_INTERNAL_ASSERT(block_outputs.size() == carried_deps.size());
-    for (size_t i = 0; i < block_outputs.size(); i++) {
+    for (const auto i : c10::irange(block_outputs.size())) {
       auto nv = getOrAddInputForValue(block_outputs[i]);
       old_to_new_[carried_deps[i]] = nv;
     }
@@ -119,7 +122,6 @@ struct BailOutGraphBuilderForNode {
     auto old_max_count = getOrAddInputForValue(lv.maxTripCount());
     auto cur_iter = getInputForValue(lv.currentTripCount());
     auto block_outputs = lv.bodyBlock()->outputs();
-    auto carried_deps = lv.carriedInputsWithCond();
 
     auto* block = copy_graph_->block();
     // subtract the number of iterations
@@ -384,8 +386,10 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
-  GRAPH_DUMP("bailout_graph ", bailout_graph);
+
   removeBailouts(bailout_graph->block());
+  ClearProfilingInformation(bailout_graph);
+  GRAPH_DUMP("bailout_graph ", bailout_graph);
   return bailout_graph;
 }
 

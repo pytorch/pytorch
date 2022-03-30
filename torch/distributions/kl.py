@@ -1,6 +1,7 @@
 import math
 import warnings
 from functools import total_ordering
+from typing import Type, Dict, Callable, Tuple
 
 import torch
 from torch._six import inf
@@ -9,6 +10,7 @@ from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
 from .categorical import Categorical
+from .cauchy import Cauchy
 from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
@@ -29,10 +31,10 @@ from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
-from .utils import _sum_rightmost
+from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
+_KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 
 def register_kl(type_p, type_q):
@@ -102,8 +104,10 @@ def _dispatch_kl(type_p, type_q):
     if not matches:
         return NotImplemented
     # Check that the left- and right- lexicographic orders agree.
-    left_p, left_q = min(_Match(*m) for m in matches).types
-    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types
+    # mypy isn't smart enough to know that _Match implements __lt__
+    # see: https://github.com/python/typing/issues/760#issuecomment-710670503
+    left_p, left_q = min(_Match(*m) for m in matches).types  # type: ignore[type-var]
+    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types  # type: ignore[type-var]
     left_fun = _KL_REGISTRY[left_p, left_q]
     right_fun = _KL_REGISTRY[right_p, right_q]
     if left_fun is not right_fun:
@@ -162,15 +166,14 @@ def kl_divergence(p, q):
         fun = _dispatch_kl(type(p), type(q))
         _KL_MEMOIZE[type(p), type(q)] = fun
     if fun is NotImplemented:
-        raise NotImplementedError
+        raise NotImplementedError("No KL(p || q) is implemented for p type {} and q type {}"
+                                  .format(p.__class__.__name__, q.__class__.__name__))
     return fun(p, q)
 
 
 ################################################################################
 # KL Divergence Implementations
 ################################################################################
-
-_euler_gamma = 0.57721566490153286060
 
 # Same distributions
 
@@ -318,9 +321,9 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
     #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
-    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+    qWt_qDinv = (q._unbroadcasted_cov_factor.mT /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
-    A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
+    A = torch.linalg.solve_triangular(q._capacitance_tril, qWt_qDinv, upper=False)
     term21 = (p._unbroadcasted_cov_diag / q._unbroadcasted_cov_diag).sum(-1)
     term22 = _batch_trace_XXT(p._unbroadcasted_cov_factor *
                               q._unbroadcasted_cov_diag.rsqrt().unsqueeze(-1))
@@ -345,9 +348,9 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ p_tril @ p_tril.T
     #                  = [inv(qD) - A.T @ A] @ p_tril @ p_tril.T
-    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+    qWt_qDinv = (q._unbroadcasted_cov_factor.mT /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
-    A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
+    A = torch.linalg.solve_triangular(q._capacitance_tril, qWt_qDinv, upper=False)
     term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril *
                               q._unbroadcasted_cov_diag.rsqrt().unsqueeze(-1))
     term22 = _batch_trace_XXT(A.matmul(p._unbroadcasted_scale_tril))
@@ -375,8 +378,8 @@ def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
                                                       (n, p.cov_factor.size(-1)))
     p_cov_diag = (torch.diag_embed(p._unbroadcasted_cov_diag.sqrt())
                   .expand(combined_batch_shape + (n, n)))
-    term21 = _batch_trace_XXT(torch.triangular_solve(p_cov_factor, q_scale_tril, upper=False)[0])
-    term22 = _batch_trace_XXT(torch.triangular_solve(p_cov_diag, q_scale_tril, upper=False)[0])
+    term21 = _batch_trace_XXT(torch.linalg.solve_triangular(q_scale_tril, p_cov_factor, upper=False))
+    term22 = _batch_trace_XXT(torch.linalg.solve_triangular(q_scale_tril, p_cov_diag, upper=False))
     term2 = term21 + term22
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
@@ -395,7 +398,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
     n = p.event_shape[0]
     q_scale_tril = q._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
     p_scale_tril = p._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
-    term2 = _batch_trace_XXT(torch.triangular_solve(p_scale_tril, q_scale_tril, upper=False)[0])
+    term2 = _batch_trace_XXT(torch.linalg.solve_triangular(q_scale_tril, p_scale_tril, upper=False))
     term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
     return half_term1 + 0.5 * (term2 + term3 - n)
 
@@ -435,10 +438,7 @@ def _kl_transformed_transformed(p, q):
         raise NotImplementedError
     if p.event_shape != q.event_shape:
         raise NotImplementedError
-    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
-    extra_event_dim = len(p.event_shape)
-    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(base_kl_divergence, extra_event_dim)
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)
@@ -666,7 +666,16 @@ def _kl_normal_gumbel(p, q):
     t3 = torch.exp(-mean_scale_ratio + 0.5 * var_scale_sqr_ratio + loc_scale_ratio)
     return -t1 + t2 + t3 - (0.5 * (1 + math.log(2 * math.pi)))
 
-# TODO: Add Normal-Laplace KL Divergence
+
+@register_kl(Normal, Laplace)
+def _kl_normal_laplace(p, q):
+    loc_diff = p.loc - q.loc
+    scale_ratio = p.scale / q.scale
+    loc_diff_scale_ratio = loc_diff / p.scale
+    t1 = torch.log(scale_ratio)
+    t2 = math.sqrt(2 / math.pi) * p.scale * torch.exp(-0.5 * loc_diff_scale_ratio.pow(2))
+    t3 = loc_diff * torch.erf(math.sqrt(0.5) * loc_diff_scale_ratio)
+    return -t1 + (t2 + t3) / q.scale - (0.5 * (1 + math.log(0.5 * math.pi)))
 
 
 @register_kl(Pareto, Beta)
@@ -796,3 +805,21 @@ def _kl_independent_independent(p, q):
         raise NotImplementedError
     result = kl_divergence(p.base_dist, q.base_dist)
     return _sum_rightmost(result, p.reinterpreted_batch_ndims)
+
+
+@register_kl(Cauchy, Cauchy)
+def _kl_cauchy_cauchy(p, q):
+    # From https://arxiv.org/abs/1905.10965
+    t1 = ((p.scale + q.scale).pow(2) + (p.loc - q.loc).pow(2)).log()
+    t2 = (4 * p.scale * q.scale).log()
+    return t1 - t2
+
+def _add_kl_info():
+    """Appends a list of implemented KL functions to the doc for kl_divergence."""
+    rows = ["KL divergence is currently implemented for the following distribution pairs:"]
+    for p, q in sorted(_KL_REGISTRY,
+                       key=lambda p_q: (p_q[0].__name__, p_q[1].__name__)):
+        rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
+                    .format(p.__name__, q.__name__))
+    kl_info = '\n\t'.join(rows)
+    kl_divergence.__doc__ += kl_info  # type: ignore[operator]

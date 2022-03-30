@@ -1,7 +1,7 @@
 #pragma once
 
-#include "c10/core/impl/InlineEvent.h"
-#include "c10/core/impl/VirtualGuardImpl.h"
+#include <c10/core/impl/InlineEvent.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
 
 namespace c10 {
 
@@ -41,18 +41,18 @@ struct Event final {
   // Constructors
   Event() = delete;
   Event(
-    const DeviceType _device_type,
-    const EventFlag _flag = EventFlag::PYTORCH_DEFAULT)
-  : impl_{_device_type, _flag} { }
+      const DeviceType _device_type,
+      const EventFlag _flag = EventFlag::PYTORCH_DEFAULT)
+      : impl_{_device_type, _flag} {}
 
   // Copy constructor and copy assignment operator (deleted)
   Event(const Event&) = delete;
   Event& operator=(const Event&) = delete;
 
   // Move constructor and move assignment operator
-  Event(Event&& other) : impl_{std::move(other.impl_)} { }
+  Event(Event&& other) : impl_{std::move(other.impl_)} {}
   Event& operator=(Event&& other) {
-  impl_.swap(std::move(other.impl_));
+    impl_.swap(std::move(other.impl_));
     return *this;
   }
 
@@ -60,54 +60,65 @@ struct Event final {
   ~Event() = default;
 
   // Getters
-  DeviceType device_type() const noexcept { return impl_.device_type(); }
-  DeviceIndex device_index() const noexcept { return impl_.device_index(); }
-  EventFlag flag() const noexcept { return impl_.flag(); }
-  bool was_marked_for_recording() const noexcept { return impl_.was_marked_for_recording(); }
+  Device device() const noexcept {
+    return Device(device_type(), device_index());
+  }
+  DeviceType device_type() const noexcept {
+    return impl_.device_type();
+  }
+  DeviceIndex device_index() const noexcept {
+    return impl_.device_index();
+  }
+  EventFlag flag() const noexcept {
+    return impl_.flag();
+  }
+  bool was_marked_for_recording() const noexcept {
+    return impl_.was_marked_for_recording();
+  }
 
-/**
- * Calls record() if and only if record() has never been called for this event.
- * Note: because Event is not thread-safe recordOnce() may call record()
- * multiple times if called from multiple threads.
- */
+  /**
+   * Calls record() if and only if record() has never been called for this
+   * event. Note: because Event is not thread-safe recordOnce() may call
+   * record() multiple times if called from multiple threads.
+   */
   void recordOnce(const Stream& stream) {
     impl_.recordOnce(stream);
   }
 
-/**
- * Increments the event's version and enqueues a job with this version
- * in the stream's work queue. When the stream process that job
- * it nofifies all streams waiting on / blocked by that version of the
- * event to continue and marks that version as recorded.
- * */
+  /**
+   * Increments the event's version and enqueues a job with this version
+   * in the stream's work queue. When the stream process that job
+   * it nofifies all streams waiting on / blocked by that version of the
+   * event to continue and marks that version as recorded.
+   * */
   void record(const Stream& stream) {
     impl_.record(stream);
   }
 
-/**
- * Does nothing if the event has not been scheduled to be recorded.
- * If the event was previously enqueued to be recorded, a command
- * to wait for the version of the event that exists at the time of this call
- * is inserted in the stream's work queue.
- * When the stream reaches this command it will stop processing
- * additional commands until that version of the event is marked as recorded.
- */
+  /**
+   * Does nothing if the event has not been scheduled to be recorded.
+   * If the event was previously enqueued to be recorded, a command
+   * to wait for the version of the event that exists at the time of this call
+   * is inserted in the stream's work queue.
+   * When the stream reaches this command it will stop processing
+   * additional commands until that version of the event is marked as recorded.
+   */
   void block(const Stream& stream) const {
     impl_.block(stream);
   }
 
-/**
- * Returns true if (and only if)
- *  (1) the event has never been scheduled to be recorded
- *  (2) the current version is marked as recorded.
- * Returns false otherwise.
- */
+  /**
+   * Returns true if (and only if)
+   *  (1) the event has never been scheduled to be recorded
+   *  (2) the current version is marked as recorded.
+   * Returns false otherwise.
+   */
   bool query() const {
     return impl_.query();
   }
 
-private:
+ private:
   impl::InlineEvent<impl::VirtualGuardImpl> impl_;
 };
 
-} // c10
+} // namespace c10

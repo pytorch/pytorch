@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cmath> 
+#include <cmath>
 // Copyright 2005, Google Inc.
 // All rights reserved.
 //
@@ -40,12 +40,12 @@ using Bits = uint32_t;
 // this avoids the "dereferencing type-punned pointer
 // will break strict-aliasing rules" error
 union Float {
-    float float_;
-    Bits bits_;
+  float float_;
+  Bits bits_;
 };
 
 // # of bits in a number.
-static const size_t kBitCount = 8*sizeof(Bits);
+static const size_t kBitCount = 8 * sizeof(Bits);
 // The mask for the sign bit.
 static const Bits kSignBitMask = static_cast<Bits>(1) << (kBitCount - 1);
 
@@ -66,23 +66,24 @@ static const Bits kSignBitMask = static_cast<Bits>(1) << (kBitCount - 1);
 //
 // Read http://en.wikipedia.org/wiki/Signed_number_representations
 // for more details on signed number representations.
-static Bits SignAndMagnitudeToBiased(const Bits &sam) {
-    if (kSignBitMask & sam) {
-        // sam represents a negative number.
-        return ~sam + 1;
-    } else {
-        // sam represents a positive number.
-        return kSignBitMask | sam;
-    }
+static Bits SignAndMagnitudeToBiased(const Bits& sam) {
+  if (kSignBitMask & sam) {
+    // sam represents a negative number.
+    return ~sam + 1;
+  } else {
+    // sam represents a positive number.
+    return kSignBitMask | sam;
+  }
 }
 
 // Given two numbers in the sign-and-magnitude representation,
 // returns the distance between them as an unsigned number.
-static Bits DistanceBetweenSignAndMagnitudeNumbers(const Bits &sam1,
-                                                    const Bits &sam2) {
-    const Bits biased1 = SignAndMagnitudeToBiased(sam1);
-    const Bits biased2 = SignAndMagnitudeToBiased(sam2);
-    return (biased1 >= biased2) ? (biased1 - biased2) : (biased2 - biased1);
+static Bits DistanceBetweenSignAndMagnitudeNumbers(
+    const Bits& sam1,
+    const Bits& sam2) {
+  const Bits biased1 = SignAndMagnitudeToBiased(sam1);
+  const Bits biased2 = SignAndMagnitudeToBiased(sam2);
+  return (biased1 >= biased2) ? (biased1 - biased2) : (biased2 - biased1);
 }
 
 // How many ULP's (Units in the Last Place) we want to tolerate when
@@ -106,13 +107,13 @@ static const size_t kMaxUlps = 4;
 //   - treats really large numbers as almost equal to infinity.
 //   - thinks +0.0 and -0.0 are 0 DLP's apart.
 inline bool AlmostEquals(float lhs, float rhs) {
-    // The IEEE standard says that any comparison operation involving
-    // a NAN must return false.
-    if (std::isnan(lhs) || std::isnan(rhs))
-      return false;
+  // The IEEE standard says that any comparison operation involving
+  // a NAN must return false.
+  if (std::isnan(lhs) || std::isnan(rhs))
+    return false;
 
-    Float l = {lhs};
-    Float r = {rhs};
+  Float l = {lhs};
+  Float r = {rhs};
 
-    return DistanceBetweenSignAndMagnitudeNumbers(l.bits_, r.bits_) <= kMaxUlps;
+  return DistanceBetweenSignAndMagnitudeNumbers(l.bits_, r.bits_) <= kMaxUlps;
 }

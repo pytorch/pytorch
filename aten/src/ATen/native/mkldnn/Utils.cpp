@@ -1,5 +1,6 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/Pool.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -16,7 +17,7 @@ std::vector<int64_t> pool_output_sizes(
   output_size[0] = input_size[0];
   output_size[1] = input_size[1];
 
-  for (size_t i = 2; i < input_size.size(); ++i) {
+  for (const auto i : c10::irange(2, input_size.size())) {
     output_size[i] = pooling_output_shape_pad_lr<int64_t>(
       input_size[i],
       kernel_size[i - 2],

@@ -1,6 +1,6 @@
 // The clang-tidy job seems to complain that it can't find cudnn.h without this.
 // This file should only be compiled if this condition holds, so it should be safe.
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
 #include <torch/csrc/utils/pybind.h>
 
 #include <array>
@@ -20,19 +20,27 @@ version_tuple getCompileVersion() {
 }
 
 version_tuple getRuntimeVersion() {
+#ifndef USE_STATIC_CUDNN
   auto version = cudnnGetVersion();
   auto major = version / 1000;
   auto minor = (version % 1000) / 100;
   auto patch = version % 10;
   return version_tuple(major, minor, patch);
+#else
+  return getCompileVersion();
+#endif
 }
 
 size_t getVersionInt() {
+#ifndef USE_STATIC_CUDNN
   return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
 }
 
 }
-#elif defined(__HIP_PLATFORM_HCC__)
+#elif defined(USE_ROCM)
 #include <miopen/miopen.h>
 #include <miopen/version.h>
 

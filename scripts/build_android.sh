@@ -39,10 +39,20 @@ if [ ! -d "$ANDROID_NDK" ]; then
   exit 1
 fi
 
+if [ -z "$PYTHON" ]; then
+  PYTHON=python
+  PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
+  if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
+    echo "Default python executable is Python-2, trying to use python3 alias"
+    PYTHON=python3
+  fi
+fi
+
 ANDROID_NDK_PROPERTIES="$ANDROID_NDK/source.properties"
 [ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*= *\([0-9]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
 
 echo "Bash: $(/bin/bash --version | head -1)"
+echo "Python: $($PYTHON -c 'import sys; print(sys.version)')"
 echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
 echo "Android NDK version: $ANDROID_NDK_VERSION"
@@ -51,9 +61,8 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
-  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
   if [ -n "${SELECTED_OP_LIST}" ]; then
@@ -84,9 +93,39 @@ fi
 # Use android-cmake to build Android project from CMake.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
 
+if [ -z "$BUILD_MOBILE_BENCHMARK" ]; then
+  BUILD_MOBILE_BENCHMARK=0
+fi
+
+if [ -z "$BUILD_MOBILE_TEST" ]; then
+  BUILD_MOBILE_TEST=0
+fi
 # Don't build artifacts we don't need
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
+
+# If there exists env variable and it equals to 0, build full jit interpreter.
+# Default behavior is to build lite interpreter
+# cmd:  BUILD_LITE_INTERPRETER=0 ./scripts/build_android.sh
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+fi
+if [ "${TRACING_BASED}" == 1 ]; then
+  CMAKE_ARGS+=("-DTRACING_BASED=ON")
+else
+  CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
+fi
+
+CMAKE_ARGS+=("-DBUILD_MOBILE_BENCHMARK=$BUILD_MOBILE_BENCHMARK")
+CMAKE_ARGS+=("-DBUILD_MOBILE_TEST=$BUILD_MOBILE_TEST")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
 if (( "${ANDROID_NDK_VERSION:-0}" < 18 )); then
@@ -112,9 +151,24 @@ CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
 CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
-
+if [ "${ANDROID_STL_SHARED:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DANDROID_STL=c++_shared")
+fi
 if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
   CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
+fi
+
+if [ -n "${USE_VULKAN}" ]; then
+  CMAKE_ARGS+=("-DUSE_VULKAN=ON")
+  if [ -n "${USE_VULKAN_FP16_INFERENCE}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_FP16_INFERENCE=ON")
+  fi
+  if [ -n "${USE_VULKAN_RELAXED_PRECISION}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_RELAXED_PRECISION=ON")
+  fi
+  if [ -n "${USE_VULKAN_SHADERC_RUNTIME}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_SHADERC_RUNTIME=ON")
+  fi
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults

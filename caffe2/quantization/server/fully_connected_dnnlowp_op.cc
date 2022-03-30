@@ -7,6 +7,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/fc_inference.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "caffe2/utils/cpuid.h"
 #include "fbgemm_pack_matrix_cache.h"
 #include "fbgemm_pack_op.h"
@@ -33,6 +34,8 @@ FullyConnectedDNNLowPOp<T, ReluFused>::FullyConnectedDNNLowPOp(
     : BaseType(operator_def, ws),
       axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
       axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
+      X_scale_(this->template GetSingleArgument<float>("X_scale", -1.0)), // for fused static int8 not valid if less than 0
+      X_zero_point_(this->template GetSingleArgument<int32_t>("X_zero_point", 0)),
       quantize_channelwise_(this->template GetSingleArgument<bool>(
           "quantize_channelwise",
           false)),
@@ -108,9 +111,22 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
     t_very_begin = t_begin;
   }
 #endif
+  float X_scale = X_scale_;
+  int32_t X_zero_point = X_zero_point_;
+  if (InputSize() == 5) {
+    // float in float out, two possibilities
+    // if there are only 3 input (no qparams): dyanmic
+    // if there are 5 input (+ input qparams): fused int8 static
+    // output qparams need to be added anyway even it's dummy when dequantize_output=1
+    const auto* input_qparam_blob =
+        this->template Input<caffe2::unique_ptr<Int8QuantParamsBlob>>(4).get();
+    // input_params overwrite input arguments
+    X_scale = input_qparam_blob->qparam.scale;
+    X_zero_point = input_qparam_blob->qparam.zero_point;
+  }
 
   // Get quantization parameters
-  if (!GetQuantizationParameters_()) {
+  if (!GetQuantizationParameters_(X_scale, X_zero_point)) {
     return false;
   }
 
@@ -167,7 +183,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       /* if (VLOG_IS_ON(1)) */
       { t_begin = chrono::system_clock::now(); }
 #endif
-
       Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -180,7 +195,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
         t_begin = chrono::system_clock::now();
       }
 #endif
-    }
+     }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
     /* if (VLOG_IS_ON(1)) */
@@ -189,6 +204,9 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 
     if (!dequantize_output_) {
       Y_int32_.resize(Y->size());
+      if (Y_int32_.size() < Y_int32_.capacity() / 2) {
+        Y_int32_.shrink_to_fit();
+      }
       DoNothing<> doNothingObj{};
 
       if (quantize_channelwise_ || filter_qparams_[0].zero_point) {
@@ -291,6 +309,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 
       if (!X.template IsType<T>()) {
         // Both input and output are float
+        // the path for dyanmic and fused staic
         row_offsets_.resize(
             PackAWithQuantRowOffset<uint8_t>::rowOffsetBufferSize());
         X_pack_buf_.resize(
@@ -442,11 +461,15 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #endif
 
     Y_int32_.resize(Y->size());
+    if (Y_int32_.size() < Y_int32_.capacity() / 2) {
+      Y_int32_.shrink_to_fit();
+    }
     for (int i = 0; i < M; ++i) {
       for (int j = 0; j < N; ++j) {
         int32_t sum = 0;
         for (int k = 0; k < K; ++k) {
           int x = Xdata[i * K + k];
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           int w = Wdata[j * K + k];
           sum += x * w;
 #ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
@@ -492,12 +515,15 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       size_t X_size = M * K;
       size_t W_size = N * K;
       size_t Y_size = M * N;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < X_size; i++) {
         X_q_data[i] = Xdata[i];
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < W_size; i++) {
         W_q_data[i] = Wdata[i];
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < Y_size; i++) {
         Y_q_data[i] = Y_int32_[i];
       }
@@ -617,7 +643,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 }
 
 template <typename T, bool ReluFused>
-bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
+bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_(float X_scale, int X_zero_point) {
   using namespace dnnlowp;
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -627,7 +653,13 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   // Choose quantization for X
-  in_qparams_[0] = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+  if (X_scale <= 0) { // non-fused static or Dynamic
+    in_qparams_[0] = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+  }
+  else { // fused int8 static
+    in_qparams_[0].scale = X_scale;
+    in_qparams_[0].zero_point = X_zero_point;
+  }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
   /* if (VLOG_IS_ON(1)) */
@@ -674,6 +706,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       filter_zero_points_.resize(filter_qparams_.size());
       requantization_params_.resize(filter_qparams_.size());
       requantization_multipliers_.resize(filter_qparams_.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < filter_qparams_.size(); ++i) {
         filter_scales_[i] = filter_qparams_[i].scale;
         filter_zero_points_[i] = filter_qparams_[i].zero_point;
@@ -781,6 +814,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
     } else {
       const auto& bias = InputTensorCPU_(2);
       if (this->template InputIsType<int8::Int8TensorCPU>(2)) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
         TensorQuantizationParams bias_qparams;
         bias_qparams.scale = this->template Input<int8::Int8TensorCPU>(2).scale;
         bias_qparams.zero_point =
@@ -799,7 +833,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           b_dequantized_.resize(N);
           for (int j = 0; j < N; ++j) {
             b_dequantized_[j] = fbgemm::Dequantize<int32_t>(
-                b_quantized_data_[j], in_qparams_[2]);
+                b_quantized_data_[j],
+                filter_qparams_[quantize_channelwise_ ? j : 0]);
           }
           b_dequantized_data_ = b_dequantized_.data();
         }
@@ -811,7 +846,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
             (*b_quantized_)[j] = fbgemm::Quantize<int32_t>(
                 b_dequantized_data_[j],
                 0,
-                in_qparams_[0].scale * filter_qparams_[0].scale,
+                in_qparams_[0].scale *
+                    filter_qparams_[quantize_channelwise_ ? j : 0].scale,
                 32);
           }
           b_quantized_data_ = b_quantized_->data();
@@ -831,6 +867,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
         b_quantized_->assign(b_quantized_data_, b_quantized_data_ + N);
         b_quantized_data_ = b_quantized_->data();
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       vector<int32_t>* column_offset_ptr;
       vector<int32_t> column_offset_temp;
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
@@ -871,8 +908,28 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   if (!dequantize_output_ && !requantization_param_selected_) {
-    GetOutputQuantizationParams_();
+    CAFFE_ENFORCE(InputSize() <= 5);
+    if (InputSize() >= 4) {
+      const auto* input_qparam_blob =
+          this->template Input<caffe2::unique_ptr<caffe2::Int8QuantParamsBlob>>(
+                  3)
+              .get();
+      CAFFE_ENFORCE(input_qparam_blob);
 
+      float in_scale = input_qparam_blob->qparam.scale;
+      int in_zero_point = input_qparam_blob->qparam.zero_point;
+
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+      dnnlowp::TensorQuantizationParams out_qparams_overwrite;
+      out_qparams_overwrite.scale = in_scale;
+      out_qparams_overwrite.zero_point = in_zero_point;
+      out_qparams_overwrite.precision = qfactory_->GetActivationPrecision();
+      GetOutputQuantizationParams_(&out_qparams_overwrite);
+    } else {
+      GetOutputQuantizationParams_();
+    }
+
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < filter_qparams_.size(); ++i) {
       float real_multiplier =
           in_qparams_[0].scale * filter_qparams_[i].scale / out_qparams_.scale;
@@ -903,6 +960,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 
   return true;
 }
+
+template class FullyConnectedDNNLowPOp<uint8_t>;
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
@@ -943,9 +1002,11 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FCRelu)
-    .NumInputs(3)
+    .NumInputs(3, 4)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));
 
 } // namespace caffe2

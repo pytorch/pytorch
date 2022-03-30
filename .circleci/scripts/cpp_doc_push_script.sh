@@ -10,33 +10,36 @@ pt_checkout="/var/lib/jenkins/workspace"
 # Since we're cat-ing this file, we need to escape all $'s
 echo "cpp_doc_push_script.sh: Invoked with $*"
 
-# Argument 1: Where to copy the built documentation for Python API to
-# (pytorch.github.io/$install_path)
-install_path="$1"
-if [ -z "$install_path" ]; then
-echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
-  exit 1
-fi
+# for statements like ${1:-${DOCS_INSTALL_PATH:-docs/}}
+# the order of operations goes:
+#   1. Check if there's an argument $1
+#   2. If no argument check for environment var DOCS_INSTALL_PATH
+#   3. If no environment var fall back to default 'docs/'
 
+# NOTE: It might seem weird to gather the second argument before gathering the first argument
+#       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
+#       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the Python API docs we are building.
-version="$2"
+version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
 echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
   exit 1
 fi
 
-is_master_doc=false
-if [ "$version" == "master" ]; then
-  is_master_doc=true
+# Argument 1: Where to copy the built documentation for Python API to
+# (pytorch.github.io/$install_path)
+install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
+if [ -z "$install_path" ]; then
+echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
+  exit 1
 fi
 
-# Argument 3: (optional) If present, we will NOT do any pushing. Used for testing.
-dry_run=false
-if [ "$3" != "" ]; then
-  dry_run=true
+is_main_doc=false
+if [ "$version" == "main" ]; then
+  is_main_doc=true
 fi
 
-echo "install_path: $install_path  version: $version  dry_run: $dry_run"
+echo "install_path: $install_path  version: $version"
 
 # ======================== Building PyTorch C++ API Docs ========================
 
@@ -53,31 +56,21 @@ sudo apt-get -y install doxygen
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time python aten/src/ATen/gen.py \
+time python -m tools.codegen.gen \
   -s aten/src/ATen \
-  -d build/aten/src/ATen \
-  aten/src/ATen/Declarations.cwrap \
-  aten/src/THCUNN/generic/THCUNN.h \
-  aten/src/ATen/nn.yaml \
-  aten/src/ATen/native/native_functions.yaml
+  -d build/aten/src/ATen
 
 # Copy some required files
-cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
 cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files
 time python tools/setup_helpers/generate_code.py \
-  --declarations-path build/aten/src/ATen/Declarations.yaml \
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
   --nn-path aten/src/
 
 # Build the docs
 pushd docs/cpp
-pip install breathe>=4.13.0 bs4 lxml six
-pip install --no-cache-dir -e "git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme"
-pip install exhale>=0.2.1
-pip install sphinx>=2.0
-# Uncomment once it is fixed
-# pip install -r requirements.txt
+pip install -r requirements.txt
 time make VERBOSE=1 html -j
 
 popd
@@ -103,23 +96,11 @@ git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
-git commit -m "Automatic sync on $(date)" || true
+git commit -m "Generate C++ docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
-if [ "$dry_run" = false ]; then
-  echo "Pushing to https://github.com/pytorch/cppdocs"
-  set +x
-/usr/bin/expect <<DONE
-  spawn git push -u origin master
-  expect "Username*"
-  send "pytorchbot\n"
-  expect "Password*"
-  send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
-  expect eof
-DONE
-  set -x
-else
-  echo "Skipping push due to dry_run"
+if [[ "${WITH_PUSH:-}" == true ]]; then
+  git push -u origin
 fi
 
 popd

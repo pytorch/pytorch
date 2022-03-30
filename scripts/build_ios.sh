@@ -13,8 +13,7 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
@@ -63,10 +62,7 @@ fi
 # IOS_PLATFORM controls type of iOS platform (see ios-cmake)
 if [ -n "${IOS_PLATFORM:-}" ]; then
   CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
-  if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
-      # iOS Simulator build is not supported by NNPACK
-      CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
-  elif [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
+  if [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
       # enable bitcode by default for watchos
       CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
       CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
@@ -82,6 +78,25 @@ if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
 fi
 
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+fi
+if [ "${TRACING_BASED}" == 1 ]; then
+  CMAKE_ARGS+=("-DTRACING_BASED=ON")
+else
+  CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
+fi
+
+CMAKE_ARGS+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
+
 # Don't build binaries or tests (only the library)
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
@@ -95,6 +110,18 @@ CMAKE_ARGS+=("-DUSE_LMDB=OFF")
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_NUMPY=OFF")
+CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
+CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
+
+# Metal
+if [ "${USE_PYTORCH_METAL:-}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_PYTORCH_METAL=ON")
+fi
+
+# Core ML
+if [ "${USE_COREML_DELEGATE}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_COREML_DELEGATE=ON")
+fi
 
 # pthreads
 CMAKE_ARGS+=("-DCMAKE_THREAD_LIBS_INIT=-lpthread")
@@ -105,6 +132,9 @@ CMAKE_ARGS+=("-DCMAKE_USE_PTHREADS_INIT=1")
 if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
+
+# enable ARC
+CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fobjc-arc")
 
 # Now, actually build the iOS target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}

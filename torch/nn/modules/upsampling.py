@@ -1,6 +1,10 @@
 from .module import Module
 from .. import functional as F
 
+from torch import Tensor
+from typing import Optional
+from ..common_types import _size_2_t, _ratio_2_t, _size_any_t, _ratio_any_t
+
 
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
@@ -27,7 +31,16 @@ class Upsample(Module):
         align_corners (bool, optional): if ``True``, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is
-            ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``
+            ``'linear'``, ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
+        recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
+            interpolation calculation. If `recompute_scale_factor` is ``True``, then
+            `scale_factor` must be passed in and `scale_factor` is used to compute the
+            output `size`. The computed output `size` will be used to infer new scales for
+            the interpolation. Note that when `scale_factor` is floating-point, it may differ
+            from the recomputed `scale_factor` due to rounding and precision issues.
+            If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
+            be used directly for interpolation.
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -114,9 +127,17 @@ class Upsample(Module):
                   [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
-    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name', 'recompute_scale_factor']
+    name: str
+    size: Optional[_size_any_t]
+    scale_factor: Optional[_ratio_any_t]
+    mode: str
+    align_corners: Optional[bool]
+    recompute_scale_factor: Optional[bool]
 
-    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
+    def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
+                 mode: str = 'nearest', align_corners: Optional[bool] = None,
+                 recompute_scale_factor: Optional[bool] = None) -> None:
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size
@@ -126,11 +147,13 @@ class Upsample(Module):
             self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners
+        self.recompute_scale_factor = recompute_scale_factor
 
-    def forward(self, input):
-        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+    def forward(self, input: Tensor) -> Tensor:
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
+                             recompute_scale_factor=self.recompute_scale_factor)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         if self.scale_factor is not None:
             info = 'scale_factor=' + str(self.scale_factor)
         else:
@@ -180,7 +203,7 @@ class UpsamplingNearest2d(Upsample):
                   [ 3.,  3.,  4.,  4.],
                   [ 3.,  3.,  4.,  4.]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
+    def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
 
@@ -226,5 +249,5 @@ class UpsamplingBilinear2d(Upsample):
                   [ 2.3333,  2.6667,  3.0000,  3.3333],
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
+    def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)

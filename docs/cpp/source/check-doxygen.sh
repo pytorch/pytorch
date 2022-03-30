@@ -10,27 +10,22 @@ ignore_warning() {
   mv temp.txt doxygen-log.txt
 }
 
+command -v doxygen >/dev/null 2>&1 || { echo >&2 "doxygen is not supported. Aborting."; exit 1; }
+
 pushd "$(dirname "$0")/../../.."
 
-cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
 cp torch/_utils_internal.py tools/shared
 
-python aten/src/ATen/gen.py \
-  -s aten/src/ATen \
-  -d build/aten/src/ATen \
-  aten/src/ATen/Declarations.cwrap \
-  aten/src/THCUNN/generic/THCUNN.h \
-  aten/src/ATen/nn.yaml \
-  aten/src/ATen/native/native_functions.yaml
+python -m tools.codegen.gen
 
 python tools/setup_helpers/generate_code.py                 \
-  --declarations-path build/aten/src/ATen/Declarations.yaml \
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
   --nn-path aten/src
 
 popd
 
 # Run doxygen and log all output.
-doxygen 2> original-doxygen-log.txt
+doxygen "$(dirname $0)" 2> original-doxygen-log.txt
 cp original-doxygen-log.txt doxygen-log.txt
 
 # Uncomment this if you need it for debugging; we're not printing this

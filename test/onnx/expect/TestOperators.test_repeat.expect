@@ -1,9 +1,9 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Tile_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -17,15 +17,43 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "1"
-    output: "2"
-    name: "Tile_1"
+    input: "onnx::ConstantOfShape_6"
+    output: "onnx::Expand_3"
+    name: "ConstantOfShape_1"
+    op_type: "ConstantOfShape"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Expand_0"
+    input: "onnx::Expand_3"
+    output: "onnx::Tile_4"
+    name: "Expand_2"
+    op_type: "Expand"
+  }
+  node {
+    input: "onnx::Tile_4"
+    input: "onnx::Tile_1"
+    output: "5"
+    name: "Tile_3"
     op_type: "Tile"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "onnx::ConstantOfShape_6"
+    raw_data: "\004\000\000\000\000\000\000\000"
+  }
   input {
-    name: "0"
+    name: "onnx::Expand_0"
     type {
       tensor_type {
         elem_type: 1
@@ -47,7 +75,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "5"
     type {
       tensor_type {
         elem_type: 1

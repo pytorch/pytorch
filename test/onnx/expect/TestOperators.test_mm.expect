@@ -1,9 +1,9 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "2"
+    output: "onnx::Gemm_2"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -17,9 +17,9 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "1"
-    input: "2"
+    input: "onnx::Gemm_0"
+    input: "onnx::Gemm_1"
+    input: "onnx::Gemm_2"
     output: "3"
     name: "Gemm_1"
     op_type: "Gemm"
@@ -34,9 +34,9 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Gemm_0"
     type {
       tensor_type {
         elem_type: 1
@@ -52,7 +52,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::Gemm_1"
     type {
       tensor_type {
         elem_type: 1
