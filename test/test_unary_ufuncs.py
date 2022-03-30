@@ -21,8 +21,8 @@ from torch.testing._internal.common_device_type import (
     OpDTypes)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
-    floating_types_and, all_types_and_complex_and, integral_types_and, get_all_math_dtypes,
-    complex_types, all_types_and, floating_and_complex_types_and
+    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and, get_all_dtypes, get_all_math_dtypes,
+    get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
 
 if TEST_SCIPY:
@@ -514,7 +514,8 @@ class TestUnaryUfuncs(TestCase):
             out = torch.empty_like(input, dtype=out_dtype)
             self._test_out_arg(op, input, out, expected, **torch_kwargs)
 
-    @dtypes(*all_types_and(torch.bool, torch.half))
+    @dtypes(*(get_all_int_dtypes() + [torch.bool] +
+              get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
         for contiguous in [False, True]:
             x = make_tensor((64, 64), low=0., high=100., dtype=dtype, device=device)
@@ -592,7 +593,7 @@ class TestUnaryUfuncs(TestCase):
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
 
     @skipCUDAIfRocm
-    @dtypes(*floating_types_and(torch.half))
+    @dtypes(*get_all_fp_dtypes(include_half=True, include_bfloat16=False))
     def test_frexp(self, device, dtype):
         input = make_tensor((50, 50), dtype=dtype, device=device)
         mantissa, exponent = torch.frexp(input)
@@ -607,13 +608,15 @@ class TestUnaryUfuncs(TestCase):
 
     @skipCUDAIfRocm
     def test_frexp_assert_raises(self, device):
-        invalid_input_dtypes = integral_types_and(torch.bool) + complex_types()
+        invalid_input_dtypes = get_all_int_dtypes() + \
+            get_all_complex_dtypes() + \
+            [torch.bool]
         for dtype in invalid_input_dtypes:
             input = make_tensor((50, 50), dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, r"torch\.frexp\(\) only supports floating-point dtypes"):
                 torch.frexp(input)
 
-        for dtype in floating_types_and(torch.half):
+        for dtype in get_all_fp_dtypes(include_half=True, include_bfloat16=False):
             input = make_tensor((50, 50), dtype=dtype, device=device)
 
             dtypes = list(all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -1177,7 +1180,7 @@ class TestUnaryUfuncs(TestCase):
             t = torch.rand(1000, device=device).to(dtype) * r
             self._i0_helper(t)
 
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
@@ -1185,7 +1188,7 @@ class TestUnaryUfuncs(TestCase):
         # The domain is (-13.25, 13.25)
         self._i0_range_helper(13.25, device, dtype)
 
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
@@ -1200,7 +1203,7 @@ class TestUnaryUfuncs(TestCase):
         # The domain is (-709.75, 709.75)
         self._i0_range_helper(709.75, device, dtype)
 
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
@@ -1210,7 +1213,7 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([inf, -inf, nan], device=device, dtype=dtype)
         self.assertTrue(torch.i0(t).isnan().all())
 
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_special_i0_i1_vs_scipy(self, device, dtype):
@@ -1316,7 +1319,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*(get_all_dtypes(include_bool=False)))
     def test_isposinf_isneginf_non_boolean_output(self, device, dtype):
         # test non-boolean tensors as the `out=` parameters
         # boolean outputs are tested in the above testcases
@@ -1358,8 +1361,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
     # TODO: rationalize with exp OpInfo
-    @dtypes(*floating_and_complex_types_and(torch.bfloat16))
-    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypes(*(get_all_fp_dtypes(include_half=False) +
+              get_all_complex_dtypes()))
+    @dtypesIfCUDA(*(get_all_fp_dtypes(include_half=True) +
+                    get_all_complex_dtypes()))
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
