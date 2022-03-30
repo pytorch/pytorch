@@ -101,6 +101,11 @@ struct C10_API Device final {
     return type_ == DeviceType::HPU;
   }
 
+  /// Return true if the device is of META type.
+  bool is_meta() const noexcept {
+    return type_ == DeviceType::Meta;
+  }
+
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;

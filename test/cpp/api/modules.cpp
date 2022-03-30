@@ -2860,13 +2860,23 @@ TEST_F(ModulesTest, GLU) {
 }
 
 TEST_F(ModulesTest, GELU) {
-  GELU model;
+  GELU model(GELUOptions().approximate("none"));
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = model(x);
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
+TEST_F(ModulesTest, TanhGELU) {
+  GELU model(GELUOptions().approximate("tanh"));
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
+  const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Mish) {
   Mish model;
   auto x = torch::randn(100) * 10;

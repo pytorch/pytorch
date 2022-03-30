@@ -280,6 +280,14 @@ enum class DispatchKey : uint8_t {
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
+
+  // Used by Python key logic to know the set of tls on entry to the dispatcher
+  // This kernel assumes it is the top-most non-functorch-related DispatchKey.
+  // If you add a key above, make sure to update the fallback implementation for
+  // this.
+  PythonTLSSnapshot,
+
+  // This key should be at the very top of the dispatcher
   FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
@@ -360,7 +368,7 @@ enum class DispatchKey : uint8_t {
 // built-in autograd formulas for operators are not appropriate.
 
 static_assert(
-    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
+    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) <= 64,
     "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)

@@ -15,7 +15,9 @@ class TORCH_API Logger {
       const std::vector<int>& device_ids,
       int output_device,
       bool broadcast_buffers,
-      bool has_sync_bn);
+      bool has_sync_bn,
+      bool static_graph
+  );
 
   void set_static_graph();
 
@@ -39,7 +41,7 @@ class TORCH_API Logger {
   // Set parameters stats.
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
-  std::vector<int> get_bucket_sizes();
+  std::vector<int64_t> get_bucket_sizes();
   // Get bucket size limits specified during DDP construction.
   std::vector<int> get_bucket_size_limits();
   // Get variable indices for each bucket.
