@@ -363,7 +363,13 @@ void ConvertGraphToONNXProto(
     int opset_version) {
   RawDataExportMap export_map;
   bool val_use_external_data_format;
-  std::tie(model_proto, export_map, symbol_map, val_use_external_data_format) =
+  NodeNameMap node_names;
+  std::tie(
+      model_proto,
+      export_map,
+      symbol_map,
+      val_use_external_data_format,
+      node_names) =
       export_onnx(
           graph,
           {},
@@ -425,8 +431,9 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     return onnx_constant_fold::runTorchBackendForOnnx(
         n, inputTensorValues, opset_version);
   } catch (const std::exception& ex) {
-    TORCH_WARN(
-        "Constant folding in symbolic shape inference fails: ", ex.what());
+    auto ex_str = std::string(ex.what());
+    ex_str = ex_str.substr(0, ex_str.find("\n"));
+    TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
     return c10::nullopt;
   }
 }
@@ -454,16 +461,6 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   auto it_0 = std::find_if(shape_vector.begin(), shape_vector.end(), is_zero);
   bool shape_has_zero = it_0 != shape_vector.end();
 
-  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
-    int allowzero = n->i(attr::allowzero);
-    if (allowzero == 1 && shape_has_zero) {
-      // Return here, because the denominator in shape_ratio calculation cannot
-      // be 0.
-      // TODO: Shall we handle the case when shape has -1 here?
-      return shape;
-    }
-  }
-
   int minus_one_pos = -1;
   for (int i = 0; i < shape_vector.size(); ++i) {
     if (shape_vector[i].value() == -1) {
@@ -472,7 +469,16 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     }
   }
 
-  if (!shape_has_zero && minus_one_pos == -1) {
+  int allowzero = 0;
+  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
+    allowzero = n->i(attr::allowzero);
+  }
+
+  TORCH_CHECK(
+      !(shape_has_zero && allowzero == 1 && minus_one_pos != -1),
+      "0 and -1 cannot both be present in `Shape` input of `Reshape` node, when `allowzero=1`.");
+
+  if (minus_one_pos == -1 && (!shape_has_zero || allowzero)) {
     return shape;
   }
   std::vector<c10::ShapeSymbol> final_shape;
