@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
