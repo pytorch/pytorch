@@ -45,7 +45,6 @@ def _propagate_qconfig_helper(module, qconfig_dict,
                        module
         prefix: corresponding prefix of the current module, used as key in
                 qconfig_dict
-
         prepare_custom_config_dict: dictionary for custom handling of modules
                                     see docs for :func:`~torch.ao.quantization.prepare_fx`
 
@@ -64,6 +63,7 @@ def _propagate_qconfig_helper(module, qconfig_dict,
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
+        #  do no not propagate qconfig to child if child is non traceable
         if prepare_custom_config_dict is None or not (
             name in prepare_custom_config_dict.get("non_traceable_module_name", [])
             or type(child) in prepare_custom_config_dict.get("non_traceable_module_class", [])
@@ -82,6 +82,8 @@ def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config_dict=Non
             quantization configuration, qconfig applies to all submodules of a
             given module unless qconfig for the submodules are specified (when
             the submodule already has qconfig attribute)
+        prepare_custom_config_dict: dictionary for custom handling of modules
+            see docs for :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
         None, module is modified inplace with qconfig attached
