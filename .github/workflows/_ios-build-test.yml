@@ -163,8 +163,8 @@ jobs:
             pip install six==1.16.0
             python coreml_backend.py
           else
-            cd "${GITHUB_WORKSPACE}/test/mobile/model_test"
-            python gen_test_model.py ios-test
+            cd "${GITHUB_WORKSPACE}"
+            python test/mobile/model_test/gen_test_model.py ios-test
           fi
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
