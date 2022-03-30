@@ -284,7 +284,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 3. Backend fallback
   auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
-  if (dispatch_ix != -1) {
+  if (dispatch_ix < 0) {
     return {missingKernel(), "backend fallback not registered on mobile"};
   }
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
