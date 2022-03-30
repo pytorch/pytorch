@@ -5,6 +5,7 @@ import torch.distributed._shard.sharded_tensor as sharded_tensor
 
 import torch.distributed as dist
 
+from torch.distributed._shard import _shard_tensor
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_distributed import (
@@ -157,6 +158,42 @@ class TestReplicatedTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
+    def test_replicated_tensor_implicit_broadcasting(self):
+        #  use same seed
+        torch.manual_seed(self.rank)
+
+        # test implicit broadcasting
+        local_tensor1 = torch.rand(12, 3, device=f"cuda:{self.rank}") * 4
+        local_tensor2 = torch.ones(1, 3, device=f"cuda:{self.rank}")
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        st = _shard_tensor(local_tensor1, spec, src_rank=0)
+        replica_tensor = ReplicatedTensor(local_tensor2)
+
+        # replicated tensor should automatically broadcasted
+        res = torch.add(st, replica_tensor)
+
+        self.assertIsInstance(res, sharded_tensor.ShardedTensor)
+        output = torch.empty((12, 3)) if self.rank == 0 else None
+        res.gather(dst=0, out=output)
+
+        if self.rank == 0:
+            local_output = torch.add(local_tensor1, local_tensor2)
+            self.assertEqual(output, local_output)
+
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
     def test_replicated_tensor_inter_op_sharded_tensor_errors(self):
         local_tensor = torch.ones(3, 3, device=f"cuda:{self.rank}") * 4
         replica_tensor = ReplicatedTensor(local_tensor)
@@ -172,13 +209,11 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             ],
         )
 
-        st = sharded_tensor.rand(spec, (20, 3))
+        st1 = sharded_tensor.rand(spec, (20, 3, 3))
+        st2 = sharded_tensor.rand(spec, (30, 3, 3))
 
         with self.assertRaisesRegex(RuntimeError, 'Implicit broadcasting'):
-            st + replica_tensor
-
-        with self.assertRaisesRegex(TypeError, 'unsupported operand type'):
-            st + 4
+            st1 + st2
 
         with self.assertRaisesRegex(RuntimeError, 'not supported for ShardedTensor'):
-            st % replica_tensor
+            st1 % replica_tensor

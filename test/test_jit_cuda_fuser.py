@@ -3720,6 +3720,33 @@ class TestCudaFuser(JitTestCase):
             self.assertGraphContains(fn_2_jit.graph_for(x), FUSION_GUARD)
             self.assertGraphContainsExactly(fn_2_jit.graph_for(x), 'aten::add', 0)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_cuda_fusion_guard(self):
+        old_guard = torch._C._jit_set_nvfuser_guard_mode(True)
+
+        class ConvModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sin().sigmoid()
+
+        mod = ConvModule().to(device="cuda")
+
+        inputs = [torch.randn(20, 16, 50, 100, device="cuda", requires_grad=True)]
+
+        def reduce_scalar(temp):
+            return temp.sum()
+
+        scripted = torch.jit.script(mod)
+        with torch.no_grad():
+            scripted(*inputs)
+        res = scripted(*inputs)
+        reduce_scalar(res).backward()
+        torch._C._jit_set_nvfuser_guard_mode(old_guard)
+
 
 class TestPassManagerCudaFuser(JitTestCase):
 

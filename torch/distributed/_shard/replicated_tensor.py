@@ -73,11 +73,15 @@ class ReplicatedTensor(torch.Tensor):
                 all_replicated = False
 
         for arg in args:
-            dispatch_arg(arg)
+            redispatched_res = dispatch_arg(arg)
+            if redispatched_res:
+                return redispatched_res
 
         if kwargs is not None:
             for k, v in kwargs.items():
-                dispatch_arg(v)
+                redispatched_res = dispatch_arg(v)
+                if redispatched_res:
+                    return redispatched_res
 
         # We cann't do super().__torch_function__() as it implicitly convert the result
         # back to tensor subclasses, where in our case, we need to control the output type

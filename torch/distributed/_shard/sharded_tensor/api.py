@@ -31,9 +31,7 @@ from .utils import (
     build_metadata_from_local_shards,
     build_global_metadata
 )
-from torch.overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function, get_default_nowrap_functions)
+from torch.overrides import handle_torch_function
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -811,10 +809,10 @@ class ShardedTensor(object):
     def __rmul__(self, other):
         return handle_torch_function(torch.Tensor.__rmul__, (self, other), self, other)
 
-    def __div__(self, other):
+    def __truediv__(self, other):
         return handle_torch_function(torch.Tensor.__div__, (self, other), self, other)
 
-    def __rdiv__(self, other):
+    def __rtruediv__(self, other):
         return handle_torch_function(torch.Tensor.__rdiv__, (self, other), self, other)
 
     @dataclass

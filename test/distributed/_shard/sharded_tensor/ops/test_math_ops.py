@@ -25,7 +25,7 @@ class TestMathOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_basic_math_ops(self):
         import builtins
-        ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*"]
+        ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*", "/"]
 
         def gen_code(python_op):
             src_lines = ['def f(lhs, rhs):']
@@ -71,20 +71,22 @@ class TestMathOps(ShardedTensorTestBase):
                 self.assertEqual(output, global_output)
 
             # test basic math ops between ShardedTensor and scalar
-            sharded_output_lhs = g["f"](sharded_lhs, 3)
-            output_lhs = torch.empty((12, 3)) if current_rank == 0 else None
-            sharded_output_lhs.gather(dst=0, out=output_lhs)
+            scalars = [3, 1.8]
+            for scalar in scalars:
+                sharded_output_lhs = g["f"](sharded_lhs, scalar)
+                output_lhs = torch.empty((12, 3)) if current_rank == 0 else None
+                sharded_output_lhs.gather(dst=0, out=output_lhs)
 
-            sharded_output_rhs = g["f"](3, sharded_lhs)
-            output_rhs = torch.empty((12, 3)) if current_rank == 0 else None
-            sharded_output_rhs.gather(dst=0, out=output_rhs)
+                sharded_output_rhs = g["f"](scalar, sharded_lhs)
+                output_rhs = torch.empty((12, 3)) if current_rank == 0 else None
+                sharded_output_rhs.gather(dst=0, out=output_rhs)
 
-            if current_rank == 0:
-                global_output_lhs = g["f"](global_lhs, 3)
-                global_output_rhs = g["f"](3, global_lhs)
+                if current_rank == 0:
+                    global_output_lhs = g["f"](global_lhs, scalar)
+                    global_output_rhs = g["f"](scalar, global_lhs)
 
-                self.assertEqual(output_lhs, global_output_lhs)
-                self.assertEqual(output_rhs, global_output_rhs)
+                    self.assertEqual(output_lhs, global_output_lhs)
+                    self.assertEqual(output_rhs, global_output_rhs)
 
 
 
