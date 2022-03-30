@@ -5,23 +5,24 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
-#include <ATen/native/cuda/thread_constants.h>
 #include <cmath>
 #include <limits>
 
-#ifndef GPU_LAMBDA
 #define GPU_LAMBDA __device__ __host__
-#endif
 
 namespace {
 
+int warp_size = at::cuda::warp_size();
+int num_threads = warp_size * 2;
+int thread_work_size = 1;
+int block_work_size = thread_work_size * num_threads;
 
 template<typename index_t, typename func_t>
-C10_LAUNCH_BOUNDS_1(num_threads())
+C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
-  for (int i = 0; i < thread_work_size(); i++) {
-    index_t idx = block_work_size() * blockIdx.x + num_threads() * i + threadIdx.x;
+  for (int i = 0; i < thread_work_size; i++) {
+    index_t idx = block_work_size * blockIdx.x + num_threads * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
@@ -34,14 +35,14 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   if (N == 0) {
     return;
   }
-  int64_t grid = (N + block_work_size() - 1) / block_work_size();
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
-    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
