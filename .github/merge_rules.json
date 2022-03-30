@@ -26,7 +26,7 @@
    {
       "name": "OSS CI",
       "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
-      "approved_by": ["janeyx99", "ezyang", "atalman"],
+      "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
@@ -88,6 +88,7 @@
         "mruberry",
         "navahgar",
         "ngimel",
+        "NicolasHug",
         "nikithamalgifb",
         "NivekT",
         "osalpekar",
@@ -106,6 +107,7 @@
         "suo",
         "tugsbayasgalan",
         "VitalyFedyunin",
+        "vmoens",
         "wanchaol",
         "wconstab",
         "wenleix",
