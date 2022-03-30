@@ -343,7 +343,7 @@ def conv2d(
 
 def batch_norm(
     input: List[int],
-    weight: List[int],
+    weight: Optional[List[int]],
     bias: Optional[List[int]],
     running_mean: Optional[List[int]],
     running_var: Optional[List[int]],
