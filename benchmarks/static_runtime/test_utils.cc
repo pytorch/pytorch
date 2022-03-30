@@ -291,7 +291,9 @@ void testStaticRuntime(
   for (bool enable_out_variant : {true, false}) {
     for (bool manage_output_tensors : {true, false}) {
       for (bool enable_tensorexpr_fusion : {true, false}) {
-        for (bool precompute_offsets : {true, false}) {
+        for (MemoryPlannerAlgorithm algorithm :
+             {MemoryPlannerAlgorithm::kStandardResizing,
+              MemoryPlannerAlgorithm::kPrecomputedOffsets}) {
           if (!enable_out_variant && manage_output_tensors) {
             continue;
           }
@@ -304,7 +306,7 @@ void testStaticRuntime(
               .optimize_memory = enable_out_variant,
               .manage_output_tensors = manage_output_tensors,
               .enable_tensorexpr_fusion = enable_tensorexpr_fusion,
-              .precompute_offsets = precompute_offsets};
+              .memory_planner_algorithm = algorithm};
           auto smodule = test_context->makeStaticModule(opts);
           StaticRuntime runtime(smodule);
           auto actual = runtime(args, {});
@@ -351,7 +353,8 @@ void testStaticRuntime(
 
             size_t new_managed_bytes =
                 memory_planner ? memory_planner->total_managed() : 0;
-            if (!precompute_offsets && check_resize && new_managed_bytes > 0) {
+            if (algorithm != MemoryPlannerAlgorithm::kPrecomputedOffsets &&
+                check_resize && new_managed_bytes > 0) {
               EXPECT_GT(new_managed_bytes, managed_bytes);
             }
 
