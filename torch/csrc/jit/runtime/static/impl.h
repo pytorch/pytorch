@@ -1009,12 +1009,7 @@ class TORCH_API StaticRuntime {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     static std::unique_ptr<IValue[]> allocate(size_t size) {
       if (size) {
-        auto result = std::make_unique<IValue[]>(size);
-        auto* data = result.get();
-        for (const auto i : c10::irange(size)) {
-          data[i] = IValue();
-        }
-        return result;
+        return std::make_unique<IValue[]>(size);
       }
       return nullptr;
     }
