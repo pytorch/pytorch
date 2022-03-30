@@ -133,6 +133,10 @@ class LazyArgument:
         assert self.lazy_type_ is not None, f"Attempted to access lazy_type for invalid argument {self.name}"
         return self.lazy_type_
 
+    @property
+    def is_optional(self) -> bool:
+        return isinstance(self.orig_type, OptionalType)
+
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
 # but carries type information from a native FunctionSchema modified for use with IR nodes,

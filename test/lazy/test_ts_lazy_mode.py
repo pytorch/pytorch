@@ -13,11 +13,11 @@ def test_nested():
     with lazy_mode():
         with lazy_mode():
             temp = x + y
-        # this line was also causing the 'lazy kernel calls meta with lazy+eager tensor' error, reenable after fixing that
+        # this line is now causing RuntimeError:
+        # result.storage().use_count() == 1 INTERNAL ASSERT FAILED at "/home/whc/pytorch/torch/csrc/autograd/generated/VariableType_0.cpp":1408, please report a bug to PyTorch. function: _to_copy
         # out = temp + 1
 
-    # this line was segfaulting on lazy .to cpu, which isn't related to nesting
-    # torch.testing.assert_allclose(out, x + 1)
+    # torch.testing.assert_close(out, x + 1)
 
 
 def test_single_operation():
@@ -31,9 +31,10 @@ def test_single_operation():
         # Temp is a lazy tensor now
         out = x / y
 
+    back_to_cpu = out.to(device='cpu')
     # out is lazy, but z is eager, so + has to handle multiple devices
     eager_value = out + z
-    print(eager_value)
+    torch.testing.assert_close(eager_value, (x / y) + z)
 
 
 def test_lazy_mode():
@@ -49,12 +50,17 @@ def test_lazy_mode():
 
         # but z is still a cuda tensor, so + has to handle multi-device
         out = temp + z
+
+    # This line causes torch.testing to raise
+    # AssertionError: The values for attribute 'device' do not match: lazy != cpu.
+    # torch.testing.assert_allclose(out, (x / y) + z)
     
     eager_value = out + x
+    torch.testing.assert_close(eager_value, (x / y) + z + x)
     print(eager_value)
 
 
 if __name__ == "__main__":
-    # test_lazy_mode()
-    # test_single_operation()
+    test_lazy_mode()
+    test_single_operation()
     test_nested()

@@ -5,6 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/lazy_mode.h>
 
 namespace torch {
 namespace lazy {
@@ -81,6 +82,19 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
+
+  // TODO(whc) for now I add the unlazy key to all lazy tensors, becuase it is easier than tracking which ones are live
+  // and adding it to just those on exit.
+  // We unfortunately track live 'LazyTensor' objects instead of live 'LTCTensorImpl' objects, where 'LTCTensorImpl'
+  // points to 'LazyTensor'.
+  //
+  // We could probably work around this by having a weak pointer from LazyTensor->LTCTensorImpl, and then for all
+  // live LazyTensor's update the 'LTCTensorImpl' that owns them.  We may also clean things up and just collapse the
+  // LazyTensor into the LTCTensorImpl.
+
+  // For now, adding the key to all lazy tensors isn't so bad becuase we can make the unlazy handler be a no-op inside
+  // the lazy mode, so it works as intended modulo a small/avoidable overhead.
+  add_unlazy_key();
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -193,6 +207,10 @@ bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
 
 const at::Storage& LTCTensorImpl::storage() const {
   TORCH_CHECK(false, "Lazy tensors do not have storage");
+}
+
+void LTCTensorImpl::add_unlazy_key() {
+  key_set_ = key_set_.add(GetUnlazyDispatchKey());
 }
 
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY

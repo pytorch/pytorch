@@ -3,6 +3,7 @@
 #include <ATen/MetaFunctions.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
+#include <torch/csrc/lazy/core/lazy_mode.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/shape_inference.h>
@@ -198,12 +199,21 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
     } else if(device && device->type() != c10::kLazy) {
       // Case 2: lazy->eager (forces a graph break since we are materializing a tensor)
-
-      TORCH_INTERNAL_ASSERT(lazy_self);
-      auto eager_tensor = lazy_self->ToTensor(/*detached=*/true);
-      options = options.device(device);
-      auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
-      return moved_eager_tensor;
+      if (in_lazy_mode()) {
+        // TODO(whc) why does this help?
+        // Is there an expected reason to call lazy_tensor.to(eager) inside lazy mode?
+        // Or is someone calling eager_tensor.to() and the mode key is routing them here?
+        // In any case, if the assert passes then this seems harmless
+        LOG(WARNING) << "to_copy in lazy mode: self.device " << self.device() << ", *device " << *device; 
+        TORCH_INTERNAL_ASSERT(self.device() == *device);
+        return self;
+      } else {
+        TORCH_INTERNAL_ASSERT(lazy_self);
+        auto eager_tensor = lazy_self->ToTensor(/*detached=*/true);
+        options = options.device(device);
+        auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
+        return moved_eager_tensor;
+      }
     } else if (device &&
                device->type() == c10::kLazy &&
                device->has_index() &&

@@ -48,6 +48,8 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   bool has_storage() const override { return false; }
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
+  void add_unlazy_key();
+
  private:
   void setup_size_properties();
 
