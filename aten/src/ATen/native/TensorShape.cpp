@@ -1366,6 +1366,20 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   auto res_sizes = self.sizes().vec();
   res_sizes[dim] = index_len;
 
+  // Equivalent to t.index_select(dim, idx), but vanilla index_select is not parallel,
+  // so we use gather instead.
+  // We use this method to select relevant indices/values
+  // in the intersection between indices[dim] and the index.
+  const auto index_select = [](const Tensor& t, int64_t dim, const Tensor& idx) -> Tensor {
+    const auto idx_len = idx.numel();
+    auto out_shape = t.sizes().vec();
+    out_shape[dim] = idx_len;
+    auto idx_shape = std::vector<int64_t>(t.dim(), 1);
+    idx_shape[dim] = idx_len;
+    return t.gather(dim, idx.view(idx_shape).expand(out_shape));
+  };
+
+
   // If indexing into sparse dimensions
   if (dim < sparse_dim) {
     auto nneg_index = at::empty_like(index);
@@ -1779,9 +1793,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_large_nnz_small_size();
     }
 
-    auto res_indices = indices.index_select(1, selected_dim_indices);
+    auto res_indices = index_select(indices, 1, selected_dim_indices);
     res_indices[dim] = res_dim_indices;
-    const auto res_values = values.index_select(0, selected_dim_indices);
+    const auto res_values = index_select(values, 0, selected_dim_indices);
 
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
@@ -1790,7 +1804,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   else {
     // It is sufficient to just perform `index_select` on values
     // if `dim` refers to dense dimensions.
-    const auto res_values = values.index_select(dim - sparse_dim + 1, index);
+    const auto res_values = index_select(values, dim - sparse_dim + 1, index);
 
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim, dense_dim, res_sizes, indices, res_values, self.options());
