@@ -52,7 +52,8 @@ from torch.testing._internal.common_device_type import (
 from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import (
+    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes,
     all_types_and_complex_and
@@ -1441,9 +1442,8 @@ else:
                     align_corners)
 
             # Expects 2d input, on CUDA.
-            # Note: not using == "cuda" here to test meta and possibly other
-            # backends.
-            if device != "cpu":
+            # Doesn't work on CPU and ROCm.
+            if device != 'cpu' and TEST_CUDNN:
                 with self.assertRaisesRegex(RuntimeError, err):
                     torch.cudnn_grid_sampler(input, grid)
 
