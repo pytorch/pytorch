@@ -313,6 +313,30 @@ class ShardedTensor(object):
 
                     out_narrow_view.copy_(tensor)
 
+    def to(self,
+           device=None,
+           process_group=None):
+        if device is not None:
+            device_is_cuda = "cuda" in str(device)
+            pg_is_nccl = isinstance(self._process_group, distributed_c10d.ProcessGroupNCCL)
+
+            if device_is_cuda != pg_is_nccl:
+                assert process_group is not None, "need to pass in process_group as argument!"
+
+            # move all local shards to the device passed in
+            for shard in self._local_shards:
+                shard.tensor.to(device)
+                shard.metadata.placement._device = device
+
+            # update the sharding_spec and process group attributes
+            if process_group is not None:
+                self._process_group = process_group
+
+            self._sharding_spec = shard_spec._infer_sharding_spec_from_shards_metadata(
+                self._metadata.shards_metadata
+            )
+
+
     @classmethod
     def _init_from_local_shards(
         cls,

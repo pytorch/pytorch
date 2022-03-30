@@ -9,6 +9,7 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
+from torch.distributed import distributed_c10d
 from torch.distributed._shard import (
     shard_parameter,
     sharded_tensor,
@@ -1463,6 +1464,61 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(full_tensor, torch.ones(h, w))
         else:
             self.assertIsNone(full_tensor)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        st = sharded_tensor.zeros(spec, h, w)
+
+        # Test ability to move st to CPU
+        # first test error if not passing pg
+        with self.assertRaisesRegex(AssertionError, 'pass in process_group'):
+            st.to(device="cpu")
+
+        gloo_pg = dist.new_group(backend="gloo")
+        st.to(device="cpu", process_group=gloo_pg)
+        spec = st.sharding_spec()
+        metas = st.metadata().shards_metadata
+        self.assertIsInstance(spec, ChunkShardingSpec)
+        self.assertIsInstance(st._process_group, distributed_c10d.ProcessGroupGloo)
+        for meta in metas:
+            self.assertTrue(str(meta.placement.device()), "cpu")
+
+        # Test ability to move st back to GPU
+        # first test error if not passing pg
+        with self.assertRaisesRegex(AssertionError, 'pass in process_group'):
+            st.to(device="cuda:0")
+
+        default_pg = dist.distributed_c10d._get_default_group()
+        st.to(device=f"cuda:{self.rank}", process_group=default_pg)
+
+        spec = st.sharding_spec()
+        metas = st.metadata().shards_metadata
+        self.assertIsInstance(spec, ChunkShardingSpec)
+        self.assertIsInstance(st._process_group, distributed_c10d.ProcessGroupNCCL)
+        for meta in metas:
+            self.assertTrue(str(meta.placement.device()), f"cuda:{self.rank}")
+
+        # Test ability to move st to a single GPU device
+        # now we already now NCCL, so no need to pass process_group
+        st.to(device="cuda:0")
+        spec = st.sharding_spec()
+        metas = st.metadata().shards_metadata
+        self.assertIsInstance(spec, ChunkShardingSpec)
+        self.assertIsInstance(st._process_group, distributed_c10d.ProcessGroupNCCL)
+        for meta in metas:
+            self.assertTrue(str(meta.placement.device()), "cuda:0")
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
