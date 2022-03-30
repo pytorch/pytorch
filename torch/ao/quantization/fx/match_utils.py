@@ -173,7 +173,7 @@ def find_matches(
                         node,
                         matched_node_pattern,
                         match_map)
-                    quantize_handler = quantize_handler_cls(
+                    quantize_handler = quantize_handler_cls(  # type: ignore[operator]
                         matched_node_pattern,
                         modules,
                         root_node_getter)
