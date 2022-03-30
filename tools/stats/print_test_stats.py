@@ -107,8 +107,14 @@ def plural(n: int) -> str:
 
 
 def get_base_commit(sha1: str) -> str:
+    default_branch = os.environ.get('GIT_DEFAULT_BRANCH')
+    # capture None and "" cases
+    if not default_branch:
+        default_branch = "master"
+
+    default_remote = f"origin/{default_branch}"
     return subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
+        ["git", "merge-base", sha1, default_remote],
         encoding="ascii",
     ).strip()
 
@@ -206,7 +212,7 @@ def analyze(
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
     nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
-    # most recent master ancestor with at least one S3 report,
+    # most recent main ancestor with at least one S3 report,
     # or empty list if there are none (will show all tests as added)
     base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
@@ -525,7 +531,7 @@ def regression_info(
     and its test times. Since Python dicts maintain insertion order
     (guaranteed as part of the language spec since 3.7), the
     base_reports argument must list the head's several most recent
-    master commits, from newest to oldest (so the merge-base is
+    main commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
     simpler_head = simplify(head_report)
@@ -790,6 +796,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
         # write to S3 to go to Rockset as well
         import uuid
         for flaky_test in flaky_tests:
+            flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
             flaky_test["workflow_id"] = workflow_id
             key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
             obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
@@ -943,7 +950,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         encoding="ascii",
     ))
 
-    # if current commit is already on master, we need to exclude it from
+    # if current commit is already on main, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],
