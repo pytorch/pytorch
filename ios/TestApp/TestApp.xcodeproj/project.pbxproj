@@ -1,925 +1,465 @@
 // !$*UTF8*$!
 {
-	archiveVersion = 1;
-	classes = {
-	};
-	objectVersion = 50;
-	objects = {
+    archiveVersion = 1;
+    classes = {
+    };
+    objectVersion = 50;
+    objects = {
 
 /* Begin PBXBuildFile section */
-		01ABE8804B924839C1F47661 /* padding_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 7C90ED658535785D38F88F93 /* padding_ops.ptl */; };
-		04269507D5651CDC4926B185 /* other_math_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 2C6DCB6D5D989F2581897B18 /* other_math_ops.ptl */; };
-		0F621A833B306F6061B1FB63 /* sparse_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = FFAD720517DF53ABEAC3A29C /* sparse_ops.ptl */; };
-		103D0681A52E50BDFC67F606 /* mobilenet_v2.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D5385C63550EE6B9D1CE0E21 /* mobilenet_v2.ptl */; };
-		119BD3A2E419065D999622AF /* loss_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 6D433ACE9AAAC02A9FB5D8A1 /* loss_function_ops.ptl */; };
-		11C9CFE7D188801D7712A0A1 /* fused_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = FB1706B9D4F44C0154A7D957 /* fused_quant_ops.ptl */; };
-		178B5A52B6EBCB85475477DA /* static_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = C9FC8EF343D4976DAB12EC45 /* static_quant_ops.ptl */; };
-		199B0BE3869728B82A148CE4 /* spectral_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B21BA84E017B705A5029DCDF /* spectral_ops.ptl */; };
-		1EA08F3CE20991333D31F436 /* libXNNPACK.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 41318C91A8E114D55E105165 /* libXNNPACK.a */; };
-		222D907DBAECFBB4B3B39C36 /* transformer_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = CAB3FF5277F71B839C451419 /* transformer_ops.ptl */; };
-		2329CCFDCDD2566384D4E636 /* tensor_indexing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 16E69C5C6D8EF1789823258A /* tensor_indexing_ops.ptl */; };
-		2446A550B0564A138AC5879B /* dynamic_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0E49CD6F017F7AC0C1FF05A4 /* dynamic_quant_ops.ptl */; };
-		28B4DE884C9981F2EDDC30D2 /* tensor_typing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B98C19D2AE2E400BB0623A2C /* tensor_typing_ops.ptl */; };
-		2AD374550A8D962C340D5020 /* libeigen_blas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5208B19428CE8A3B4884F2F0 /* libeigen_blas.a */; };
-		2C422E95F4EA180A91BBE115 /* libpthreadpool.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FB1FD8D6B0D41E75C7763F27 /* libpthreadpool.a */; };
-		2E015D125D7BEF71FF0F6312 /* libpytorch_qnnpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A727C147C1FD07C0469D9265 /* libpytorch_qnnpack.a */; };
-		2E2F4F5C4ADB25605C2CCB77 /* tensor_view_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 6BA898EB3B4F425D7548E60F /* tensor_view_ops.ptl */; };
-		33A84D04E1D6B88DEC32018D /* linear_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = BCF55F230712CE83330DC554 /* linear_ops.ptl */; };
-		3575F883582FC91501119850 /* convolution_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = CC60EADC20DC4FA6FB1ED5AD /* convolution_ops.ptl */; };
-		3919C0EBD7D87B37FF3235FD /* tensor_view_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 6BA898EB3B4F425D7548E60F /* tensor_view_ops.ptl */; };
-		39696EC97F785086184AEF52 /* android_api_module.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 465E84E2DF6AF3279216A675 /* android_api_module.ptl */; };
-		3A134C6D8F600E6CF206226A /* recurrent_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D86FB8E50AB889EA51C698D7 /* recurrent_ops.ptl */; };
-		3C28209D07935ABF6CCFEB88 /* libpytorch_qnnpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2BE5FB92456BC8E97F1370DC /* libpytorch_qnnpack.a */; };
-		3F54ED5A94A1B1715E3DA320 /* libc10.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58932EDE011A142ADD4EB3B8 /* libc10.a */; };
-		429018410E7AC47ED423A23C /* general_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 8776032B3AC0D5F54C775A50 /* general_quant_ops.ptl */; };
-		44ECD4E97E79BCD1CDF8E589 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4ABA91B46ECA160CBCAE94D /* Metal.framework */; };
-		455592F9C28B62840E77F229 /* fused_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = FB1706B9D4F44C0154A7D957 /* fused_quant_ops.ptl */; };
-		48275EC2ED2434268B52FE92 /* libXNNPACK.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8D3AA33252AE62C03CD232EA /* libXNNPACK.a */; };
-		496363965DEC478B2918E2CC /* sampling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0BD32D69260473BA0FE4E569 /* sampling_ops.ptl */; };
-		49A400471A85A6A8481E0CF9 /* activation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = E1AAAB2B3A67361F8DE35705 /* activation_ops.ptl */; };
-		4DB44C1AAE27B312C4316394 /* torchscript_collection_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 529C59B09E68D5A401FD02CA /* torchscript_collection_ops.ptl */; };
-		4E5CCAEDF2094DF159EC0BF6 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5215DB6DDD47AF6069121B4C /* UIKit.framework */; };
-		4EA4D071597FAA7994C486F4 /* tensor_typing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B98C19D2AE2E400BB0623A2C /* tensor_typing_ops.ptl */; };
-		5216DD522E38DBBB5CBC73EE /* sampling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0BD32D69260473BA0FE4E569 /* sampling_ops.ptl */; };
-		53774F244903CAF535975AE4 /* shuffle_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = FBA4D8D01AE89E58013515EF /* shuffle_ops.ptl */; };
-		547130FAD7242F1673D245D3 /* shuffle_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = FBA4D8D01AE89E58013515EF /* shuffle_ops.ptl */; };
-		568142435FF819B4786DC1A5 /* padding_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 7C90ED658535785D38F88F93 /* padding_ops.ptl */; };
-		58B0CD070DA51E5B01404775 /* dropout_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 8ED228300A6148C608B5321A /* dropout_ops.ptl */; };
-		5B1F297DDA28563970AE574B /* tensor_creation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = EC0A0C504ABC4121936243A3 /* tensor_creation_ops.ptl */; };
-		5EC8B45B5B63C54E5481A5F9 /* tensor_creation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = EC0A0C504ABC4121936243A3 /* tensor_creation_ops.ptl */; };
-		5FFC4F369B0E8B341107C18D /* torchscript_collection_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 529C59B09E68D5A401FD02CA /* torchscript_collection_ops.ptl */; };
-		635DE327E6194B4E19B8EF22 /* model_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 86273C184A04E5FF856BE845 /* model_coreml.ptl */; };
-		6570536CA66C5E647A74E7B8 /* recurrent_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D86FB8E50AB889EA51C698D7 /* recurrent_ops.ptl */; };
-		674A036213955657DA9AE386 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 87EB665445ED57AD3A47DD9F /* UIKit.framework */; };
-		6A8BEC2C7271B22A1157A597 /* comparison_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 2C35B5878DCE6E6CB1ECEE4D /* comparison_ops.ptl */; };
-		6B7347205492BC273F994019 /* static_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = C9FC8EF343D4976DAB12EC45 /* static_quant_ops.ptl */; };
-		6C799389157336DBDEF67978 /* tensor_general_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A2749355BB27E557731E5DC5 /* tensor_general_ops.ptl */; };
-		6EF0BB53653D146D2C319CA8 /* model.pt in Resources */ = {isa = PBXBuildFile; fileRef = B2F1D9D512DAEFF95EC4E6F0 /* model.pt */; };
-		73A886FBF9B79AC5098C5F82 /* libc10.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3A882BCE25D6D5563AD44CD1 /* libc10.a */; };
-		76FCA4E3FEF42E2605CB8F90 /* convolution_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = CC60EADC20DC4FA6FB1ED5AD /* convolution_ops.ptl */; };
-		77903034836CF934B9C559F5 /* reduction_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = AE6CE73F951734FEF9A1E24C /* reduction_ops.ptl */; };
-		7830421EA290AAA210F846D7 /* libcpuinfo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A8BEA269AE2C3C9B9A122F18 /* libcpuinfo.a */; };
-		79713B8B0ED5426F2E2BF045 /* dropout_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 8ED228300A6148C608B5321A /* dropout_ops.ptl */; };
-		79BB496544A000E85E298C1D /* vision_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 4E875DC3CA056E021208E256 /* vision_function_ops.ptl */; };
-		7D1B42B53AD1506069E12968 /* pooling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A2782EBA770D002DD1884FFE /* pooling_ops.ptl */; };
-		804ACAE275C67958E1C7053D /* torchscript_builtin_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 261AD2E77A6D0969D852701C /* torchscript_builtin_ops.ptl */; };
-		81EC074B1F4BA55E3B0C0023 /* nn_utils_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0AEA7C2E96C7AA4F609C77B2 /* nn_utils_ops.ptl */; };
-		8390C6D4F19467E7531BA478 /* sparse_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = FFAD720517DF53ABEAC3A29C /* sparse_ops.ptl */; };
-		85B4D8F9A66A94AAAF37E248 /* libclog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0B4306E1FA27E2D5F650F59E /* libclog.a */; };
-		890E8E880CE9B61BD6F8AF49 /* libpthreadpool.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DB73CD5316650841F299923C /* libpthreadpool.a */; };
-		8E99294565162489E3EF3798 /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = F18EF668037AC1C7442D2E4A /* model_lite.ptl */; };
-		94476655B80BD5B3EC982EEF /* libeigen_blas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = AA20266643A79B843484A80B /* libeigen_blas.a */; };
-		96C65BC6BB8A77AF90774778 /* spectral_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B21BA84E017B705A5029DCDF /* spectral_ops.ptl */; };
-		98206078BE8C4FD233CC078A /* MetalPerformanceShaders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5CDEEFC2D66D910F6FE07496 /* MetalPerformanceShaders.framework */; };
-		990113C718E3EE7DF30F0449 /* blas_lapack_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 44B54FE2C073E7BBF1B89C60 /* blas_lapack_ops.ptl */; };
-		9AAC116EE8C5697E4FCE499B /* blas_lapack_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 44B54FE2C073E7BBF1B89C60 /* blas_lapack_ops.ptl */; };
-		9B583DC2E7283AB3442D734D /* linear_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = BCF55F230712CE83330DC554 /* linear_ops.ptl */; };
-		A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
-		A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
-		A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
-		A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
-		A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
-		A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
-		A0A33126404ACBB93F5FB5AC /* pooling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A2782EBA770D002DD1884FFE /* pooling_ops.ptl */; };
-		A11BE67C07D340FAD01EFCC0 /* libtorch.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 175D4E1BFA44D13713F6E311 /* libtorch.a */; };
-		A2232C3F75721612E19C846B /* libtorch.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0DF1EE29D6EF4B318E542998 /* libtorch.a */; };
-		A5C34ABD82CDDD82BE4C350B /* MetalPerformanceShaders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D47C102325818D689F888B8 /* MetalPerformanceShaders.framework */; };
-		ABFC6AF1076F480BDDF24B37 /* reduction_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = AE6CE73F951734FEF9A1E24C /* reduction_ops.ptl */; };
-		AC7F8688E38DA3839C502792 /* dynamic_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0E49CD6F017F7AC0C1FF05A4 /* dynamic_quant_ops.ptl */; };
-		B1D722954A9351C65190380B /* libclog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D399A56F9F589BF164767D5 /* libclog.a */; };
-		B3C24A2D8FBB3D230CC5EFAA /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DF6DE5AA8708F210A73B569E /* Accelerate.framework */; };
-		B545D094E6DA21881DA7AB0D /* model_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 86273C184A04E5FF856BE845 /* model_coreml.ptl */; };
-		B7D732B2B213554C51D83898 /* tensor_indexing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 16E69C5C6D8EF1789823258A /* tensor_indexing_ops.ptl */; };
-		C15A5A20F6AEEFABF4D49252 /* activation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = E1AAAB2B3A67361F8DE35705 /* activation_ops.ptl */; };
-		C17A49BAD4092C160E3524DF /* TestLiteInterpreter.mm in Sources */ = {isa = PBXBuildFile; fileRef = BC88DDAEC880298C3EB5D41F /* TestLiteInterpreter.mm */; };
-		C3C9443A03A02D31E8CDD7F7 /* normalization_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A385B86E9F79007608F58A6E /* normalization_ops.ptl */; };
-		C4180794F732442C2E3D3D41 /* vision_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 4E875DC3CA056E021208E256 /* vision_function_ops.ptl */; };
-		C4E78D833E2465DD9E32A780 /* libcpuinfo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 580CE214827E67F949E40B55 /* libcpuinfo.a */; };
-		C88DD845722713AC7ACEC17F /* BuildFile in Sources */ = {isa = PBXBuildFile; };
-		C89BAD9EC92580F285C82E74 /* tensor_general_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A2749355BB27E557731E5DC5 /* tensor_general_ops.ptl */; };
-		C92D102C877D0461232B9E52 /* loss_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 6D433ACE9AAAC02A9FB5D8A1 /* loss_function_ops.ptl */; };
-		CA756C8BE526F2A7772C63E3 /* pointwise_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = DBE6CB57815180D23D23FB90 /* pointwise_ops.ptl */; };
-		CB3FF0C18BDF90581CFADBCD /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 39D2F039B63277AA38184AB5 /* Metal.framework */; };
-		CB51C51CBD22826F5C3A418C /* android_api_module.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 465E84E2DF6AF3279216A675 /* android_api_module.ptl */; };
-		CEA58D9C020C13E4BDF9133E /* distance_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A9A1713C73074A85A81EE166 /* distance_function_ops.ptl */; };
-		CF66FD4F092BF2D36770B67F /* libtorch_cpu.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D7C5EC2A7C8E2A2E802CF6F /* libtorch_cpu.a */; };
-		DA017E53047AA15544AFD993 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3E491E8BE2B0300277D91765 /* CoreML.framework */; };
-		DD0764E3CAF4EB3E8377F927 /* mobilenet_v2.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D5385C63550EE6B9D1CE0E21 /* mobilenet_v2.ptl */; };
-		DDC3416727A074F68F4F9E50 /* nn_utils_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0AEA7C2E96C7AA4F609C77B2 /* nn_utils_ops.ptl */; };
-		E0A975057101A9D7C890EA82 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18BD8069A66F47C85A9178F9 /* CoreML.framework */; };
-		E78C0E067C54CBAA969B5A2D /* normalization_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A385B86E9F79007608F58A6E /* normalization_ops.ptl */; };
-		E7D3460DDE8433ED9ED5F8EA /* model.pt in Resources */ = {isa = PBXBuildFile; fileRef = B2F1D9D512DAEFF95EC4E6F0 /* model.pt */; };
-		E89F5EEE5BBEBC7766BD3863 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 98EF794EA9645B85305CA93D /* Accelerate.framework */; };
-		EBDA8392559B1D39EE7325BF /* libtorch_cpu.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B64647CE4B300CB1C8E200B2 /* libtorch_cpu.a */; };
-		ECE8421F4CF71249249F8C1E /* general_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 8776032B3AC0D5F54C775A50 /* general_quant_ops.ptl */; };
-		ED382433999296A31DF19C50 /* distance_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A9A1713C73074A85A81EE166 /* distance_function_ops.ptl */; };
-		F0B17181E2064BFB9B0B9ABC /* other_math_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 2C6DCB6D5D989F2581897B18 /* other_math_ops.ptl */; };
-		F1115792B7B2FEDADA9A164F /* comparison_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 2C35B5878DCE6E6CB1ECEE4D /* comparison_ops.ptl */; };
-		F255013710FE2100D2C7E815 /* torchscript_builtin_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 261AD2E77A6D0969D852701C /* torchscript_builtin_ops.ptl */; };
-		F6B0B2E8016F25F12B952AA7 /* pointwise_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = DBE6CB57815180D23D23FB90 /* pointwise_ops.ptl */; };
-		FDF4087D5CC1E854632D8E5E /* transformer_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = CAB3FF5277F71B839C451419 /* transformer_ops.ptl */; };
-		FE596D37249EA3D243A80438 /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = F18EF668037AC1C7442D2E4A /* model_lite.ptl */; };
+        A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
+        A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
+        A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
+        A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
+        A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
+        A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A06D4CA8232F0DB200763E16 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A06D4CAF232F0DB200763E16;
-			remoteInfo = TestApp;
-		};
+        A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = A06D4CA8232F0DB200763E16 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = A06D4CAF232F0DB200763E16;
+            remoteInfo = TestApp;
+        };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		0AEA7C2E96C7AA4F609C77B2 /* nn_utils_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = nn_utils_ops.ptl; path = ../models/nn_utils_ops.ptl; sourceTree = "<group>"; };
-		0B4306E1FA27E2D5F650F59E /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
-		0BD32D69260473BA0FE4E569 /* sampling_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = sampling_ops.ptl; path = ../models/sampling_ops.ptl; sourceTree = "<group>"; };
-		0DF1EE29D6EF4B318E542998 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
-		0E49CD6F017F7AC0C1FF05A4 /* dynamic_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = dynamic_quant_ops.ptl; path = ../models/dynamic_quant_ops.ptl; sourceTree = "<group>"; };
-		0F2E61739616BDB5EADFD5E0 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
-		153D4439E749558CFFCE8547 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
-		16E69C5C6D8EF1789823258A /* tensor_indexing_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_indexing_ops.ptl; path = ../models/tensor_indexing_ops.ptl; sourceTree = "<group>"; };
-		17476DE97697B64F655CBC9A /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
-		175D4E1BFA44D13713F6E311 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
-		18BD8069A66F47C85A9178F9 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
-		1D399A56F9F589BF164767D5 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
-		1D7C5EC2A7C8E2A2E802CF6F /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
-		242296466C67202AF0DA79CA /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
-		25E973C62A5F97074C80ADB6 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
-		261AD2E77A6D0969D852701C /* torchscript_builtin_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = torchscript_builtin_ops.ptl; path = ../models/torchscript_builtin_ops.ptl; sourceTree = "<group>"; };
-		262B5F9C7B2CDD8720EBFA5D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		2AD4036E09B4E8354E8A696F /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
-		2BE5FB92456BC8E97F1370DC /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
-		2C35B5878DCE6E6CB1ECEE4D /* comparison_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = comparison_ops.ptl; path = ../models/comparison_ops.ptl; sourceTree = "<group>"; };
-		2C6DCB6D5D989F2581897B18 /* other_math_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = other_math_ops.ptl; path = ../models/other_math_ops.ptl; sourceTree = "<group>"; };
-		39D2F039B63277AA38184AB5 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		3A7BD1558746D4C3F39766B6 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
-		3A882BCE25D6D5563AD44CD1 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
-		3E491E8BE2B0300277D91765 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
-		41318C91A8E114D55E105165 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
-		44B54FE2C073E7BBF1B89C60 /* blas_lapack_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = blas_lapack_ops.ptl; path = ../models/blas_lapack_ops.ptl; sourceTree = "<group>"; };
-		465E84E2DF6AF3279216A675 /* android_api_module.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = android_api_module.ptl; path = ../models/android_api_module.ptl; sourceTree = "<group>"; };
-		466DD3141C22E27352F65E5B /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
-		499306A497F65306A0921DCA /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		4E875DC3CA056E021208E256 /* vision_function_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = vision_function_ops.ptl; path = ../models/vision_function_ops.ptl; sourceTree = "<group>"; };
-		5208B19428CE8A3B4884F2F0 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
-		5215DB6DDD47AF6069121B4C /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		529C59B09E68D5A401FD02CA /* torchscript_collection_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = torchscript_collection_ops.ptl; path = ../models/torchscript_collection_ops.ptl; sourceTree = "<group>"; };
-		561D286612C634D971E78492 /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
-		580CE214827E67F949E40B55 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
-		58932EDE011A142ADD4EB3B8 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
-		58C7BFD23E2CBEEE895F5B01 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
-		5CDEEFC2D66D910F6FE07496 /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
-		60CCBC9A33D71610A9A4CE10 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		684894693ACA14AC545A6CEC /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
-		6BA898EB3B4F425D7548E60F /* tensor_view_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_view_ops.ptl; path = ../models/tensor_view_ops.ptl; sourceTree = "<group>"; };
-		6D433ACE9AAAC02A9FB5D8A1 /* loss_function_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = loss_function_ops.ptl; path = ../models/loss_function_ops.ptl; sourceTree = "<group>"; };
-		7874BAA512A4BC1AA374C70C /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
-		7C90ED658535785D38F88F93 /* padding_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = padding_ops.ptl; path = ../models/padding_ops.ptl; sourceTree = "<group>"; };
-		7CC6E5FE718F45F527832397 /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
-		7D47C102325818D689F888B8 /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
-		86273C184A04E5FF856BE845 /* model_coreml.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = model_coreml.ptl; path = ../models/model_coreml.ptl; sourceTree = "<group>"; };
-		8776032B3AC0D5F54C775A50 /* general_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = general_quant_ops.ptl; path = ../models/general_quant_ops.ptl; sourceTree = "<group>"; };
-		87EB665445ED57AD3A47DD9F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		8D3AA33252AE62C03CD232EA /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
-		8ED228300A6148C608B5321A /* dropout_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = dropout_ops.ptl; path = ../models/dropout_ops.ptl; sourceTree = "<group>"; };
-		98EF794EA9645B85305CA93D /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
-		A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-		A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-		A06D4CB6232F0DB200763E16 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-		A06D4CB7232F0DB200763E16 /* ViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
-		A06D4CBA232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
-		A06D4CBC232F0DB200763E16 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A06D4CBF232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		A06D4CC1232F0DB200763E16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
-		A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A2749355BB27E557731E5DC5 /* tensor_general_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_general_ops.ptl; path = ../models/tensor_general_ops.ptl; sourceTree = "<group>"; };
-		A2782EBA770D002DD1884FFE /* pooling_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = pooling_ops.ptl; path = ../models/pooling_ops.ptl; sourceTree = "<group>"; };
-		A385B86E9F79007608F58A6E /* normalization_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = normalization_ops.ptl; path = ../models/normalization_ops.ptl; sourceTree = "<group>"; };
-		A4ABA91B46ECA160CBCAE94D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		A727C147C1FD07C0469D9265 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
-		A8BEA269AE2C3C9B9A122F18 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
-		A9A1713C73074A85A81EE166 /* distance_function_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = distance_function_ops.ptl; path = ../models/distance_function_ops.ptl; sourceTree = "<group>"; };
-		AA20266643A79B843484A80B /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
-		AAE911C67AC0EDA446157B1A /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
-		AE6CE73F951734FEF9A1E24C /* reduction_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = reduction_ops.ptl; path = ../models/reduction_ops.ptl; sourceTree = "<group>"; };
-		B036DBD586973D3E983C85D3 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
-		B21BA84E017B705A5029DCDF /* spectral_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = spectral_ops.ptl; path = ../models/spectral_ops.ptl; sourceTree = "<group>"; };
-		B2F1D9D512DAEFF95EC4E6F0 /* model.pt */ = {isa = PBXFileReference; includeInIndex = 1; name = model.pt; path = ../models/model.pt; sourceTree = "<group>"; };
-		B64647CE4B300CB1C8E200B2 /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
-		B714316FEFC25E1D2487B35F /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
-		B98C19D2AE2E400BB0623A2C /* tensor_typing_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_typing_ops.ptl; path = ../models/tensor_typing_ops.ptl; sourceTree = "<group>"; };
-		BC88DDAEC880298C3EB5D41F /* TestLiteInterpreter.mm */ = {isa = PBXFileReference; includeInIndex = 1; path = TestLiteInterpreter.mm; sourceTree = "<group>"; };
-		BCF55F230712CE83330DC554 /* linear_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = linear_ops.ptl; path = ../models/linear_ops.ptl; sourceTree = "<group>"; };
-		C2B9BDD93600FDC34C23E00D /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
-		C9FC8EF343D4976DAB12EC45 /* static_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = static_quant_ops.ptl; path = ../models/static_quant_ops.ptl; sourceTree = "<group>"; };
-		CAB3FF5277F71B839C451419 /* transformer_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = transformer_ops.ptl; path = ../models/transformer_ops.ptl; sourceTree = "<group>"; };
-		CC60EADC20DC4FA6FB1ED5AD /* convolution_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = convolution_ops.ptl; path = ../models/convolution_ops.ptl; sourceTree = "<group>"; };
-		D3D340BEA0E84791B933274E /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
-		D5385C63550EE6B9D1CE0E21 /* mobilenet_v2.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = mobilenet_v2.ptl; path = ../models/mobilenet_v2.ptl; sourceTree = "<group>"; };
-		D86FB8E50AB889EA51C698D7 /* recurrent_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = recurrent_ops.ptl; path = ../models/recurrent_ops.ptl; sourceTree = "<group>"; };
-		DB73CD5316650841F299923C /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
-		DBE6CB57815180D23D23FB90 /* pointwise_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = pointwise_ops.ptl; path = ../models/pointwise_ops.ptl; sourceTree = "<group>"; };
-		DF6DE5AA8708F210A73B569E /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
-		DF7F721F1950B3B454A0E331 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
-		E1AAAB2B3A67361F8DE35705 /* activation_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = activation_ops.ptl; path = ../models/activation_ops.ptl; sourceTree = "<group>"; };
-		E4EF0C874BC12BF2F7A70206 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
-		EAEDCAB1BE75F65121D4D26D /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
-		EC0A0C504ABC4121936243A3 /* tensor_creation_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_creation_ops.ptl; path = ../models/tensor_creation_ops.ptl; sourceTree = "<group>"; };
-		F18EF668037AC1C7442D2E4A /* model_lite.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = model_lite.ptl; path = ../models/model_lite.ptl; sourceTree = "<group>"; };
-		F3C1BE0A01CD770456E720F2 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
-		FA3CC66A8F39196E03DAAD9F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		FB1706B9D4F44C0154A7D957 /* fused_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = fused_quant_ops.ptl; path = ../models/fused_quant_ops.ptl; sourceTree = "<group>"; };
-		FB1FD8D6B0D41E75C7763F27 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
-		FBA322AEDA04EEA7414EBED3 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
-		FBA4D8D01AE89E58013515EF /* shuffle_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = shuffle_ops.ptl; path = ../models/shuffle_ops.ptl; sourceTree = "<group>"; };
-		FE91D76C7107ED4BD9301E3F /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
-		FFAD720517DF53ABEAC3A29C /* sparse_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = sparse_ops.ptl; path = ../models/sparse_ops.ptl; sourceTree = "<group>"; };
+        A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
+        A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+        A06D4CB6232F0DB200763E16 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
+        A06D4CB7232F0DB200763E16 /* ViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
+        A06D4CBA232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+        A06D4CBC232F0DB200763E16 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+        A06D4CBF232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+        A06D4CC1232F0DB200763E16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+        A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+        A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+        A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A06D4CAD232F0DB200763E16 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				73A886FBF9B79AC5098C5F82 /* libc10.a in Frameworks */,
-				85B4D8F9A66A94AAAF37E248 /* libclog.a in Frameworks */,
-				890E8E880CE9B61BD6F8AF49 /* libpthreadpool.a in Frameworks */,
-				48275EC2ED2434268B52FE92 /* libXNNPACK.a in Frameworks */,
-				2AD374550A8D962C340D5020 /* libeigen_blas.a in Frameworks */,
-				7830421EA290AAA210F846D7 /* libcpuinfo.a in Frameworks */,
-				2E015D125D7BEF71FF0F6312 /* libpytorch_qnnpack.a in Frameworks */,
-				CF66FD4F092BF2D36770B67F /* libtorch_cpu.a in Frameworks */,
-				A2232C3F75721612E19C846B /* libtorch.a in Frameworks */,
-				E0A975057101A9D7C890EA82 /* CoreML.framework in Frameworks */,
-				44ECD4E97E79BCD1CDF8E589 /* Metal.framework in Frameworks */,
-				A5C34ABD82CDDD82BE4C350B /* MetalPerformanceShaders.framework in Frameworks */,
-				E89F5EEE5BBEBC7766BD3863 /* Accelerate.framework in Frameworks */,
-				674A036213955657DA9AE386 /* UIKit.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A0EA3AFC237FCB08007CEA34 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				3F54ED5A94A1B1715E3DA320 /* libc10.a in Frameworks */,
-				B1D722954A9351C65190380B /* libclog.a in Frameworks */,
-				2C422E95F4EA180A91BBE115 /* libpthreadpool.a in Frameworks */,
-				1EA08F3CE20991333D31F436 /* libXNNPACK.a in Frameworks */,
-				94476655B80BD5B3EC982EEF /* libeigen_blas.a in Frameworks */,
-				C4E78D833E2465DD9E32A780 /* libcpuinfo.a in Frameworks */,
-				3C28209D07935ABF6CCFEB88 /* libpytorch_qnnpack.a in Frameworks */,
-				EBDA8392559B1D39EE7325BF /* libtorch_cpu.a in Frameworks */,
-				A11BE67C07D340FAD01EFCC0 /* libtorch.a in Frameworks */,
-				DA017E53047AA15544AFD993 /* CoreML.framework in Frameworks */,
-				CB3FF0C18BDF90581CFADBCD /* Metal.framework in Frameworks */,
-				98206078BE8C4FD233CC078A /* MetalPerformanceShaders.framework in Frameworks */,
-				B3C24A2D8FBB3D230CC5EFAA /* Accelerate.framework in Frameworks */,
-				4E5CCAEDF2094DF159EC0BF6 /* UIKit.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+        A06D4CAD232F0DB200763E16 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A0EA3AFC237FCB08007CEA34 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A06D4CA7232F0DB200763E16 = {
-			isa = PBXGroup;
-			children = (
-				A06D4CB2232F0DB200763E16 /* TestApp */,
-				A0EA3B00237FCB08007CEA34 /* TestAppTests */,
-				A06D4CB1232F0DB200763E16 /* Products */,
-				B840BDF7F47ED5AEFB14A9EA /* Frameworks */,
-			);
-			sourceTree = "<group>";
-		};
-		A06D4CB1232F0DB200763E16 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				A06D4CB0232F0DB200763E16 /* TestApp.app */,
-				A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		A06D4CB2232F0DB200763E16 /* TestApp */ = {
-			isa = PBXGroup;
-			children = (
-				A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
-				A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
-				A06D4CB6232F0DB200763E16 /* ViewController.h */,
-				A06D4CB7232F0DB200763E16 /* ViewController.mm */,
-				A06D4CB9232F0DB200763E16 /* Main.storyboard */,
-				A06D4CBC232F0DB200763E16 /* Assets.xcassets */,
-				A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */,
-				A06D4CC1232F0DB200763E16 /* Info.plist */,
-				A06D4CC2232F0DB200763E16 /* main.m */,
-				B2F1D9D512DAEFF95EC4E6F0 /* model.pt */,
-				2C6DCB6D5D989F2581897B18 /* other_math_ops.ptl */,
-				A9A1713C73074A85A81EE166 /* distance_function_ops.ptl */,
-				AE6CE73F951734FEF9A1E24C /* reduction_ops.ptl */,
-				FFAD720517DF53ABEAC3A29C /* sparse_ops.ptl */,
-				0AEA7C2E96C7AA4F609C77B2 /* nn_utils_ops.ptl */,
-				529C59B09E68D5A401FD02CA /* torchscript_collection_ops.ptl */,
-				2C35B5878DCE6E6CB1ECEE4D /* comparison_ops.ptl */,
-				4E875DC3CA056E021208E256 /* vision_function_ops.ptl */,
-				C9FC8EF343D4976DAB12EC45 /* static_quant_ops.ptl */,
-				CC60EADC20DC4FA6FB1ED5AD /* convolution_ops.ptl */,
-				A2749355BB27E557731E5DC5 /* tensor_general_ops.ptl */,
-				465E84E2DF6AF3279216A675 /* android_api_module.ptl */,
-				DBE6CB57815180D23D23FB90 /* pointwise_ops.ptl */,
-				EC0A0C504ABC4121936243A3 /* tensor_creation_ops.ptl */,
-				0E49CD6F017F7AC0C1FF05A4 /* dynamic_quant_ops.ptl */,
-				A2782EBA770D002DD1884FFE /* pooling_ops.ptl */,
-				16E69C5C6D8EF1789823258A /* tensor_indexing_ops.ptl */,
-				8776032B3AC0D5F54C775A50 /* general_quant_ops.ptl */,
-				BCF55F230712CE83330DC554 /* linear_ops.ptl */,
-				FBA4D8D01AE89E58013515EF /* shuffle_ops.ptl */,
-				D5385C63550EE6B9D1CE0E21 /* mobilenet_v2.ptl */,
-				8ED228300A6148C608B5321A /* dropout_ops.ptl */,
-				86273C184A04E5FF856BE845 /* model_coreml.ptl */,
-				FB1706B9D4F44C0154A7D957 /* fused_quant_ops.ptl */,
-				B21BA84E017B705A5029DCDF /* spectral_ops.ptl */,
-				CAB3FF5277F71B839C451419 /* transformer_ops.ptl */,
-				0BD32D69260473BA0FE4E569 /* sampling_ops.ptl */,
-				A385B86E9F79007608F58A6E /* normalization_ops.ptl */,
-				44B54FE2C073E7BBF1B89C60 /* blas_lapack_ops.ptl */,
-				7C90ED658535785D38F88F93 /* padding_ops.ptl */,
-				6D433ACE9AAAC02A9FB5D8A1 /* loss_function_ops.ptl */,
-				F18EF668037AC1C7442D2E4A /* model_lite.ptl */,
-				6BA898EB3B4F425D7548E60F /* tensor_view_ops.ptl */,
-				B98C19D2AE2E400BB0623A2C /* tensor_typing_ops.ptl */,
-				E1AAAB2B3A67361F8DE35705 /* activation_ops.ptl */,
-				261AD2E77A6D0969D852701C /* torchscript_builtin_ops.ptl */,
-				D86FB8E50AB889EA51C698D7 /* recurrent_ops.ptl */,
-			);
-			path = TestApp;
-			sourceTree = SOURCE_ROOT;
-		};
-		A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
-			isa = PBXGroup;
-			children = (
-				A0EA3B03237FCB08007CEA34 /* Info.plist */,
-				BC88DDAEC880298C3EB5D41F /* TestLiteInterpreter.mm */,
-			);
-			path = TestAppTests;
-			sourceTree = "<group>";
-		};
-		B840BDF7F47ED5AEFB14A9EA /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				B036DBD586973D3E983C85D3 /* libc10.a */,
-				17476DE97697B64F655CBC9A /* libclog.a */,
-				DF7F721F1950B3B454A0E331 /* libpthreadpool.a */,
-				684894693ACA14AC545A6CEC /* libXNNPACK.a */,
-				FE91D76C7107ED4BD9301E3F /* libeigen_blas.a */,
-				B714316FEFC25E1D2487B35F /* libcpuinfo.a */,
-				E4EF0C874BC12BF2F7A70206 /* libpytorch_qnnpack.a */,
-				466DD3141C22E27352F65E5B /* libtorch_cpu.a */,
-				7874BAA512A4BC1AA374C70C /* libtorch.a */,
-				58C7BFD23E2CBEEE895F5B01 /* CoreML.framework */,
-				262B5F9C7B2CDD8720EBFA5D /* Metal.framework */,
-				7CC6E5FE718F45F527832397 /* MetalPerformanceShaders.framework */,
-				153D4439E749558CFFCE8547 /* Accelerate.framework */,
-				60CCBC9A33D71610A9A4CE10 /* UIKit.framework */,
-				FBA322AEDA04EEA7414EBED3 /* libc10.a */,
-				D3D340BEA0E84791B933274E /* libclog.a */,
-				2AD4036E09B4E8354E8A696F /* libpthreadpool.a */,
-				AAE911C67AC0EDA446157B1A /* libXNNPACK.a */,
-				25E973C62A5F97074C80ADB6 /* libeigen_blas.a */,
-				F3C1BE0A01CD770456E720F2 /* libcpuinfo.a */,
-				3A7BD1558746D4C3F39766B6 /* libpytorch_qnnpack.a */,
-				561D286612C634D971E78492 /* libtorch_cpu.a */,
-				0F2E61739616BDB5EADFD5E0 /* libtorch.a */,
-				EAEDCAB1BE75F65121D4D26D /* CoreML.framework */,
-				499306A497F65306A0921DCA /* Metal.framework */,
-				242296466C67202AF0DA79CA /* MetalPerformanceShaders.framework */,
-				C2B9BDD93600FDC34C23E00D /* Accelerate.framework */,
-				FA3CC66A8F39196E03DAAD9F /* UIKit.framework */,
-				3A882BCE25D6D5563AD44CD1 /* libc10.a */,
-				0B4306E1FA27E2D5F650F59E /* libclog.a */,
-				DB73CD5316650841F299923C /* libpthreadpool.a */,
-				8D3AA33252AE62C03CD232EA /* libXNNPACK.a */,
-				5208B19428CE8A3B4884F2F0 /* libeigen_blas.a */,
-				A8BEA269AE2C3C9B9A122F18 /* libcpuinfo.a */,
-				A727C147C1FD07C0469D9265 /* libpytorch_qnnpack.a */,
-				1D7C5EC2A7C8E2A2E802CF6F /* libtorch_cpu.a */,
-				0DF1EE29D6EF4B318E542998 /* libtorch.a */,
-				18BD8069A66F47C85A9178F9 /* CoreML.framework */,
-				A4ABA91B46ECA160CBCAE94D /* Metal.framework */,
-				7D47C102325818D689F888B8 /* MetalPerformanceShaders.framework */,
-				98EF794EA9645B85305CA93D /* Accelerate.framework */,
-				87EB665445ED57AD3A47DD9F /* UIKit.framework */,
-				58932EDE011A142ADD4EB3B8 /* libc10.a */,
-				1D399A56F9F589BF164767D5 /* libclog.a */,
-				FB1FD8D6B0D41E75C7763F27 /* libpthreadpool.a */,
-				41318C91A8E114D55E105165 /* libXNNPACK.a */,
-				AA20266643A79B843484A80B /* libeigen_blas.a */,
-				580CE214827E67F949E40B55 /* libcpuinfo.a */,
-				2BE5FB92456BC8E97F1370DC /* libpytorch_qnnpack.a */,
-				B64647CE4B300CB1C8E200B2 /* libtorch_cpu.a */,
-				175D4E1BFA44D13713F6E311 /* libtorch.a */,
-				3E491E8BE2B0300277D91765 /* CoreML.framework */,
-				39D2F039B63277AA38184AB5 /* Metal.framework */,
-				5CDEEFC2D66D910F6FE07496 /* MetalPerformanceShaders.framework */,
-				DF6DE5AA8708F210A73B569E /* Accelerate.framework */,
-				5215DB6DDD47AF6069121B4C /* UIKit.framework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
+        A06D4CA7232F0DB200763E16 = {
+            isa = PBXGroup;
+            children = (
+                A06D4CB2232F0DB200763E16 /* TestApp */,
+                A0EA3B00237FCB08007CEA34 /* TestAppTests */,
+                A06D4CB1232F0DB200763E16 /* Products */,
+            );
+            sourceTree = "<group>";
+        };
+        A06D4CB1232F0DB200763E16 /* Products */ = {
+            isa = PBXGroup;
+            children = (
+                A06D4CB0232F0DB200763E16 /* TestApp.app */,
+                A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */,
+            );
+            name = Products;
+            sourceTree = "<group>";
+        };
+        A06D4CB2232F0DB200763E16 /* TestApp */ = {
+            isa = PBXGroup;
+            children = (
+                A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
+                A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
+                A06D4CB6232F0DB200763E16 /* ViewController.h */,
+                A06D4CB7232F0DB200763E16 /* ViewController.mm */,
+                A06D4CB9232F0DB200763E16 /* Main.storyboard */,
+                A06D4CBC232F0DB200763E16 /* Assets.xcassets */,
+                A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */,
+                A06D4CC1232F0DB200763E16 /* Info.plist */,
+                A06D4CC2232F0DB200763E16 /* main.m */,
+            );
+            path = TestApp;
+            sourceTree = "<group>";
+        };
+        A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
+            isa = PBXGroup;
+            children = (
+                A0EA3B03237FCB08007CEA34 /* Info.plist */,
+            );
+            path = TestAppTests;
+            sourceTree = "<group>";
+        };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A06D4CAF232F0DB200763E16 /* TestApp */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */;
-			buildPhases = (
-				A06D4CAC232F0DB200763E16 /* Sources */,
-				A06D4CAD232F0DB200763E16 /* Frameworks */,
-				A06D4CAE232F0DB200763E16 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = TestApp;
-			productName = TestApp;
-			productReference = A06D4CB0232F0DB200763E16 /* TestApp.app */;
-			productType = "com.apple.product-type.application";
-		};
-		A0EA3AFE237FCB08007CEA34 /* TestAppTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */;
-			buildPhases = (
-				A0EA3AFB237FCB08007CEA34 /* Sources */,
-				A0EA3AFC237FCB08007CEA34 /* Frameworks */,
-				A0EA3AFD237FCB08007CEA34 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */,
-			);
-			name = TestAppTests;
-			productName = TestAppTests;
-			productReference = A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
+        A06D4CAF232F0DB200763E16 /* TestApp */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */;
+            buildPhases = (
+                A06D4CAC232F0DB200763E16 /* Sources */,
+                A06D4CAD232F0DB200763E16 /* Frameworks */,
+                A06D4CAE232F0DB200763E16 /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            name = TestApp;
+            productName = TestApp;
+            productReference = A06D4CB0232F0DB200763E16 /* TestApp.app */;
+            productType = "com.apple.product-type.application";
+        };
+        A0EA3AFE237FCB08007CEA34 /* TestAppTests */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */;
+            buildPhases = (
+                A0EA3AFB237FCB08007CEA34 /* Sources */,
+                A0EA3AFC237FCB08007CEA34 /* Frameworks */,
+                A0EA3AFD237FCB08007CEA34 /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */,
+            );
+            name = TestAppTests;
+            productName = TestAppTests;
+            productReference = A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */;
+            productType = "com.apple.product-type.bundle.unit-test";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A06D4CA8232F0DB200763E16 /* Project object */ = {
-			isa = PBXProject;
-			attributes = {
-				LastUpgradeCheck = 1030;
-				TargetAttributes = {
-					A06D4CAF232F0DB200763E16 = {
-						CreatedOnToolsVersion = 10.3;
-					};
-					A0EA3AFE237FCB08007CEA34 = {
-						CreatedOnToolsVersion = 11.2.1;
-					};
-				};
-			};
-			buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
-			compatibilityVersion = "Xcode 9.3";
-			developmentRegion = en;
-			hasScannedForEncodings = 0;
-			knownRegions = (
-				en,
-				Base,
-			);
-			mainGroup = A06D4CA7232F0DB200763E16;
-			productRefGroup = A06D4CB1232F0DB200763E16 /* Products */;
-			projectDirPath = "";
-			projectRoot = "";
-			targets = (
-				A06D4CAF232F0DB200763E16 /* TestApp */,
-				A0EA3AFE237FCB08007CEA34 /* TestAppTests */,
-			);
-		};
+        A06D4CA8232F0DB200763E16 /* Project object */ = {
+            isa = PBXProject;
+            attributes = {
+                LastUpgradeCheck = 1030;
+                TargetAttributes = {
+                    A06D4CAF232F0DB200763E16 = {
+                        CreatedOnToolsVersion = 10.3;
+                    };
+                    A0EA3AFE237FCB08007CEA34 = {
+                        CreatedOnToolsVersion = 11.2.1;
+                    };
+                };
+            };
+            buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
+            compatibilityVersion = "Xcode 9.3";
+            developmentRegion = en;
+            hasScannedForEncodings = 0;
+            knownRegions = (
+                en,
+                Base,
+            );
+            mainGroup = A06D4CA7232F0DB200763E16;
+            productRefGroup = A06D4CB1232F0DB200763E16 /* Products */;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (
+                A06D4CAF232F0DB200763E16 /* TestApp */,
+                A0EA3AFE237FCB08007CEA34 /* TestAppTests */,
+            );
+        };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A06D4CAE232F0DB200763E16 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */,
-				A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */,
-				A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */,
-				E7D3460DDE8433ED9ED5F8EA /* model.pt in Resources */,
-				F0B17181E2064BFB9B0B9ABC /* other_math_ops.ptl in Resources */,
-				CEA58D9C020C13E4BDF9133E /* distance_function_ops.ptl in Resources */,
-				ABFC6AF1076F480BDDF24B37 /* reduction_ops.ptl in Resources */,
-				8390C6D4F19467E7531BA478 /* sparse_ops.ptl in Resources */,
-				81EC074B1F4BA55E3B0C0023 /* nn_utils_ops.ptl in Resources */,
-				5FFC4F369B0E8B341107C18D /* torchscript_collection_ops.ptl in Resources */,
-				6A8BEC2C7271B22A1157A597 /* comparison_ops.ptl in Resources */,
-				C4180794F732442C2E3D3D41 /* vision_function_ops.ptl in Resources */,
-				178B5A52B6EBCB85475477DA /* static_quant_ops.ptl in Resources */,
-				3575F883582FC91501119850 /* convolution_ops.ptl in Resources */,
-				C89BAD9EC92580F285C82E74 /* tensor_general_ops.ptl in Resources */,
-				CB51C51CBD22826F5C3A418C /* android_api_module.ptl in Resources */,
-				F6B0B2E8016F25F12B952AA7 /* pointwise_ops.ptl in Resources */,
-				5B1F297DDA28563970AE574B /* tensor_creation_ops.ptl in Resources */,
-				AC7F8688E38DA3839C502792 /* dynamic_quant_ops.ptl in Resources */,
-				7D1B42B53AD1506069E12968 /* pooling_ops.ptl in Resources */,
-				B7D732B2B213554C51D83898 /* tensor_indexing_ops.ptl in Resources */,
-				429018410E7AC47ED423A23C /* general_quant_ops.ptl in Resources */,
-				9B583DC2E7283AB3442D734D /* linear_ops.ptl in Resources */,
-				547130FAD7242F1673D245D3 /* shuffle_ops.ptl in Resources */,
-				DD0764E3CAF4EB3E8377F927 /* mobilenet_v2.ptl in Resources */,
-				79713B8B0ED5426F2E2BF045 /* dropout_ops.ptl in Resources */,
-				635DE327E6194B4E19B8EF22 /* model_coreml.ptl in Resources */,
-				11C9CFE7D188801D7712A0A1 /* fused_quant_ops.ptl in Resources */,
-				96C65BC6BB8A77AF90774778 /* spectral_ops.ptl in Resources */,
-				222D907DBAECFBB4B3B39C36 /* transformer_ops.ptl in Resources */,
-				496363965DEC478B2918E2CC /* sampling_ops.ptl in Resources */,
-				E78C0E067C54CBAA969B5A2D /* normalization_ops.ptl in Resources */,
-				990113C718E3EE7DF30F0449 /* blas_lapack_ops.ptl in Resources */,
-				01ABE8804B924839C1F47661 /* padding_ops.ptl in Resources */,
-				C92D102C877D0461232B9E52 /* loss_function_ops.ptl in Resources */,
-				FE596D37249EA3D243A80438 /* model_lite.ptl in Resources */,
-				2E2F4F5C4ADB25605C2CCB77 /* tensor_view_ops.ptl in Resources */,
-				28B4DE884C9981F2EDDC30D2 /* tensor_typing_ops.ptl in Resources */,
-				49A400471A85A6A8481E0CF9 /* activation_ops.ptl in Resources */,
-				F255013710FE2100D2C7E815 /* torchscript_builtin_ops.ptl in Resources */,
-				3A134C6D8F600E6CF206226A /* recurrent_ops.ptl in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A0EA3AFD237FCB08007CEA34 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				6EF0BB53653D146D2C319CA8 /* model.pt in Resources */,
-				04269507D5651CDC4926B185 /* other_math_ops.ptl in Resources */,
-				ED382433999296A31DF19C50 /* distance_function_ops.ptl in Resources */,
-				77903034836CF934B9C559F5 /* reduction_ops.ptl in Resources */,
-				0F621A833B306F6061B1FB63 /* sparse_ops.ptl in Resources */,
-				DDC3416727A074F68F4F9E50 /* nn_utils_ops.ptl in Resources */,
-				4DB44C1AAE27B312C4316394 /* torchscript_collection_ops.ptl in Resources */,
-				F1115792B7B2FEDADA9A164F /* comparison_ops.ptl in Resources */,
-				79BB496544A000E85E298C1D /* vision_function_ops.ptl in Resources */,
-				6B7347205492BC273F994019 /* static_quant_ops.ptl in Resources */,
-				76FCA4E3FEF42E2605CB8F90 /* convolution_ops.ptl in Resources */,
-				6C799389157336DBDEF67978 /* tensor_general_ops.ptl in Resources */,
-				39696EC97F785086184AEF52 /* android_api_module.ptl in Resources */,
-				CA756C8BE526F2A7772C63E3 /* pointwise_ops.ptl in Resources */,
-				5EC8B45B5B63C54E5481A5F9 /* tensor_creation_ops.ptl in Resources */,
-				2446A550B0564A138AC5879B /* dynamic_quant_ops.ptl in Resources */,
-				A0A33126404ACBB93F5FB5AC /* pooling_ops.ptl in Resources */,
-				2329CCFDCDD2566384D4E636 /* tensor_indexing_ops.ptl in Resources */,
-				ECE8421F4CF71249249F8C1E /* general_quant_ops.ptl in Resources */,
-				33A84D04E1D6B88DEC32018D /* linear_ops.ptl in Resources */,
-				53774F244903CAF535975AE4 /* shuffle_ops.ptl in Resources */,
-				103D0681A52E50BDFC67F606 /* mobilenet_v2.ptl in Resources */,
-				58B0CD070DA51E5B01404775 /* dropout_ops.ptl in Resources */,
-				B545D094E6DA21881DA7AB0D /* model_coreml.ptl in Resources */,
-				455592F9C28B62840E77F229 /* fused_quant_ops.ptl in Resources */,
-				199B0BE3869728B82A148CE4 /* spectral_ops.ptl in Resources */,
-				FDF4087D5CC1E854632D8E5E /* transformer_ops.ptl in Resources */,
-				5216DD522E38DBBB5CBC73EE /* sampling_ops.ptl in Resources */,
-				C3C9443A03A02D31E8CDD7F7 /* normalization_ops.ptl in Resources */,
-				9AAC116EE8C5697E4FCE499B /* blas_lapack_ops.ptl in Resources */,
-				568142435FF819B4786DC1A5 /* padding_ops.ptl in Resources */,
-				119BD3A2E419065D999622AF /* loss_function_ops.ptl in Resources */,
-				8E99294565162489E3EF3798 /* model_lite.ptl in Resources */,
-				3919C0EBD7D87B37FF3235FD /* tensor_view_ops.ptl in Resources */,
-				4EA4D071597FAA7994C486F4 /* tensor_typing_ops.ptl in Resources */,
-				C15A5A20F6AEEFABF4D49252 /* activation_ops.ptl in Resources */,
-				804ACAE275C67958E1C7053D /* torchscript_builtin_ops.ptl in Resources */,
-				6570536CA66C5E647A74E7B8 /* recurrent_ops.ptl in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+        A06D4CAE232F0DB200763E16 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */,
+                A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */,
+                A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A0EA3AFD237FCB08007CEA34 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A06D4CAC232F0DB200763E16 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
-				A06D4CC3232F0DB200763E16 /* main.m in Sources */,
-				A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A0EA3AFB237FCB08007CEA34 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				C88DD845722713AC7ACEC17F /* BuildFile in Sources */,
-				C17A49BAD4092C160E3524DF /* TestLiteInterpreter.mm in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+        A06D4CAC232F0DB200763E16 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
+                A06D4CC3232F0DB200763E16 /* main.m in Sources */,
+                A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A0EA3AFB237FCB08007CEA34 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A06D4CAF232F0DB200763E16 /* TestApp */;
-			targetProxy = A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */;
-		};
+        A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = A06D4CAF232F0DB200763E16 /* TestApp */;
+            targetProxy = A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */;
+        };
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
-		A06D4CB9232F0DB200763E16 /* Main.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				A06D4CBA232F0DB200763E16 /* Base */,
-			);
-			name = Main.storyboard;
-			sourceTree = "<group>";
-		};
-		A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				A06D4CBF232F0DB200763E16 /* Base */,
-			);
-			name = LaunchScreen.storyboard;
-			sourceTree = "<group>";
-		};
+        A06D4CB9232F0DB200763E16 /* Main.storyboard */ = {
+            isa = PBXVariantGroup;
+            children = (
+                A06D4CBA232F0DB200763E16 /* Base */,
+            );
+            name = Main.storyboard;
+            sourceTree = "<group>";
+        };
+        A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */ = {
+            isa = PBXVariantGroup;
+            children = (
+                A06D4CBF232F0DB200763E16 /* Base */,
+            );
+            name = LaunchScreen.storyboard;
+            sourceTree = "<group>";
+        };
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-		A06D4CC4232F0DB200763E16 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
-			};
-			name = Debug;
-		};
-		A06D4CC5232F0DB200763E16 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
-				SDKROOT = iphoneos;
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		A06D4CC7232F0DB200763E16 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_BITCODE = No;
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestApp/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		A06D4CC8232F0DB200763E16 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_BITCODE = No;
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestApp/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		A0EA3B06237FCB08007CEA34 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_BITCODE = No;
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestAppTests/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		A0EA3B07237FCB08007CEA34 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_BITCODE = No;
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestAppTests/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/linbin/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
+        A06D4CC4232F0DB200763E16 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                CLANG_ANALYZER_NONNULL = YES;
+                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+                CLANG_CXX_LIBRARY = "libc++";
+                CLANG_ENABLE_MODULES = YES;
+                CLANG_ENABLE_OBJC_ARC = YES;
+                CLANG_ENABLE_OBJC_WEAK = YES;
+                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                CLANG_WARN_BOOL_CONVERSION = YES;
+                CLANG_WARN_COMMA = YES;
+                CLANG_WARN_CONSTANT_CONVERSION = YES;
+                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                CLANG_WARN_EMPTY_BODY = YES;
+                CLANG_WARN_ENUM_CONVERSION = YES;
+                CLANG_WARN_INFINITE_RECURSION = YES;
+                CLANG_WARN_INT_CONVERSION = YES;
+                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                CLANG_WARN_STRICT_PROTOTYPES = YES;
+                CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                CLANG_WARN_UNREACHABLE_CODE = YES;
+                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                COPY_PHASE_STRIP = NO;
+                DEBUG_INFORMATION_FORMAT = dwarf;
+                ENABLE_STRICT_OBJC_MSGSEND = YES;
+                ENABLE_TESTABILITY = YES;
+                GCC_C_LANGUAGE_STANDARD = gnu11;
+                GCC_DYNAMIC_NO_PIC = NO;
+                GCC_NO_COMMON_BLOCKS = YES;
+                GCC_OPTIMIZATION_LEVEL = 0;
+                GCC_PREPROCESSOR_DEFINITIONS = (
+                    "DEBUG=1",
+                    "$(inherited)",
+                );
+                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                GCC_WARN_UNDECLARED_SELECTOR = YES;
+                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                GCC_WARN_UNUSED_FUNCTION = YES;
+                GCC_WARN_UNUSED_VARIABLE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+                MTL_FAST_MATH = YES;
+                ONLY_ACTIVE_ARCH = YES;
+                SDKROOT = iphoneos;
+            };
+            name = Debug;
+        };
+        A06D4CC5232F0DB200763E16 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                CLANG_ANALYZER_NONNULL = YES;
+                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+                CLANG_CXX_LIBRARY = "libc++";
+                CLANG_ENABLE_MODULES = YES;
+                CLANG_ENABLE_OBJC_ARC = YES;
+                CLANG_ENABLE_OBJC_WEAK = YES;
+                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                CLANG_WARN_BOOL_CONVERSION = YES;
+                CLANG_WARN_COMMA = YES;
+                CLANG_WARN_CONSTANT_CONVERSION = YES;
+                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                CLANG_WARN_EMPTY_BODY = YES;
+                CLANG_WARN_ENUM_CONVERSION = YES;
+                CLANG_WARN_INFINITE_RECURSION = YES;
+                CLANG_WARN_INT_CONVERSION = YES;
+                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                CLANG_WARN_STRICT_PROTOTYPES = YES;
+                CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                CLANG_WARN_UNREACHABLE_CODE = YES;
+                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                COPY_PHASE_STRIP = NO;
+                DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+                ENABLE_NS_ASSERTIONS = NO;
+                ENABLE_STRICT_OBJC_MSGSEND = YES;
+                GCC_C_LANGUAGE_STANDARD = gnu11;
+                GCC_NO_COMMON_BLOCKS = YES;
+                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                GCC_WARN_UNDECLARED_SELECTOR = YES;
+                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                GCC_WARN_UNUSED_FUNCTION = YES;
+                GCC_WARN_UNUSED_VARIABLE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                MTL_ENABLE_DEBUG_INFO = NO;
+                MTL_FAST_MATH = YES;
+                SDKROOT = iphoneos;
+                VALIDATE_PRODUCT = YES;
+            };
+            name = Release;
+        };
+        A06D4CC7232F0DB200763E16 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_STYLE = Manual;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_BITCODE = NO;
+                INFOPLIST_FILE = TestApp/Info.plist;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                TARGETED_DEVICE_FAMILY = "1,2";
+            };
+            name = Debug;
+        };
+        A06D4CC8232F0DB200763E16 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_STYLE = Manual;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_BITCODE = NO;
+                INFOPLIST_FILE = TestApp/Info.plist;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                TARGETED_DEVICE_FAMILY = "1,2";
+            };
+            name = Release;
+        };
+        A0EA3B06237FCB08007CEA34 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                CODE_SIGN_STYLE = Manual;
+                DEVELOPMENT_TEAM = "";
+                INFOPLIST_FILE = TestAppTests/Info.plist;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                    "@loader_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                "PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
+                TARGETED_DEVICE_FAMILY = "1,2";
+            };
+            name = Debug;
+        };
+        A0EA3B07237FCB08007CEA34 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                CODE_SIGN_STYLE = Automatic;
+                INFOPLIST_FILE = TestAppTests/Info.plist;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                    "@loader_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                TARGETED_DEVICE_FAMILY = "1,2";
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A06D4CC4232F0DB200763E16 /* Debug */,
-				A06D4CC5232F0DB200763E16 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A06D4CC7232F0DB200763E16 /* Debug */,
-				A06D4CC8232F0DB200763E16 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A0EA3B06237FCB08007CEA34 /* Debug */,
-				A0EA3B07237FCB08007CEA34 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
+        A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A06D4CC4232F0DB200763E16 /* Debug */,
+                A06D4CC5232F0DB200763E16 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A06D4CC7232F0DB200763E16 /* Debug */,
+                A06D4CC8232F0DB200763E16 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A0EA3B06237FCB08007CEA34 /* Debug */,
+                A0EA3B07237FCB08007CEA34 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
 /* End XCConfigurationList section */
-	};
-	rootObject = A06D4CA8232F0DB200763E16 /* Project object */;
+    };
+    rootObject = A06D4CA8232F0DB200763E16 /* Project object */;
 }
