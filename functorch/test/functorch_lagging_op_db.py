@@ -482,7 +482,6 @@ _functorch_lagging_meta = {
     ('special.polygamma', 'special_polygamma_n_0'),
     ('special.xlog1py', ''),
     ('special.zeta', ''),
-    ('special.zeta', 'grad'),
     ('split', ''),
     ('split', 'list_args'),
     ('split_with_sizes', ''),

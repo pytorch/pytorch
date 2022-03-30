@@ -358,7 +358,6 @@ class TestEagerFusionOpInfo(TestCase):
         skip('msort'),
         xfail('nn.functional.dropout'),
         xfail('polar'),
-        xfail('special.zeta', 'grad'),
         xfail('to_sparse'),
         xfail('addcdiv'),
         xfail('cholesky'),
