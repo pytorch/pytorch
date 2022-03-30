@@ -782,6 +782,10 @@ StaticRuntime& StaticModule::runtime() {
   return *cached_runtime_;
 }
 
+StaticRuntime StaticModule::clone_runtime_from_cached() {
+  return runtime().clone();
+}
+
 Node* StaticModule::findNodeWithKindForTesting(const std::string& kind) const {
   for (auto& block_and_info : block_infos_) {
     auto& block_info = block_and_info.second;
