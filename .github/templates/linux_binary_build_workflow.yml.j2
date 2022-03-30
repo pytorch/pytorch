@@ -109,7 +109,9 @@ jobs:
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-{%- if config["gpu_arch_type"] == "cuda" %}
+{%- if config["gpu_arch_type"] == "rocm" %}
+    runs-on: linux.rocm.gpu
+{%- elif config["gpu_arch_type"] == "cuda" %}
     runs-on: linux.4xlarge.nvidia.gpu
 {%- else %}
     runs-on: linux.4xlarge
@@ -125,7 +127,11 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
-{%- if config["gpu_arch_type"] == "cuda" %}
+{%- if config["gpu_arch_type"] == "rocm" %}
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+{%- elif config["gpu_arch_type"] == "cuda" %}
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:

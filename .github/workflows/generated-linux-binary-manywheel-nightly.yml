@@ -1958,7 +1958,7 @@ jobs:
   manywheel-py3_7-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm4_5_2-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -2050,6 +2050,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -2389,7 +2392,7 @@ jobs:
   manywheel-py3_7-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_0-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -2481,6 +2484,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -4580,7 +4586,7 @@ jobs:
   manywheel-py3_8-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm4_5_2-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -4672,6 +4678,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -5011,7 +5020,7 @@ jobs:
   manywheel-py3_8-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_0-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -5103,6 +5112,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -7202,7 +7214,7 @@ jobs:
   manywheel-py3_9-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm4_5_2-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -7294,6 +7306,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -7633,7 +7648,7 @@ jobs:
   manywheel-py3_9-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_0-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -7725,6 +7740,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -9824,7 +9842,7 @@ jobs:
   manywheel-py3_10-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm4_5_2-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -9916,6 +9934,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -10255,7 +10276,7 @@ jobs:
   manywheel-py3_10-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_0-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
@@ -10347,6 +10368,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {

@@ -7287,7 +7287,7 @@ jobs:
   libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -7380,6 +7380,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -7721,7 +7724,7 @@ jobs:
   libtorch-rocm4_5_2-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-shared-without-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -7814,6 +7817,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -8155,7 +8161,7 @@ jobs:
   libtorch-rocm4_5_2-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-static-with-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -8248,6 +8254,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -8589,7 +8598,7 @@ jobs:
   libtorch-rocm4_5_2-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-static-without-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -8682,6 +8691,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -9023,7 +9035,7 @@ jobs:
   libtorch-rocm5_0-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -9116,6 +9128,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -9457,7 +9472,7 @@ jobs:
   libtorch-rocm5_0-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-shared-without-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -9550,6 +9565,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -9891,7 +9909,7 @@ jobs:
   libtorch-rocm5_0-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -9984,6 +10002,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -10325,7 +10346,7 @@ jobs:
   libtorch-rocm5_0-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-static-without-deps-cxx11-abi-build
-    runs-on: linux.4xlarge
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -10418,6 +10439,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
