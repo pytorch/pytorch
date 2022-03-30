@@ -2973,6 +2973,15 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
   }
 }
 
+TEST(TestShapeGraphLinting, Basic) {
+  auto schemas = RegisteredShapeComputeSchemas();
+  for (const auto& schema : schemas) {
+    auto g = shapeComputeGraphForSchema(*schema);
+    TORCH_INTERNAL_ASSERT(g);
+    LintShapeComputeGraph(schema, *g);
+  }
+}
+
 // TODO: move to test_kernel when global settings are explicit
 // fusion parameters
 class Composed : public ::testing::Test {
