@@ -225,6 +225,24 @@ PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObjec
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getAllocatorBackend(PyObject *_unused, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  using c10::cuda::CUDACachingAllocator::AllocatorBackend;
+  AllocatorBackend backend = c10::cuda::CUDACachingAllocator::allocatorBackend();
+  // this call should be uncommon, don't bother interning strings
+  switch (backend) {
+    case AllocatorBackend::NATIVE:
+      return THPUtils_packString("native");
+    case AllocatorBackend::CUDAMALLOCASYNC:
+      return THPUtils_packString("cudaMallocAsync");
+    default:
+      THPUtils_assert(false, "Unexpected value for backend");
+      return nullptr;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -590,6 +608,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_cudaHostAllocator", THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
   {"_cuda_cudaCachingAllocator_raw_alloc", THCPModule_cudaCachingAllocator_raw_alloc, METH_VARARGS, nullptr},
   {"_cuda_cudaCachingAllocator_raw_delete", THCPModule_cudaCachingAllocator_raw_delete, METH_O, nullptr},
+  {"_cuda_getAllocatorBackend", THCPModule_getAllocatorBackend, METH_NOARGS, nullptr},
   {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
   {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},

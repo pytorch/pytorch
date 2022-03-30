@@ -587,3 +587,14 @@ def mem_get_info(device: Union[Device, int] = None) -> int:
         device = torch.cuda.current_device()
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
+
+def get_allocator_backend() -> str:
+    r"""Returns a string describing the active allocator backend as set by
+    ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
+    ``native`` (Pytorch's native caching allocator) and `cudaMallocAsync``
+    (CUDA's built-in asynchronous allocator).
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on choosing the allocator backend.
+    """
+    return torch._C._cuda_getAllocatorBackend()
