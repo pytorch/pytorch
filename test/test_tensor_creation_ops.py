@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
+from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
@@ -508,12 +509,12 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch_result, scipy_result)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.half, torch.float32, torch.float64)
     def test_torch_complex(self, device, dtype):
         real = torch.tensor([1, 2], device=device, dtype=dtype)
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
-        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        complex_dtype = float_to_corresponding_complex_type_map[dtype]
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes
@@ -531,12 +532,12 @@ class TestTensorCreation(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.complex64, torch.complex128, torch.bool)
+            torch.complex64, torch.complex128, torch.bool)
     def test_torch_complex_floating_dtype_error(self, device, dtype):
         for op in (torch.complex, torch.polar):
             a = torch.tensor([1, 2], device=device, dtype=dtype)
             b = torch.tensor([3, 4], device=device, dtype=dtype)
-            error = r"Expected both inputs to be Float or Double tensors but " \
+            error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
         with self.assertRaisesRegex(RuntimeError, error):
             op(a, b)
@@ -1599,6 +1600,10 @@ class TestTensorCreation(TestCase):
 
     def test_combinations(self, device):
         a = torch.tensor([1, 2, 3], device=device)
+
+        c = torch.combinations(a, r=0)
+        expected = torch.empty(0, dtype=a.dtype, device=device)
+        self.assertEqual(c, expected)
 
         c = torch.combinations(a, r=1)
         expected = torch.tensor(list(combinations(a, r=1)), device=device)
@@ -2832,8 +2837,6 @@ class TestTensorCreation(TestCase):
         self._test_signal_window_functions(window, dtype, device)
 
     @onlyNativeDeviceTypes
-    # See https://github.com/pytorch/pytorch/issues/72630
-    @skipMeta
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
@@ -4071,6 +4074,8 @@ class TestAsArray(TestCase):
             [0.0, True, False, 42],
             # With Complex
             [0.0, True, False, 42, 5j],
+            # With Range
+            range(5),
         ]
 
         for e in examples:

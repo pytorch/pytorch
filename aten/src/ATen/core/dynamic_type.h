@@ -159,7 +159,7 @@ class DynamicType : public SharedType {
   const Arguments& arguments() const {
     return arguments_;
   }
-  TypeKind dynamicKind() const;
+  TORCH_API TypeKind dynamicKind() const;
 
   // Should be used only on the server side to restore static type information.
 #ifndef C10_MOBILE
