@@ -16,17 +16,21 @@ class SyncBatchNorm(Function):
         if size == 1 and world_size < 2:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
 
-        # calculate mean/invstd for input.
-        mean, invstd = torch.batch_norm_stats(input, eps)
-
-        count = torch.full((1,), input.numel() // input.size(1),
-                           dtype=mean.dtype,
-                           device=mean.device)
-
-
         num_channels = input.shape[1]
-        # C, C, 1 -> (2C + 1)
-        combined = torch.cat([mean, invstd, count], dim=0)
+        if input.numel() > 0:
+            # calculate mean/invstd for input.
+            mean, invstd = torch.batch_norm_stats(input, eps)
+
+            count = torch.full((1,), input.numel() // input.size(1),
+                            dtype=mean.dtype,
+                            device=mean.device)
+
+            # C, C, 1 -> (2C + 1)
+            combined = torch.cat([mean, invstd, count], dim=0)
+        else:
+            # for empty input, directly set all stats to 0
+            combined = torch.zeros(2 * num_channels + 1, device=input.device)
+
         # Use allgather instead of allreduce because count could be different across
         # ranks, simple all reduce op can not give correct results.
         # batch_norm_gather_stats_with_counts calculates global mean & invstd based on
@@ -53,6 +57,11 @@ class SyncBatchNorm(Function):
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
+        # remove stats from empty inputs
+        indices = [i for i, x in enumerate(count_all.cpu().tolist()) if x[0] >= 1]
+        mean_all = mean_all[indices]
+        invstd_all = invstd_all[indices]
+
         # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
@@ -69,8 +78,10 @@ class SyncBatchNorm(Function):
         self.process_group = process_group
 
         # apply element-wise normalization
-        out = torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
-        return out
+        if input.numel() > 0:
+            return torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
+        else:
+            return torch.empty_like(input)
 
     @staticmethod
     def backward(self, grad_output):

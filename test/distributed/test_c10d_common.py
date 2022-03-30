@@ -806,6 +806,28 @@ class CommonDistributedDataParallelTest(object):
 
         return fut.then(fut_then)
 
+    @skip_if_lt_x_gpu(2)
+    def test_sync_batch_norm_empty_input(self):
+        pg = self._get_process_group()
+
+        model = torch.nn.Sequential(
+            torch.nn.BatchNorm2d(2),
+        ).to(device=self.rank)
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+        )
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(
+            model,
+            process_group=pg,
+        )
+
+        model.train()
+        x = torch.zeros((1 if self.rank != 0 else 0, 2, 11, 13), dtype=torch.float32, device=self.rank)
+        y = model(x)
+        print(y)
+
 
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
