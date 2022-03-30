@@ -89,6 +89,7 @@ jobs:
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
   linux-xenial-cuda11_3-py3_7-gcc7-no-ops-build:
+    if: ${{false}}
     name: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
