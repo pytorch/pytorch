@@ -17,7 +17,7 @@ from torch.onnx.symbolic_helper import (parse_args,
                                         _unimplemented,
                                         ScalarType,
                                         quantized_args,
-                                        check_args_have_same_dtype)
+                                        args_have_same_dtype)
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -1365,10 +1365,11 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
     sym_help.check_training_mode(training, "batch_norm")
 
     if torch.is_autocast_enabled() and \
-            not check_args_have_same_dtype([input, weight, bias, running_mean, running_var]) and \
+            not args_have_same_dtype([input, weight, bias, running_mean, running_var]) and \
             sym_help._export_onnx_opset_version < 15:
         return sym_help._onnx_opset_unsupported_detailed("BatchNormalization", 9, 15,
-                                                         "Tensors with mixed precision are not supported")
+                                                         "All input tensors must have the same `dtype`."
+                                                         " Turn off Autocast or export using opset version 15.")
 
     weight, bias, running_mean, running_var = sym_help._batchnorm_helper(g, input, weight, bias, running_mean, running_var)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
