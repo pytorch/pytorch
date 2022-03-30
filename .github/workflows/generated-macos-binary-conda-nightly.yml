@@ -36,6 +36,7 @@ concurrency:
 
 jobs:
   conda-py3_7-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
@@ -241,6 +242,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_8-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
@@ -446,6 +448,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_9-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
@@ -651,6 +654,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_10-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
