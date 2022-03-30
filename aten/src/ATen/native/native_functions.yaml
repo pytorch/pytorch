@@ -5338,8 +5338,13 @@
 
 - func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
+
+# Special case of to_dense with custom derivative
+- func: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+  variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: sparse_to_dense
+    SparseCPU, SparseCUDA: sparse_to_dense
+    SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
