@@ -23,7 +23,7 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
     jvp, make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble,
+    combine_state_for_ensemble, make_fx
 )
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
@@ -2111,6 +2111,35 @@ class TestComposability(TestCase):
 
         y = vjp_fn(x)[0]
         # Honestly IDK what the result here is... but at least it runs
+
+    def test_make_fx_vmap(self, device):
+        def f(x):
+            return torch.sin(x)
+        inp = torch.randn(5, 3)
+        f = vmap(f)
+        fx_f = make_fx(f)(inp)
+        new_inp = torch.randn(5, 3)
+        self.assertEqual(fx_f(new_inp), f(new_inp))
+
+    def test_make_fx_jacrev(self, device):
+        def f(x):
+            return x.sin().sum()
+        inp = torch.randn(3)
+        f = jacrev(jacrev(f))
+        fx_f = make_fx(f)(inp)
+        new_inp = torch.randn(3)
+        self.assertEqual(fx_f(new_inp), f(new_inp))
+
+    def test_make_fx_vjp(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        primals = torch.randn(3)
+        _, vjp_fn = vjp(f, primals)
+        cotangent = torch.randn(())
+        fx_f = make_fx(vjp_fn)(cotangent, True, True)
+        new_cotangent = torch.randn(())
+        self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
 
 class TestMakeFunctional(TestCase):
