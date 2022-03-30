@@ -63,7 +63,7 @@ def register_math_op(op):
                 res,
                 rhs.sharding_spec(),
                 rhs.size(),  # type: ignore[arg-type]
-                kprocess_group=pg)
+                process_group=pg)
 
         elif isinstance(rhs, (int, float)):
             assert isinstance(lhs, ShardedTensor)
