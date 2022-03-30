@@ -400,7 +400,7 @@ class TestObserver(QuantizationTestCase):
             x = obs(x)
 
     def _test_memoryless(self, obs_class):
-        obs = obs_class(memoryless=True)
+        obs = obs_class(averaging_constant=1)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -411,10 +411,10 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(params, obs.calculate_qparams())
 
     def test_memoryless_minmaxobserver(self):
-        self._test_memoryless(MinMaxObserver)
+        self._test_memoryless(MovingAverageMinMaxObserver)
 
     def test_memoryless_perchannelminmaxobserver(self):
-        self._test_memoryless(PerChannelMinMaxObserver)
+        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -757,6 +757,17 @@ class TestFakeQuantize(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
+
+    def test_quant_min_max_override(self):
+        observer = default_per_channel_weight_observer
+        # test no override
+        fq_module = FakeQuantize(observer)
+        self.assertEqual(fq_module.activation_post_process.quant_min, -128)
+        self.assertEqual(fq_module.activation_post_process.quant_max, 127)
+        # test quant_min/quant_max override
+        fq_module = FakeQuantize(observer, quant_min=0, quant_max=127)
+        self.assertEqual(fq_module.activation_post_process.quant_min, -64)
+        self.assertEqual(fq_module.activation_post_process.quant_max, 63)
 
 def _get_buffer_ids(module):
     """
