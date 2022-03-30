@@ -296,10 +296,11 @@ class TestHooks(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_register_functions_called(self, cuda_first, mixed_precision):
         """Tests that _register_{pre|post}_backward_hooks called during forward."""
         group = dist.distributed_c10d._get_default_group()
+        mixed_precision = MixedPrecision() if mixed_precision else None
         config = {"mixed_precision": mixed_precision}
         model = self._get_wrapped_model(
             group, mixed_precision=mixed_precision, cuda_first=cuda_first
@@ -316,9 +317,10 @@ class TestHooks(FSDPTest):
 
 class TestNoGrad(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_transformer_no_grad(self, mixed_precision):
         group = dist.distributed_c10d._get_default_group()
+        mixed_precision = MixedPrecision() if mixed_precision else None
         config = {"mixed_precision": mixed_precision}
         model = self._get_wrapped_model(group, config=config, cuda_first=False)
         # Train model for a step

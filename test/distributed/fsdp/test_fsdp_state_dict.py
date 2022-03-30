@@ -140,13 +140,14 @@ class TestFSDPStateDict(FSDPTest):
                             self.assertEqual(tensor.dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_save_and_load_after_forward_state_dict(self, mixed_precision):
         """
         Test that saving after some training results in params being updated as
         expected.
         """
         torch.cuda.set_device(self.rank)
+        mixed_precision = MixedPrecision() if mixed_precision else None
         model = self._get_simple_nested_model(mixed_precision=mixed_precision)
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         initial_params = _get_full_detached_param(model)

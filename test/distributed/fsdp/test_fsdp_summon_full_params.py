@@ -360,10 +360,11 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_params_are_unflattenned(self, rank0_only, offload_to_cpu, mixed_precision):
         layer_shape = (10, 12)
         model = nn.Linear(*layer_shape, bias=False).cuda(self.rank)
+        mixed_precision = MixedPrecision() if mixed_precision else None
         fsdp_model = FSDP(deepcopy(model), mixed_precision=mixed_precision).cuda(self.rank)
 
         def _get_flat_param():
