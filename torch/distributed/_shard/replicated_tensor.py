@@ -32,14 +32,21 @@ class ReplicatedTensor(torch.Tensor):
     def __new__(cls, data=None, process_group=None):
         if data is None:
             data = torch.empty(0)
-        r = torch.Tensor._make_subclass(cls, data)      # type: ignore[arg-type]
+        r = torch.Tensor._make_subclass(cls, data, data.requires_grad)      # type: ignore[arg-type]
         r.process_group = (     # type: ignore[attr-defined]
             process_group
             if process_group is not None
             else distributed_c10d._get_default_group()
         )
-        r.requires_grad = data.requires_grad
         return r
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.process_group)
+            memo[id(self)] = result
+            return result
 
     def __repr__(self):
         return f"ReplicatedTensor({super(ReplicatedTensor, self).__repr__()})"
@@ -124,6 +131,16 @@ class ReplicatedTensor(torch.Tensor):
 
         return True
 
+    def __setstate__(self, state):
+        with torch._C.DisableTorchFunction():
+            self.data = state
+            self.requires_grad = state.requires_grad
+            from torch.distributed._shard.api import _get_current_process_group
+            self.process_group = _get_current_process_group()
+
+    def __getstate__(self):
+        return self.data
+
 class ReplicatedParameter(ReplicatedTensor, torch.nn.Parameter):
     """
     ReplicatedParameter is essentially a wrapper around ReplicatedTensor and
@@ -135,7 +152,7 @@ class ReplicatedParameter(ReplicatedTensor, torch.nn.Parameter):
         behaves as a regular torch.nn.Parameter when used within an nn.Module.
     """
 
-    def __new__(cls, tensor: torch.Tensor, process_group=None):
+    def __new__(cls, tensor: torch.Tensor, requires_grad=True, process_group=None):
         process_group = (     # type: ignore[attr-defined]
             process_group
             if process_group is not None
@@ -143,7 +160,33 @@ class ReplicatedParameter(ReplicatedTensor, torch.nn.Parameter):
         )
 
         replicated_tensor = ReplicatedTensor(tensor, process_group)
-        r = torch.Tensor._make_subclass(cls, replicated_tensor)      # type: ignore[arg-type]
+        r = torch.Tensor._make_subclass(cls, replicated_tensor, requires_grad)      # type: ignore[arg-type]
         r.process_group = process_group
-        r.requires_grad = tensor.requires_grad
+
+        # Ensure both tensors share grads.
+        r.grad = tensor.grad
+        if tensor.grad is None:
+            r.grad = torch.zeros_like(tensor)
+            tensor.grad = r.grad
         return r
+
+    def __repr__(self):
+        return f"ReplicatedParameter({super(ReplicatedParameter, self).__repr__()})"
+
+    def __setstate__(self, state):
+        with torch._C.DisableTorchFunction():
+            self.data = state
+            self.requires_grad = state.requires_grad
+            from torch.distributed._shard.api import _get_current_process_group
+            self.process_group = _get_current_process_group()
+
+    def __getstate__(self):
+        return self.data
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad, self.process_group)
+            memo[id(self)] = result
+            return result

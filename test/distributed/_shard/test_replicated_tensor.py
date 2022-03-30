@@ -190,12 +190,13 @@ class TestReplicatedTensor(ShardedTensorTestBase):
     def test_with_ddp(self):
         # Test Replicated params for DDP
         replica_tensor = ReplicatedTensor(torch.rand(4, 8, device=self.rank))
-        module = torch.nn.Linear(8, 2).cuda(self.rank)
-        ddp = DDP(module)
+        model = torch.nn.Linear(8, 2).cuda(self.rank)
+        original_params = list(model.parameters())
+        ddp = DDP(model)
         self.assertIsInstance(ddp.module.weight, ReplicatedParameter)
         self.assertIsInstance(ddp.module.bias, ReplicatedParameter)
-        self.assertIsInstance(module.weight, ReplicatedParameter)
-        self.assertIsInstance(module.bias, ReplicatedParameter)
+        self.assertIsInstance(model.weight, ReplicatedParameter)
+        self.assertIsInstance(model.bias, ReplicatedParameter)
 
         # Test module.parameters.
         params = list(ddp.parameters())
@@ -203,33 +204,50 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         self.assertEqual(ddp.module.weight, params[0])
         self.assertEqual(ddp.module.bias, params[1])
 
-        params = list(module.parameters())
+        params = list(model.parameters())
         self.assertEqual(2, len(params))
-        self.assertEqual(module.weight, params[0])
-        self.assertEqual(module.bias, params[1])
+        self.assertEqual(model.weight, params[0])
+        self.assertEqual(model.bias, params[1])
 
         # Validate output
         out = ddp(replica_tensor)
         self.assertIsInstance(out, ReplicatedTensor)
 
+        # Test backward.
+        out.sum().backward()
+        self.assertIsNotNone(model.weight.grad)
+        self.assertIsNotNone(model.bias.grad)
+        self.assertIsNotNone(ddp.module.weight.grad)
+        self.assertIsNotNone(ddp.module.bias.grad)
+        for original_param in original_params:
+            self.assertIsNotNone(original_param.grad)
+        self.assertEqual(model.weight.grad, original_params[0].grad)
+        self.assertEqual(model.bias.grad, original_params[1].grad)
+        self.assertEqual(model.weight.grad, ddp.module.weight.grad)
+        self.assertEqual(model.bias.grad, ddp.module.bias.grad)
+
         # Validate after forward pass
         self.assertIsInstance(ddp.module.weight, ReplicatedParameter)
         self.assertIsInstance(ddp.module.bias, ReplicatedParameter)
-        self.assertIsInstance(module.weight, ReplicatedParameter)
-        self.assertIsInstance(module.bias, ReplicatedParameter)
+        self.assertIsInstance(model.weight, ReplicatedParameter)
+        self.assertIsInstance(model.bias, ReplicatedParameter)
 
         # Test buffers.
-        module.register_buffer('foo', torch.rand(10).cuda(self.rank))
-        ddp = DDP(module)
+        model.register_buffer('foo', torch.rand(10).cuda(self.rank))
+        ddp = DDP(model)
         self.assertIsInstance(ddp.module.foo, ReplicatedTensor)
-        self.assertIsInstance(module.foo, ReplicatedTensor)
+        self.assertIsInstance(model.foo, ReplicatedTensor)
 
         # Validate during forward pass
         def hook(module, input):
             self.assertIsInstance(ddp.module.foo, ReplicatedTensor)
             self.assertIsInstance(module.foo, ReplicatedTensor)
 
-        module.register_forward_pre_hook(hook)
+        model.register_forward_pre_hook(hook)
         for _ in range(2):
             out = ddp(replica_tensor)
             self.assertIsInstance(out, ReplicatedTensor)
+
+            # Validate buffers not replicated after forward.
+            self.assertNotIsInstance(ddp.module.foo, ReplicatedTensor)
+            self.assertNotIsInstance(model.foo, ReplicatedTensor)

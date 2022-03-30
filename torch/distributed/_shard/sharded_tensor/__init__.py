@@ -16,7 +16,6 @@ from .api import (
 )
 from .metadata import ShardMetadata  # noqa: F401
 from .partial_tensor import _PartialTensor
-from .utils import load_with_process_group
 
 
 def empty(sharding_spec: shard_spec.ShardingSpec,
