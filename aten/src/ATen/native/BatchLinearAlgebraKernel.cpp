@@ -908,8 +908,8 @@ void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tra
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(B);
-  auto lu_stride = matrixStride(LU);
-  auto pivots_stride = pivots.size(-1);
+  auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
   auto batch_size = batchCount(B);
 
   auto n = LU.size(-2);
@@ -917,10 +917,19 @@ void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tra
   auto leading_dimension = std::max<int64_t>(1, n);
 
   int info = 0;
+
+  // lu and pivots tensors can be broadcast to B
+  // here we construct a helper indexing tensor to linearly index into LU and pivots
+  IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+  IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
+  BroadcastLinearIndices lu_index(
+      batchCount(LU), lu_batch_shape, b_batch_shape);
+
   for (const auto i : c10::irange(batch_size)) {
+    int64_t lu_index_i = lu_index(i);
     scalar_t* b_working_ptr = &b_data[i * b_stride];
-    scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    scalar_t* lu_working_ptr = &lu_data[lu_index_i * lu_stride];
+    int* pivots_working_ptr = &pivots_data[lu_index_i * pivots_stride];
 
     lapackLuSolve<scalar_t>(trans, n, nrhs, lu_working_ptr, leading_dimension, pivots_working_ptr,
                             b_working_ptr, leading_dimension, &info);

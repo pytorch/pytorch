@@ -452,7 +452,7 @@ class TestReductions(TestCase):
         sizes = [1] * 65
         x = torch.randn(sizes, device=device)
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
-               torch.amin, torch.amax, torch.norm]
+               torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, 64)
@@ -1735,7 +1735,7 @@ class TestReductions(TestCase):
     @onlyNativeDeviceTypes
     def test_repeated_dim(self, device):
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
-               torch.amin, torch.amax, torch.norm]
+               torch.norm]
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
@@ -1835,10 +1835,6 @@ class TestReductions(TestCase):
             torch.max(x, dim=0, out=(illegal_values, valid_indices))
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(illegal_values, valid_indices))
-        with self.assertRaisesRegex(RuntimeError, rmsg):
-            torch.amax(x, dim=0, out=illegal_values)
-        with self.assertRaisesRegex(RuntimeError, rmsg):
-            torch.amin(x, dim=0, out=illegal_values)
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.max(x, dim=0, out=(valid_values, illegal_indices))
         with self.assertRaisesRegex(RuntimeError, rmsg):

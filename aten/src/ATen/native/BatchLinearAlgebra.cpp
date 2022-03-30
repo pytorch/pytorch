@@ -1606,20 +1606,9 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
 }
 
 std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
-  TORCH_WARN_ONCE(
-    "torch.solve is deprecated in favor of torch.linalg.solve",
-    "and will be removed in a future PyTorch release.\n",
-    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.linalg.lu_factor.\n",
-    "X = torch.solve(B, A).solution\n",
-    "should be replaced with\n",
-    "X = torch.linalg.solve(A, B)"
-  );
-  // We cannot use _linalg_solve_out as it sometimes computes the LU from A^T
-  Tensor X, LU;
-  X = at::linalg_solve(A, self);
-  LU = std::get<0>(at::linalg_lu_factor(A));
-  return std::make_tuple(X, LU);
+  Tensor solution, LU;
+  at::solve_out(solution, LU, self, A);
+  return std::make_tuple(solution, LU);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_factor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
