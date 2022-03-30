@@ -86,6 +86,8 @@ jobs:
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
 
+          export COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -107,6 +109,7 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
+            -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
