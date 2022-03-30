@@ -35,7 +35,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtypes, get_all_math_dtypes
+from torch.testing._internal.common_dtype import integral_types, floating_types_and, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, \
@@ -13104,7 +13104,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_deterministic_cudnn(self, device, dtype):
         inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
@@ -13123,7 +13123,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_large_workspace(self, device, dtype):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
         # reasonable algorithm that does not run out of memory
@@ -13248,7 +13248,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to(device, dtype)
@@ -17602,7 +17602,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
@@ -17970,37 +17970,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -18165,7 +18165,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18179,7 +18179,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
