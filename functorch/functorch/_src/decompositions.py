@@ -477,7 +477,7 @@ def native_layer_norm_backward(grad_out: Tensor, input: Tensor, normalized_shape
     if output_mask[0]:
         d_input = aten.mul(aten.div(rstd, N), inner)
     else:
-        d_input = aten.new_empty(input, (0,))
+        d_input = None
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
@@ -485,7 +485,7 @@ def native_layer_norm_backward(grad_out: Tensor, input: Tensor, normalized_shape
         else:
             d_weight = aten.mul(grad_out, x_hat)
     else:
-        d_weight = aten.new_empty(input, (0,))
+        d_weight = None
 
     if output_mask[2] and bias is not None:
         if len(outer_dim_indices) > 0:
@@ -493,7 +493,7 @@ def native_layer_norm_backward(grad_out: Tensor, input: Tensor, normalized_shape
         else:
             d_bias = grad_out
     else:
-        d_bias = aten.new_empty(input, (0,))
+        d_bias = None
     return (d_input, d_weight, d_bias)
 
 # @register_decomposition(aten.addmm)
