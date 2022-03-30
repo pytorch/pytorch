@@ -10279,6 +10279,19 @@
   dispatch:
     CPU, CUDA: special_ndtri_out
 
+- func: special_log_ndtr(Tensor self) -> Tensor
+  structured_delegate: special_log_ndtr.out
+  python_module: special
+  variants: function
+
+- func: special_log_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_log_ndtr_out
+
 - func: special_expm1(Tensor self) -> Tensor
   python_module: special
   variants: function
