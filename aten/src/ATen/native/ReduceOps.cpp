@@ -1985,5 +1985,9 @@ Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const
   return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
 }
 
+Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
+  return self.values().sum(dtype);
+}
+
 } // namespace native
 } // namespace at
