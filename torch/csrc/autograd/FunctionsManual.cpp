@@ -5288,7 +5288,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
-    N = N.scatter_add_(dim, index, ones_like(src));
+    N = N.scatter_add(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
     Tensor N_src = N.gather(dim, index);

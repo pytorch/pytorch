@@ -317,7 +317,7 @@ struct cuda_scatter_gather_base_kernel {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
-      "cuda_scatter_gather_base_kernel", [&] {
+      "cuda_scatter_gather_base_kernel_func", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
