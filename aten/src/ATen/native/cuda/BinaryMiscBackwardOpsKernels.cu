@@ -16,22 +16,23 @@
 namespace at {
 namespace native {
 
+const char sigmoid_backward_name[] = "sigmoid_backward_kernel";
 void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if(isComplexType(dtype)) {
-#if AT_USE_JITERATOR();
+#if AT_USE_JITERATOR()
     static const auto sigmoid_backward_string = jiterator_stringify(
         template <typename T>
         T sigmoid_backward(T a, T b) {
           return a * std::conj((T{1.} - b) * b);
         }
-    ); // sigmoid_backwad_string
+    ); // sigmoid_backward_string
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sigmoid_backward_cuda", [&]() {
         jitted_gpu_kernel<
           /*name=*/ sigmoid_backward_name,
           /*return_dtype=*/ scalar_t,
           /*common_dtype=*/ scalar_t,
-          /*arity=*/ 2>(iter, sigmoid_backwar_string);
+          /*arity=*/ 2>(iter, sigmoid_backward_string);
     });
 #else
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sigmoid_backward_cuda", [&]() {
@@ -39,6 +40,7 @@ void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
         return a * std::conj((scalar_t{1.} - b) * b);
       });
     });
+#endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, dtype, "sigmoid_backward_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
