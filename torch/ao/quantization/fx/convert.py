@@ -68,12 +68,22 @@ FUSED_MODULE_CLASSES = (
     torch.nn.intrinsic.ConvReLU3d,
 )
 
+FLOAT_WEIGHTED_MODULE_CLASSES = (
+    torch.nn.Linear,
+    torch.nn.Conv1d,
+    torch.nn.Conv2d,
+    torch.nn.Conv3d,
+)
+
 QAT_MODULE_CLASSES = (
     torch.nn.qat.Linear,
     torch.nn.qat.Conv2d,
     torch.nn.qat.Conv3d,
     torch.nn.intrinsic.qat.LinearReLU,
     torch.nn.intrinsic.qat.LinearBn1d,
+    torch.nn.intrinsic.qat.ConvBn1d,
+    torch.nn.intrinsic.qat.ConvBnReLU1d,
+    torch.nn.intrinsic.qat.ConvReLU1d,
     torch.nn.intrinsic.qat.ConvBn2d,
     torch.nn.intrinsic.qat.ConvBnReLU2d,
     torch.nn.intrinsic.qat.ConvReLU2d,
@@ -136,6 +146,26 @@ def run_weight_observers(observed: GraphModule) -> None:
                     observed, weight_observer_nodes)
             # run the weight observer
             weight_observer_module()
+
+# this method is temporary will be removed soon
+def duplicate_quantize_dynamic_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if (node.op == "call_function" and node.target == torch.quantize_per_tensor_dynamic):
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node(
+                            "call_function",
+                            torch.quantize_per_tensor_dynamic,
+                            node.args,
+                            node.kwargs)
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
 
 def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     """
@@ -506,11 +536,16 @@ def convert_custom_module(
         assert isinstance(prev_node, Node), \
             f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
         if prev_node.op == "call_method" and prev_node.target == "dequantize":
-            assert len(prev_node.users) == 1, "dequantize node before custom module is used "
-            "multiple times, this is currently not supported yet, but it can be "
-            "supported by duplicating the dequantize nodes in these cases"
-            prev_node.replace_all_uses_with(prev_node.args[0])
-            graph.erase_node(prev_node)
+            # change the connection for custom module, we'll change the input
+            # of custom module node to quantize node:
+            # Before: quantize - dequantize - custom - module
+            # After: quantize - custom - module
+            #              \ - dequantize
+            node.replace_input_with(prev_node, prev_node.args[0])
+
+            # Remove the dequantize node if it doesn't have other users
+            if len(prev_node.users) == 0:
+                graph.erase_node(prev_node)
 
         # absorb the following observer into the module conversion
         activation_post_process = maybe_get_observer_for_node(node, modules)
@@ -746,6 +781,11 @@ def convert(
                     node, modules, model, is_reference, backend_config_dict)
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
+                # extra check for fused module classes to make sure they are fused module classes
+                # of target modules
+                if type(modules[node.target]) in FUSED_MODULE_CLASSES and \
+                   type(modules[node.target][0]) not in FLOAT_WEIGHTED_MODULE_CLASSES:
+                    continue
                 convert_weighted_module(
                     node, modules, observed_node_names, quantized_reference_module_mapping, qconfig_map)
             elif type(modules[node.target]) in custom_module_classes:
@@ -763,6 +803,7 @@ def convert(
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = duplicate_dequantize_node(model)
+        model = duplicate_quantize_dynamic_node(model)
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
