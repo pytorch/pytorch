@@ -3075,7 +3075,7 @@ TEST(StaticRuntime, MoveCtor) {
 }
 
 namespace {
-void testClone(bool precompute_offsets) {
+void testClone(MemoryPlannerAlgorithm algorithm) {
   auto mod = getDeepAndWideSciptModel();
   std::vector<IValue> args{
       at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
@@ -3085,7 +3085,7 @@ void testClone(bool precompute_offsets) {
       StaticModuleOptions{
           .enable_out_variant = true,
           .optimize_memory = true,
-          .precompute_offsets = precompute_offsets});
+          .memory_planner_algorithm = algorithm});
 
   auto& runtime = smod.runtime();
   auto cloned_runtime = runtime.clone();
@@ -3096,9 +3096,9 @@ void testClone(bool precompute_offsets) {
 } // namespace
 
 TEST(StaticRuntime, CloneWithRegularMemoryPlanner) {
-  testClone(/*precompute_offsets=*/false);
+  testClone(MemoryPlannerAlgorithm::kStandardResizing);
 }
 
 TEST(StaticRuntime, CloneWithPrecomputedOffsets) {
-  testClone(/*precompute_offsets=*/true);
+  testClone(MemoryPlannerAlgorithm::kPrecomputedOffsets);
 }

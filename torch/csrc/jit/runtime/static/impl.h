@@ -154,6 +154,13 @@ class TORCH_API ManagedTensorRanges {
   FastMap<const Value*, Lifetime> value_lifetimes_{};
 };
 
+enum class TORCH_API MemoryPlannerAlgorithm {
+  // The default in StaticModuleOptions
+  kStandardResizing,
+  // See [Precomputed Offsets Memory Planning Algorithm] for details.
+  kPrecomputedOffsets
+};
+
 struct TORCH_API StaticModuleOptions {
   // enabling out variant allows Static Runtime to do memory planning
   bool enable_out_variant{true};
@@ -181,10 +188,9 @@ struct TORCH_API StaticModuleOptions {
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
-  // If true, use the precomputed offsets memory planning algorithm. Only
-  // meaningful if enable_out_variant == true.
-  // See [Precomputed Offsets Memory Planning Algorithm] for details.
-  bool precompute_offsets{false};
+  // The memory planner to use. Only meaningful if enable_out_variant == true
+  MemoryPlannerAlgorithm memory_planner_algorithm{
+      MemoryPlannerAlgorithm::kStandardResizing};
 };
 
 /// The static runime supports two execution modes.
@@ -1023,12 +1029,7 @@ class TORCH_API StaticRuntime {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     static std::unique_ptr<IValue[]> allocate(size_t size) {
       if (size) {
-        auto result = std::make_unique<IValue[]>(size);
-        auto* data = result.get();
-        for (const auto i : c10::irange(size)) {
-          data[i] = IValue();
-        }
-        return result;
+        return std::make_unique<IValue[]>(size);
       }
       return nullptr;
     }
