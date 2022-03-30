@@ -11,9 +11,10 @@
 
 namespace at { namespace native {
 
+const char logical_and_name[] = "logical_and_kernel";
 void logical_and_kernel_cuda(TensorIterator& iter) {
   auto dtype = iter.common_dtype();
-  if (at::isComplexType(dtype) {
+  if (at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
     static const auto logical_and_string = jiterator_stringify(
         template <typename T>
@@ -37,11 +38,12 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
 #endif
   } else {
     AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, ScalarType::BFloat16,
-                               iter.common_dtype(), "logical_and_cuda", [&]() {
+                               dtype, "logical_and_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
         return a && b;
       });
    });
+  }
 }
 
 void logical_or_kernel_cuda(TensorIterator& iter) {
