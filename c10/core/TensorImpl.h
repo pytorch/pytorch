@@ -860,11 +860,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::SparseXPU);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
-  // format.
   bool is_sparse_csr() const {
-    return key_set_.has(DispatchKey::SparseCsrCPU) ||
-        key_set_.has(DispatchKey::SparseCsrCUDA);
+    return layout() == kSparseCsr;
+  }
+
+  bool is_sparse_bsr() const {
+    return layout() == kSparseBsr;
   }
 
   bool is_quantized() const {
@@ -996,7 +997,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
-    } else if (is_sparse_csr()) {
+    } else if (
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA)) {
       return slow_layout();
     } else if (is_mkldnn()) {
       return kMkldnn;

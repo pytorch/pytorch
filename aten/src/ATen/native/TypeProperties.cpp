@@ -50,6 +50,10 @@ bool is_sparse_csr(const Tensor& self) {
   return self.is_sparse_csr();
 }
 
+bool is_sparse_bsr(const Tensor& self) {
+  return self.is_sparse_bsr();
+}
+
 bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }

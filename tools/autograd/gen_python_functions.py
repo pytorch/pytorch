@@ -70,7 +70,7 @@ from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
 # These functions require manual Python bindings or are not exposed to Python
 _SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
+    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'is_sparse_bsr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_?sparse_csr_tensor.*',
@@ -160,9 +160,9 @@ def is_py_special_function(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
+def gen(out: str, native_yaml_path: str, tags_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     methods = load_signatures(native_functions, deprecated_yaml_path, method=True)

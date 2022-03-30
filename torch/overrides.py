@@ -1079,6 +1079,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
         Tensor.is_sparse_csr.__get__: lambda self: -1,
+        Tensor.is_sparse_bsr.__get__: lambda self: -1,
         Tensor.is_vulkan.__get__: lambda self: -1,
         Tensor.layout.__get__: lambda self: -1,
         Tensor.name.__get__: lambda self: -1,

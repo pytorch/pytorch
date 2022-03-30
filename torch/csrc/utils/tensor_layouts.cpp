@@ -35,6 +35,14 @@ void initializeLayouts() {
   }
   registerLayoutObject((THPLayout*)sparse_csr_layout, at::Layout::SparseCsr);
 
+  PyObject* sparse_bsr_layout =
+      THPLayout_New(at::Layout::SparseBsr, "torch.sparse_bsr");
+  Py_INCREF(sparse_bsr_layout);
+  if (PyModule_AddObject(torch_module, "sparse_bsr", sparse_bsr_layout) != 0) {
+    throw python_error();
+  }
+  registerLayoutObject((THPLayout*)sparse_bsr_layout, at::Layout::SparseBsr);
+
   PyObject* mkldnn_layout = THPLayout_New(at::Layout::Mkldnn, "torch._mkldnn");
   Py_INCREF(mkldnn_layout);
   if (PyModule_AddObject(torch_module, "_mkldnn", mkldnn_layout) != 0) {

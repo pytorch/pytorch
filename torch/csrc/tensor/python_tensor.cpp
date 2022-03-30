@@ -131,6 +131,14 @@ PyObject *Tensor_is_sparse_csr(PyTensorType *self, void *unused) {
   }
 }
 
+PyObject *Tensor_is_sparse_bsr(PyTensorType *self, void *unused) {
+  if (self->layout->layout == at::Layout::SparseBsr) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", Tensor_instancecheck, METH_O, nullptr},
@@ -146,6 +154,7 @@ static struct PyGetSetDef metaclass_properties[] = {
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
   {"is_sparse_csr",(getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
+  {"is_sparse_bsr",(getter)Tensor_is_sparse_bsr, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
