@@ -1,4 +1,3 @@
-
 from functools import partial
 import torch
 import torch.nn.functional as F
@@ -11,13 +10,12 @@ from typing import List, Optional
 class InstanceNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
-        instance_norm = partial(torch._instance_norm_all_outputs, cudnn_enabled=True)
+        instance_norm = partial(torch.instance_norm, cudnn_enabled=True)
         expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
-        output, mean, rstd, reserve, idx = forward_helper(instance_norm, expanded_args, expanded_kwargs)
+        output = forward_helper(instance_norm, expanded_args, expanded_kwargs)
         ctx.input = expanded_args[0]
         ctx.running_mean, ctx.running_var = expanded_kwargs['running_mean'], expanded_kwargs['running_var']
         ctx.weight, ctx.bias, ctx.eps = expanded_kwargs['weight'], expanded_kwargs['bias'], expanded_kwargs['eps']
-        ctx.mean, ctx.rstd, ctx.reserve, ctx.idx = mean, rstd, reserve, idx
         return output
 
 
@@ -25,7 +23,6 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
     def backward(ctx, grad_output):
         input, running_mean, running_var = ctx.input, ctx.running_mean, ctx.running_var
         weight, bias, eps = ctx.weight, ctx.bias, ctx.eps
-        mean, rstd, reserve, idx = ctx.mean, ctx.rstd, ctx.reserve, ctx.idx
 
         results: List[Optional[torch.Tensor]] = []
         results.append(None)  # for kwarg names
@@ -40,9 +37,13 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
             running_var_ = running_var.repeat(b) if running_var is not None else None
             input_reshaped = input.contiguous().view(new_shape)
             grad_output_reshaped = grad_output.contiguous().view(new_shape)
-            res = torch.ops.aten._batch_norm_impl_index_backward(
-                idx, input_reshaped, grad_output_reshaped, weight_, running_mean_, running_var_,
-                mean, rstd, True, eps, (True, False, False), reserve)
+            mean = torch.mean(input_reshaped.transpose(0, 1), tuple(range(1, input.dim())), False)
+            rstd = torch.var(input_reshaped.transpose(0, 1), tuple(range(1, input.dim())), keepdim=False, unbiased=False)
+
+            # can't use cuda or miopen backward since 
+            res = torch.ops.aten.native_batch_norm_backward(
+                grad_output_reshaped, input_reshaped, weight_, running_mean_, running_var_,
+                mean, rstd, True, eps, (True, False, False))
             results.append(res[0].reshape(input.shape))
         else:
             results.append(None)

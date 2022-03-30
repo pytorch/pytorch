@@ -16,7 +16,7 @@ class TSBuiltinOpsModule(torch.nn.Module):
         l = ["1", "2", "test"]
         d = {"key": 1}
         d2 = {0: 100}
-        return len(
+        return (
             # type
             bool(x),
             bool(x.item()),
@@ -111,7 +111,7 @@ class TSCollectionOpsModule(torch.nn.Module):
             d2.clear()
             d2[0] = 100
 
-        return len(
+        return (
             s[torch.tensor(1)],
             d["key"],
             d2[0],
