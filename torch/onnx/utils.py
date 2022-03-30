@@ -1324,45 +1324,45 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 # For a concrete example, see how we create and call
 # export_to_onnx(...) below.
 # ```c++
-#static void PropagateArgTypes(
-#    const at::ArrayRef<c10::IValue>& inputs,
-#    std::shared_ptr<torch::jit::Graph> graph) {
-#  TORCH_CHECK(graph->inputs().size() == inputs.size(),
-#              "Number of provided inputs must match captured sub-graph's schema.");
-#  for (size_t i = 0; i < graph->inputs().size(); ++i) {
-#    auto input_symbol = graph->inputs()[i];
-#    auto input_value = inputs[i];
-#    if (!input_value.isTensor()) {
-#      // The allowed IR components in ONNX exporter and Pytorch
-#      // are a little different. I am not confident to fill
-#      // types other than tensor, because of the ambiguous scalar
-#      // representations in Pytorch.
-#      continue;
-#    }
-#    input_symbol->setType(input_value.type());
-#  }
-#}
-#static std::string ExportToOnnx1(
-#    std::shared_ptr<torch::jit::Graph> graph,
-#    const at::ArrayRef<c10::IValue>& args) {
-#  // ONNX exporter modifies the graph in-place, so we
-#  // need to clone it to avoid interaction between
-#  // Pytorch's JIT mechanism and ONNX graph.
-#  std::shared_ptr<torch::jit::Graph> new_subgraph(graph->copyUnique().release());
-#  // Acquire GIL since Python is not multi-threading.
-#  pybind11::gil_scoped_acquire guard{};
-#  // Retrieve Python exporter function.
-#  pybind11::function export_to_onnx =
-#      pybind11::reinterpret_borrow<pybind11::function>(
-#          pybind11::module::import("torch.onnx.utils").attr("_export_jit_graph_to_onnx_model_proto"));
-#  // Fill types up. The sub-graphp from LazyTensor doesn't
-#  // contain input shapes.
-#  PropagateArgTypes(args, new_subgraph);
-#  // Execute Python function.
-#  auto result = export_to_onnx(new_subgraph, ::torch::onnx::OperatorExportTypes::ONNX);
-#  return result.cast<std::string>();
+# static void PropagateArgTypes(
+#     const at::ArrayRef<c10::IValue>& inputs,
+#     std::shared_ptr<torch::jit::Graph> graph) {
+#   TORCH_CHECK(graph->inputs().size() == inputs.size(),
+#               "Number of provided inputs must match captured sub-graph's schema.");
+#   for (size_t i = 0; i < graph->inputs().size(); ++i) {
+#     auto input_symbol = graph->inputs()[i];
+#     auto input_value = inputs[i];
+#     if (!input_value.isTensor()) {
+#       // The allowed IR components in ONNX exporter and Pytorch
+#       // are a little different. I am not confident to fill
+#       // types other than tensor, because of the ambiguous scalar
+#       // representations in Pytorch.
+#       continue;
+#     }
+#     input_symbol->setType(input_value.type());
+#   }
+# }
+# static std::string ExportToOnnx1(
+#     std::shared_ptr<torch::jit::Graph> graph,
+#     const at::ArrayRef<c10::IValue>& args) {
+#   // ONNX exporter modifies the graph in-place, so we
+#   // need to clone it to avoid interaction between
+#   // Pytorch's JIT mechanism and ONNX graph.
+#   std::shared_ptr<torch::jit::Graph> new_subgraph(graph->copyUnique().release());
+#   // Acquire GIL since Python is not multi-threading.
+#   pybind11::gil_scoped_acquire guard{};
+#   // Retrieve Python exporter function.
+#   pybind11::function export_to_onnx =
+#       pybind11::reinterpret_borrow<pybind11::function>(
+#           pybind11::module::import("torch.onnx.utils").attr("_export_jit_graph_to_onnx_model_proto"));
+#   // Fill types up. The sub-graphp from LazyTensor doesn't
+#   // contain input shapes.
+#   PropagateArgTypes(args, new_subgraph);
+#   // Execute Python function.
+#   auto result = export_to_onnx(new_subgraph, ::torch::onnx::OperatorExportTypes::ONNX);
+#   return result.cast<std::string>();
 #
-#```
+# ```
 def _export_jit_graph_to_onnx_model_proto(
         graph,
         operator_export_type):
