@@ -79,6 +79,7 @@ jobs:
       build-generates-artifacts: false
 
   libtorch-linux-xenial-cuda11_3-py3_7-gcc7-build:
+    if: ${{ false }}
     name: libtorch-linux-xenial-cuda11.3-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
