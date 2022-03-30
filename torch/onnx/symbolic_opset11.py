@@ -6,10 +6,10 @@ from sys import maxsize
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
-import numpy
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType, quantized_args
 from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -23,7 +23,7 @@ from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_blo
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -55,7 +55,7 @@ def clamp(g, self, min, max):
             return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args('v', 'v')
+@parse_args("v", "v")
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
     min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -66,7 +66,7 @@ def clamp_min(g, self, min):
         return g.op("Max", self, min)
 
 
-@parse_args('v', 'v')
+@parse_args("v", "v")
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
     max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -81,7 +81,7 @@ def relu6(g, input):
     relu = g.op("Relu", input)
     dtype = input.type().scalarType()
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -102,7 +102,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         indices_list = [indices_list_value]
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         args = [self] + indices_list + [values, accumulate]
-        return g.op("ATen", *args, operator_s="index_put")
+        return g.at("index_put", *args)
 
     from torch.onnx.symbolic_opset9 import add, expand
     accumulate = sym_help._parse_arg(accumulate, "b")
@@ -112,7 +112,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == 'Bool':
+            if indices_list[idx_].type().scalarType() == "Bool":
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -179,7 +179,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     rank = sym_help._get_tensor_rank(values)
     if rank is not None and rank == 0:
         values = expand(g, values, values_shape, None)
-    values = g.op("Reshape", values, values_shape)
+    values = sym_help._reshape_helper(g, values, values_shape)
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
@@ -218,7 +218,7 @@ upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args("v", "i", "v", "v")
@@ -226,7 +226,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
+        return g.at("gather", self, dim, index, sparse_grad)
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
@@ -234,7 +234,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, dim, index, src, operator_s="scatter")
+        return g.at("scatter", self, dim, index, src, overload_name="src")
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
@@ -266,12 +266,12 @@ def masked_select(g, self, mask):
 
 
 def masked_scatter(g, self, mask, source):
-    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as, size
     index = nonzero(g, expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.
     # This is not supported by ONNX::ScatterND, so we need to flatten and slice source tensor.
-    source = view(g, source, torch.LongTensor([-1]))
+    source = sym_help._reshape_helper(g, source, torch.LongTensor([-1]))
     source = sym_help._slice_helper(g, source,
                                     axes=torch.LongTensor([0]),
                                     starts=torch.LongTensor([0]),
@@ -394,6 +394,13 @@ def round(g, self):
     return g.op("Round", self)
 
 
+def remainder(g, input, other):
+    if sym_help._is_fp(input) or sym_help._is_fp(other):
+        from torch.onnx.symbolic_opset9 import remainder as _remainder_9
+        return _remainder_9(g, input, other)
+    return g.op("Mod", input, other, fmod_i=0)
+
+
 @parse_args("v", "v", "i", "i")
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not sym_help._is_split_static(split_size_or_sizes, _outputs):
@@ -432,18 +439,25 @@ def unbind(g, self, dim=0, _outputs=None):
 
 # Generate paddings in ONNX order based on pad in pytorch.
 # Args:
-#     dim: the dimension of the tensor.
+#     input: the input tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
 #          where m is in range [0, n].
-def _prepare_onnx_paddings(g, dim, pad):
+def _prepare_onnx_paddings(g, input, pad):
+    if not sym_help._is_packed_list(pad) and sym_help._is_list(pad) and sym_help._is_scalar_list(pad):
+        pad = g.op("ConcatFromSequence", pad, axis_i=0, new_axis_i=1)
     # The desired order of paddings is
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
     # n is the dimension of input.
     # Assume zero-dimensions in the beginning, pad the "pad" sequence with zeros in the beginning
     pad_len = torch.onnx.symbolic_opset9.size(g, pad, g.op("Constant", value_t=torch.tensor([0])))
     # Set extension = [0] * (dim * 2 - len(pad))
-    extension = g.op("Sub", g.op("Mul", g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)),
+    rank = sym_help._get_tensor_rank(input)
+    if rank is None:
+        rank = g.op("Size", g.op("Shape", input))
+    else:
+        rank = g.op("Constant", value_t=torch.tensor(rank, dtype=torch.int64))
+    extension = g.op("Sub", g.op("Mul", rank,
                      g.op("Constant", value_t=torch.tensor(2, dtype=torch.int64))), pad_len)
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
     # Currently ONNX only supports int64 type for Pad
@@ -453,9 +467,9 @@ def _prepare_onnx_paddings(g, dim, pad):
     # paddings = [[..., 0, dim_n-1_begin, dim_n_begin],
     #               [..., 0, dim_n-1_end, dim_n_end]]
     # Reshape back to 1-D paddings = [..., 0, dim_n - 1_begin, dim_n_begin, ..., 0, dim_n - 1_end, dim_n_end]
-    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
+    paddings = sym_help._reshape_helper(g, paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
     paddings = g.op("Transpose", torch.onnx.symbolic_opset10.flip(g, paddings, [0]), perm_i=[1, 0])
-    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1])))
+    paddings = sym_help._reshape_helper(g, paddings, g.op("Constant", value_t=torch.tensor([-1])))
     padding_c = g.op("Cast", paddings, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     return padding_c
 
@@ -464,19 +478,19 @@ def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, input)
-    pad = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
+    pad = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, pad, value, mode_s=mode)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
-    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
+    paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
-    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
+    paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
@@ -537,7 +551,10 @@ def arange(g, *args):
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    # Caffe2-specific op
+    is_caffe2_aten_fallback = (sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                               torch.onnx._CAFFE2_ATEN_FALLBACK)
+    if is_caffe2_aten_fallback:
         return g.op("_caffe2::Range", stop)
     return arange(g, stop, 4, None, None, None)
 
@@ -551,6 +568,10 @@ def size(g, self, dim=None):
 def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
+
+    # dim as a tensor
+    if not sym_help._is_constant(dim):
+        return sym_help._squeeze_helper(g, self, [dim])
 
     dim = sym_help._get_const(dim, "i", "dim")
 
@@ -589,8 +610,10 @@ def squeeze(g, self, dim=None):
     return sym_help._squeeze_helper(g, self, [dim])
 
 
-@parse_args("v", "i")
 def unsqueeze(g, self, dim):
+    if sym_help._is_constant(dim):
+        dim = sym_help._get_const(dim, "i", "dim")
+
     return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
@@ -599,7 +622,7 @@ def mm(g, self, other):
 
 def index(g, self, index):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, index, operator_s="index")
+        return g.at("index", self, index, overload_name="Tensor")
 
     if sym_help._is_packed_list(index):
         indices = sym_help._unpack_list(index)
@@ -620,7 +643,7 @@ def index(g, self, index):
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
+        return g.at("index_fill", self, index, value, dim_i=dim_value, overload_name="int_Scalar")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
@@ -631,7 +654,7 @@ def index_fill(g, self, dim, index, value):
 def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
+        return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 
@@ -689,13 +712,13 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
                             blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
 
     # Apply dilation on kernel and find its indices along dim d
-    kernel_grid = numpy.arange(0, kernel_size_d * dilation_d, dilation_d)
-    kernel_grid = g.op("Constant", value_t=torch.tensor([kernel_grid]))
+    kernel_grid = torch.arange(0, kernel_size_d * dilation_d, dilation_d)
+    kernel_grid = g.op("Constant", value_t=kernel_grid.unsqueeze(0))
 
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     blocks_d_indices = sym_help._unsqueeze_helper(g, blocks_d_indices, [0])  # Reshape to [1, -1]
-    kernel_mask = g.op("Reshape", kernel_grid, g.op("Constant", value_t=torch.tensor([-1, 1])))
+    kernel_mask = sym_help._reshape_helper(g, kernel_grid, g.op("Constant", value_t=torch.tensor([-1, 1])))
     block_mask = g.op("Add", blocks_d_indices, kernel_mask)
 
     return block_mask
@@ -766,7 +789,7 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     output = g.op("Gather", padded_input, blocks_row_indices, axis_i=2)
     output = g.op("Gather", output, blocks_col_indices, axis_i=4)
     output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
-    return g.op("Reshape", output, output_shape)
+    return sym_help._reshape_helper(g, output, output_shape)
 
 
 def narrow(g, input, dim, start, length):
@@ -774,10 +797,12 @@ def narrow(g, input, dim, start, length):
     end = g.op("Add", start, length)
     return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
 
-
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
+    if dim == 1:
+        return input
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):
@@ -795,6 +820,17 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    if ord == 0:
+        if dim is None:
+            self = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+            keepdim = None
+        cond_op = g.op("Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0]))))
+        cond_op = g.op("Cast", cond_op, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        return sym_help._reducesum_helper(g, cond_op, axes_i=dim, keepdims_i=keepdim)
+    else:
+        return lvn(g, self, ord, dim, keepdim, dtype)
 
 @parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(g,
@@ -866,22 +902,29 @@ def embedding_bag(g,
     return loop.node().output(), None, None, None
 
 
-def prim_ConstantChunk(g, self, chunks, dim):
-    input_shape = g.op("Shape", self)
-    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
-    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
-    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
-    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
-    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
-    res = []
-    for i in range(chunks):
-        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
-        end = g.op("Mul", chunk_dim, index)
-        res.append(g.op("Slice", self, start, end, axis))
-        start = end
-    return res
+@parse_args("v", "v", "f", "f")
+def embedding_renorm(g, weight, indices, max_norm, norm_type):
+    unique_indices = g.op("Unique", indices)
+    partial_weight = g.op("Gather", weight, unique_indices)
+    norm_type = int(norm_type)
+    if norm_type == 1:
+        norm_type = "ReduceL1"
+    elif norm_type == 2:
+        norm_type = "ReduceL2"
+    else:
+        raise RuntimeError(f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
+                           "Only 1. and 2. are supported.")
+    partial_weight_norm = g.op(norm_type, partial_weight, axes_i=[1], keepdims_i=1)
+    # https://github.com/pytorch/pytorch/blob/0a07488ed2c47765e337e290bd138c0e6e459cbd/aten/src/ATen/native/Embedding.cpp#L177
+    # Add 1e-7 to prevent division by zero.
+    partial_weight_norm_ = g.op("Add", partial_weight_norm, g.op("Constant", value_t=torch.tensor(1e-7)))
+    max_norm = torch.tensor(max_norm)
+    scales = g.op("Div", max_norm, partial_weight_norm_)
+    partial_weight_renorm = g.op("Mul", partial_weight, scales)
+    partial_weight_renorm = g.op("Where", g.op("Greater", partial_weight_norm, max_norm),
+                                 partial_weight_renorm, partial_weight)
+    return g.op("ScatterND", weight, sym_help._unsqueeze_helper(g, unique_indices, [1]), partial_weight_renorm)
+
 
 def chunk(g, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
@@ -894,109 +937,6 @@ def chunk(g, self, chunks, dim):
     chunk_vec = g.op("Concat", *chunk_vec, axis_i=0)
     return split(g, self, chunk_vec, dim)
 
-def repeat_interleave(g, self, repeats, dim=None, output_size=None):
-    from torch.onnx.symbolic_opset9 import reshape
-    input = self
-    final_dim = dim
-    # if dim is None flatten
-    # By default, use the flattened input array, and return a flat output array
-    if sym_help._is_none(dim):
-        input = reshape(g, self, g.op("Constant", value_t=torch.tensor([-1])))
-        dim = 0
-    else:
-        dim = sym_help._maybe_get_scalar(dim)
-
-    repeats_dim = sym_help._get_tensor_rank(repeats)
-    repeats_sizes = sym_help._get_tensor_sizes(repeats)
-    input_sizes = sym_help._get_tensor_sizes(input)
-    if repeats_dim is None:
-        raise RuntimeError("Unsupported: ONNX export of repeat_interleave for unknown "
-                           "repeats rank.")
-    if repeats_sizes is None:
-        raise RuntimeError("Unsupported: ONNX export of repeat_interleave for unknown "
-                           "repeats size.")
-    if input_sizes is None:
-        raise RuntimeError("Unsupported: ONNX export of repeat_interleave for unknown "
-                           "input size.")
-    # Handle cases where dim is negative
-    if dim < 0:
-        dim += len(input_sizes)
-
-    output_sizes = input_sizes.copy()
-    perm_i = [0]
-    for idx, input_size in enumerate(input_sizes):
-        perm_i.append(idx + 1)
-        if input_size is None:
-            output_sizes[idx], input_sizes[idx] = 0, -1
-    perm_i[0], perm_i[dim] = perm_i[dim], perm_i[0]
-
-    # Cases when repeats is a single value tensor and dim has unknown input size
-    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)) and output_sizes[dim] == 0:
-        if not sym_help._is_tensor(repeats):
-            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-        reps = sym_help._size_helper(g, input, dim)
-        reps = unsqueeze(g, reps, 0)
-        repeats = g.op("Expand", repeats, reps)
-    # There are cases when the repeats are 1-d tensor with multiple repeats, but dim
-    # provided along one of the dynamic axes provided. A simple example would be
-    # input.shape -> [1, 1, *] where * represents the dynamic axes, and dim = 2
-    # Now, repeat interleaving can be performed in pytorch when the value of * matches
-    # with the number of elements in repeat, for example if * -> 2, number of repeats
-    # should be 2 as well.
-    else:
-        return torch.onnx.symbolic_opset9.repeat_interleave(g, self, repeats, final_dim)
-
-    reps_like = g.op("ConstantOfShape", g.op("Shape", repeats),
-                     value_t=torch.tensor([1], dtype=torch.long))
-    r_splits = split(g, repeats, reps_like, 0)
-    i_splits = split(g, input, reps_like, dim)
-
-    output_sizes[dim], input_sizes[dim] = -1, 1
-
-    # Create a loop to iterate over each value along the dimension
-    # and perform individual interleaving using the repeats tensor
-    # Loop is of the following pattern
-    # input (trip_count, cond)
-    #   int trip_count = ...;
-    #   bool cond = ...;
-    #   for (int i=0; i < trip_count && cond; ++i) {
-    #     cond = ...;
-    #   }
-
-    # Loop conditions
-    loop_condition = g.op("Constant", value_t=torch.tensor(1))
-    loop_condition = g.op("Cast", loop_condition, to_i=9)
-    loop_len = reps
-    loop = g.op("Loop", loop_len, loop_condition)
-
-    # Loop inputs
-    loop_block = _add_block(loop.node())
-    block_input_iter = _add_input_to_block(loop_block)
-    cond = _add_input_to_block(loop_block)
-
-    r_split = loop_block.op("SequenceAt", r_splits, block_input_iter)
-    i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
-
-    i_split = unsqueeze(loop_block, i_split, dim + 1)
-    r_concat = [loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[:dim + 1])),
-                r_split,
-                loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1:]))]
-    r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
-    i_split = expand(loop_block, i_split, r_concat, None)
-    i_split = reshape(loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
-
-    # Loop outputs
-    cond_out = loop_block.op("Cast", loop_condition, to_i=9)
-    _add_output_to_block(loop_block, cond_out)
-    _add_output_to_block(loop_block, i_split)
-    loop_out = loop.node().output()
-
-    # In this loop, the outputs are scan outputs and are concatenated along
-    # the zero'th dimension (by default). In order to avoid this and concatenate
-    # along the dimension provided, some post-processing is required
-    loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
-    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
-
 
 def normal(g, loc, scale, seed):
     # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
@@ -1006,3 +946,25 @@ def normal(g, loc, scale, seed):
     # is a sample with mean μ and variance σ's square.
     result = mul(g, scale, g.op("RandomNormalLike", loc))
     return add(g, result, loc)
+
+
+class Prim:
+    domain = "prim"
+
+    @staticmethod
+    def ConstantChunk(g, self, chunks, dim):
+        input_shape = g.op("Shape", self)
+        axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+        input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
+        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+        chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+        input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+        chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+        res = []
+        for i in range(chunks):
+            index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+            end = g.op("Mul", chunk_dim, index)
+            res.append(g.op("Slice", self, start, end, axis))
+            start = end
+        return res

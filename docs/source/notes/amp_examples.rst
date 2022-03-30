@@ -1,7 +1,7 @@
 .. _amp-examples:
 
-Automatic Mixed Precision examples
-==================================
+CUDA Automatic Mixed Precision examples
+=======================================
 
 .. currentmodule:: torch.cuda.amp
 
@@ -296,42 +296,17 @@ The issues described here only affect :class:`autocast`.  :class:`GradScaler`\ '
 DataParallel in a single process
 --------------------------------
 
-:class:`torch.nn.DataParallel` spawns threads to run the forward pass on each device.
-The autocast state is thread local, so the following will not work::
+Even if :class:`torch.nn.DataParallel` spawns threads to run the forward pass on each device.
+The autocast state is propagated in each one and the following will work::
 
     model = MyModel()
     dp_model = nn.DataParallel(model)
 
     # Sets autocast in the main thread
     with autocast():
-        # dp_model's internal threads won't autocast.  The main thread's autocast state has no effect.
+        # dp_model's internal threads will autocast.
         output = dp_model(input)
-        # loss_fn still autocasts, but it's too late...
-        loss = loss_fn(output)
-
-The fix is simple.  Enable autocast as part of ``MyModel.forward``::
-
-    MyModel(nn.Module):
-        ...
-        @autocast()
-        def forward(self, input):
-           ...
-
-    # Alternatively
-    MyModel(nn.Module):
-        ...
-        def forward(self, input):
-            with autocast():
-                ...
-
-The following now autocasts in ``dp_model``'s threads (which execute ``forward``) and the main thread
-(which executes ``loss_fn``)::
-
-    model = MyModel()
-    dp_model = nn.DataParallel(model)
-
-    with autocast():
-        output = dp_model(input)
+        # loss_fn also autocast
         loss = loss_fn(output)
 
 DistributedDataParallel, one GPU per process

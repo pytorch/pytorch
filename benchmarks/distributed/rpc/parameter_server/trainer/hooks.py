@@ -12,7 +12,7 @@ def allreduce_hook(state, bucket):
         bucket (GradBucket): gradient bucket
     """
     cref = state.cref
-    tensor = bucket.get_tensor()
+    tensor = bucket.buffer()
     tensors = [tensor / state.process_group.size()]
     key = state.get_key(bucket.get_index())
     if tensor.is_sparse:
@@ -38,7 +38,7 @@ def hybrid_hook(state, bucket):
         bucket (GradBucket): gradient bucket
     """
     cref = state.cref
-    tensor = bucket.get_tensor()
+    tensor = bucket.buffer()
     key = state.get_key(bucket.get_index())
 
     if tensor.is_sparse:
@@ -51,7 +51,7 @@ def hybrid_hook(state, bucket):
         fut.set_result([tensor])
     else:
         cref.record_start("hook_future_metric", key, "nccl_dense_allreduce")
-        tensors = [bucket.get_tensor() / state.process_group.size()]
+        tensors = [bucket.buffer() / state.process_group.size()]
         fut = state.process_group.allreduce(tensors).get_future()
 
         def callback(fut):
@@ -81,7 +81,7 @@ def sparse_rpc_hook(state, bucket):
         state (object): maintains state during the training process
         bucket (GradBucket): gradient bucket
     """
-    tensor = bucket.get_tensor()
+    tensor = bucket.buffer()
     if tensor.is_sparse:
         return process_bucket_with_remote_server(state, bucket)
     else:

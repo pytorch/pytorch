@@ -41,7 +41,7 @@ std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
-static const double kLowProb = 0.001;
+static constexpr double kLowProb = 0.001;
 struct CoinflipTLS {
   int tries_left_;
   std::mt19937 genGeo_;
@@ -71,6 +71,66 @@ int sample_geometric() {
 double sample_zero_one() {
   return coinflip_tls().distZeroOne_(coinflip_tls().genZeroOne_);
 }
+
+struct GlobalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+ private:
+  std::atomic<bool> enabled;
+ public:
+  CallbackHandle handle;
+
+  GlobalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), enabled(true), handle(h) {}
+
+  // Copying is fine despite std::atomic<bool> not being supposed to
+  // have a copy/move constructor: adding & removing callbacks is
+  // already not thread-safe.
+  GlobalRecordFunctionCallbacksEntry(
+      const GlobalRecordFunctionCallbacksEntry& rhs)
+      : callback(rhs.callback), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(const GlobalRecordFunctionCallbacksEntry& rhs) {
+    callback = rhs.callback;
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  GlobalRecordFunctionCallbacksEntry(
+      GlobalRecordFunctionCallbacksEntry&& rhs) noexcept
+      : callback(std::move(rhs.callback)), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(GlobalRecordFunctionCallbacksEntry&& rhs) noexcept {
+    callback = std::move(rhs.callback);
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool disable() {
+    bool expected = true;
+    // NOTE: we use sequentially consistent access here and in
+    // enable() because updating further atomic flags depends on this
+    // operation.
+    return enabled.compare_exchange_strong(expected, false);
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool enable() {
+    bool expected = false;
+    return enabled.compare_exchange_strong(expected, true);
+  }
+
+  // Read the flag. Note that it is neither necessary nor correct to
+  // check this before calling enable() or disable().
+  bool isEnabled() const {
+    return enabled.load(std::memory_order_relaxed);
+  }
+};
+
+using GlobalRecordFunctionCallbacks =
+  c10::SmallVector<GlobalRecordFunctionCallbacksEntry, kSoftLimitCallbacks>;
 
 } // namespace
 
@@ -246,10 +306,11 @@ class CallbackManager {
 
     // otherwise potentially do the sampling
     double sampling_prob = cb.sampling_prob_;
+    constexpr double kLowProbInv = 1 / kLowProb;
     if (pre_sampled) {
       // adjust the sampling rate to account for kLowProb pre-sampling of
       // the RecordFunction
-      sampling_prob /= kLowProb;
+      sampling_prob *= kLowProbInv;
     }
 
     if (sampling_prob < 1.0) {
@@ -261,7 +322,7 @@ class CallbackManager {
       if (sampling_prob < kLowProb) {
         if (coinflip_tls().tries_left_ == 0) {
           coinflip_tls().tries_left_ = sample_geometric();
-          return (sample_zero_one() < sampling_prob / kLowProb);
+          return (sample_zero_one() < sampling_prob * kLowProbInv);
         } else {
           --coinflip_tls().tries_left_;
           return false;
@@ -294,7 +355,7 @@ class CallbackManager {
           found_needs_ids = true;
         }
         if (!rec_fn.state_) {
-          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+          rec_fn.state_.emplace(scope);
         }
         rec_fn.state_->sorted_active_tls_handles_.push_back(cb.handle);
       }
@@ -312,7 +373,7 @@ class CallbackManager {
           found_needs_ids = true;
         }
         if (!rec_fn.state_) {
-          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+          rec_fn.state_.emplace(scope);
         }
         rec_fn.state_->sorted_active_global_handles_.push_back(cb.handle);
       }
@@ -369,7 +430,11 @@ class CallbackManager {
   std::atomic<uint_fast32_t> num_enabled_global_callbacks_;
 
  private:
-  bool tryRunCallback(
+  static void logTryRunCallbackError(const char* what, const RecordFunction& rf) {
+    LOG(WARNING) << "Exception in RecordFunction callback: " << what << " , for the range " << rf.name();
+  }
+
+  C10_ALWAYS_INLINE static bool tryRunCallback(
       const RecordFunctionCallback& rfcb,
       RecordFunction& rf,
       std::unique_ptr<ObserverContext>& ctx,
@@ -385,18 +450,16 @@ class CallbackManager {
       }
       return true;
     } catch (const std::exception &e) {
-      LOG(WARNING) << "Exception in RecordFunction callback: "
-          << e.what() << " , for the range " << rf.name();
+      logTryRunCallbackError(e.what(), rf);
       return false;
     } catch (...) {
-      LOG(WARNING) << "Exception in RecordFunction callback: unknown"
-          << " , for the range " << rf.name();
+      logTryRunCallbackError("unknown", rf);
       return false;
     }
   }
 
   template <typename RecordFunctionCallbacks>
-  void mergeRunCallbacks(
+  static void mergeRunCallbacks(
       const RecordFunctionCallbacks& sorted_callbacks,
       const CallbackHandles& sorted_handles,
       ObserverContextList& ctx_list,
@@ -404,12 +467,15 @@ class CallbackManager {
       RecordFunction& rf) {
     size_t num_executed = 0;
     size_t idx_c = 0;
-    for (size_t idx_h = 0; idx_h < sorted_handles.size() && idx_h < ctx_list.size(); ++idx_h) {
-      while (idx_c < sorted_callbacks.size() &&
+    const auto sorted_handles_size = sorted_handles.size();
+    const auto ctx_list_size = ctx_list.size();
+    const auto sorted_callbacks_size = sorted_callbacks.size();
+    for (size_t idx_h = 0; idx_h < sorted_handles_size && idx_h < ctx_list_size; ++idx_h) {
+      while (idx_c < sorted_callbacks_size &&
             sorted_callbacks[idx_c].handle < sorted_handles[idx_h]) {
         ++idx_c;
       }
-      if (idx_c >= sorted_callbacks.size()) {
+      if (idx_c >= sorted_callbacks_size) {
         break;
       }
       if (sorted_callbacks[idx_c].handle == sorted_handles[idx_h]) {
@@ -517,7 +583,8 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
-  state_->name_ = StringView(name);
+  state_->op_input_size = state_->inputs_.size();
+  state_->name_ = name;
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
@@ -529,7 +596,8 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
-  state_->name_ = StringView(std::move(name));
+  state_->op_input_size = state_->inputs_.size();
+  state_->name_ = std::move(name);
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
@@ -548,7 +616,7 @@ void RecordFunction::before(
   state_->operator_name_ = op.operator_name();
   state_->op_input_size = op.schema().arguments().size();
   state_->op_output_size = op.schema().returns().size();
-  state_->name_ = StringView(op.schema().name());
+  state_->name_ = op.schema().name();
 
   manager().runStartCallbacks(*this);
 }

@@ -584,9 +584,6 @@ class AdagradOptimizer(Optimizer):
         counter_halflife=-1,
         **kwargs
     ):
-        for k, v in locals().items():
-            logger.info("AdagradOptimizer: input arguments: {}: {}".format(k, v))
-
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -735,7 +732,7 @@ class AdagradOptimizer(Optimizer):
             self._aux_params.shared.append(iteration)
 
         if self.rowWise:
-            logger.info(
+            logger.debug(
                 "Using engine {} for rowWise Adagrad to train param {}".format(
                     self.engine, param
                 )
@@ -763,7 +760,7 @@ class AdagradOptimizer(Optimizer):
                     value=0.0,
                 )
         else:
-            logger.info(
+            logger.debug(
                 "Using engine {} for regular Adagrad to train param {}".format(
                     self.engine, param
                 )
@@ -929,14 +926,14 @@ class AdagradOptimizer(Optimizer):
             # Skip weight decay for 1d parameters
             if len(param_shape) == 1:
                 weight_decay = 0.0
-                logger.warn(
+                logger.warning(
                     "SKIPPING weight decay on 1d dense param: {}.shape is {}".format(
                         str(param), param_shape
                     )
                 )
             else:
                 weight_decay = self.weight_decay
-        logger.info(
+        logger.debug(
             "weight_decay for {} (shape:{}): {}".format(
                 str(param), param_shape, weight_decay
             )
@@ -970,7 +967,7 @@ class AdagradOptimizer(Optimizer):
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = "SparseAdagrad"
-            logger.info("using {} for {}".format(op, str(param)))
+            logger.debug("using {} for {}".format(op, str(param)))
 
             if self.prune_delays:
                 input_args += [lr_iteration, last_mask_updated_iter]

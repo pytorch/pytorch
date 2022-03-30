@@ -42,7 +42,6 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      c10::intrusive_ptr<c10d::ProcessGroup> pg,
       FaultyTensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,
@@ -53,8 +52,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
-      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
-      override;
+      const DeviceMap& deviceMap = {}) override;
 
   // Add delay to writes
   void pipeWrite(

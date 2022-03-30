@@ -4,21 +4,22 @@ from functools import partial
 
 import torch
 from torch.testing._internal.common_cuda import (TEST_CUDA)
-from torch.testing._core import _dispatch_dtypes
-from torch.testing import (all_types_and_complex_and,
-                           all_types_and_complex,
-                           all_types_and_half,
-                           all_types,
-                           complex_types,
-                           floating_and_complex_types,
-                           floating_types_and_half,
-                           floating_types,
-                           integral_types,
-                           floating_types_and,
-                           floating_and_complex_types_and,
-                           integral_types_and,
-                           all_types_and,
-                           )
+from torch.testing._internal.common_dtype import (
+    all_types_and_complex_and,
+    all_types_and_complex,
+    all_types_and_half,
+    all_types,
+    complex_types,
+    floating_and_complex_types,
+    floating_types_and_half,
+    floating_types,
+    integral_types,
+    floating_types_and,
+    floating_and_complex_types_and,
+    integral_types_and,
+    all_types_and,
+    _dispatch_dtypes,
+)
 
 COMPLETE_DTYPES_DISPATCH = (
     all_types,
@@ -128,11 +129,11 @@ def is_dynamic_dtype_set(op):
 def str_format_dynamic_dtype(op):
     fmt_str = """
         OpInfo({name},
-               dtypes={dtypesIfCPU},
+               dtypes={dtypes},
                dtypesIfCUDA={dtypesIfCUDA},
         )
         """.format(name=op.name,
-                   dtypesIfCPU=dtypes_dispatch_hint(op.dtypesIfCPU).dispatch_fn_str,
+                   dtypes=dtypes_dispatch_hint(op.dtypes).dispatch_fn_str,
                    dtypesIfCUDA=dtypes_dispatch_hint(op.dtypesIfCUDA).dispatch_fn_str)
 
     return fmt_str

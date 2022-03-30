@@ -2,7 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 
 namespace at {
 namespace native {
@@ -27,8 +27,8 @@ Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offse
   checkSetStorage(result, storage, storage_offset, size, stride);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
-                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ?
+                                          at::OptionalIntArrayRef(stride) : c10::nullopt;
   at::native::resize_impl_cuda_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }

@@ -1,15 +1,19 @@
 #include <cub/block/block_reduce.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <cfloat>
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 namespace rocprim {
 #else
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+namespace at_cuda_detail {
+#endif
 namespace cub {
 #endif
 
@@ -22,6 +26,9 @@ inline __host__ __device__ bool operator<(
 }
 
 } // namespace cub
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+}  // namespace at_cuda_detail
+#endif
 
 namespace caffe2 {
 

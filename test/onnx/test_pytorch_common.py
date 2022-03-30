@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import functools
 import os
 import unittest
@@ -37,6 +39,9 @@ skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(),
 skipIfTravis = _skipper(lambda: os.getenv("TRAVIS"),
                         "Skip In Travis")
 
+skipIfNoBFloat16Cuda = _skipper(lambda: not torch.cuda.is_bf16_supported(),
+                                "BFloat16 CUDA is not available")
+
 # skips tests for all versions below min_opset_version.
 # if exporting the op is only supported after a specific version,
 # add this wrapper to prevent running the test for opset_versions
@@ -55,6 +60,16 @@ def skipIfUnsupportedMaxOpsetVersion(min_opset_version):
     def skip_dec(func):
         def wrapper(self):
             if self.opset_version > min_opset_version:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
+# skips tests for all opset versions.
+def skipForAllOpsetVersions():
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version:
                 raise unittest.SkipTest("Skip verify test for unsupported opset_version")
             return func(self)
         return wrapper

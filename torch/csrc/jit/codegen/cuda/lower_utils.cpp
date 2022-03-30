@@ -1,368 +1,34 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <algorithm>
+
+// TODO: refactor this file (one per namespace)
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
 namespace scope_utils {
 
-// START SCOPE HELPER SYSTEMS
-namespace {
-
-class Loops : private OptInDispatch {
- private:
-  std::deque<kir::ForLoop*> loops;
-  void handle(kir::ForLoop* fl) final {
-    loops.insert(loops.begin(), fl);
-  }
-
-  void handle(kir::IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static std::vector<kir::ForLoop*> getLoops(Expr* scope) {
-    Loops loops;
-    Expr* it = scope;
-    while (it != nullptr) {
-      loops.handle(it);
-      it = scope_utils::getParent(it);
-    }
-    return std::vector<kir::ForLoop*>(loops.loops.begin(), loops.loops.end());
-  }
-};
-
-class scopePushBack : private OptInDispatch {
- private:
-  Expr* expr_;
-  void handle(kir::ForLoop* fl) final {
-    fl->body().push_back(expr_);
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    ite->thenBody().push_back(expr_);
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
-  scopePushBack(Expr* expr) : expr_(expr) {}
-
- public:
-  static void push(Expr* scope, Expr* expr) {
-    scopePushBack pb(expr);
-    TORCH_INTERNAL_ASSERT(
-        expr != nullptr && scope != nullptr,
-        "Cannot push back, scope or expr is a nullptr.");
-    pb.handle(scope);
-  }
-};
-
-class scopeInsertBefore : private OptInDispatch {
- private:
-  Expr* ref_;
-  Expr* expr_;
-  void handle(kir::ForLoop* fl) final {
-    fl->body().insert_before(ref_, expr_);
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    ite->thenBody().insert_before(ref_, expr_);
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
-  scopeInsertBefore(Expr* ref, Expr* expr) : ref_(ref), expr_(expr) {}
-
- public:
-  static void insert(Expr* scope, Expr* ref, Expr* expr) {
-    scopeInsertBefore scb(ref, expr);
-    TORCH_INTERNAL_ASSERT(
-        expr != nullptr && scope != nullptr,
-        "Cannot push back, scope or expr is a nullptr.");
-    scb.handle(scope);
-  }
-};
-
-class ExprInScope : private OptInDispatch {
- private:
-  Expr* expr_;
-  bool contains_ = false;
-
-  void handle(kir::ForLoop* fl) final {
-    if (fl->body().contains(expr_)) {
-      contains_ = true;
-    }
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    if (ite->thenBody().contains(expr_)) {
-      contains_ = true;
-    }
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
-  ExprInScope(Expr* expr) : expr_(expr) {}
-
- public:
-  static bool find(Expr* scope, Expr* expr) {
-    ExprInScope eis(expr);
-    TORCH_INTERNAL_ASSERT(
-        expr != nullptr && scope != nullptr,
-        "Cannot push back, scope or expr is a nullptr.");
-    eis.handle(scope);
-    return eis.contains_;
-  }
-};
-
-class parentScope : private OptInDispatch {
- private:
-  Expr* parent_ = nullptr;
-
-  void handle(kir::ForLoop* fl) final {
-    parent_ = fl->parentScope();
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    parent_ = ite->parentScope();
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static Expr* get(Expr* scope) {
-    parentScope sp;
-    sp.handle(scope);
-    return sp.parent_;
-  }
-};
-
-void assertScope(Expr* expr) {
-  TORCH_INTERNAL_ASSERT(
-      expr->getExprType() == ExprType::ForLoop ||
-          expr->getExprType() == ExprType::IfThenElse,
-      "Assert Scope failed when calling a scope_util function.");
+//! Create an **empty** Forloop and copy the metadata.
+kir::ForLoop* cloneForLoop(kir::ForLoop* for_loop) {
+  return IrBuilder::create<kir::ForLoop>(for_loop);
 }
 
-class CloneLoopNest : public OptOutMutator {
- private:
-  Expr* parent_scope_ = nullptr;
-  Expr* to_clone_ = nullptr;
-
-  Statement* mutate(kir::ForLoop* fl) final {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    const auto parent_scope =
-        fl == to_clone_ ? parent_scope_ : fl->parentScope();
-    auto new_loop = ir_builder.create<kir::ForLoop>(
-        fl->index(), fl->iter_domain(), parent_scope);
-    for (Expr* expr : fl->body().exprs()) {
-      new_loop->body().push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
-    }
-    return new_loop;
-  }
-
-  CloneLoopNest(Expr* _to_clone, Expr* _parent_scope)
-      : parent_scope_(_parent_scope), to_clone_(_to_clone) {}
-
- public:
-  static kir::ForLoop* getClone(kir::ForLoop* _to_clone, Expr* _parent_scope) {
-    TORCH_INTERNAL_ASSERT(
-        _to_clone != nullptr,
-        "Tried to clone a scope, but received a nullptr.");
-    CloneLoopNest cln(_to_clone, _parent_scope);
-    return ir_utils::asForLoop(ir_utils::asExpr(cln.mutate(_to_clone)));
-  }
-};
-
-class ReplaceExprsInScope : public OptOutDispatch {
- public:
-  static void replace(
-      Expr* scope,
-      std::unordered_map<Expr*, Expr*> replacement_map) {
-    ReplaceExprsInScope reis(std::move(replacement_map));
-    reis.handle(scope);
-  }
-
- private:
-  explicit ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> replacement_map)
-      : replacement_map_(std::move(replacement_map)) {}
-
-  void handleScope(kir::Scope& scope) {
-    for (const auto i : c10::irange(scope.size())) {
-      const auto it = replacement_map_.find(scope[i]);
-      if (it == replacement_map_.end()) {
-        handle(scope[i]);
-        continue;
-      }
-      scope[i] = it->second;
-    }
-  }
-
-  void handle(Expr* expr) final {
-    OptOutDispatch::handle(expr);
-  }
-
-  void handle(kir::ForLoop* fl) final {
-    handleScope(fl->body());
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    handleScope(ite->thenBody());
-    handleScope(ite->elseBody());
-  }
-
- private:
-  std::unordered_map<Expr*, Expr*> replacement_map_;
-};
-
-class FirstInnerMostScope : private OptInDispatch {
- private:
-  Expr* active_scope = nullptr;
-
-  void handle(kir::ForLoop* fl) final {
-    for (auto expr : fl->body().exprs()) {
-      if (ir_utils::isScope(expr)) {
-        active_scope = expr;
-        return;
-      }
-    }
-    active_scope = nullptr;
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->thenBody().exprs()) {
-      if (ir_utils::isScope(expr)) {
-        active_scope = expr;
-        return;
-      }
-    }
-    for (auto expr : ite->elseBody().exprs()) {
-      if (ir_utils::isScope(expr)) {
-        active_scope = expr;
-        return;
-      }
-    }
-    active_scope = nullptr;
-  }
-
-  Expr* getInner(Expr* expr) {
-    OptInDispatch::handle(expr);
-    return active_scope;
-  }
-
- public:
-  static Expr* get(Expr* scope) {
-    TORCH_INTERNAL_ASSERT(
-        scope != nullptr,
-        "Tried to get inner most scope, but was provided nullptr.");
-
-    FirstInnerMostScope fims;
-    Expr* inner = fims.getInner(scope);
-
-    if (inner == nullptr)
-      return scope;
-
-    while (fims.getInner(inner) != nullptr)
-      inner = fims.getInner(inner);
-    return inner;
-  }
-};
-
-// END SCOPE HELPER SYSTEMS
-} // namespace
-
-// Grab the ForLoop starting from scope working out
-std::vector<kir::ForLoop*> getLoops(Expr* scope) {
-  if (scope == nullptr)
-    return std::vector<kir::ForLoop*>();
-  assertScope(scope);
-  return Loops::getLoops(scope);
-}
-
-// Push back an expr to scope
-void pushBack(Expr* scope, Expr* expr) {
-  TORCH_INTERNAL_ASSERT(
-      scope != nullptr, "Scope is a nullptr, cannot push an expr to it.");
-  assertScope(scope);
-  scopePushBack::push(scope, expr);
-}
-
-// Insert expr in scope before ref
-void insertBefore(Expr* scope, Expr* ref, Expr* expr) {
-  scopeInsertBefore::insert(scope, ref, expr);
-}
-
-bool exprInScope(Expr* scope, Expr* expr) {
-  return ExprInScope::find(scope, expr);
-}
-
-// Return the parent of the active scope
-Expr* getParent(Expr* scope) {
-  TORCH_INTERNAL_ASSERT(
-      scope != nullptr,
-      "Tried to close the active scope, but there isn't one set.");
-  assertScope(scope);
-  return parentScope::get(scope);
-}
-
-// Open a new inner most for loop
-kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  const auto kir_id = GpuLower::lowerValue(id)->as<kir::IterDomain>();
-  kir::ForLoop* new_scope = nullptr;
-  if (id->isThread()) {
-    std::stringstream ss;
-    ss << id->getParallelType();
-    new_scope = ir_builder.create<kir::ForLoop>(
-        ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
-        kir_id,
-        scope);
-  } else {
-    new_scope = ir_builder.create<kir::ForLoop>(
-        ir_builder.create<kir::Int>(c10::nullopt), kir_id, scope);
-  }
-  if (scope != nullptr)
-    pushBack(scope, new_scope);
-  return new_scope;
-}
-
-kir::ForLoop* cloneLoopNest(kir::ForLoop* to_clone, Expr* parent_scope) {
-  return CloneLoopNest::getClone(to_clone, parent_scope);
-}
-
-void replaceExprsInScope(
-    Expr* scope,
-    std::unordered_map<Expr*, Expr*> replacement_map) {
-  TORCH_INTERNAL_ASSERT(
-      replacement_map.find(scope) == replacement_map.end(),
-      "Error trying to replace expressions in a scope, scope wants to be replaced entirely.");
-  ReplaceExprsInScope::replace(scope, std::move(replacement_map));
-}
-
-Expr* firstInnerMostScope(Expr* scope) {
-  return FirstInnerMostScope::get(scope);
+//! Create an **empty** IfThenElse and copy the metadata.
+kir::IfThenElse* cloneIfThenElse(kir::IfThenElse* ite) {
+  return IrBuilder::create<kir::IfThenElse>(ite->predicate());
 }
 
 } // namespace scope_utils
@@ -379,8 +45,11 @@ TVDomainGuard::~TVDomainGuard() {
 }
 
 std::vector<IterDomain*> iterDomainInputsOf(
-    const std::vector<IterDomain*>& input_ids) {
-  auto inputs = IterVisitor::getInputsTo({input_ids.begin(), input_ids.end()});
+    const std::vector<IterDomain*>& input_ids,
+    const std::vector<IterDomain*>& all_inputs) {
+  auto inputs = IterVisitor::getInputsTo(
+      {input_ids.begin(), input_ids.end()},
+      {all_inputs.begin(), all_inputs.end()});
   std::vector<IterDomain*> id_inputs(
       ir_utils::filterByType<IterDomain>(inputs).begin(),
       ir_utils::filterByType<IterDomain>(inputs).end());
@@ -390,7 +59,7 @@ std::vector<IterDomain*> iterDomainInputsOf(
 std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& of,
     const std::vector<IterDomain*>& order) {
-  auto inputs_vec = iterDomainInputsOf(of);
+  auto inputs_vec = iterDomainInputsOf(of, order);
 
   std::unordered_set<IterDomain*> inputs_set(
       inputs_vec.begin(), inputs_vec.end());
@@ -407,35 +76,59 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
   return ordered_inputs;
 }
 
-std::vector<Val*> indices(std::vector<kir::ForLoop*> loops) {
-  std::vector<Val*> inds(loops.size());
-  std::transform(
-      loops.begin(), loops.end(), inds.begin(), [](kir::ForLoop* fl) {
-        return fl->index();
-      });
-  return inds;
-}
-
 bool isTV(const Val* val) {
-  return val->getValType().value() == ValType::TensorView;
+  return val->getValType().value() == ValType::TensorView ||
+      val->getValType().value() == ValType::TensorIndex;
 }
 
 // Check if we're a TensorView op that we can generate code for.
-bool isTVOp(const Expr* expr) {
-  if (expr->outputs().size() == 1 && isTV(expr->output(0)) &&
-      (expr->getExprType().value() == ExprType::BinaryOp ||
-       expr->getExprType().value() == ExprType::UnaryOp ||
+bool isTvOp(const Expr* expr) {
+  if (std::any_of(
+          expr->outputs().begin(),
+          expr->outputs().end(),
+          [](Val* v) { return isTV(v); }) &&
+      (expr->getExprType().value() == ExprType::UnaryOp ||
+       expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
-       expr->getExprType().value() == ExprType::BroadcastOp))
+       expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::BroadcastOp ||
+       expr->getExprType().value() == ExprType::TransposeOp ||
+       expr->getExprType().value() == ExprType::ShiftOp ||
+       expr->getExprType().value() == ExprType::GatherOp ||
+       expr->getExprType().value() == ExprType::ViewOp ||
+       expr->getExprType().value() == ExprType::GridReduction ||
+       expr->getExprType().value() == ExprType::GridBroadcast ||
+       expr->getExprType().value() == ExprType::GridWelford)) {
     return true;
+  }
   return false;
 }
 
-TensorView* getTVOutput(const Expr* expr) {
+TensorView* getTv(Val* val) {
+  if (val->isA<TensorView>()) {
+    return val->as<TensorView>();
+  } else if (val->isA<kir::TensorIndex>()) {
+    return val->as<kir::TensorIndex>()->view();
+  }
+  return nullptr;
+}
+
+std::vector<TensorView*> getTvs(const std::vector<Val*>& vals) {
+  std::vector<TensorView*> tvs;
+  for (auto val : vals) {
+    auto tv = ir_utils::getTv(val);
+    if (tv) {
+      tvs.emplace_back(tv);
+    }
+  }
+  return tvs;
+}
+
+TensorView* getTvOutput(const Expr* expr) {
   for (auto out : expr->outputs()) {
-    if (out->getValType().value() == ValType::TensorView) {
-      return out->as<TensorView>();
+    if (auto tv = getTv(out)) {
+      return tv;
     }
   }
   return nullptr;
@@ -448,278 +141,375 @@ bool isScalarOp(const Expr* expr) {
   return true;
 }
 
-void ASSERT_EXPR(Statement* stmt) {
-  TORCH_INTERNAL_ASSERT(
-      stmt->isExpr(),
-      "Tried to generate a kernel but hit a non expression during lowering: ",
-      stmt);
-}
-
-Expr* asExpr(Statement* stmt) {
-  ASSERT_EXPR(stmt);
-  return stmt->as<Expr>();
-}
-
-TensorView* asTV(Val* val) {
-  TORCH_INTERNAL_ASSERT(isTV(val));
-  return val->as<TensorView>();
-}
-
-bool isScope(const Expr* expr) {
-  return expr->getExprType() == ExprType::ForLoop ||
-      expr->getExprType() == ExprType::IfThenElse;
-}
-
-kir::ForLoop* asForLoop(Statement* stmt) {
-  Expr* expr = asExpr(stmt);
-  TORCH_INTERNAL_ASSERT(expr->getExprType() == ExprType::ForLoop);
-  return expr->as<kir::ForLoop>();
-}
-
-const TensorView* asConstTV(const Val* val) {
-  TORCH_INTERNAL_ASSERT(isTV(val));
-  return val->as<TensorView>();
-}
-
-bool isUnrolledFor(const Expr* expr) {
-  if (expr->getExprType() != ExprType::ForLoop) {
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (!isTvOp(expr)) {
     return false;
   }
-  return expr->as<kir::ForLoop>()->iter_domain()->getParallelType() ==
-      ParallelType::Unroll;
-}
 
-const std::unordered_map<ParallelType, int, TypeHash>
-    ParallelTypeBitmap::pt_to_offset_{
-        {ParallelType::BIDx, 0},
-        {ParallelType::BIDy, 1},
-        {ParallelType::BIDz, 2},
-        {ParallelType::TIDx, 3},
-        {ParallelType::TIDy, 4},
-        {ParallelType::TIDz, 5}};
-
-const std::unordered_map<int, ParallelType> ParallelTypeBitmap::offset_to_pt_ =
-    {{0, ParallelType::BIDx},
-     {1, ParallelType::BIDy},
-     {2, ParallelType::BIDz},
-     {3, ParallelType::TIDx},
-     {4, ParallelType::TIDy},
-     {5, ParallelType::TIDz}};
-
-bool ParallelTypeBitmap::get(ParallelType pt) const {
-  if (pt_to_offset_.find(pt) == pt_to_offset_.end()) {
-    TORCH_INTERNAL_ASSERT(false, "Could not recognize parallel type.");
+  if (!(expr->isA<ReductionOp>() || expr->isA<BroadcastOp>() ||
+        expr->isA<WelfordOp>() || expr->isA<kir::GridReduction>() ||
+        expr->isA<kir::GridBroadcast>() || expr->isA<kir::GridWelford>())) {
+    return false;
   }
-  return bitset_[pt_to_offset_.at(pt)];
-}
 
-bool ParallelTypeBitmap::set(ParallelType pt, bool new_val) {
-  if (pt_to_offset_.find(pt) == pt_to_offset_.end()) {
-    TORCH_INTERNAL_ASSERT(false, "Could not recognize parallel type.");
+  auto tv = getTvOutput(expr);
+
+  if (tv->hasBlockReduction() || tv->hasGridReduction()) {
+    return true;
+  } else if (expr->isA<BroadcastOp>()) {
+    const ParallelTypeBitmap pt_map =
+        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
+    return pt_map.any();
   }
-  bool old_val = bitset_[pt_to_offset_.at(pt)];
-  bitset_[pt_to_offset_.at(pt)] = new_val;
-  return old_val;
+
+  return false;
 }
 
-ParallelTypeBitmap ParallelTypeBitmap::operator&=(
-    const ParallelTypeBitmap& other) {
-  bitset_ &= other.bitset_;
-  return *this;
-}
-
-ParallelTypeBitmap ParallelTypeBitmap::operator|=(
-    const ParallelTypeBitmap& other) {
-  bitset_ |= other.bitset_;
-  return *this;
-}
-
-ParallelTypeBitmap ParallelTypeBitmap::operator^=(
-    const ParallelTypeBitmap& other) {
-  bitset_ ^= other.bitset_;
-  return *this;
-}
-
-ParallelTypeBitmap ParallelTypeBitmap::operator~() const {
-  return ParallelTypeBitmap(~bitset_);
-}
-
-bool ParallelTypeBitmap::none() const {
-  return bitset_.none();
-}
-
-bool ParallelTypeBitmap::any() const {
-  return bitset_.any();
-}
-
-bool ParallelTypeBitmap::all() const {
-  return bitset_.all();
-}
-
-bool ParallelTypeBitmap::operator[](size_t pos) const {
-  TORCH_INTERNAL_ASSERT(
-      pos < num_p_type, "Invalid index to ParallelTypeBitset: ", pos);
-  return bitset_[pos];
-}
-
-std::map<ParallelType, bool> ParallelTypeBitmap::getMap() const {
-  std::map<ParallelType, bool> map;
-  for (const auto& pt_offset : pt_to_offset_) {
-    map.emplace(pt_offset.first, bitset_[pt_offset.second]);
+c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
+  auto tv_out = getTv(node->out());
+  if (tv_out == nullptr) {
+    return c10::nullopt;
   }
-  return map;
-}
 
-ParallelTypeBitmap operator&(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs) {
-  auto x = lhs;
-  x &= rhs;
-  return x;
-}
+  auto tv_in = getTv(node->in());
 
-ParallelTypeBitmap operator|(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs) {
-  auto x = lhs;
-  x |= rhs;
-  return x;
-}
-
-ParallelTypeBitmap operator^(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs) {
-  auto x = lhs;
-  x ^= rhs;
-  return x;
-}
-
-ParallelTypeBitmap getParallelBroadcastDomains(
-    const Val* bop_out,
-    const ThreadPredicateMap& preds) {
-  if (bop_out->getValType().value() == ValType::TensorIndex) {
-    bop_out = bop_out->as<kir::TensorIndex>()->view()->fuserTv();
+  // only support reducing to registers for now.
+  if (tv_in->getMemoryType() != MemoryType::Local ||
+      tv_out->getMemoryType() != MemoryType::Local) {
+    return c10::nullopt;
   }
-  TORCH_INTERNAL_ASSERT(
-      bop_out->getValType().value() == ValType::TensorView,
-      "Out is not tensor view");
-  auto out_tv = bop_out->as<TensorView>();
-  // If no pred is found for out_tv, no predicate is necessary
-  if (preds.find(out_tv) == preds.end()) {
-    return ParallelTypeBitmap();
-  }
-  const ParallelTypeBitmap& out_pred = preds.at(out_tv).first;
 
-  ParallelTypeBitmap parallel_broadcast;
-  const auto& iter_domains = out_tv->domain()->domain();
-  // If the output is on shared memory, assume that all subsequent
-  // reads from all threads in its CTA can be done with no parallel
-  // broadcast. Only one thread will write to shared memory followed
-  // by a proper _syncthreads.
-  const bool output_smem = out_tv->getMemoryType() == MemoryType::Shared;
-  for (auto id : iter_domains) {
-    if (!id->isBroadcast()) {
-      continue;
+  IterDomain* reduction_on_xdim = nullptr;
+  for (auto id : tv_out->domain()->domain()) {
+    // Currently warp reduction only allows
+    //  serial and block.x parallel reductions
+    if (id->isReduction() && id->isParallelized()) {
+      if (id->getParallelType() == ParallelType::TIDx) {
+        reduction_on_xdim = id;
+      } else if (id->isThread()) {
+        return c10::nullopt;
+      }
     }
-    if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
-      parallel_broadcast.set(id->getParallelType(), true);
+  }
+  if (!reduction_on_xdim) {
+    return c10::nullopt;
+  }
+
+  if (!reduction_on_xdim->start()->isZeroInt()) {
+    return c10::nullopt;
+  }
+
+  if (reduction_on_xdim->hasPaddingToMultipleOfWarp()) {
+    return c10::optional<IterDomain*>(reduction_on_xdim);
+  }
+
+  if (reduction_on_xdim->extent()->isConst()) {
+    auto extent_value = reduction_on_xdim->extent()->getInt().value();
+    if (extent_value % at::cuda::warp_size() == 0) {
+      return c10::optional<IterDomain*>(reduction_on_xdim);
     }
   }
 
-  return parallel_broadcast & out_pred;
+  return c10::nullopt;
+}
+
+bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis) {
+  std::vector<IterDomain*> ca_axes(
+      tv->domain()->domain().begin(),
+      tv->domain()->domain().begin() + tv->getComputeAtPosition());
+
+  auto ca_root_vals = IterVisitor::getInputsTo(
+      std::vector<Val*>(ca_axes.begin(), ca_axes.end()));
+
+  auto root_vals = IterVisitor::getInputsTo({axis});
+
+  return std::any_of(
+      root_vals.begin(), root_vals.end(), [&ca_root_vals](auto root) {
+        return std::find(ca_root_vals.begin(), ca_root_vals.end(), root) !=
+            ca_root_vals.end();
+      });
+}
+
+std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
+    Val* val) {
+  TensorView* tv = nullptr;
+  if (val->isA<TensorView>()) {
+    tv = val->as<TensorView>();
+  } else if (val->isA<kir::TensorIndex>()) {
+    tv = val->as<kir::TensorIndex>()->view();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Provided val is not TensorIndex or TensorView.");
+  }
+
+  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
+  for (auto d : tv->domain()->domain()) {
+    if (d->isThread()) {
+      parallel_domains.insert(std::make_pair(d->getParallelType(), d));
+    }
+  }
+  return parallel_domains;
 }
 
 } // namespace ir_utils
 
 namespace loop_utils {
 
-std::pair<kir::ForLoop*, int64_t> getAllocPoint(
-    TensorView* tv,
-    const std::vector<kir::ForLoop*>& loops) {
-  // If in global memory, it can be all the way outside the loops.
-  if (tv->getMemoryType() == MemoryType::Global) {
-    return {nullptr, 0};
-  }
+BasicAllocInfo getAllocInformation(
+    const TensorView* tv,
+    const std::vector<kir::ForLoop*>& for_loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map,
+    bool use_id_map) {
+  BasicAllocInfo info;
+  auto gpu_lower = GpuLower::current();
+  const auto& loop_map = gpu_lower->caLoopMap();
 
-  // Figure out where we want to place alloc/reduction initialization. We want
-  // outside an unroll loop, or inside our computeAt point.
-  kir::ForLoop* alloc_loop = nullptr;
+  bool outer_alloc_found = false;
 
-  auto loops_it = loops.begin();
-
-  // Look at each axis individually in out's domain
-  for (const auto tv_i : c10::irange((int64_t)tv->getThisComputeAtAxis())) {
-    // Grab the axis ID
-
-    auto ca_id = tv->getComputeAtAxis(tv_i).first;
-    auto kir_ca_id = GpuLower::lowerValue(ca_id)->as<kir::IterDomain>();
-
-    loops_it =
-        std::find_if(loops_it, loops.end(), [&kir_ca_id](const auto& loop) {
-          return kir_ca_id == loop->iter_domain() ||
-              loop->iter_domain()->getParallelType() == ParallelType::Unroll;
-        });
-
-    if (loops_it == loops.end()) {
-      for (auto loop : loops) {
-        std::cout << kir::toString(loop->iter_domain()) << "  ";
-      }
-      std::cout << std::endl;
-    }
-    TORCH_INTERNAL_ASSERT(
-        loops_it != loops.end(),
-        "Could not find all required axes for indexing when trying to index into ",
-        tv);
-
-    if (kir_ca_id->getParallelType() == ParallelType::Unroll) {
-      return {alloc_loop, tv_i};
+  for (auto fl : for_loops) {
+    if (info.alloc_pos == tv->getComputeAtPosition()) {
+      break;
     }
 
-    alloc_loop = *loops_it;
-    ++loops_it;
-  }
+    if (tv->axis(info.alloc_pos)->isReduction()) {
+      const auto outputs = FusionGuard::getCurFusion()->getTerminatingOutputs();
+      TORCH_INTERNAL_ASSERT(
+          std::find(outputs.begin(), outputs.end(), tv) != outputs.end(),
+          "Invalid computeAt of T",
+          tv->name(),
+          ". A reducation axis is detected outside computeAt point even though it is not an output tensor.");
+      break;
+    }
 
-  return {alloc_loop, (int64_t)tv->getThisComputeAtAxis()};
-}
+    auto fl_id = fl->iter_domain();
 
-std::unordered_map<IterDomain*, IterDomain*> p2cRootMap(
-    const std::vector<Expr*>& exprs) {
-  std::unordered_map<IterDomain*, IterDomain*> p2c_root_map;
+    if (fl_id->getParallelType() == ParallelType::Unroll) {
+      break;
+    }
 
-  for (auto expr : exprs) {
-    auto out_tv = ir_utils::getTVOutput(expr);
-    for (auto inp : expr->inputs()) {
-      if (inp->getValType().value() != ValType::TensorView) {
-        continue;
+    // Shared memory must be allocated outside of unswitched
+    // domains. See issue #1133.
+    if (fl_id->getParallelType() == ParallelType::Unswitch &&
+        tv->getMemoryType() == MemoryType::Shared) {
+      outer_alloc_found = true;
+    }
+
+    // Assume global memory is allocated at outer most scope.
+    if (tv->getMemoryType() == MemoryType::Global) {
+      outer_alloc_found = true;
+    }
+
+    // Allocation of a double buffered tensor is placed outside its
+    // double buffer axis.
+    if (tv->isDoubleBuffered() &&
+        tv->axis(info.alloc_pos) ==
+            gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
+      outer_alloc_found = true;
+    }
+
+    auto local_id = tv->axis(info.alloc_pos);
+
+    if (use_id_map) {
+      auto id_it = id_map.find(local_id);
+      if (id_it != id_map.end()) {
+        local_id = id_it->second;
       }
+    }
 
-      auto root_p2c = TensorDomain::mapRootPtoC(
-          inp->as<TensorView>()->domain(), out_tv->domain());
-      for (auto entry : root_p2c) {
-        auto p_id = entry.first;
-        auto c_id = entry.second;
-        // Careful we don't allow circular references
-        if (p_id != c_id) {
-          p2c_root_map[p_id] = c_id;
-        }
-      }
+    if (loop_map.areMapped(local_id, fl_id)) {
+      info.alloc_pos++;
+    }
+
+    info.init_for_loop = fl;
+
+    if (!outer_alloc_found) {
+      info.alloc_for_loop = fl;
     }
   }
 
-  return p2c_root_map;
-}
-
-IterDomain* getTermIDInMap(
-    IterDomain* root_id,
-    std::unordered_map<IterDomain*, IterDomain*> p2c_root_map) {
-  auto entry = root_id;
-  while (p2c_root_map.find(entry) != p2c_root_map.end()) {
-    entry = p2c_root_map.at(entry);
-  }
-  return entry;
+  return info;
 }
 
 } // namespace loop_utils
+
+namespace {
+
+class ReplaceExprInput : public OptOutDispatch {
+ public:
+  using OptOutDispatch::handle;
+  static Expr* replace(
+      Expr* expr,
+      const std::unordered_map<Val*, Val*>& replacement_map) {
+    ReplaceExprInput replacer(expr, replacement_map);
+    TORCH_INTERNAL_ASSERT(expr != nullptr);
+    replacer.handle(expr);
+    TORCH_INTERNAL_ASSERT(replacer.replaced_expr_ != nullptr);
+    auto ret_expr = replacer.replaced_expr_;
+
+    // Copy predicates if the original expr is predicated
+    if (ret_expr != expr) {
+      ret_expr->setPredicate(expr->predicate());
+      ret_expr->setWritePredicate(expr->writePredicate());
+    }
+    return ret_expr;
+  }
+
+  static std::vector<Expr*> replace(
+      const std::vector<Expr*>& scope,
+      const std::unordered_map<Val*, Val*>& replacement_map) {
+    std::vector<Expr*> ret_expr;
+    ret_expr.reserve(scope.size());
+
+    for (auto expr : scope) {
+      ret_expr.push_back(replace(expr, replacement_map));
+    }
+
+    return ret_expr;
+  }
+
+ private:
+  // TODO: Replace this with mutator, example of this is done in replace
+  // symbolic sizes
+  ReplaceExprInput(
+      Expr* expr,
+      const std::unordered_map<Val*, Val*>& replacement_map)
+      : replacement_map_(replacement_map) {
+    replaced_expr_ = expr;
+  }
+
+  c10::optional<std::unordered_map<Val*, Val*>> getMaybeInputReplacementMap(
+      Expr* expr) {
+    bool need_replacement = false;
+
+    std::unordered_map<Val*, Val*> replaced_val;
+    for (auto in : expr->inputs()) {
+      auto replace_it = replacement_map_.find(in);
+      if (replace_it != replacement_map_.end()) {
+        need_replacement = true;
+        replaced_val[in] = replace_it->second;
+      } else {
+        replaced_val[in] = in;
+      }
+    }
+    if (need_replacement) {
+      return c10::optional<std::unordered_map<Val*, Val*>>(replaced_val);
+    } else {
+      return c10::nullopt;
+    }
+  }
+
+  // IR visitor interface
+  void handle(kir::ForLoop* for_loop) final {
+    auto new_for_loop = IrBuilder::create<kir::ForLoop>(for_loop);
+
+    auto replaced_loop_body =
+        replace(for_loop->body().exprs(), replacement_map_);
+
+    for (auto new_expr : replaced_loop_body) {
+      new_for_loop->body().push_back(new_expr);
+    }
+    replaced_expr_ = new_for_loop;
+  }
+
+  void handle(kir::IfThenElse* ite) final {
+    auto new_ite = IrBuilder::create<kir::IfThenElse>(ite->predicate());
+    auto replaced_then_body =
+        replace(ite->thenBody().exprs(), replacement_map_);
+    for (auto new_expr : replaced_then_body) {
+      new_ite->thenBody().push_back(new_expr);
+    }
+    if (ite->hasElse()) {
+      auto replaced_else_body =
+          replace(ite->elseBody().exprs(), replacement_map_);
+      for (auto new_expr : replaced_else_body) {
+        new_ite->elseBody().push_back(new_expr);
+      }
+    }
+    replaced_expr_ = new_ite;
+  }
+
+  void handle(UnaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = IrBuilder::create<UnaryOp>(
+          node->getUnaryOpType(),
+          node->out(),
+          replaced_inputs.value().at(node->in()));
+    }
+  }
+  void handle(BinaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = IrBuilder::create<BinaryOp>(
+          node->getBinaryOpType(),
+          node->out(),
+          replaced_inputs.value().at(node->lhs()),
+          replaced_inputs.value().at(node->rhs()));
+    }
+  }
+
+  void handle(TernaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = IrBuilder::create<TernaryOp>(
+          node->getTernaryOpType(),
+          node->out(),
+          replaced_inputs.value().at(node->in1()),
+          replaced_inputs.value().at(node->in2()),
+          replaced_inputs.value().at(node->in3()));
+    }
+  }
+
+  void handle(ReductionOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = IrBuilder::create<ReductionOp>(
+          node->getReductionOpType(),
+          node->init(),
+          node->out(),
+          replaced_inputs.value().at(node->in()));
+    }
+  }
+
+  void handle(BroadcastOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = IrBuilder::create<BroadcastOp>(
+          node->out(),
+          replaced_inputs.value().at(node->in()),
+          node->getBroadcastDimFlags());
+    }
+  }
+
+  void handle(WelfordOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = IrBuilder::create<WelfordOp>(
+          node->outAvg(),
+          node->outVar(),
+          node->outN(),
+          node->initAvg(),
+          node->initVar(),
+          node->initN(),
+          replaced_inputs.value().at(node->inAvg()),
+          replaced_inputs.value().at(node->inVar()),
+          replaced_inputs.value().at(node->inN()));
+    }
+  }
+
+ private:
+  Expr* replaced_expr_ = nullptr;
+  const std::unordered_map<Val*, Val*>& replacement_map_;
+};
+
+} // namespace
+
+std::vector<Expr*> replaceInputsInExpr(
+    const std::vector<Expr*>& exprs,
+    const std::unordered_map<Val*, Val*>& replacement_map) {
+  return ReplaceExprInput::replace(exprs, replacement_map);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

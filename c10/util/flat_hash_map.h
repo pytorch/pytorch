@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -24,6 +25,11 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -2103,3 +2109,5 @@ struct power_of_two_std_hash : std::hash<T> {
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop
 #endif
+
+C10_CLANG_DIAGNOSTIC_POP()

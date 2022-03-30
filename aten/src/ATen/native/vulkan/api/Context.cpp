@@ -78,6 +78,12 @@ VkDevice create_device(
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
   TORCH_CHECK(device, "Invalid Vulkan device!");
 
+#ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+  volkLoadDevice(device);
+#endif
+#endif
+
   return device;
 }
 
@@ -105,30 +111,16 @@ Context::Context(const Adapter& adapter)
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),
-      descriptor_(gpu()),
-      resource_(gpu()) {
+      threadcontext_(gpu()) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
 }
 
 Context::~Context() {
-  try {
-    flush();
-  }
-  catch (const std::exception& e) {
-    TORCH_WARN(
-        "Vulkan: Context destructor raised an exception! Error: ",
-        e.what());
-  }
-  catch (...) {
-    TORCH_WARN(
-        "Vulkan: Context destructor raised an exception! "
-        "Error: Unknown");
-  }
+  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
 }
 
 void Context::flush() {
@@ -137,6 +129,23 @@ void Context::flush() {
   resource().pool.purge();
   descriptor().pool.purge();
   command().pool.purge();
+}
+
+void Context::wait(const at::Tensor& src) {
+  // wait only if Vulkan tensor
+  if (at::kVulkan == src.device().type()) {
+    api::Command::Pool& command_pool = command().pool;
+    api::Command::Buffer& command_buffer = command_pool.stream();
+
+    using Future = ops::vTensor::Future<const void, ops::vTensor::Access::Read>;
+    const ops::vTensor& v_src = ops::convert(src);
+    const Future v_src_future = v_src.host<const void>(command_buffer);
+
+    // This wait() is a no-op if data is not out of sync.  More often than
+    // not though, waits here are expected as the GPU catches up with
+    // compute submitted from CPU.
+    v_src_future.wait();
+  }
 }
 
 bool available() {
@@ -154,10 +163,10 @@ Context* context() {
       return new Context(adapter);
     }
     catch (const std::exception& e) {
-      TORCH_WARN("Vulkan: Failed to initialize context! Error: ", e.what());
+      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
     }
     catch (...) {
-      TORCH_WARN("Vulkan: Failed to initialize context! Error: Unknown");
+      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: Unknown");
     }
 
     return nullptr;

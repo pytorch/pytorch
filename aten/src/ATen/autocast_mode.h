@@ -10,8 +10,13 @@ TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
 TORCH_API bool is_cpu_enabled();
 TORCH_API void set_cpu_enabled(bool enabled);
+TORCH_API at::ScalarType get_autocast_gpu_dtype();
 TORCH_API at::ScalarType get_autocast_cpu_dtype();
+TORCH_API void set_autocast_gpu_dtype(at::ScalarType dtype);
 TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_autocast_cache_enabled();
+TORCH_API void set_autocast_cache_enabled(bool enabled);
+
 
 namespace {
   bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
@@ -38,7 +43,7 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
     DeviceType device_type) {
   switch (device_type) {
     case DeviceType::CUDA:
-      return at::kHalf;
+      return get_autocast_gpu_dtype();
     case DeviceType::CPU:
       return get_autocast_cpu_dtype();
     default:

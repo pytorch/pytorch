@@ -81,12 +81,10 @@ includes = [
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/THC/*",
-    "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
     # we do want to handle, so explicitly specify them
     "aten/src/THC/CMakeLists.txt",
-    "aten/src/THCUNN/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
@@ -118,7 +116,8 @@ ignores = [
 def is_hip_clang() -> bool:
     try:
         hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
-        return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()
+        with open(hip_path + '/lib/.hipInfo') as f:
+            return 'HIP_COMPILER=clang' in f.read()
     except IOError:
         return False
 
@@ -126,16 +125,17 @@ def is_hip_clang() -> bool:
 if is_hip_clang():
     gloo_cmake_file = "third_party/gloo/cmake/Hip.cmake"
     do_write = False
-    with open(gloo_cmake_file, "r") as sources:
-        lines = sources.readlines()
-    newlines = [line.replace(' hip_hcc ', ' amdhip64 ') for line in lines]
-    if lines == newlines:
-        print("%s skipped" % gloo_cmake_file)
-    else:
-        with open(gloo_cmake_file, "w") as sources:
-            for line in newlines:
-                sources.write(line)
-        print("%s updated" % gloo_cmake_file)
+    if os.path.exists(gloo_cmake_file):
+        with open(gloo_cmake_file, "r") as sources:
+            lines = sources.readlines()
+        newlines = [line.replace(' hip_hcc ', ' amdhip64 ') for line in lines]
+        if lines == newlines:
+            print("%s skipped" % gloo_cmake_file)
+        else:
+            with open(gloo_cmake_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print("%s updated" % gloo_cmake_file)
 
 gloo_cmake_file = "third_party/gloo/cmake/Modules/Findrccl.cmake"
 if os.path.exists(gloo_cmake_file):
@@ -155,16 +155,17 @@ if os.path.exists(gloo_cmake_file):
 if is_hip_clang():
     gloo_cmake_file = "third_party/gloo/cmake/Dependencies.cmake"
     do_write = False
-    with open(gloo_cmake_file, "r") as sources:
-        lines = sources.readlines()
-    newlines = [line.replace('HIP_HCC_FLAGS', 'HIP_CLANG_FLAGS') for line in lines]
-    if lines == newlines:
-        print("%s skipped" % gloo_cmake_file)
-    else:
-        with open(gloo_cmake_file, "w") as sources:
-            for line in newlines:
-                sources.write(line)
-        print("%s updated" % gloo_cmake_file)
+    if os.path.exists(gloo_cmake_file):
+        with open(gloo_cmake_file, "r") as sources:
+            lines = sources.readlines()
+        newlines = [line.replace('HIP_HCC_FLAGS', 'HIP_CLANG_FLAGS') for line in lines]
+        if lines == newlines:
+            print("%s skipped" % gloo_cmake_file)
+        else:
+            with open(gloo_cmake_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print("%s updated" % gloo_cmake_file)
 
 hipify_python.hipify(
     project_directory=proj_dir,

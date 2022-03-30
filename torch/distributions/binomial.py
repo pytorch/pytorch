@@ -112,6 +112,14 @@ class Binomial(Distribution):
                           - log_factorial_n)
         return value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
 
+    def entropy(self):
+        total_count = int(self.total_count.max())
+        if not self.total_count.min() == total_count:
+            raise NotImplementedError("Inhomogeneous total count not supported by `entropy`.")
+
+        log_prob = self.log_prob(self.enumerate_support(False))
+        return -(torch.exp(log_prob) * log_prob).sum(0)
+
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:

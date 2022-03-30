@@ -7,11 +7,22 @@ import traceback
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
+from ._compatibility import compatibility
+from .operator_schemas import check_for_mutable_operation
 
+@compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
     record_stack_traces : bool = False
+    # Feature flag for mutable schema checking
+    # Enableby default in 1.12
+    check_mutable_operations : bool = False
+    # Feature flag for assert tracing
+    trace_asserts : bool = False
+    # Feature flag for proxying accesses to buffer values
+    proxy_buffer_attributes : bool = False
 
+    @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
                     type_expr : Optional[Any] = None) -> Node:
@@ -22,13 +33,16 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+        if kind == 'call_function' and self.check_mutable_operations:
+            check_for_mutable_operation(target, args, kwargs)
+
         return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
 
-
-
+    @compatibility(is_backward_compatible=True)
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
                      proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
@@ -86,6 +100,7 @@ class TracerBase:
 
         return frame
 
+    @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> Argument:
         """
         A method that lowers the objects seen as arguments during symbolic evaluation
@@ -131,6 +146,7 @@ class TracerBase:
 
         raise NotImplementedError(f"argument of type: {type(a)}")
 
+    @compatibility(is_backward_compatible=True)
     def to_bool(self, obj: 'Proxy') -> bool:
         """Called when a proxy object is being converted to a boolean, such as
         when used in control flow.  Normally we don't know what to do because
@@ -139,6 +155,7 @@ class TracerBase:
         """
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
+    @compatibility(is_backward_compatible=True)
     def iter(self, obj: 'Proxy') -> Iterator:
         """Called when a proxy object is being iterated over, such as
         when used in control flow.  Normally we don't know what to do because
@@ -154,6 +171,7 @@ class TracerBase:
                          ' Proxy docstring for help troubleshooting '
                          'Proxy iteration errors')
 
+    @compatibility(is_backward_compatible=True)
     def keys(self, obj: 'Proxy') -> Any:
         """Called when a proxy object is has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
@@ -163,15 +181,21 @@ class TracerBase:
 
 
 # used in Proxy object when just appending to the graph while not tracing.
+@compatibility(is_backward_compatible=True)
 class GraphAppendingTracer(TracerBase):
     def __init__(self, graph: Graph):
         super().__init__()
         self.graph = graph
 
+@compatibility(is_backward_compatible=False)
+def assert_fn(x):
+    assert x
+
+@compatibility(is_backward_compatible=True)
 class TraceError(ValueError):
     pass
 
-
+@compatibility(is_backward_compatible=True)
 class Proxy:
     """
     ``Proxy`` objects are ``Node`` wrappers that flow through the
@@ -200,6 +224,8 @@ class Proxy:
     For a more detailed description into the Proxy internals, check out
     the "Proxy" section in `torch/fx/OVERVIEW.md`
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:
             # This allows you to create a Proxy object around a raw Node
@@ -230,8 +256,30 @@ class Proxy:
         return self.tracer.iter(self)
 
     def __bool__(self) -> bool:
+        if self.tracer.trace_asserts:
+            # check if this boolean is used in an assertion, bytecode pattern for assertions
+            # is pretty stable for Python 3.7--3.9
+            frame = inspect.currentframe()
+            assert frame is not None
+            calling_frame = frame.f_back
+            assert calling_frame is not None
+            insts = list(dis.get_instructions(calling_frame.f_code))
+            cur = calling_frame.f_lasti // 2
+            inst = insts[cur]
+
+            if inst.opname == 'POP_JUMP_IF_TRUE':
+                first = insts[cur + 1]
+                assert inst.arg is not None
+                last = insts[inst.arg // 2 - 1]
+                starts_with_assert = (first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError'
+                                      or first.opname == 'LOAD_ASSERTION_ERROR')
+                if starts_with_assert and last.opname == 'RAISE_VARARGS':
+                    self.tracer.create_proxy('call_function', assert_fn, (self,), {})
+                    return True
+
         return self.tracer.to_bool(self)
 
+    @compatibility(is_backward_compatible=True)
     def keys(self):
         return self.tracer.keys(self)
 
@@ -240,20 +288,37 @@ class Proxy:
                            "this call to be recorded, please call torch.fx.wrap('len') at "
                            "module scope")
 
-    def __torch_function__(self, orig_method, types, args=None, kwargs=None):
+    @classmethod
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        tracers : Dict[Any, None] = {}
+
+        def find_tracer(a):
+            if isinstance(a, cls):
+                tracers[a.tracer] = None
+        torch.fx.node.map_aggregate(args, find_tracer)
+        torch.fx.node.map_aggregate(kwargs, find_tracer)
+
+        if len(tracers) > 1:
+            raise RuntimeError(f'Found multiple different tracers {list(tracers.keys())} while '
+                               f'trying to trace operations {orig_method}')
+        tracer = next(iter(tracers.keys()))
+
         if isinstance(orig_method, torch._C.ScriptMethod):
             args = (orig_method.owner,) + args
-            return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
+            return tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
-            return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
+            return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=self.tracer.graph._target_to_str(orig_method.__name__))
+            return tracer.create_proxy('call_function', orig_method, args, kwargs,
+                                       name=tracer.graph._target_to_str(orig_method.__name__))
 
+
+@compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
+    @compatibility(is_backward_compatible=True)
     def __init__(self, root: Proxy, attr: str):
         self.root = root
         self.attr = attr
@@ -272,9 +337,10 @@ class Attribute(Proxy):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
 
+@compatibility(is_backward_compatible=False)
 class ParameterProxy(Proxy):
     """
-    a special proxy which lets "shape", "size", "dim", and a few other
+    A special proxy which lets "shape", "size", "dim", and a few other
     attribute accesses pass through to the underlying  module parameter object,
     so that conditional tests on these attributes will not throw exception during tracing
     """
@@ -309,18 +375,18 @@ class ParameterProxy(Proxy):
 
 
 for method in magic_methods:
-    def scope(method):
+    def _scope(method):
         def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
-        as_magic = f'__{method}__'
+        as_magic = f'__{method.strip("_")}__'
         setattr(Proxy, as_magic, impl)
-    scope(method)
+    _scope(method)
 
 def _define_reflectable(orig_method_name):
-    method_name = f'__r{orig_method_name}__'
+    method_name = f'__r{orig_method_name.strip("_")}__'
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)

@@ -16,12 +16,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-#if TENSORPIPE_HAS_SHM_TRANSPORT
-// Needed for ::getpid(), which is used to create a unique address.
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -209,22 +203,10 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 
-std::string createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = tensorpipe::transport::shm::create();
-  std::string address = createUniqueShmAddr();
-  return std::make_unique<TransportRegistration>(TransportRegistration{
-      std::move(context), kShmTransportPriority, std::move(address)});
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), kShmTransportPriority, ""});
 }
 
 // The SHM implements connections using ringbuffers residing in anonymous shared
@@ -360,9 +342,15 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::prepareNames() {
-  auto nameToId = collectNames(
-      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+void TensorPipeAgent::prepareNames(bool isStaticGroup) {
+  std::unordered_map<std::string, worker_id_t> nameToId;
+  if (isStaticGroup) {
+    nameToId = collectNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+  } else {
+    nameToId = collectCurrentNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
+  }
 
   for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
@@ -372,12 +360,35 @@ void TensorPipeAgent::prepareNames() {
   }
 }
 
+void TensorPipeAgent::checkAndSetStaticGroup(
+    const c10::intrusive_ptr<::c10d::Store>& store) {
+  std::string isStaticGroupKey("rpcIsStaticGroup");
+
+  std::string isStaticGroupStr = isStaticGroup_ ? "true" : "false";
+  std::vector<uint8_t> isStaticGroupVec(
+      (uint8_t*)isStaticGroupStr.c_str(),
+      (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
+  std::vector<uint8_t> returnedVec;
+  returnedVec = store->compareSet(
+      isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
+  std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
+  // In both cases, the returned value should be the value of isStaticGroupStr,
+  // otherwise there is a discrepency with initialization among one of the
+  // members
+  TORCH_CHECK(
+      returnedVal == isStaticGroupStr,
+      fmt::format(
+          "RPC group mixes statically and dynamically initialized members which is not supported. ",
+          "Static group property is initialized as {} and is trying to be set as {} ",
+          isStaticGroup_,
+          returnedVal));
+}
+
 TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    int worldSize,
-    c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
+    optional<int> worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -395,10 +406,17 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      worldSize_(worldSize),
-      processGroup_(std::move(processGroup)) {
+      shutdownStore_("shutdown", store),
+      isStaticGroup_(worldSize.has_value()) {
+  if (isStaticGroup_) {
+    worldSize_ = worldSize.value();
+  }
+
+  // check the static group attribute against store
+  checkAndSetStaticGroup(store);
+
   // collect worker names
-  prepareNames();
+  prepareNames(isStaticGroup_);
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
@@ -416,6 +434,7 @@ void TensorPipeAgent::startImpl() {
   int lowestPriority = std::numeric_limits<int>::max();
   std::string lowestPriorityTransport;
 
+  // Register transports
   for (auto& key : TensorPipeTransportRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.transports.has_value()) {
@@ -446,6 +465,7 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->transport));
   }
 
+  // Register channels
   for (auto& key : TensorPipeChannelRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.channels.has_value()) {
@@ -1028,11 +1048,6 @@ void TensorPipeAgent::pollTimeoutRpcs() {
   }
 }
 
-// TODO: Remove sync()
-void TensorPipeAgent::sync() {
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is syncing (no-op)";
-}
-
 // TODO: Remove join()
 void TensorPipeAgent::join(bool shutdown) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
@@ -1058,7 +1073,7 @@ void TensorPipeAgent::join(bool shutdown) {
     }
     VLOG(1) << "RPC agent for " << workerInfo_.name_
             << " completed all client calls and is entering a barrier";
-    processGroup_->barrier()->wait();
+    syncCallCount(shutdownStore_, worldSize_);
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
       // At this point, the count may have become non-zero again. We can't wait
@@ -1069,18 +1084,16 @@ void TensorPipeAgent::join(bool shutdown) {
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " exited the barrier and found " << clientActiveCalls_
               << " active client calls";
-      std::vector<at::Tensor> totalClientActiveCalls = {
-          at::zeros({}, at::kLong)};
-      *totalClientActiveCalls[0].data_ptr<int64_t>() = clientActiveCalls_;
-      processGroup_->allreduce(totalClientActiveCalls)->wait();
+      int totalClientActiveCalls =
+          syncCallCount(shutdownStore_, worldSize_, clientActiveCalls_);
       VLOG(1) << "RPC agent for " << workerInfo_.name_
-              << " completed the allreduce and got a total of "
-              << (*totalClientActiveCalls[0].data_ptr<int64_t>())
+              << " completed sync call counts and got a total of "
+              << totalClientActiveCalls
               << " active client calls across all workers";
-      if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+      if (totalClientActiveCalls == 0) {
         if (shutdown) {
           shuttingDown_ = true;
-          processGroup_->barrier()->wait();
+          syncCallCount(shutdownStore_, worldSize_);
         }
         break;
       }

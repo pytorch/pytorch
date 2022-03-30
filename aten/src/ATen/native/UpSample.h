@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 
@@ -51,7 +51,7 @@ namespace upsample {
 
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
-    c10::optional<c10::IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
 
 inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
@@ -65,27 +65,42 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 
 using scale_t = c10::optional<double>;
 using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
+using _upsampling_nearest_exact1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using _upsampling_nearest_exact2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
 using upsampling_nearest3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+using _upsampling_nearest_exact3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
 using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using _upsampling_bilinear2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using _upsampling_bicubic2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_kernel);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel);
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
 
-static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -113,7 +128,7 @@ static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_width};
 }
 
-static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -149,7 +164,8 @@ static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_height, output_width};
 }
 
-static std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static C10_UNUSED
+std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -250,12 +266,16 @@ static inline scalar_t area_pixel_compute_scale(
     bool align_corners,
     const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
-  if (output_size > 1) {
-    return align_corners
-        ? static_cast<scalar_t>(input_size - 1) / (output_size - 1)
-        : compute_scales_value<scalar_t>(scale, input_size, output_size);
-  } else {
-    return scalar_t(0);
+  if(align_corners){
+    if(output_size > 1) {
+      return static_cast<scalar_t>(input_size - 1) / (output_size - 1);
+    }
+    else {
+      return static_cast<scalar_t>(0);
+    }
+  }
+  else{
+    return compute_scales_value<scalar_t>(scale, input_size, output_size);
   }
 }
 
@@ -289,8 +309,22 @@ static inline int64_t nearest_neighbor_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
+  // Index computation matching OpenCV INTER_NEAREST
+  // which is buggy and kept for BC
   const int64_t src_index =
       std::min(static_cast<int64_t>(floorf(dst_index * scale)), input_size - 1);
+  return src_index;
+}
+
+static inline int64_t nearest_neighbor_exact_compute_source_index(
+    const float scale,
+    int64_t dst_index,
+    int64_t input_size) {
+  // index_f32 = (output_index + 0.5) * scale - 0.5
+  // input_index = round(index_f32)
+  // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+  const int64_t src_index =
+      std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
 

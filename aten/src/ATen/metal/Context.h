@@ -25,6 +25,11 @@ class MetalImplRegistrar {
 at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src);
 
 } // namespace metal
+
+namespace native {
+bool is_metal_available();
+} // namespace native
+
 } // namespace at
 
 #endif /* MetalContext_h */

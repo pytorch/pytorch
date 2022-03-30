@@ -47,6 +47,7 @@ shellcheck:
 		--step 'Extract scripts from GitHub Actions workflows'
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'shellcheck'
 
 setup_lint:
@@ -85,6 +86,7 @@ quick_checks:
 		--step 'Ensure canonical include' \
 		--step 'Ensure no versionless Python shebangs' \
 		--step 'Ensure no unqualified noqa' \
+		--step 'Ensure GitHub PyPi dependencies are pinned' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
 		--step 'Ensure correct trailing newlines' \
@@ -93,11 +95,13 @@ quick_checks:
 flake8:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'flake8-py3'
 
 mypy:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'mypy'
 
 cmakelint:
@@ -109,6 +113,7 @@ cmakelint:
 clang-tidy:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'clang-tidy'
 
 toc:

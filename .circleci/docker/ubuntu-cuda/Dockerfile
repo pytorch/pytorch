@@ -1,12 +1,11 @@
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
-ARG CUDNN_VERSION
+ARG IMAGE_NAME
 
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+FROM ${IMAGE_NAME}
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
-ARG CUDNN_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -24,11 +23,13 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda and other packages (e.g., numpy, coverage, pytest)
+# Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ADD requirements-ci.txt /opt/conda/requirements-ci.txt
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
+RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -61,11 +62,21 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+ADD ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+
+# (optional) Install non-default CMake version
+ARG CMAKE_VERSION
+ADD ./common/install_cmake.sh install_cmake.sh
+RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
-ENV CUDA_NVCC_EXECUTABLE=/opt/cache/lib/nvcc
+ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 # Add jni.h for java host build
 ADD ./common/install_jni.sh install_jni.sh
@@ -84,13 +95,16 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
+ENV CUDA_PATH /usr/local/cuda
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
-ADD ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
+# Install CUDNN
+ARG CUDNN_VERSION
+ADD ./common/install_cudnn.sh install_cudnn.sh
+RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
+RUN rm install_cudnn.sh
 
 USER jenkins
 CMD ["bash"]

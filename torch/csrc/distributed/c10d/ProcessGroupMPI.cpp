@@ -4,6 +4,7 @@
 
 #include <limits>
 #include <map>
+#include <iostream>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
@@ -269,6 +270,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       bool groupComm_updated = false;
       MPI_Barrier(MPI_COMM_WORLD);
       for (const auto i : c10::irange(kMaxNumRetries)) {
+        (void)i;
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
           break;
@@ -308,6 +310,8 @@ ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
 
   // Start the worker thread accepting MPI calls
   workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
+
+  init();
 }
 
 ProcessGroupMPI::~ProcessGroupMPI() {

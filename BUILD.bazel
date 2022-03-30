@@ -3,10 +3,10 @@ load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
-load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
+load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -14,99 +14,16 @@ COMMON_COPTS = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-D_FILE_OFFSET_BITS=64",
-    "-DHAVE_GCC_GET_CPUID",
-    "-DUSE_GCC_GET_CPUID",
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
+    "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
     "-DUSE_CUDA",
     "-DUSE_CUDNN",
 ])
-
-# c10
-header_template_rule(
-    name = "cmake_macros_h",
-    src = "c10/macros/cmake_macros.h.in",
-    out = "c10/macros/cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
-    },
-)
-
-header_template_rule(
-    name = "cuda_cmake_macros_h",
-    src = "c10/cuda/impl/cuda_cmake_macros.h.in",
-    out = "c10/cuda/impl/cuda_cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-    },
-)
-
-cc_library(
-    name = "c10_headers",
-    hdrs = glob([
-        "c10/core/*.h",
-        "c10/core/impl/*.h",
-        "c10/cuda/*.h",
-        "c10/cuda/impl/*.h",
-        "c10/macros/*.h",
-        "c10/mobile/*.h",
-        "c10/util/*.h",
-        "c10/util/*.hpp",
-    ]),
-    deps = [
-        "@com_github_gflags_gflags//:gflags",
-        "@com_github_glog//:glog",
-        ":cmake_macros_h",
-        ":cuda_cmake_macros_h",
-    ],
-)
-
-cc_library(
-    name = "c10",
-    srcs = glob([
-        "c10/core/*.cpp",
-        "c10/core/impl/*.cpp",
-        "c10/mobile/*.cpp",
-        "c10/util/*.cpp",
-    ]) + if_cuda(
-        glob([
-            "c10/cuda/*.cpp",
-            "c10/cuda/impl/*.cpp",
-        ]),
-        [],
-    ),
-    copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
-    deps = [
-        ":c10_headers",
-        "@fmt",
-    ] + if_cuda(
-        ["@cuda"],
-        [],
-    ),
-    alwayslink = True,
-)
-
-cc_test(
-    name = "c10_tests",
-    size = "small",
-    srcs = glob([
-        "c10/test/util/*.cpp",
-        "c10/test/util/*.h",
-        "c10/test/core/*.cpp",
-        "c10/test/core/impl/*.cpp",
-    ]),
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":c10",
-        ":c10_headers",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
 
 # TODO: refactor this into its own library (but how to make
 # a binary based off of a module in a library?)
@@ -118,46 +35,74 @@ py_binary(
     ],
 )
 
-genrule(
-    name = "generated_cpp",
-    srcs = [
-        "aten/src/ATen/native/native_functions.yaml",
-    ] + glob(["aten/src/ATen/templates/**"]),
-    outs = [
-        "aten/src/ATen/Declarations.yaml",
-        "aten/src/ATen/RegisterBackendSelect.cpp",
-        "aten/src/ATen/RegisterCPU.cpp",
-        "aten/src/ATen/RegisterMkldnnCPU.cpp",
-        "aten/src/ATen/RegisterQuantizedCPU.cpp",
-        "aten/src/ATen/RegisterSparseCPU.cpp",
-        "aten/src/ATen/RegisterSparseCsrCPU.cpp",
-        "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
-        "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
-        "aten/src/ATen/RegisterMeta.cpp",
-        "aten/src/ATen/RegisterSchema.cpp",
-        "aten/src/ATen/CPUFunctions.h",
-        "aten/src/ATen/CPUFunctions_inl.h",
-        "aten/src/ATen/CUDAFunctions.h",
-        "aten/src/ATen/CUDAFunctions_inl.h",
-        "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
-        "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
-        "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
-        "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
-        "aten/src/ATen/Functions.h",
-        "aten/src/ATen/Functions.cpp",
-        "aten/src/ATen/RedispatchFunctions.h",
-        "aten/src/ATen/Operators.h",
-        "aten/src/ATen/Operators.cpp",
-        "aten/src/ATen/NativeFunctions.h",
-        "aten/src/ATen/MetaFunctions.h",
-        "aten/src/ATen/MetaFunctions_inl.h",
-        "aten/src/ATen/NativeMetaFunctions.h",
-        "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.cpp",
-        "aten/src/ATen/core/ATenOpList.cpp",
-    ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
-    tools = [":gen"],
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
+
+generated_cpu_cpp = [
+    "aten/src/ATen/RegisterBackendSelect.cpp",
+    "aten/src/ATen/RegisterCPU.cpp",
+    "aten/src/ATen/RegisterFunctionalization_0.cpp",
+    "aten/src/ATen/RegisterFunctionalization_1.cpp",
+    "aten/src/ATen/RegisterFunctionalization_2.cpp",
+    "aten/src/ATen/RegisterFunctionalization_3.cpp",
+    # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
+    "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterQuantizedCPU.cpp",
+    "aten/src/ATen/RegisterSparseCPU.cpp",
+    "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+    "aten/src/ATen/RegisterZeroTensor.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterSchema.cpp",
+    "aten/src/ATen/CPUFunctions.h",
+    "aten/src/ATen/CPUFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/FunctionalInverses.h",
+    "aten/src/ATen/Functions.h",
+    "aten/src/ATen/Functions.cpp",
+    "aten/src/ATen/RedispatchFunctions.h",
+    "aten/src/ATen/Operators.h",
+    "aten/src/ATen/Operators_0.cpp",
+    "aten/src/ATen/Operators_1.cpp",
+    "aten/src/ATen/Operators_2.cpp",
+    "aten/src/ATen/Operators_3.cpp",
+    "aten/src/ATen/Operators_4.cpp",
+    "aten/src/ATen/NativeFunctions.h",
+    "aten/src/ATen/MetaFunctions.h",
+    "aten/src/ATen/MetaFunctions_inl.h",
+    "aten/src/ATen/MethodOperators.h",
+    "aten/src/ATen/NativeMetaFunctions.h",
+    "aten/src/ATen/RegistrationDeclarations.h",
+    "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/TensorBody.h",
+    "aten/src/ATen/core/TensorMethods.cpp",
+    "aten/src/ATen/core/ATenOpList.cpp",
+]
+
+generated_cuda_cpp = [
+    "aten/src/ATen/CUDAFunctions.h",
+    "aten/src/ATen/CUDAFunctions_inl.h",
+    "aten/src/ATen/RegisterCUDA.cpp",
+    "aten/src/ATen/RegisterQuantizedCUDA.cpp",
+    "aten/src/ATen/RegisterSparseCUDA.cpp",
+    "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
+]
+
+generate_aten(
+    name = "generated_aten_cpp",
+    srcs = aten_generation_srcs,
+    outs = (
+        generated_cpu_cpp +
+        generated_cuda_cpp +
+        aten_ufunc_generated_cpu_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
+        ["aten/src/ATen/Declarations.yaml"]
+    ),
+    generator=":gen",
 )
 
 py_library(
@@ -210,27 +155,46 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
+        "torch/csrc/lazy/generated/LazyIr.h",
+        "torch/csrc/lazy/generated/LazyNativeFunctions.h",
+        "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
+        "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
+        "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ]
 
 libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_functions.h",
-        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_functions_3.cpp",
+        "torch/csrc/autograd/generated/python_functions_4.cpp",
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
     name = "all_generated_code",
     srcs = [
-        "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/ts_native_functions.yaml",
+        "torch/csrc/lazy/core/shape_inference.h",
+        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src --gen_lazy_ts_backend",
     tools = [":generate_code"],
 )
 
@@ -283,6 +247,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_nested_cpp",
+    srcs = glob(["aten/src/ATen/native/nested/*.cpp"]),
+)
+
+filegroup(
     name = "aten_native_quantized_cpp",
     srcs = glob(
         [
@@ -294,7 +263,7 @@ filegroup(
 
 filegroup(
     name = "aten_native_mkl_cpp",
-    srcs = glob(["aten/src/ATen/native/mkl/*.cpp"]),
+    srcs = glob(["aten/src/ATen/native/mkl/*.cpp", "aten/src/ATen/mkl/*.cpp"]),
 )
 
 filegroup(
@@ -330,188 +299,44 @@ filegroup(
 )
 
 filegroup(
-    name = "th_srcs",
-    srcs = [
-        "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THStorageFunctions.cpp",
-        "aten/src/TH/THTensor.cpp",
-    ],
+    name = "aten_cuda_cpp_srcs",
+    srcs = glob(
+        [
+            "aten/src/ATen/cuda/*.cpp",
+            "aten/src/ATen/cuda/detail/*.cpp",
+            "aten/src/ATen/cudnn/*.cpp",
+            "aten/src/ATen/native/cuda/*.cpp",
+            "aten/src/ATen/native/cuda/linalg/*.cpp",
+            "aten/src/ATen/native/cudnn/*.cpp",
+            "aten/src/ATen/native/miopen/*.cpp",
+            "aten/src/ATen/native/sparse/cuda/*.cpp",
+            "aten/src/THC/*.cpp",
+        ],
+    ),
 )
 
 filegroup(
-    name = "aten_cuda_srcs",
-    srcs = [
-        "aten/src/ATen/cuda/CUDABlas.cpp",
-        "aten/src/ATen/cuda/CUDASolver.cpp",
-        "aten/src/ATen/cuda/CUDAContext.cpp",
-        "aten/src/ATen/cuda/CUDAGeneratorImpl.cpp",
-        "aten/src/ATen/cuda/CUDAGraph.cpp",
-        "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
-        "aten/src/ATen/cuda/CublasHandlePool.cpp",
-        "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
-        "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
-        "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
-        "aten/src/ATen/cudnn/AutocastRNN.cpp",
-        "aten/src/ATen/cudnn/Descriptors.cpp",
-        "aten/src/ATen/cudnn/Handle.cpp",
-        "aten/src/ATen/cudnn/Types.cpp",
-        "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
-        "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
-        "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
-        "aten/src/ATen/native/cudnn/BatchNorm.cpp",
-        "aten/src/ATen/native/cudnn/Conv.cpp",
-        "aten/src/ATen/native/cudnn/GridSampler.cpp",
-        "aten/src/ATen/native/cudnn/LossCTC.cpp",
-        "aten/src/ATen/native/cudnn/RNN.cpp",
-        "aten/src/ATen/native/miopen/BatchNorm_miopen.cpp",
-        "aten/src/ATen/native/miopen/Conv_miopen.cpp",
-        "aten/src/ATen/native/miopen/RNN_miopen.cpp",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
-        "aten/src/THC/THCCachingHostAllocator.cpp",
-        "aten/src/THC/THCGeneral.cpp",
-        "aten/src/THC/THCStorageCopy.cpp",
-        "aten/src/THC/THCTensor.cpp",
-    ],
-)
-
-filegroup(
-    name = "thc_srcs_cu",
-    srcs = [
-        "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSleep.cu.cc",
-        "aten/src/THC/THCSortUtils.cu.cc",
-        "aten/src/THC/THCStorage.cu.cc",
-        "aten/src/THC/THCStorageCopy.cu.cc",
-        "aten/src/THC/THCTensor.cu.cc",
-        "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathMagma.cu.cc",
-        "aten/src/THC/THCTensorMathPairwise.cu.cc",
-        "aten/src/THC/THCTensorMathScan.cu.cc",
-        "aten/src/THC/THCTensorScatterGather.cu.cc",
-        "aten/src/THC/THCTensorSort.cu.cc",
-        "aten/src/THC/generated/THCTensorSortByte.cu.cc",
-        "aten/src/THC/generated/THCTensorSortChar.cu.cc",
-        "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorSortFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorSortHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorSortInt.cu.cc",
-        "aten/src/THC/generated/THCTensorSortLong.cu.cc",
-        "aten/src/THC/generated/THCTensorSortShort.cu.cc",
-    ],
-)
-
-filegroup(
-    name = "thcunn_srcs_cu",
-    srcs = [
-        "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ELU.cu.cc",
-        "aten/src/THCUNN/HardTanh.cu.cc",
-        "aten/src/THCUNN/LeakyReLU.cu.cc",
-        "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftPlus.cu.cc",
-        "aten/src/THCUNN/SoftShrink.cu.cc",
-        "aten/src/THCUNN/SpatialClassNLLCriterion.cu.cc",
-        "aten/src/THCUNN/SpatialConvolutionMM.cu.cc",
-        "aten/src/THCUNN/Tanh.cu.cc",
-    ],
-)
-
-filegroup(
-    name = "aten_srcs_cu",
-    srcs = [
-        "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
-        "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
-        "aten/src/ATen/native/cuda/Activation.cu.cc",
-        "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
-        "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",
-        "aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu.cc",
-        "aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu.cc",
-        "aten/src/ATen/native/cuda/AveragePool2d.cu.cc",
-        "aten/src/ATen/native/cuda/AveragePool3d.cu.cc",
-        "aten/src/ATen/native/cuda/BatchLinearAlgebra.cu.cc",
-        "aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cu.cc",
-        "aten/src/ATen/native/cuda/BinaryArithmeticKernel.cu.cc",
-        "aten/src/ATen/native/cuda/BinaryCompareKernel.cu.cc",
-        "aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu.cc",
-        "aten/src/ATen/native/cuda/CUDAScalar.cu.cc",
-        "aten/src/ATen/native/cuda/Col2Im.cu.cc",
-        "aten/src/ATen/native/cuda/Copy.cu.cc",
-        "aten/src/ATen/native/cuda/CrossKernel.cu.cc",
-        "aten/src/ATen/native/cuda/DilatedMaxPool2d.cu.cc",
-        "aten/src/ATen/native/cuda/DilatedMaxPool3d.cu.cc",
-        "aten/src/ATen/native/cuda/DistanceKernel.cu.cc",
-        "aten/src/ATen/native/cuda/Distributions.cu.cc",
-        "aten/src/ATen/native/cuda/Dropout.cu.cc",
-        "aten/src/ATen/native/cuda/Embedding.cu.cc",
-        "aten/src/ATen/native/cuda/EmbeddingBackwardKernel.cu.cc",
-        "aten/src/ATen/native/cuda/EmbeddingBag.cu.cc",
-        "aten/src/ATen/native/cuda/FillKernel.cu.cc",
-        "aten/src/ATen/native/cuda/FractionalMaxPool2d.cu.cc",
-        "aten/src/ATen/native/cuda/FractionalMaxPool3d.cu.cc",
-        "aten/src/ATen/native/cuda/GridSampler.cu.cc",
-        "aten/src/ATen/native/cuda/Im2Col.cu.cc",
-        "aten/src/ATen/native/cuda/IndexKernel.cu.cc",
-        "aten/src/ATen/native/cuda/Indexing.cu.cc",
-        "aten/src/ATen/native/cuda/Lerp.cu.cc",
-        "aten/src/ATen/native/cuda/LinearAlgebra.cu.cc",
-        "aten/src/ATen/native/cuda/Loss.cu.cc",
-        "aten/src/ATen/native/cuda/LossCTC.cu.cc",
-        "aten/src/ATen/native/cuda/MaxUnpooling.cu.cc",
-        "aten/src/ATen/native/cuda/MultinomialKernel.cu.cc",
-        "aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu.cc",
-        "aten/src/ATen/native/cuda/NaiveConvolutionTranspose2d.cu.cc",
-        "aten/src/ATen/native/cuda/NaiveConvolutionTranspose3d.cu.cc",
-        "aten/src/ATen/native/cuda/NaiveDilatedConvolution.cu.cc",
-        "aten/src/ATen/native/cuda/Normalization.cu.cc",
-        "aten/src/ATen/native/cuda/PointwiseOpsKernel.cu.cc",
-        "aten/src/ATen/native/cuda/PowKernel.cu.cc",
-        "aten/src/ATen/native/cuda/RNN.cu.cc",
-        "aten/src/ATen/native/cuda/RangeFactories.cu.cc",
-        "aten/src/ATen/native/cuda/Reduce.cu.cc",
-        "aten/src/ATen/native/cuda/ReduceOpsKernel.cu.cc",
-        "aten/src/ATen/native/cuda/ReflectionPad.cu.cc",
-        "aten/src/ATen/native/cuda/Repeat.cu.cc",
-        "aten/src/ATen/native/cuda/ReplicationPadding.cu.cc",
-        "aten/src/ATen/native/cuda/Resize.cu.cc",
-        "aten/src/ATen/native/cuda/SegmentReduce.cu.cc",
-        "aten/src/ATen/native/cuda/SoftMax.cu.cc",
-        "aten/src/ATen/native/cuda/SortingKthValue.cu.cc",
-        "aten/src/ATen/native/cuda/SparseMM.cu.cc",
-        "aten/src/ATen/native/cuda/SpectralOps.cu.cc",
-        "aten/src/ATen/native/cuda/SummaryOps.cu.cc",
-        "aten/src/ATen/native/cuda/TensorCompare.cu.cc",
-        "aten/src/ATen/native/cuda/TensorFactories.cu.cc",
-        "aten/src/ATen/native/cuda/TensorTopK.cu.cc",
-        "aten/src/ATen/native/cuda/TensorTransformations.cu.cc",
-        "aten/src/ATen/native/cuda/TriangularOps.cu.cc",
-        "aten/src/ATen/native/cuda/UnaryOpsKernel.cu.cc",
-        "aten/src/ATen/native/cuda/UnarySpecialOpsKernel.cu.cc",
-        "aten/src/ATen/native/cuda/Unique.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleBicubic2d.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleBilinear2d.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleLinear1d.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleNearest1d.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleNearest2d.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleNearest3d.cu.cc",
-        "aten/src/ATen/native/cuda/UpSampleTrilinear3d.cu.cc",
-        "aten/src/ATen/native/cuda/WeightNorm.cu.cc",
-        "aten/src/ATen/native/cuda/layer_norm_kernel.cu.cc",
-        "aten/src/ATen/native/quantized/cuda/fake_quantize_core.cu.cc",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cu.cc",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cu.cc",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDATensorMath.cu.cc",
-    ],
+    name = "aten_cu_srcs",
+    srcs = glob([
+        "aten/src/ATen/cuda/*.cu",
+        "aten/src/ATen/cuda/detail/*.cu",
+        "aten/src/ATen/native/cuda/*.cu",
+        "aten/src/ATen/native/quantized/cuda/*.cu",
+        "aten/src/ATen/native/sparse/cuda/*.cu",
+    ]) + aten_ufunc_generated_cuda_sources("aten/src/ATen/{}"),
+    # It's a bit puzzling to me why it's not necessary to declare the
+    # target that generates these sources...
 )
 
 header_template_rule(
     name = "aten_src_ATen_config",
     src = "aten/src/ATen/Config.h.in",
     out = "aten/src/ATen/Config.h",
+    include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
-        "@AT_MKL_ENABLED@": "0",
+        "@AT_MKL_ENABLED@": "1",
+        "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
         "@AT_POCKETFFT_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
@@ -530,65 +355,42 @@ header_template_rule(
     name = "aten_src_ATen_cuda_config",
     src = "aten/src/ATen/cuda/CUDAConfig.h.in",
     out = "aten/src/ATen/cuda/CUDAConfig.h",
+    include = "aten/src",
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
         "@AT_ROCM_ENABLED@": "0",
+        "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",
-    },
-)
-
-header_template_rule(
-    name = "aten_src_TH_THGeneral",
-    src = "aten/src/TH/THGeneral.h.in",
-    out = "aten/src/TH/THGeneral.h",
-    substitutions = {
-    },
-)
-
-header_template_rule(
-    name = "aten_src_THC_THCGeneral",
-    src = "aten/src/THC/THCGeneral.h.in",
-    out = "aten/src/THC/THCGeneral.h",
-    substitutions = {
-        "#cmakedefine USE_MAGMA": "",
     },
 )
 
 cc_library(
     name = "aten_headers",
     hdrs = [
-        "torch/csrc/WindowsTorchApiMacro.h",
+        "torch/csrc/Export.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
         "aten/src/**/*.h",
         "aten/src/**/*.hpp",
+        "aten/src/ATen/cuda/**/*.cuh",
+        "aten/src/ATen/native/**/*.cuh",
         "aten/src/TH/**/*.cpp",
-        "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/generic/*.cu.cc",
-        "aten/src/THCUNN/*.cuh",
-        "aten/src/THCUNN/generic/*.cu.cc",
+        "aten/src/THC/generic/*.cu",
     ],
-    exclude = [
-        "aten/src/ATen/Config.h",
-    ],) + [
-        ":generated_cpp",
+    ) + [
         ":aten_src_ATen_config",
+        ":generated_aten_cpp",
     ],
     includes = [
         "aten/src",
-        "aten/src/TH",
     ],
     deps = [
-        ":c10_headers",
-        ":aten_src_TH_THGeneral",
-        ":aten_src_THC_THCGeneral",
+        "//c10:headers",
     ],
 )
 
 ATEN_COPTS = COMMON_COPTS + [
-    "-DUSE_AVX",
-    "-DUSE_AVX2",
     "-DCAFFE2_BUILD_MAIN_LIBS",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
@@ -603,21 +405,9 @@ intern_build_aten_ops(
         ":aten_headers",
         "@sleef",
         "@fbgemm",
+        "@mkl",
     ],
-)
-
-cc_library(
-    name = "th",
-    srcs = [
-        ":th_srcs",
-    ],
-    copts = ATEN_COPTS + [
-        "-mavx",
-    ],
-    deps = [
-        ":aten_headers",
-        "@fbgemm",
-    ],
+    extra_impls = aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}"),
 )
 
 cc_library(
@@ -633,10 +423,10 @@ cc_library(
         ":aten_native_mkldnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
+        ":aten_native_nested_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-        ":generated_cpp",
-    ],
+    ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
@@ -647,7 +437,6 @@ cc_library(
         ":ATen_CPU",
         ":aten_headers",
         ":caffe2_for_aten_headers",
-        ":th",
         ":torch_headers",
         "@fbgemm",
         "@ideep",
@@ -665,10 +454,10 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        ":c10_headers",
         "@cuda",
         "@cuda//:cuda_driver",
         "@cuda//:nvrtc",
+        "//c10:headers",
     ],
     alwayslink = True,
 )
@@ -684,12 +473,14 @@ cc_binary(
 
 cc_library(
     name = "aten_cuda_cpp",
-    srcs = [":aten_cuda_srcs"],
+    srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp,
+    hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
     visibility = ["//visibility:public"],
     deps = [
         ":aten",
         "@cuda",
+        "@cuda//:cusolver",
         "@cuda//:nvrtc",
         "@cudnn",
     ],
@@ -706,11 +497,7 @@ torch_cuda_half_options = [
 
 cu_library(
     name = "aten_cuda",
-    srcs = [
-        ":aten_srcs_cu",
-        ":thc_srcs_cu",
-        ":thcunn_srcs_cu",
-    ],
+    srcs = [":aten_cu_srcs"],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -774,6 +561,7 @@ header_template_rule(
 filegroup(
     name = "caffe2_contrib_srcs",
     srcs = [
+        "caffe2/contrib/aten/aten_op.cc",
         "caffe2/contrib/gloo/allgather_ops.cc",
         "caffe2/contrib/gloo/allreduce_ops.cc",
         "caffe2/contrib/gloo/barrier_ops.cc",
@@ -943,6 +731,7 @@ filegroup(
         "caffe2/operators/conv_op_eigen.cc",
         "caffe2/operators/conv_op_shared.cc",
         "caffe2/operators/conv_transpose_gradient_op.cc",
+        "caffe2/operators/conv_transpose_op.cc",
         "caffe2/operators/conv_transpose_op_mobile.cc",
         "caffe2/operators/copy_op.cc",
         "caffe2/operators/copy_rows_to_tensor_op.cc",
@@ -1338,7 +1127,7 @@ filegroup(
 )
 
 filegroup(
-    name = "caffe2_cuda_srcs",
+    name = "caffe2_cuda_cpp_srcs",
     srcs = [
         "caffe2/contrib/aten/aten_op_gpu.cc",
         "caffe2/contrib/gloo/allreduce_ops_gpu.cc",
@@ -1407,155 +1196,155 @@ filegroup(
 filegroup(
     name = "caffe2_cu_srcs",
     srcs = [
-        "caffe2/core/context_gpu.cu.cc",
-        "caffe2/operators/abs_op.cu.cc",
-        "caffe2/operators/accumulate_op.cu.cc",
-        "caffe2/operators/accuracy_op.cu.cc",
-        "caffe2/operators/acos_op.cu.cc",
-        "caffe2/operators/affine_channel_op.cu.cc",
-        "caffe2/operators/alias_with_name.cu.cc",
-        "caffe2/operators/arg_ops.cu.cc",
-        "caffe2/operators/asin_op.cu.cc",
-        "caffe2/operators/assert_op.cu.cc",
-        "caffe2/operators/atan_op.cu.cc",
-        "caffe2/operators/batch_gather_ops.cu.cc",
-        "caffe2/operators/batch_matmul_op.cu.cc",
-        "caffe2/operators/batch_moments_op.cu.cc",
-        "caffe2/operators/batch_permutation_op.cu.cc",
-        "caffe2/operators/batch_sparse_to_dense_op.cu.cc",
-        "caffe2/operators/boolean_mask_ops.cu.cc",
-        "caffe2/operators/boolean_unmask_ops.cu.cc",
-        "caffe2/operators/bucketize_op.cu.cc",
-        "caffe2/operators/cast_op.cu.cc",
-        "caffe2/operators/cbrt_op.cu.cc",
-        "caffe2/operators/ceil_op.cu.cc",
-        "caffe2/operators/channel_backprop_stats_op.cu.cc",
-        "caffe2/operators/channel_shuffle_op.cu.cc",
-        "caffe2/operators/channel_stats_op.cu.cc",
-        "caffe2/operators/channelwise_conv3d_op_cudnn.cu.cc",
-        "caffe2/operators/clip_op.cu.cc",
-        "caffe2/operators/copy_op.cu.cc",
-        "caffe2/operators/cos_op.cu.cc",
-        "caffe2/operators/cosh_op.cu.cc",
-        "caffe2/operators/cosine_embedding_criterion_op.cu.cc",
-        "caffe2/operators/cross_entropy_op.cu.cc",
-        "caffe2/operators/cube_op.cu.cc",
-        "caffe2/operators/data_couple_gpu.cu.cc",
-        "caffe2/operators/deform_conv_op.cu.cc",
-        "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu.cc",
-        "caffe2/operators/distance_op.cu.cc",
-        "caffe2/operators/dropout_op.cu.cc",
-        "caffe2/operators/elementwise_div_op.cu.cc",
-        "caffe2/operators/elementwise_linear_op.cu.cc",
-        "caffe2/operators/elementwise_mul_op.cu.cc",
-        "caffe2/operators/elementwise_ops.cu.cc",
-        "caffe2/operators/elu_op.cu.cc",
-        "caffe2/operators/enforce_finite_op.cu.cc",
-        "caffe2/operators/ensure_cpu_output_op.cu.cc",
-        "caffe2/operators/erf_op.cu.cc",
-        "caffe2/operators/filler_op.cu.cc",
-        "caffe2/operators/find_op.cu.cc",
-        "caffe2/operators/floor_op.cu.cc",
-        "caffe2/operators/gather_op.cu.cc",
-        "caffe2/operators/gelu_op.cu.cc",
-        "caffe2/operators/generate_proposals_op.cu.cc",
-        "caffe2/operators/generate_proposals_op_util_nms_gpu.cu.cc",
-        "caffe2/operators/given_tensor_byte_string_to_uint8_fill_op.cu.cc",
-        "caffe2/operators/given_tensor_fill_op.cu.cc",
-        "caffe2/operators/glu_op.cu.cc",
-        "caffe2/operators/group_norm_op.cu.cc",
-        "caffe2/operators/gru_unit_op_gpu.cu.cc",
-        "caffe2/operators/half_float_ops.cu.cc",
-        "caffe2/operators/hard_sigmoid_op.cu.cc",
-        "caffe2/operators/instance_norm_op.cu.cc",
-        "caffe2/operators/integral_image_op.cu.cc",
-        "caffe2/operators/layer_norm_op.cu.cc",
-        "caffe2/operators/leaky_relu_op.cu.cc",
-        "caffe2/operators/lengths_pad_op.cu.cc",
-        "caffe2/operators/lengths_tile_op.cu.cc",
-        "caffe2/operators/local_response_normalization_op.cu.cc",
-        "caffe2/operators/logit_op.cu.cc",
-        "caffe2/operators/loss_op.cu.cc",
-        "caffe2/operators/lp_pool_op.cu.cc",
-        "caffe2/operators/lstm_unit_op_gpu.cu.cc",
-        "caffe2/operators/margin_ranking_criterion_op.cu.cc",
-        "caffe2/operators/max_pool_with_index.cu.cc",
-        "caffe2/operators/mean_op.cu.cc",
-        "caffe2/operators/mem_query_op.cu.cc",
-        "caffe2/operators/minmax_ops.cu.cc",
-        "caffe2/operators/moments_op.cu.cc",
-        "caffe2/operators/multi_class_accuracy_op.cu.cc",
-        "caffe2/operators/normalize_ops.cu.cc",
-        "caffe2/operators/one_hot_ops.cu.cc",
-        "caffe2/operators/pack_segments.cu.cc",
-        "caffe2/operators/pad_op_gpu.cu.cc",
-        "caffe2/operators/perplexity_op.cu.cc",
-        "caffe2/operators/piecewise_linear_transform_op.cu.cc",
-        "caffe2/operators/pool_op.cu.cc",
-        "caffe2/operators/pow_op.cu.cc",
-        "caffe2/operators/prelu_op.cu.cc",
-        "caffe2/operators/reciprocal_op.cu.cc",
-        "caffe2/operators/reduce_front_back_max_ops.cu.cc",
-        "caffe2/operators/reduce_front_back_sum_mean_ops.cu.cc",
-        "caffe2/operators/reduce_ops.cu.cc",
-        "caffe2/operators/reduction_ops.cu.cc",
-        "caffe2/operators/relu_n_op.cu.cc",
-        "caffe2/operators/relu_op.cu.cc",
-        "caffe2/operators/replace_nan_op.cu.cc",
-        "caffe2/operators/resize_3d_op.cu.cc",
-        "caffe2/operators/resize_op.cu.cc",
-        "caffe2/operators/reverse_packed_segs_op.cu.cc",
-        "caffe2/operators/rmac_regions_op.cu.cc",
-        "caffe2/operators/rnn/recurrent_network_op_gpu.cu.cc",
-        "caffe2/operators/roi_align_gradient_op.cu.cc",
-        "caffe2/operators/roi_align_op.cu.cc",
-        "caffe2/operators/roi_align_rotated_gradient_op.cu.cc",
-        "caffe2/operators/roi_align_rotated_op.cu.cc",
-        "caffe2/operators/roi_pool_op.cu.cc",
-        "caffe2/operators/rsqrt_op.cu.cc",
-        "caffe2/operators/scale_blobs_op.cu.cc",
-        "caffe2/operators/segment_reduction_op_gpu.cu.cc",
-        "caffe2/operators/selu_op.cu.cc",
-        "caffe2/operators/sequence_ops.cu.cc",
-        "caffe2/operators/sigmoid_op.cu.cc",
-        "caffe2/operators/sin_op.cu.cc",
-        "caffe2/operators/sinh_op.cu.cc",
-        "caffe2/operators/slice_op.cu.cc",
-        "caffe2/operators/softmax_ops.cu.cc",
-        "caffe2/operators/softplus_op.cu.cc",
-        "caffe2/operators/softsign_op.cu.cc",
-        "caffe2/operators/space_batch_op_gpu.cu.cc",
-        "caffe2/operators/sparse_normalize_op_gpu.cu.cc",
-        "caffe2/operators/sparse_to_dense_op.cu.cc",
-        "caffe2/operators/spatial_batch_norm_op.cu.cc",
-        "caffe2/operators/spatial_batch_norm_op_cudnn.cu.cc",
-        "caffe2/operators/stump_func_op.cu.cc",
-        "caffe2/operators/summarize_op.cu.cc",
-        "caffe2/operators/swish_op.cu.cc",
-        "caffe2/operators/tan_op.cu.cc",
-        "caffe2/operators/tanh_op.cu.cc",
-        "caffe2/operators/thresholded_relu_op.cu.cc",
-        "caffe2/operators/tile_op.cu.cc",
-        "caffe2/operators/top_k.cu.cc",
-        "caffe2/operators/transpose_op.cu.cc",
-        "caffe2/operators/unique_ops.cu.cc",
-        "caffe2/operators/upsample_op.cu.cc",
-        "caffe2/operators/utility_ops.cu.cc",
-        "caffe2/operators/weighted_sample_op.cu.cc",
-        "caffe2/sgd/adadelta_op_gpu.cu.cc",
-        "caffe2/sgd/adagrad_op_gpu.cu.cc",
-        "caffe2/sgd/adam_op_gpu.cu.cc",
-        "caffe2/sgd/fp16_momentum_sgd_op.cu.cc",
-        "caffe2/sgd/fp32_momentum_sgd_op.cu.cc",
-        "caffe2/sgd/lars_op_gpu.cu.cc",
-        "caffe2/sgd/momentum_sgd_op_gpu.cu.cc",
-        "caffe2/sgd/rmsprop_op_gpu.cu.cc",
-        "caffe2/sgd/yellowfin_op_gpu.cu.cc",
-        "caffe2/utils/math/broadcast.cu.cc",
-        "caffe2/utils/math/elementwise.cu.cc",
-        "caffe2/utils/math/reduce.cu.cc",
-        "caffe2/utils/math/transpose.cu.cc",
-        "caffe2/utils/math_gpu.cu.cc",
+        "caffe2/core/context_gpu.cu",
+        "caffe2/operators/abs_op.cu",
+        "caffe2/operators/accumulate_op.cu",
+        "caffe2/operators/accuracy_op.cu",
+        "caffe2/operators/acos_op.cu",
+        "caffe2/operators/affine_channel_op.cu",
+        "caffe2/operators/alias_with_name.cu",
+        "caffe2/operators/arg_ops.cu",
+        "caffe2/operators/asin_op.cu",
+        "caffe2/operators/assert_op.cu",
+        "caffe2/operators/atan_op.cu",
+        "caffe2/operators/batch_gather_ops.cu",
+        "caffe2/operators/batch_matmul_op.cu",
+        "caffe2/operators/batch_moments_op.cu",
+        "caffe2/operators/batch_permutation_op.cu",
+        "caffe2/operators/batch_sparse_to_dense_op.cu",
+        "caffe2/operators/boolean_mask_ops.cu",
+        "caffe2/operators/boolean_unmask_ops.cu",
+        "caffe2/operators/bucketize_op.cu",
+        "caffe2/operators/cast_op.cu",
+        "caffe2/operators/cbrt_op.cu",
+        "caffe2/operators/ceil_op.cu",
+        "caffe2/operators/channel_backprop_stats_op.cu",
+        "caffe2/operators/channel_shuffle_op.cu",
+        "caffe2/operators/channel_stats_op.cu",
+        "caffe2/operators/channelwise_conv3d_op_cudnn.cu",
+        "caffe2/operators/clip_op.cu",
+        "caffe2/operators/copy_op.cu",
+        "caffe2/operators/cos_op.cu",
+        "caffe2/operators/cosh_op.cu",
+        "caffe2/operators/cosine_embedding_criterion_op.cu",
+        "caffe2/operators/cross_entropy_op.cu",
+        "caffe2/operators/cube_op.cu",
+        "caffe2/operators/data_couple_gpu.cu",
+        "caffe2/operators/deform_conv_op.cu",
+        "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
+        "caffe2/operators/distance_op.cu",
+        "caffe2/operators/dropout_op.cu",
+        "caffe2/operators/elementwise_div_op.cu",
+        "caffe2/operators/elementwise_linear_op.cu",
+        "caffe2/operators/elementwise_mul_op.cu",
+        "caffe2/operators/elementwise_ops.cu",
+        "caffe2/operators/elu_op.cu",
+        "caffe2/operators/enforce_finite_op.cu",
+        "caffe2/operators/ensure_cpu_output_op.cu",
+        "caffe2/operators/erf_op.cu",
+        "caffe2/operators/filler_op.cu",
+        "caffe2/operators/find_op.cu",
+        "caffe2/operators/floor_op.cu",
+        "caffe2/operators/gather_op.cu",
+        "caffe2/operators/gelu_op.cu",
+        "caffe2/operators/generate_proposals_op.cu",
+        "caffe2/operators/generate_proposals_op_util_nms_gpu.cu",
+        "caffe2/operators/given_tensor_byte_string_to_uint8_fill_op.cu",
+        "caffe2/operators/given_tensor_fill_op.cu",
+        "caffe2/operators/glu_op.cu",
+        "caffe2/operators/group_norm_op.cu",
+        "caffe2/operators/gru_unit_op_gpu.cu",
+        "caffe2/operators/half_float_ops.cu",
+        "caffe2/operators/hard_sigmoid_op.cu",
+        "caffe2/operators/instance_norm_op.cu",
+        "caffe2/operators/integral_image_op.cu",
+        "caffe2/operators/layer_norm_op.cu",
+        "caffe2/operators/leaky_relu_op.cu",
+        "caffe2/operators/lengths_pad_op.cu",
+        "caffe2/operators/lengths_tile_op.cu",
+        "caffe2/operators/local_response_normalization_op.cu",
+        "caffe2/operators/logit_op.cu",
+        "caffe2/operators/loss_op.cu",
+        "caffe2/operators/lp_pool_op.cu",
+        "caffe2/operators/lstm_unit_op_gpu.cu",
+        "caffe2/operators/margin_ranking_criterion_op.cu",
+        "caffe2/operators/max_pool_with_index.cu",
+        "caffe2/operators/mean_op.cu",
+        "caffe2/operators/mem_query_op.cu",
+        "caffe2/operators/minmax_ops.cu",
+        "caffe2/operators/moments_op.cu",
+        "caffe2/operators/multi_class_accuracy_op.cu",
+        "caffe2/operators/normalize_ops.cu",
+        "caffe2/operators/one_hot_ops.cu",
+        "caffe2/operators/pack_segments.cu",
+        "caffe2/operators/pad_op_gpu.cu",
+        "caffe2/operators/perplexity_op.cu",
+        "caffe2/operators/piecewise_linear_transform_op.cu",
+        "caffe2/operators/pool_op.cu",
+        "caffe2/operators/pow_op.cu",
+        "caffe2/operators/prelu_op.cu",
+        "caffe2/operators/reciprocal_op.cu",
+        "caffe2/operators/reduce_front_back_max_ops.cu",
+        "caffe2/operators/reduce_front_back_sum_mean_ops.cu",
+        "caffe2/operators/reduce_ops.cu",
+        "caffe2/operators/reduction_ops.cu",
+        "caffe2/operators/relu_n_op.cu",
+        "caffe2/operators/relu_op.cu",
+        "caffe2/operators/replace_nan_op.cu",
+        "caffe2/operators/resize_3d_op.cu",
+        "caffe2/operators/resize_op.cu",
+        "caffe2/operators/reverse_packed_segs_op.cu",
+        "caffe2/operators/rmac_regions_op.cu",
+        "caffe2/operators/rnn/recurrent_network_op_gpu.cu",
+        "caffe2/operators/roi_align_gradient_op.cu",
+        "caffe2/operators/roi_align_op.cu",
+        "caffe2/operators/roi_align_rotated_gradient_op.cu",
+        "caffe2/operators/roi_align_rotated_op.cu",
+        "caffe2/operators/roi_pool_op.cu",
+        "caffe2/operators/rsqrt_op.cu",
+        "caffe2/operators/scale_blobs_op.cu",
+        "caffe2/operators/segment_reduction_op_gpu.cu",
+        "caffe2/operators/selu_op.cu",
+        "caffe2/operators/sequence_ops.cu",
+        "caffe2/operators/sigmoid_op.cu",
+        "caffe2/operators/sin_op.cu",
+        "caffe2/operators/sinh_op.cu",
+        "caffe2/operators/slice_op.cu",
+        "caffe2/operators/softmax_ops.cu",
+        "caffe2/operators/softplus_op.cu",
+        "caffe2/operators/softsign_op.cu",
+        "caffe2/operators/space_batch_op_gpu.cu",
+        "caffe2/operators/sparse_normalize_op_gpu.cu",
+        "caffe2/operators/sparse_to_dense_op.cu",
+        "caffe2/operators/spatial_batch_norm_op.cu",
+        "caffe2/operators/spatial_batch_norm_op_cudnn.cu",
+        "caffe2/operators/stump_func_op.cu",
+        "caffe2/operators/summarize_op.cu",
+        "caffe2/operators/swish_op.cu",
+        "caffe2/operators/tan_op.cu",
+        "caffe2/operators/tanh_op.cu",
+        "caffe2/operators/thresholded_relu_op.cu",
+        "caffe2/operators/tile_op.cu",
+        "caffe2/operators/top_k.cu",
+        "caffe2/operators/transpose_op.cu",
+        "caffe2/operators/unique_ops.cu",
+        "caffe2/operators/upsample_op.cu",
+        "caffe2/operators/utility_ops.cu",
+        "caffe2/operators/weighted_sample_op.cu",
+        "caffe2/sgd/adadelta_op_gpu.cu",
+        "caffe2/sgd/adagrad_op_gpu.cu",
+        "caffe2/sgd/adam_op_gpu.cu",
+        "caffe2/sgd/fp16_momentum_sgd_op.cu",
+        "caffe2/sgd/fp32_momentum_sgd_op.cu",
+        "caffe2/sgd/lars_op_gpu.cu",
+        "caffe2/sgd/momentum_sgd_op_gpu.cu",
+        "caffe2/sgd/rmsprop_op_gpu.cu",
+        "caffe2/sgd/yellowfin_op_gpu.cu",
+        "caffe2/utils/math/broadcast.cu",
+        "caffe2/utils/math/elementwise.cu",
+        "caffe2/utils/math/reduce.cu",
+        "caffe2/utils/math/transpose.cu",
+        "caffe2/utils/math_gpu.cu",
     ],
 )
 
@@ -1582,10 +1371,33 @@ cc_library(
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
-        ":c10_headers",
         ":caffe2_protos",
         ":caffe2_core_macros_h",
+        "//c10:headers",
     ],
+)
+
+py_binary(
+    name = "gen_op",
+    srcs = ["caffe2/contrib/aten/gen_op.py"],
+    deps = [":tools_codegen"],
+)
+
+genrule(
+    name = "generated_caffe2_aten_op_headers",
+    srcs = [
+        "caffe2/contrib/aten/aten_op_template.h",
+        "aten/src/ATen/Declarations.yaml",
+    ],
+    outs = ["caffe2/caffe2/contrib/aten/gen_aten_op.h"],
+    cmd = """
+    $(location :gen_op) \
+        --output_prefix gen_ \
+        --install_dir $(@D) \
+        --aten_root `dirname $(location aten/src/ATen/Declarations.yaml)`/../.. \
+        --template_dir `dirname $(location caffe2/contrib/aten/aten_op_template.h)` \
+        --yaml_dir `dirname $(location aten/src/ATen/Declarations.yaml)`""",
+    tools = [":gen_op"],
 )
 
 cc_library(
@@ -1628,7 +1440,7 @@ cc_library(
     ]) + if_cuda(glob([
         "caffe2/**/*.cuh",
         "caffe2/image/*.h",
-    ])),
+    ])) + [":generated_caffe2_aten_op_headers"],
     copts = CAFFE2_COPTS,
     includes = [
         "caffe2/contrib/aten",
@@ -1710,7 +1522,7 @@ cc_library(
         "@fmt",
     ] + if_cuda(
         [
-            ":caffe2_cpp_cuda",
+            ":caffe2_cuda_cpp",
             ":aten_cuda",
             "@tensorpipe//:tensorpipe_cuda",
         ],
@@ -1723,8 +1535,8 @@ cc_library(
 )
 
 cc_library(
-    name = "caffe2_cpp_cuda",
-    srcs = [":caffe2_cuda_srcs"],
+    name = "caffe2_cuda_cpp",
+    srcs = [":caffe2_cuda_cpp_srcs"],
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
@@ -1742,7 +1554,6 @@ cu_library(
     deps = [
         ":aten",
         ":caffe2_headers",
-        "@cub",
         "@cuda//:cublas",
         "@cuda//:curand",
         "@cudnn",
@@ -1754,9 +1565,6 @@ cu_library(
 )
 
 PERF_COPTS = [
-    "-DHAVE_GCC_GET_CPUID",
-    "-DUSE_AVX",
-    "-DUSE_AVX2",
     "-DTH_HAVE_THREAD",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
@@ -1766,6 +1574,7 @@ PERF_COPTS = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-DSLEEF_STATIC_LIBS=1",
+    "-DTH_BALS_MKL",
     "-D_FILE_OFFSET_BITS=64",
     "-DUSE_FBGEMM",
     "-fvisibility-inlines-hidden",
@@ -1792,7 +1601,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        ":c10",
+        "//c10",
     ],
     alwayslink = True,
 )
@@ -1811,7 +1620,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        ":c10",
+        "//c10",
     ],
     alwayslink = True,
 )
@@ -1833,7 +1642,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        ":c10",
+        "//c10",
     ],
     alwayslink = True,
 )
@@ -1849,10 +1658,29 @@ genrule(
     srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
     outs = ["torch/csrc/api/include/torch/version.h"],
     cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
-    tools = [':gen_version_header']
+    tools = [':gen_version_header'],
 )
 
-torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
+py_binary(
+    name = "stringify_file",
+    srcs = ["torch/csrc/jit/codegen/cuda/tools/stringify_file.py"],
+)
+
+generated_nvfuser_hdrs = ["generated_" + hdr for hdr in libtorch_nvfuser_generated_headers]
+
+[
+    genrule(
+        name = name,
+        srcs = [src],
+        outs = ["nvfuser_resources/{}".format(hdr)],
+        cmd = "$(location :stringify_file) -i $< -o $@",
+        tools = [":stringify_file"],
+    )
+    for name, src, hdr in zip(generated_nvfuser_hdrs, libtorch_nvfuser_runtime_sources, libtorch_nvfuser_generated_headers)
+]
+
+torch_cuda_headers = glob(["torch/csrc/cuda/*.h"]) + generated_nvfuser_hdrs
+
 cc_library(
     name = "torch_headers",
     hdrs = if_cuda(
@@ -1863,6 +1691,7 @@ cc_library(
             "torch/csrc/**/*.h",
             "torch/csrc/distributed/c10d/*.hpp",
             "torch/lib/libshm/*.h",
+            "torch/csrc/generic/*.cpp",
         ],
         exclude = [
             "torch/csrc/autograd/generated/VariableType.h",
@@ -1881,8 +1710,9 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        ":c10_headers",
         ":caffe2_headers",
+        "//c10:headers",
+        "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
         "@onnx",
     ],
@@ -1899,21 +1729,27 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fno-trapping-math",
 ]
 
+cu_library(
+    name = "torch_distributed_cuda",
+    srcs = ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
+    deps = [":torch_headers"],
+)
+
 cc_library(
     name = "torch",
     srcs = if_cuda(glob(
-        [
-            "torch/csrc/cuda/*.cpp",
-            "torch/csrc/autograd/functions/comm.cpp",
-        ],
+        libtorch_cuda_sources,
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
+            "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources +[
         ":cpp_generated_code",
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
     ],
-    copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
+    copts = TORCH_COPTS,
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
     ],
@@ -1921,7 +1757,10 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-    ],
+    ] + if_cuda([
+        ":torch_distributed_cuda",
+        "@cuda//:nvToolsExt",
+    ]),
     alwayslink = True,
 )
 
@@ -1939,10 +1778,9 @@ cc_library(
         "**/*.h",
         "**/*.cuh",
     ]) + [
-        ":generated_code",
+        ":cpp_generated_code",
     ],
     includes = [
-        ".",
         "torch/csrc/api/include",
         "torch/csrc/distributed",
         "torch/lib",
@@ -1950,21 +1788,17 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":aten_headers",
-        ":c10_headers",
-        ":caffe2_headers",
+        ":torch_headers",
     ],
 )
 
 cc_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources + [":python_generated_code"],
-    hdrs = glob([
-        "torch/csrc/generic/*.cpp",
-    ]),
     deps = [
         ":torch",
         ":shm",
+        "@pybind11",
     ],
 )
 
@@ -1998,11 +1832,16 @@ cc_library(
 # Torch integration tests rely on a labeled data set from the MNIST database.
 # http://yann.lecun.com/exdb/mnist/
 
-cpp_api_tests = glob(["test/cpp/api/*.cpp"])
+# imethod.cpp is excluded since torch/csrc/deploy* build is not yet supported.
+cpp_api_tests = glob(
+    ["test/cpp/api/*.cpp"],
+    exclude = ["test/cpp/api/imethod.cpp"],
+)
+
 [
   cc_test(
       name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
-    size = "medium",
+      size = "medium",
       srcs = [filename],
       deps = [
           ":test_support",
@@ -2067,6 +1906,9 @@ cc_test(
         "test/cpp/jit/*.h",
         "test/cpp/tensorexpr/*.cpp",
         "test/cpp/tensorexpr/*.h",
+    ], exclude=[
+        # skip this since <pybind11/embed.h> is not found in OSS build
+        "test/cpp/jit/test_exception.cpp",
     ]),
     linkstatic = True,
     tags = [
@@ -2079,13 +1921,35 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "lazy_tests",
+    size = "small",
+    srcs = glob([
+        "test/cpp/lazy/*.cpp",
+        "test/cpp/lazy/*.h",
+    ], exclude=[
+        # skip these since they depend on generated LazyIr.h which isn't available in bazel yet
+        "test/cpp/lazy/test_ir.cpp",
+        "test/cpp/lazy/test_lazy_ops.cpp",
+        "test/cpp/lazy/test_lazy_ops_util.cpp",
+    ]),
+    linkstatic = True,
+    tags = [
+        "exclusive",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 # all tests
 test_suite(
     name = "all_tests",
     tests = [
         "api_tests",
-        "c10_tests",
         "jit_tests",
         "torch_dist_autograd_test",
+        "//c10/test:tests",
     ],
 )

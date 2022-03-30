@@ -1,9 +1,11 @@
+# Owner(s): ["oncall: mobile"]
+
 import torch
 import torch.utils.bundled_inputs
 import io
-from typing import Dict, List, NamedTuple
-from collections import namedtuple
+from typing import Dict, List
 import inspect
+from torch.testing import FileCheck
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -48,13 +50,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_save_mobile_module_with_debug_info_with_trace(self):
         class A(torch.nn.Module):
@@ -88,12 +90,12 @@ class TestLiteScriptModule(TestCase):
             assert(b"callstack_debug_map.pkl" in exported_module)
 
             mobile_module = _load_for_lite_interpreter(buffer)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A0\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A0\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((8, 10))
                 z = torch.rand((8, 10))
                 mobile_module(x, y, z)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A1\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A1\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((2, 3))
                 z = torch.rand((8, 10))
@@ -117,13 +119,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_find_and_run_method(self):
         class MyTestModule(torch.nn.Module):
@@ -154,7 +156,7 @@ class TestLiteScriptModule(TestCase):
 
         bundled_inputs = mobile_module.run_method("get_all_bundled_inputs")
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
     def test_method_calls_with_optional_arg(self):
         class A(torch.nn.Module):
@@ -183,7 +185,7 @@ class TestLiteScriptModule(TestCase):
         input = torch.tensor([5])
         script_module_forward_result = script_module.forward(input)
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -198,7 +200,7 @@ class TestLiteScriptModule(TestCase):
 
         # now both match again
         mobile_module_forward_result = mobile_module.forward(input, 2)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -219,37 +221,8 @@ class TestLiteScriptModule(TestCase):
         script_module = torch.jit.script(MyTestModule())
         with self.assertRaisesRegex(RuntimeError,
                                     r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
-                                    r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
-            script_module._save_to_buffer_for_lite_interpreter()
-
-    def test_unsupported_return_typing_namedtuple(self):
-        myNamedTuple = NamedTuple('myNamedTuple', [('a', torch.Tensor)])
-
-        class MyTestModule(torch.nn.Module):
-            def forward(self):
-                return myNamedTuple(torch.randn(1))
-
-        script_module = torch.jit.script(MyTestModule())
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"A named tuple type is not supported in mobile module. "
-                                    r"Workaround: instead of using a named tuple type\'s fields, "
-                                    r"use a dictionary type\'s key-value pair itmes or "
-                                    r"a pytorch class \(class Foo\(torch\.nn\.Module\)\)\'s attributes."):
-            script_module._save_to_buffer_for_lite_interpreter()
-
-    def test_unsupported_return_collections_namedtuple(self):
-        myNamedTuple = namedtuple('myNamedTuple', [('a')])
-
-        class MyTestModule(torch.nn.Module):
-            def forward(self):
-                return myNamedTuple(torch.randn(1))
-
-        script_module = torch.jit.script(MyTestModule())
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"A named tuple type is not supported in mobile module. "
-                                    r"Workaround: instead of using a named tuple type\'s fields, "
-                                    r"use a dictionary type\'s key-value pair itmes or "
-                                    r"a pytorch class \(class Foo\(torch\.nn\.Module\)\)\'s attributes."):
+                                    r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\. "
+                                    r"The problematic type is: "):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_unsupported_return_list_with_module_class(self):
@@ -363,7 +336,14 @@ class TestLiteScriptModule(TestCase):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+        # In C++ code, the type of exception thrown is torch::jit::JITException
+        # which does not extend c10::Error, and hence it isn't possible to add
+        # additional context to the exception message and preserve the correct
+        #  C++ stack trace for symbolication. i.e. it isn't possible to add
+        # the debug handle string to show where in the Python code the exception
+        # occured w/o first changing
+        # torch::jit::JITException to extend c10::Error.
+        with self.assertRaisesRegex(torch.jit.Error, 'foo'):
             ft = FooTest2()
             loaded = self.getScriptExportImportCopy(ft)
             loaded()
@@ -432,10 +412,66 @@ class TestLiteScriptModule(TestCase):
 
         try:
             loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
-        except RuntimeError as e:
+        except torch.jit.Error as e:
             error_message = f"{e}"
-        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
-        self.assertTrue('top(FooTest5)' in error_message)
+
+        # In C++ code, the type of exception thrown is torch::jit::JITException
+        # which does not extend c10::Error, and hence it isn't possible to add
+        # additional context to the exception message and preserve the correct
+        #  C++ stack trace for symbolication. i.e. it isn't possible to add
+        # the debug handle string to show where in the Python code the exception
+        # occured w/o first changing
+        # torch::jit::JITException to extend c10::Error.
+        self.assertTrue('self.val and val are same' in error_message)
+
+    def test_stacktrace_interface_call(self):
+        @torch.jit.interface
+        class Forward(torch.nn.Module):
+            def forward(self, x) -> torch.Tensor:
+                pass
+
+            def forwardError(self, x) -> torch.Tensor:
+                pass
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+            def forwardError(self, x):
+                return self.call() + x
+
+            def call(self):
+                return torch.ones(-1)
+
+        class A(torch.nn.Module):
+            b : Forward
+
+            def __init__(self):
+                super().__init__()
+                self.b = B()
+
+            def forward(self):
+                self.b.forward(torch.ones(1))
+                self.b.forwardError(torch.ones(1))
+
+        a = torch.jit.script(A())
+        torch._C._enable_mobile_interface_call_export()
+        buffer = io.BytesIO(a._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True))
+        buffer.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer)
+        try:
+            mobile_module()
+            self.assertTrue(False)
+        except RuntimeError as exp:
+            FileCheck().check("Trying to create tensor with negative dimension") \
+                .check("Traceback of TorchScript") \
+                .check("self.b.forwardError").check_next("~~~~~~~~~~~~~~~~~~~ <--- HERE") \
+                .check("return self.call").check_next("~~~~~~~~~ <--- HERE") \
+                .check("return torch.ones").check_next("~~~~~~~~~~ <--- HERE").run(str(exp))
+
 
 
 class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
@@ -461,10 +497,10 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.relu = torch.nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -476,16 +512,59 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         model_fp32 = M()
 
         model_fp32.eval()
-        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
-        model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+        model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+        model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
         input_fp32 = torch.randn(4, 1, 4, 4)
         model_fp32_prepared(input_fp32)
-        model_int8 = torch.quantization.convert(model_fp32_prepared)
+        model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
         input = torch.randn(4, 1, 4, 4)
         self._compare_script_and_mobile(model=model_int8, input=input)
 
+    def test_bundled_input_with_dynamic_type(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(
+                self,
+                x: Dict[int, torch.Tensor],
+                y: Dict[int, torch.Tensor],
+                z: Dict[int, torch.Tensor],
+            ):
+                return x
+
+        model = Model()
+        script_module = torch.jit.script(model)
+
+        sample_input = {
+            script_module.forward: [
+                (
+                    {0: torch.ones(1)},
+                    {1: torch.ones(1)},
+                    {2: torch.ones(1)},
+                )
+            ]
+        }
+
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            script_module, sample_input
+        )
+
+        buf = bundled_model._save_to_buffer_for_lite_interpreter()
+        mobile_module = _load_for_lite_interpreter(io.BytesIO(buf))
+
+        i = mobile_module.run_method("get_all_bundled_inputs")
+
+        self.assertEqual(
+            i[0],
+            (
+                {0: torch.ones(1)},
+                {1: torch.ones(1)},
+                {2: torch.ones(1)},
+            ),
+        )
 
 if __name__ == '__main__':
     run_tests()

@@ -50,19 +50,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_many_channels_small_1xM_pool_with_padding) {
        channels += 3) {
     for (size_t poolSize = 3; poolSize <= pytorch_qnnp_params.q8avgpool.mr;
          poolSize++) {
-      for (size_t paddingLeft = 0; paddingLeft <= 1; paddingLeft++) {
-        for (size_t paddingRight = 0; paddingRight <= 1; paddingRight++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(2)
-              .inputWidth(poolSize + 2)
-              .paddingLeft(paddingLeft)
-              .paddingRight(paddingRight)
-              .poolingHeight(1)
-              .poolingWidth(poolSize)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingWidth = 0; paddingWidth <= 1; paddingWidth++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(2)
+            .inputWidth(poolSize + 2)
+            .paddingWidth(paddingWidth)
+            .poolingHeight(1)
+            .poolingWidth(poolSize)
+            .channels(channels)
+            .testQ8();
       }
     }
   }
@@ -114,19 +111,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_many_channels_small_Mx1_pool_with_padding) {
        channels += 3) {
     for (size_t poolSize = 2; poolSize <= pytorch_qnnp_params.q8avgpool.mr;
          poolSize++) {
-      for (size_t paddingTop = 0; paddingTop <= 1; paddingTop++) {
-        for (size_t paddingBottom = 0; paddingBottom <= 1; paddingBottom++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(poolSize + 1)
-              .inputWidth(3)
-              .paddingTop(paddingTop)
-              .paddingBottom(paddingBottom)
-              .poolingHeight(poolSize)
-              .poolingWidth(1)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingHeight = 0; paddingHeight <= 1; paddingHeight++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(poolSize + 1)
+            .inputWidth(3)
+            .paddingHeight(paddingHeight)
+            .poolingHeight(poolSize)
+            .poolingWidth(1)
+            .channels(channels)
+            .testQ8();
       }
     }
   }
@@ -433,19 +427,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_many_channels_large_1xM_pool_with_padding) {
        channels += 3) {
     for (size_t poolSize = 3; poolSize <= pytorch_qnnp_params.q8avgpool.mr;
          poolSize++) {
-      for (size_t paddingLeft = 0; paddingLeft <= 1; paddingLeft++) {
-        for (size_t paddingRight = 0; paddingRight <= 1; paddingRight++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(2)
-              .inputWidth(poolSize + 2)
-              .paddingLeft(paddingLeft)
-              .paddingRight(paddingRight)
-              .poolingHeight(1)
-              .poolingWidth(poolSize)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingWidth = 0; paddingWidth <= 1; paddingWidth++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(2)
+            .inputWidth(poolSize + 2)
+            .paddingWidth(paddingWidth)
+            .poolingHeight(1)
+            .poolingWidth(poolSize)
+            .channels(channels)
+            .testQ8();
       }
     }
   }
@@ -500,19 +491,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_many_channels_large_Mx1_pool_with_padding) {
     for (size_t poolSize = pytorch_qnnp_params.q8avgpool.mr + 1; poolSize <=
          pytorch_qnnp_params.q8avgpool.mr + pytorch_qnnp_params.q8avgpool.qr;
          poolSize++) {
-      for (size_t paddingTop = 0; paddingTop <= 1; paddingTop++) {
-        for (size_t paddingBottom = 0; paddingBottom <= 1; paddingBottom++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(poolSize + 1)
-              .inputWidth(3)
-              .paddingTop(paddingTop)
-              .paddingBottom(paddingBottom)
-              .poolingHeight(poolSize)
-              .poolingWidth(1)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingHeight = 0; paddingHeight <= 1; paddingHeight++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(poolSize + 1)
+            .inputWidth(3)
+            .paddingHeight(paddingHeight)
+            .poolingHeight(poolSize)
+            .poolingWidth(1)
+            .channels(channels)
+            .testQ8();
       }
     }
   }
@@ -526,19 +514,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_many_channels_large_Mx1_pool_with_stride) {
     for (size_t poolSize = pytorch_qnnp_params.q8avgpool.mr + 1; poolSize <=
          pytorch_qnnp_params.q8avgpool.mr + pytorch_qnnp_params.q8avgpool.qr;
          poolSize++) {
-      for (size_t paddingTop = 0; paddingTop <= 1; paddingTop++) {
-        for (size_t paddingBottom = 0; paddingBottom <= 1; paddingBottom++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(poolSize + 1)
-              .inputWidth(3)
-              .paddingTop(paddingTop)
-              .paddingBottom(paddingBottom)
-              .poolingHeight(poolSize)
-              .poolingWidth(1)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingHeight = 0; paddingHeight <= 1; paddingHeight++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(poolSize + 1)
+            .inputWidth(3)
+            .paddingHeight(paddingHeight)
+            .poolingHeight(poolSize)
+            .poolingWidth(1)
+            .channels(channels)
+            .testQ8();
       }
     }
   }
@@ -830,19 +815,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_few_channels_1xM_pool_with_padding) {
        channels++) {
     for (size_t poolSize = 3; poolSize <= pytorch_qnnp_params.q8avgpool.mr;
          poolSize++) {
-      for (size_t paddingLeft = 0; paddingLeft <= 1; paddingLeft++) {
-        for (size_t paddingRight = 0; paddingRight <= 1; paddingRight++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(2)
-              .inputWidth(poolSize + 2)
-              .paddingLeft(paddingLeft)
-              .paddingRight(paddingRight)
-              .poolingHeight(1)
-              .poolingWidth(poolSize)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingWidth = 0; paddingWidth <= 1; paddingWidth++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(2)
+            .inputWidth(poolSize + 2)
+            .paddingWidth(paddingWidth)
+            .poolingHeight(1)
+            .poolingWidth(poolSize)
+            .channels(channels)
+            .testQ8();
       }
     }
   }
@@ -891,19 +873,16 @@ TEST(AVERAGE_POOLING_OP, unit_batch_few_channels_Mx1_pool_with_padding) {
        channels++) {
     for (size_t poolSize = 2; poolSize <= 2 * pytorch_qnnp_params.q8avgpool.kr;
          poolSize++) {
-      for (size_t paddingTop = 0; paddingTop <= 1; paddingTop++) {
-        for (size_t paddingBottom = 0; paddingBottom <= 1; paddingBottom++) {
-          AveragePoolingOperatorTester()
-              .batchSize(1)
-              .inputHeight(poolSize + 1)
-              .inputWidth(3)
-              .paddingTop(paddingTop)
-              .paddingBottom(paddingBottom)
-              .poolingHeight(poolSize)
-              .poolingWidth(1)
-              .channels(channels)
-              .testQ8();
-        }
+      for (size_t paddingHeight = 0; paddingHeight <= 1; paddingHeight++) {
+        AveragePoolingOperatorTester()
+            .batchSize(1)
+            .inputHeight(poolSize + 1)
+            .inputWidth(3)
+            .paddingHeight(paddingHeight)
+            .poolingHeight(poolSize)
+            .poolingWidth(1)
+            .channels(channels)
+            .testQ8();
       }
     }
   }

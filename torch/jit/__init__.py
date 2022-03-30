@@ -20,7 +20,6 @@ from torch._jit_internal import (
 )
 from torch.jit._script import (
     script,
-    _script_pdt,
     Attribute,
     ScriptModule,
     script_method,
@@ -48,13 +47,15 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
-from torch.jit._serialization import save, load
-from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
+from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
+from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
+from torch.jit._ir_utils import _InsertPoint
 
 # For backwards compatibility
 _fork = fork
 _wait = wait
+_set_fusion_strategy = set_fusion_strategy
 
 
 def export_opnames(m):

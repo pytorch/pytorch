@@ -1,14 +1,18 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -21,6 +25,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
   ReplaceWithCopy(graph);
+  ReplaceWithMaybeCopy(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -38,7 +43,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
   auto g = node->g(attr::Subgraph);
   auto module = std::make_shared<torch::jit::StaticModule>(g);
   auto num_inputs = module->num_inputs();
-  return [module, num_inputs](Stack* stack) {
+  return [module, num_inputs](Stack& stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);
     // TODO maybe avoid call to vec
@@ -46,11 +51,11 @@ Operation createStaticSubgraphRuntime(const Node* node) {
     torch::jit::drop(stack, num_inputs);
 
     if (module->num_outputs() > 1) {
-      for (auto& o : outputs.toTuple()->elements()) {
-        push_one(*stack, std::move(o));
+      for (auto& o : outputs.toTupleRef().elements()) {
+        push_one(stack, std::move(o));
       }
     } else {
-      push_one(*stack, std::move(outputs));
+      push_one(stack, std::move(outputs));
     }
     return 0;
   };
@@ -294,7 +299,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   Node* prev_fusion_group =
       initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
-  for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
+  for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
     // Try merging the just created fusion group into the previous one.
     // If it did not work, then put the previous fusion group into
     // fusion_groups vector - we will not touch it anymore in this loop.
@@ -316,6 +321,36 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
     }
   }
   inlineSmallFusionGroups(block, min_size);
+}
+
+void inlineFallbackGraphs(std::shared_ptr<Graph> graph) {
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      SubgraphUtils::unmergeSubgraph(n);
+    }
+  }
+}
+
+void performTensorExprFusion(
+    std::shared_ptr<Graph> graph,
+    std::vector<IValue> sample_inputs) {
+  // Enable TensorExpr fusion with dynamic shapes
+  setTensorExprDynamicShapeFusionEnabled(true);
+  GRAPH_DEBUG("Graph before tracing: ", *graph);
+  auto traced_graph = TraceGraph(graph, sample_inputs);
+  GRAPH_DEBUG("Graph after tracing: ", *traced_graph);
+  FuseTensorExprs(
+      traced_graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
+  inlineFallbackGraphs(traced_graph);
+  graph->block()->clear();
+  graph->block()->cloneFrom(traced_graph->block(), nullptr);
+  GRAPH_DUMP("Graph after fusion: ", graph);
 }
 
 } // namespace jit

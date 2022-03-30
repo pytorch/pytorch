@@ -13,8 +13,6 @@
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/accumulate.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
 
 
 #include <cmath>
@@ -32,7 +30,7 @@ struct HermitianSymmetryOffsetCalculator {
   using offset_type = at::detail::Array<index_t, 1>;
   using dim_type = std::remove_cv_t<decltype(MAX_DIMS)>;
   dim_type dims;
-  IntDivider<index_t> sizes_[MAX_DIMS];
+  at::cuda::detail::IntDivider<index_t> sizes_[MAX_DIMS];
   index_t strides_[MAX_DIMS];
   uint32_t mirror_dim_;  // bit mask
   static_assert(MAX_DIMS < 32, "Need a bigger mask type");
@@ -44,6 +42,7 @@ struct HermitianSymmetryOffsetCalculator {
     TORCH_INTERNAL_ASSERT(sizes.size() <= MAX_DIMS);
     dims = sizes.size();
 
+    using at::cuda::detail::IntDivider;
     for (dim_type i = 0; i < MAX_DIMS; ++i) {
       if (i < dims) {
         sizes_[i] = IntDivider<index_t>(sizes[i]);

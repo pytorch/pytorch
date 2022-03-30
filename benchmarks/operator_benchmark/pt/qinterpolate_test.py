@@ -29,6 +29,7 @@ qinterpolate_short_configs = op_bench.config_list(
         [32, 32, 32, torch.quint8, 'bilinear', 0.5, True],  # Downsample
         [32, 32, 32, torch.quint8, 'nearest', 2.0, True],  # Upsample
         [32, 32, 32, torch.quint8, 'bilinear', 2.0, True],  # Upsample
+        [3, 720, 1280, torch.quint8, 'bilinear', 0.83333, True],  # Downsample
     ],
     tags=['short'],
 )
@@ -43,7 +44,7 @@ class QInterpolateBenchmark(op_bench.TorchBenchmarkBase):
                                                  zero_point=zero_point,
                                                  dtype=dtype)
         if not contig:
-            permute_dims = list(range(q_input.ndim))[::-1]
+            permute_dims = list(range(self.q_input.ndim))[::-1]
             self.q_input = self.q_input.permute(permute_dims)
 
         self.inputs = {

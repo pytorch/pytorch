@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import contextlib
 import os
 import sys
@@ -15,7 +17,11 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     require_n_gpus_for_nccl_backend,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    sys.exit(0)
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
@@ -136,11 +142,7 @@ class TestJoin(MultiProcessTestCase):
         super(TestJoin, self).setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = BACKEND
-        # torch and spawn have known issues with ASAN, so use fork instead
-        if TEST_WITH_ASAN:
-            self._fork_processes()
-        else:
-            self._spawn_processes()
+        self._spawn_processes()
 
     @property
     def device(self):

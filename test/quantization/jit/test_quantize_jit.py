@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: quantization"]
+
 # torch
 import torch
 import torch.nn as nn
@@ -6,8 +8,8 @@ import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
 
-# torch.quantization
-from torch.quantization import (
+# torch.ao.quantization
+from torch.ao.quantization import (
     QConfig,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
@@ -26,8 +28,8 @@ from torch.quantization import (
     PlaceholderObserver,
 )
 
-# torch.quantization.quantize_jit
-from torch.quantization.quantize_jit import (
+# torch.ao.quantization.quantize_jit
+from torch.ao.quantization.quantize_jit import (
     convert_jit,
     convert_dynamic_jit,
     fuse_conv_bn_jit,
@@ -83,6 +85,46 @@ import unittest
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """Test graph mode quantization passes used by quantize_jit"""
+
+    def test_skip_dequant_constant_prop(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = torch.jit.script(M())
+        observer = (
+            default_per_channel_weight_observer.with_args(ch_axis=1)
+        )
+        qconfig_dict = {"": QConfig(activation=default_observer, weight=observer)}
+        m = prepare_jit(m, qconfig_dict)
+        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+
+        m(data)
+        m = convert_jit(m, debug=True)
+
+        freezed = torch.jit.freeze(m)
+        freezed(data)
+
+        # After freezing, weight becomes Constant.
+        # We have this pattern in the original graph: Constant f32_weight -> quant -> dequant
+        # After skipping dequant during Constant Propagation, the resulting graph will be:
+        # Constant int8_weight -> dequant
+        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True).run(freezed.graph)
+        FileCheck().check_count("aten::quantize_per_channel", 0, exactly=True).run(freezed.graph)
+        FileCheck().check_count("aten::dequantize", 3, exactly=True).run(freezed.graph)
+        FileCheck().check("aten::quantize_per_tensor").check_next("aten::dequantize").check_not(
+            "aten::quantize_per_channel"
+        ).check("aten::dequantize").check_next("aten::conv2d").check_next(
+            "aten::quantize_per_tensor"
+        ).check_next(
+            "aten::dequantize"
+        ).run(
+            freezed.graph
+        )
 
     def test_foldbn_trivial(self):
         bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
@@ -1176,6 +1218,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         self.assertEqual(res, ref_res)
 
     def test_swap_functional_linear(self):
+        # TODO: This pass replaces any function called "linear" with "aten::linear"
+        # No longer necessary, and also quite surprising
+        def linear(input, weight, bias):
+            return torch.nn.functional.linear(input, weight, bias)
+
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1183,7 +1230,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def forward(self, x, weight, bias):
                 x = torch.dequantize(x)
                 weight = torch.dequantize(weight)
-                x = F.linear(x, weight, bias)
+                x = linear(x, weight, bias)
                 x = torch.quantize_per_tensor(
                     x, scale=1.0, zero_point=0, dtype=torch.quint8
                 )
@@ -1214,6 +1261,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def __init__(self):
                 super(Res, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = True
 
             def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
@@ -1222,7 +1270,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 if self.use_skip:
                     return self.conv(x)
                 else:
-                    return self.conv(x)
+                    return self.conv2(x)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -2963,10 +3011,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
             m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
             m.eval()
             m = torch.jit.trace(m, torch.rand(4, 1, 4, 4))
-            qconfig = torch.quantization.get_default_qconfig("qnnpack")
-            prepared_model = torch.quantization.prepare_jit(m, {"": qconfig})
+            qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+            prepared_model = torch.ao.quantization.prepare_jit(m, {"": qconfig})
             prepared_model(torch.rand(4, 1, 4, 4))
-            converted_model = torch.quantization.convert_jit(prepared_model)
+            converted_model = torch.ao.quantization.convert_jit(prepared_model)
             FileCheck().check("quantized::conv2d").run(converted_model.graph)
 
     @skipIfNoFBGEMM
@@ -3271,14 +3319,11 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             model = quantize_dynamic_jit(model, qconfig_dict, debug=True)
             graph_qparams = []
             for x, obs in model._modules._c.items():
-                if x == 'fc' and tracing:
-                    graph_qparams.append(
-                        (obs.getattr("weight.6_scale_0"), obs.getattr("weight.6_zero_point_0"))
-                    )
-                else:
-                    graph_qparams.append(
-                        (obs.getattr("weight.1_scale_0"), obs.getattr("weight.1_zero_point_0"))
-                    )
+                n = 2 if x == 'fc' and tracing else 1
+                graph_qparams.append(
+                    (obs.getattr(f"weight.{n}_scale_0"),
+                     obs.getattr(f"weight.{n}_zero_point_0"))
+                )
             self.assertEqual(ref_qparams, graph_qparams)
 
     def test_convert_dynamic_fp16(self):

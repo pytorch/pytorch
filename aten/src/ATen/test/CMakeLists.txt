@@ -36,14 +36,18 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_format_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vmap_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_key_set_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/stride_properties_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_atomic_ops_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_caching_host_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_math_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
@@ -53,6 +57,7 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_distributions_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
@@ -79,7 +84,6 @@ list(APPEND ATen_HIP_TEST_SRCS
 #  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
 
 list(APPEND ATen_VULKAN_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
 
 list(APPEND ATen_MOBILE_TEST_SRCS

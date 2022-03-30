@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 # Torch
 import torch
 import torch.nn.functional as F
@@ -218,3 +220,21 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
                 kernel_size, stride, padding, dilation, X_scale, X_zero_point,
                 W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
                 use_channelwise)
+
+    @given(N=st.integers(1, 10),
+           C=st.integers(1, 10),
+           H=st.integers(4, 8),
+           H_out=st.integers(4, 8),
+           W=st.integers(4, 8),
+           W_out=st.integers(4, 8),
+           scale=st.floats(.1, 2),
+           zero_point=st.integers(0, 4))
+    def test_grid_sample(self, N, C, H, H_out, W, W_out, scale, zero_point):
+        X = torch.rand(N, C, H, W)
+        X_q = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        grid = torch.rand(N, H_out, W_out, 2)
+
+        out = F.grid_sample(X_q, grid)
+        out_exp = torch.quantize_per_tensor(F.grid_sample(X, grid), scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        np.testing.assert_array_almost_equal(
+            out.int_repr().numpy(), out_exp.int_repr().numpy(), decimal=0)

@@ -9,8 +9,9 @@ import hypothesis
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -212,6 +213,7 @@ class TestAdam(hu.HypothesisTestCase):
             ref_sparse,
             input_device_options=input_device_options)
 
+    @unittest.skipIf(not workspace.has_cuda_support, "no cuda support")
     @given(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10),
            LR=st.floats(min_value=0.000001, max_value=0.1,

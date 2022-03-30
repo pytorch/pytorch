@@ -2,7 +2,9 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
@@ -142,6 +144,7 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
   m.impl("_fw_primal", CppFunction::makeFallthrough());
+  m.impl("_make_dual", CppFunction::makeFallthrough());
 }
 
 }  // namespace
@@ -184,7 +187,7 @@ void general_trace_function(
           type = type->expectRef<OptionalType>().getElementType();
         }
       }
-      if (type->isSubtypeOf(TensorType::get())) {
+      if (type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERT(iter->isTensor());
         tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
       } else if (type->kind() == TypeKind::FloatType) {
@@ -203,7 +206,7 @@ void general_trace_function(
         tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
       } else if (type->kind() == TypeKind::ListType) {
         const auto& elem_type = type->expectRef<ListType>().getElementType();
-        if (elem_type->isSubtypeOf(TensorType::get())) {
+        if (elem_type->isSubtypeOf(*TensorType::get())) {
           AT_ASSERT(iter->isTensorList());
           auto list = iter->toTensorVector();
           tracer::addInputs(node, args[i].name().c_str(), list);
@@ -223,8 +226,7 @@ void general_trace_function(
           // doubles in the list are constants
           auto value = iter->toDoubleVector();
           std::vector<Value*> info(value.size());
-          for (size_t value_index = 0; value_index < value.size();
-                ++value_index) {
+          for (const auto value_index : c10::irange(value.size())) {
             info[value_index] = graph->insertConstant(value[value_index]);
             tracer::recordSourceLocation(info[value_index]->node());
           }
@@ -265,12 +267,12 @@ void general_trace_function(
     for (auto iter = stack->end() - output_size; iter != stack->end();
           ++iter, ++i) {
       const auto& type = op.schema().returns()[i].type();
-      if (type->isSubtypeOf(TensorType::get())) {
+      if (type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERT(iter->isTensor());
         tracer::addOutput(node, iter->toTensor());
       } else if (type->kind() == TypeKind::ListType) {
         const auto& elem_type = type->expectRef<ListType>().getElementType();
-        if (elem_type->isSubtypeOf(TensorType::get())) {
+        if (elem_type->isSubtypeOf(*TensorType::get())) {
           AT_ASSERT(iter->isTensorList());
           tracer::addOutput(node, iter->toTensorList());
         } else {

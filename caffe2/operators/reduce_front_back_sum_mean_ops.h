@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -35,7 +36,7 @@ class SumReduceDimsOp final : public Operator<Context> {
     vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index = FIRSTDIMS ? X.dim() : X.dim() - num_reduce_dims_;
-    for (int i = start_index; i < end_index; ++i) {
+    for (const auto i : c10::irange(start_index, end_index)) {
       output_shape.push_back(X.sizes()[i]);
     }
     auto* Y = Output(0, output_shape, at::dtype<T>());

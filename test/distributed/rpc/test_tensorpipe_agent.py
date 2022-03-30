@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: distributed"]
 
 import sys
 
@@ -16,7 +17,6 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
 from torch.testing._internal.distributed.rpc_utils import (
     GENERIC_TESTS,
     TENSORPIPE_TESTS,
-    MultiProcess,
     generate_tests,
 )
 
@@ -29,7 +29,6 @@ if not (IS_IN_CI and torch.cuda.is_available()):
             "TensorPipe",
             TensorPipeRpcAgentTestFixture,
             GENERIC_TESTS + TENSORPIPE_TESTS,
-            MultiProcess.SPAWN,
             __name__,
         )
     )

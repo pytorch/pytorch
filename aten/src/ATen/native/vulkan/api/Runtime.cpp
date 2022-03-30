@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -111,7 +112,7 @@ VkInstance create_instance(const Runtime::Type type) {
     VK_API_VERSION_1_0,
   };
 
-  const VkInstanceCreateInfo instance_create_info{
+const VkInstanceCreateInfo instance_create_info{
     VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
     nullptr,
     0u,
@@ -125,6 +126,12 @@ VkInstance create_instance(const Runtime::Type type) {
   VkInstance instance{};
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
   TORCH_CHECK(instance, "Invalid Vulkan instance!");
+
+#ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+  volkLoadInstance(instance);
+#endif
+#endif
 
   return instance;
 }
@@ -238,7 +245,7 @@ uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device
       &queue_family_count,
       queue_families_properties.data());
 
-  for (uint32_t i = 0; i < queue_families_properties.size(); ++i) {
+  for (const auto i : c10::irange(queue_families_properties.size())) {
     const VkQueueFamilyProperties& properties = queue_families_properties[i];
     if (properties.queueCount > 0 && (properties.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
       return i;
@@ -308,11 +315,18 @@ Adapter Runtime::select(const Selector& selector) {
 Runtime* runtime() {
   static const std::unique_ptr<Runtime> runtime([]() -> Runtime* {
 #ifdef USE_VULKAN_WRAPPER
-    if (!InitVulkan()) {
+#ifdef USE_VULKAN_VOLK
+    if (VK_SUCCESS != volkInitialize()) {
+      TORCH_WARN("Vulkan: Failed to initialize Volk!");
+      return nullptr;
+    }
+#else
+ if (!InitVulkan()) {
       TORCH_WARN("Vulkan: Failed to initialize Vulkan Wrapper!");
       return nullptr;
     }
-#endif
+#endif /* USE_VULKAN_VOLK */
+#endif /* USE_VULKAN_WRAPPER */
 
     try {
       return new Runtime(Configuration::kRuntime);

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import importlib
 from io import BytesIO
 from sys import version_info
@@ -180,16 +182,24 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
+        with self.assertRaises(PackagingError):
+            with PackageExporter(buffer) as he:
+                he.mock(include="package_a.subpackage")
+                he.intern("**")
+                he.save_pickle("obj", "obj.pkl", obj2)
+
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
+    def test_pickle_mocked_all(self):
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
         with PackageExporter(buffer) as he:
-            he.mock(include="package_a.subpackage")
-            he.intern("**")
+            he.intern(include="package_a.**")
+            he.mock("**")
             he.save_pickle("obj", "obj.pkl", obj2)
-
-        buffer.seek(0)
-
-        hi = PackageImporter(buffer)
-        with self.assertRaises(NotImplementedError):
-            hi.load_pickle("obj", "obj.pkl")
 
     def test_allow_empty_with_error(self):
         """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""

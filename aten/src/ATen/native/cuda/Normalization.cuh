@@ -1,11 +1,10 @@
 #pragma once
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCGeneral.h>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>
@@ -13,7 +12,7 @@
 namespace at { namespace native {
 
 // The maximum number of threads in a block
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
 constexpr int MAX_BLOCK_SIZE = 256;
 #else
 constexpr int MAX_BLOCK_SIZE = 512;
@@ -23,7 +22,7 @@ constexpr unsigned MAX_GRID_SIZE = 65535u;
 
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
 static int getNumThreads(int nElem) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
   int threadSizes[5] = { 16, 32, 64, 128, MAX_BLOCK_SIZE };
 #else
   int threadSizes[5] = { 32, 64, 128, 256, MAX_BLOCK_SIZE };
@@ -169,14 +168,14 @@ __host__ void flexible_launch_configs(
       dim3 &grid,
       const bool coop_flag = false) {
   int block_x = std::min(lastPow2(stride), OPTIMAL_TILE_W);
-  int block_y = std::min(lastPow2(at::cuda::ATenCeilDiv(reduction , ELEMENTS_PER_THREAD)),
+  int block_y = std::min(lastPow2(at::ceil_div(reduction , ELEMENTS_PER_THREAD)),
                          MAX_BLOCK_SIZE / block_x);
   if (block_x * block_y != MAX_BLOCK_SIZE) {
     block_x = std::min(lastPow2(stride), MAX_BLOCK_SIZE / block_y);
   }
 
-  int grid_x = at::cuda::ATenCeilDiv(stride, block_x);
-  int grid_y = std::min(at::cuda::ATenCeilDiv(reduction, block_y * ELEMENTS_PER_THREAD), MAX_H_BLOCK);
+  int grid_x = at::ceil_div(stride, block_x);
+  int grid_y = std::min(at::ceil_div(reduction, block_y * ELEMENTS_PER_THREAD), MAX_H_BLOCK);
   if (coop_flag) {
     // it's not worth having a grid reduction if the reduction dimension is not big enough
     grid_y = grid_y < 8 ? 1 : grid_y;
@@ -694,6 +693,8 @@ void batch_norm_stats_cuda_template(
   Tensor dummy_var_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
+  resize_output(out_mean, {n_input});
+  resize_output(out_invstd, {n_input});
   auto input = get_packed_accessor<
       scalar_t, 3, RestrictPtrTraits, index_t>(input_reshaped, "input");
   TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
@@ -845,9 +846,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   auto feature_size = input_reshaped.size(2);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  int block_y = std::min<int>(lastPow2(batch_size), MAX_BLOCK_SIZE/C10_WARP_SIZE);
+  int warp_size = at::cuda::warp_size();
+  int block_y = std::min<int>(lastPow2(batch_size), MAX_BLOCK_SIZE/warp_size);
   // We want block_x to be at least a warp width
-  int block_x = std::min<int>(std::max<int>(getNumThreads(feature_size), C10_WARP_SIZE), MAX_BLOCK_SIZE/block_y);
+  int block_x = std::min<int>(std::max<int>(getNumThreads(feature_size), warp_size), MAX_BLOCK_SIZE/block_y);
   const dim3 block(block_x, block_y);
   const dim3 grid(n_input);
 
@@ -1454,6 +1456,8 @@ void batch_norm_stats_channels_last_cuda_template(
   const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
+  resize_output(out_mean, {stride});
+  resize_output(out_invstd, {stride});
   TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
                         out_invstd.sizes()[0]);
   TORCH_INTERNAL_ASSERT(out_mean.dim() == 1 && out_mean.is_contiguous() &&
@@ -1645,7 +1649,8 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
   const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
-  at::Tensor grad_input = at::empty_like(input, input.suggest_memory_format());
+  // Input is guarunteed to be channels-last compatible
+  at::Tensor grad_input = at::empty_like(input);
 
   dim3 block;
   dim3 grid;
@@ -1712,7 +1717,8 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
   const auto reduction_size = input.numel() / stride;
   auto norm_fct = 1.0 / reduction_size;
 
-  at::Tensor grad_input = at::empty_like(input, input.suggest_memory_format());
+  // Input is guarunteed to be channels-last compatible
+  at::Tensor grad_input = at::empty_like(input);
 
   dim3 block;
   dim3 grid;

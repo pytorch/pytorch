@@ -4,6 +4,21 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
 http_archive(
+    name = "rules_cuda",
+    sha256 = "f80438bee9906e9ecb1a8a4ae2365374ac1e8a283897281a2db2fb7fcf746333",
+    strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
+    urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
+)
+
+load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
+
+rules_cuda_dependencies()
+
+load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
+
+rules_cc_toolchains()
+
+http_archive(
     name = "bazel_skylib",
     urls = [
         "https://github.com/bazelbuild/bazel-skylib/releases/download/1.0.2/bazel-skylib-1.0.2.tar.gz",
@@ -16,6 +31,13 @@ http_archive(
     urls = [
         "https://github.com/google/googletest/archive/cd6b9ae3243985d4dc725abd513a874ab4161f3e.tar.gz",
     ],
+)
+
+http_archive(
+    name = "google_benchmark",
+    sha256 = "6132883bc8c9b0df5375b16ab520fac1a85dc9e4cf5be59480448ece74b278d4",
+    strip_prefix = "benchmark-1.6.1/",
+    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.6.1.tar.gz"],
 )
 
 http_archive(
@@ -170,3 +192,20 @@ protobuf_deps()
 load("@rules_python//python:repositories.bzl", "py_repositories")
 
 py_repositories()
+
+new_local_repository(
+    name = "cuda",
+    build_file = "@//third_party:cuda.BUILD",
+    path = "/usr/local/cuda",
+)
+
+new_local_repository(
+    name = "cudnn",
+    build_file = "@//third_party:cudnn.BUILD",
+    path = "/usr/",
+)
+
+local_repository(
+    name = "com_github_google_flatbuffers",
+    path = "third_party/flatbuffers",
+)

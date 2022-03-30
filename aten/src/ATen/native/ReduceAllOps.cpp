@@ -27,7 +27,9 @@ Tensor max(const Tensor &self) {
 
 // DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
+  TORCH_WARN_ONCE("_aminmax is deprecated as of PyTorch 1.11 and will be removed in a future release. Use aminmax instead."
+                  " This warning will only appear once per process.");
   return at::aminmax(self);
 }
 
-}} // namesapce at::native
+}} // namespace at::native

@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/core/DistributionsHelper.h>
@@ -6,6 +7,13 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace native {
@@ -40,12 +48,12 @@ void multinomial_with_replacement_apply(
   auto result_dist_stride_0 = result.dim() > 1 ? result.stride(-2) : 0;
   auto result_dist_stride_1 = result.stride(-1);
 
-  for (int64_t i = 0; i < n_dist; i++) {
+  for (const auto i : c10::irange(n_dist)) {
     /* Get normalized cumulative distribution from prob distribution */
     scalar_t sum = 0;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     scalar_t val;
-    for (int64_t j = 0; j < n_categories; j++) {
+    for (const auto j : c10::irange(n_categories)) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(
           val >= 0,
@@ -73,12 +81,12 @@ void multinomial_with_replacement_apply(
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original self row sums to one */
     if ((sum > 0) || ((sum < 1.00001) && (sum > 0.99999))) {
-      for (int64_t j = 0; j < n_categories; j++) {
+      for (const auto j : c10::irange(n_categories)) {
         cum_dist_ptr[j * cum_dist_stride_0] /= sum;
       }
     }
 
-    for (int64_t j = 0; j < n_sample; j++) {
+    for (const auto j : c10::irange(n_sample)) {
       /* sample a probability mass from a uniform distribution */
       at::uniform_real_distribution<double> uniform(0, 1);
       double uniform_sample = uniform(gen);

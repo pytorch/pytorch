@@ -1,6 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -17,8 +18,8 @@ class Stmt;
 
 // Forward declarations of functions
 namespace std {
-TORCH_API std::string to_string(const torch::jit::tensorexpr::Expr*);
-TORCH_API std::string to_string(const torch::jit::tensorexpr::Stmt*);
+TORCH_API std::string to_string(const torch::jit::tensorexpr::ExprPtr);
+TORCH_API std::string to_string(const torch::jit::tensorexpr::StmtPtr);
 } // namespace std
 
 namespace torch {
@@ -43,9 +44,9 @@ class unimplemented_lowering : public std::runtime_error {
  public:
   explicit unimplemented_lowering()
       : std::runtime_error("UNIMPLEMENTED LOWERING") {}
-  explicit unimplemented_lowering(Expr* expr)
+  explicit unimplemented_lowering(ExprPtr expr)
       : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(expr)) {}
-  explicit unimplemented_lowering(Stmt* stmt)
+  explicit unimplemented_lowering(StmtPtr stmt)
       : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(stmt)) {}
 };
 
@@ -54,14 +55,14 @@ class malformed_input : public std::runtime_error {
   explicit malformed_input() : std::runtime_error("MALFORMED INPUT") {}
   explicit malformed_input(const std::string& err)
       : std::runtime_error("MALFORMED INPUT: " + err) {}
-  explicit malformed_input(Expr* expr)
+  explicit malformed_input(ExprPtr expr)
       : std::runtime_error("MALFORMED INPUT: " + std::to_string(expr)) {}
-  explicit malformed_input(const std::string& err, Expr* expr)
+  explicit malformed_input(const std::string& err, ExprPtr expr)
       : std::runtime_error(
             "MALFORMED INPUT: " + err + " - " + std::to_string(expr)) {}
-  explicit malformed_input(Stmt* stmt)
+  explicit malformed_input(StmtPtr stmt)
       : std::runtime_error("MALFORMED INPUT: " + std::to_string(stmt)) {}
-  explicit malformed_input(const std::string& err, Stmt* stmt)
+  explicit malformed_input(const std::string& err, StmtPtr stmt)
       : std::runtime_error(
             "MALFORMED INPUT: " + err + " - " + std::to_string(stmt)) {}
 };
@@ -71,17 +72,19 @@ class malformed_ir : public std::runtime_error {
   explicit malformed_ir() : std::runtime_error("MALFORMED IR") {}
   explicit malformed_ir(const std::string& err)
       : std::runtime_error("MALFORMED IR: " + err) {}
-  explicit malformed_ir(Expr* expr)
+  explicit malformed_ir(ExprPtr expr)
       : std::runtime_error("MALFORMED IR: " + std::to_string(expr)) {}
-  explicit malformed_ir(const std::string& err, Expr* expr)
+  explicit malformed_ir(const std::string& err, ExprPtr expr)
       : std::runtime_error(
             "MALFORMED IR: " + err + " - " + std::to_string(expr)) {}
-  explicit malformed_ir(Stmt* stmt)
+  explicit malformed_ir(StmtPtr stmt)
       : std::runtime_error("MALFORMED IR: " + std::to_string(stmt)) {}
-  explicit malformed_ir(const std::string& err, Stmt* stmt)
+  explicit malformed_ir(const std::string& err, StmtPtr stmt)
       : std::runtime_error(
             "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
 };
+
+TORCH_API std::string buildErrorMessage(const std::string& s = "");
 
 } // namespace tensorexpr
 } // namespace jit

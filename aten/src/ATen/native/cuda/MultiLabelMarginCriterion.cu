@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -24,7 +25,6 @@ void check_shape(const Tensor& input, const Tensor& target) {
 
   if (ndims <= 1) {
     int dim = input.dim() == 0 ? 1 : input.size(0);
-    int target_size = target.dim() == 0 ? 1 : target.size(0);
     TORCH_CHECK(
         valid_inputs && target.dim() <= 1 && target.numel() == dim,
         "inconsistent target size: ",
@@ -209,7 +209,6 @@ void multilabel_margin_loss_forward_out_cuda_template(
 
   if (input.dim() <= 1) {
     int dim = input.dim() == 0 ? 1 : input.size(0);
-    int target_size = target.dim() == 0 ? 1 : target.size(0);
     output.resize_({});
 
     dim3 blocks(1);
@@ -260,12 +259,12 @@ void multilabel_margin_loss_forward_out_cuda_template(
                     reduction == at::Reduction::Mean);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           });
-      at::native::sum_out(
+      at::cuda::sum_out(
+          output,
           output_tmp,
           at::IntArrayRef(std::vector<int64_t>{}),
           false,
-          output.scalar_type(),
-          output);
+          output.scalar_type());
     } else {
       output.resize_({input.size(0)});
       AT_DISPATCH_FLOATING_TYPES_AND2(

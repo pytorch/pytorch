@@ -7,7 +7,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/PrefixStore.hpp>
-#include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
@@ -166,8 +165,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
-      int worldSize,
-      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
+      optional<int> worldSize,
       TensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,
@@ -185,7 +183,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
   void join(bool shutdown = false) override;
-  void sync() override;
+  void sync() override{};
   void startImpl() override;
   void shutdownImpl() override;
 
@@ -235,7 +233,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void prepareNames();
+  void prepareNames(bool isStaticGroup);
+
+  // Check the static group attribute with the value set in store
+  void checkAndSetStaticGroup(const c10::intrusive_ptr<::c10d::Store>& store);
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
@@ -330,12 +331,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   ::c10d::PrefixStore rankToNameStore_;
   ::c10d::PrefixStore nameToAddressStore_;
-  const int worldSize_;
-
-  // The join method is required to behave like a barrier and perform collective
-  // operations. For simplicity and reliability, we offload this to a process
-  // group, but probably one day we might want to re-implement them using RPCs.
-  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
+  // Store keys that will used to count joined processes and active calls during
+  // the shutdown process
+  ::c10d::PrefixStore shutdownStore_;
+  int worldSize_ = 0;
+  const bool isStaticGroup_;
 
   std::atomic<uint64_t> nextMessageID_{0};
 

@@ -9,6 +9,11 @@
 #include <stdexcept>
 #include <string>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated")
+#endif
+
 namespace c10 {
 
 /**
@@ -103,7 +108,8 @@ class basic_string_view final {
   }
 
   constexpr const_reference operator[](size_type pos) const {
-    return at(pos);
+    // TODO: split out
+    return at_(pos);
   }
 
   constexpr const_reference at(size_type pos) const {
@@ -681,3 +687,5 @@ struct hash<::c10::basic_string_view<CharT>> {
   }
 };
 } // namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

@@ -84,6 +84,13 @@ struct TORCH_API AutoNonVariableTypeMode {
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
+struct TORCH_API AutoDispatchSkipFunctionalize {
+  AutoDispatchSkipFunctionalize() :
+    dispatch_key_guard_(c10::DispatchKeySet(c10::DispatchKey::Functionalize)) {
+  }
+  c10::impl::ExcludeDispatchKeyGuard dispatch_key_guard_;
+};
+
 /* Note [AutoDispatchBelowADInplaceOrView]
  * AutoDispatchBelowADInplaceOrView is equivalent to AutoNonVariableTypeMode
  * before we split inplace & view ops out of VariableType kernel.

@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import unittest
 from typing import Dict, Optional
 
@@ -16,10 +18,7 @@ class StaticModule:
             self.static_module = torch._C._jit_to_static_module(scripted.graph)
 
     def __call__(self, *args, **kwargs):
-        if not kwargs:
-            return self.static_module(args)
-        else:
-            return self.static_module(args, kwargs)
+        return self.static_module(*args, **kwargs)
 
     def benchmark(self, args, kwargs, warmup_runs, main_runs):
         self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
@@ -186,10 +185,10 @@ class TestStaticModule(TestCase):
         o_test_kw = attention_a(src, src, value=src, mask=src_mask)
 
         for a, b in zip(o_ref, o_test):
-            torch.testing.assert_allclose(a, b)
+            torch.testing.assert_close(a, b)
 
         for a, b in zip(o_ref, o_test_kw):
-            torch.testing.assert_allclose(a, b)
+            torch.testing.assert_close(a, b)
 
     def test_multihead_attention_layer_benchmark(self):
         HID_DIM = 256
@@ -227,37 +226,37 @@ class TestStaticModule(TestCase):
             bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
             top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
         ref_bot = bot_l(bot_inp)
-        acc_bot = bot_l_acc(bot_inp)[0]
-        torch.testing.assert_allclose(acc_bot, ref_bot)
+        acc_bot = bot_l_acc(bot_inp)
+        torch.testing.assert_close(acc_bot, ref_bot)
         ref_top = top_l(top_inp)
-        acc_top = top_l_acc(top_inp)[0]
-        torch.testing.assert_allclose(acc_top, ref_top)
+        acc_top = top_l_acc(top_inp)
+        torch.testing.assert_close(acc_top, ref_top)
         for _ in range(5):
             with torch.no_grad():
                 bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
                 top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
             ref_bot = bot_l(bot_inp)
-            acc_bot = bot_l_acc(bot_inp)[0]
-            torch.testing.assert_allclose(acc_bot, ref_bot)
+            acc_bot = bot_l_acc(bot_inp)
+            torch.testing.assert_close(acc_bot, ref_bot)
             ref_top = top_l(top_inp)
-            acc_top = top_l_acc(top_inp)[0]
-            torch.testing.assert_allclose(acc_top, ref_top)
+            acc_top = top_l_acc(top_inp)
+            torch.testing.assert_close(acc_top, ref_top)
 
     def test_trivial_graph(self):
         s = torch.full((2, 2), 2)
         tg = torch.jit.script(trivial_graph)
         o_ref = tg(s, s, s)
         tg_a = StaticModule(tg)
-        o_test = tg_a(s, s, s)[0]
-        torch.testing.assert_allclose(o_ref, o_test)
+        o_test = tg_a(s, s, s)
+        torch.testing.assert_close(o_ref, o_test)
 
     def test_leaky_relu(self):
         s = torch.randn(5, 5)
         tg = torch.jit.script(nn.LeakyReLU(0.1))
         o_ref = tg(s)
         tg_a = StaticModule(tg)
-        o_test = tg_a(s)[0]
-        torch.testing.assert_allclose(o_ref, o_test)
+        o_test = tg_a(s)
+        torch.testing.assert_close(o_ref, o_test)
 
     def test_attr(self):
         """
@@ -292,8 +291,8 @@ class TestStaticModule(TestCase):
 
         ms = torch.jit.script(m)
         sm = StaticModule(ms)
-        output_sm = sm(input)[0]
-        torch.testing.assert_allclose(output_s, output_sm)
+        output_sm = sm(input)
+        torch.testing.assert_close(output_s, output_sm)
         sm.benchmark([input], {}, 2, 2)
         sm.benchmark_individual_ops([input], {}, 2, 2)
         sm.benchmark([], {"x": input}, 2, 2)
@@ -307,7 +306,7 @@ class TestStaticModule(TestCase):
         torch._C._fuse_to_static_module(tg.graph)
         assert "StaticSubgraph" in str(tg.graph)
         o_test = tg(s, s, s)
-        torch.testing.assert_allclose(o_ref, o_test)
+        torch.testing.assert_close(o_ref, o_test)
 
     @unittest.skip("Temporarily disabled")
     def test_fusion_multihead_attention_layer(self):
@@ -332,7 +331,7 @@ class TestStaticModule(TestCase):
         o_test = attention(src, src, src, src_mask)
 
         for a, b in zip(o_ref, o_test):
-            torch.testing.assert_allclose(a, b)
+            torch.testing.assert_close(a, b)
 
     @unittest.skip("Temporarily disabled")
     def test_fusion_loop(self):
@@ -344,7 +343,7 @@ class TestStaticModule(TestCase):
         torch._C._fuse_to_static_module(lg.graph)
         assert "StaticSubgraph" in str(lg.graph)
         o_test = lg(a, b, c)
-        torch.testing.assert_allclose(o_ref, o_test)
+        torch.testing.assert_close(o_ref, o_test)
 
     @unittest.skip("Temporarily disabled")
     def test_fusion_outputs(self):
@@ -357,8 +356,29 @@ class TestStaticModule(TestCase):
         assert "StaticSubgraph" in str(og.graph)
         o_test = og(a, b, b, c)
         for i in o_ref.keys():
-            torch.testing.assert_allclose(o_ref[i], o_test[i])
+            torch.testing.assert_close(o_ref[i], o_test[i])
 
+    def test_create_object(self):
+        class Foo:  # noqa: B903
+            def __init__(self, x: torch.Tensor) -> None:
+                self.x = x
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, y: torch.Tensor) -> torch.Tensor:
+                foo = Foo(y)
+                return y * foo.x
+
+        mod = torch.jit.script(Mod()).eval()
+        y = torch.randn((1, ))
+        expected = mod(y)
+
+        static_mod = StaticModule(torch.jit.freeze(mod))
+        actual = static_mod(y)
+
+        self.assertEqual(expected, actual)
 
 if __name__ == "__main__":
     run_tests()

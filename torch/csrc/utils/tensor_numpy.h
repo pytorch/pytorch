@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 namespace torch { namespace utils {
 
@@ -15,6 +15,7 @@ bool is_numpy_available();
 bool is_numpy_int(PyObject* obj);
 bool is_numpy_scalar(PyObject* obj);
 
+void warn_numpy_not_writeable();
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj);
 
 }} // namespace torch::utils

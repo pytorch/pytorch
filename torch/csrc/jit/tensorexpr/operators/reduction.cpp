@@ -19,9 +19,11 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeSum(
+Tensor computeSum(
     const std::vector<ArgValue>& inputs,
-    const c10::optional<ScalarType>& outputType) {
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   std::vector<size_t> axes;
   bool keepdim = false;
   // aten::sum takes the input tensor named self.
@@ -51,12 +53,12 @@ Tensor* computeSum(
     std::iota(axes.begin(), axes.end(), 0);
   }
   // Axes go into reduction dimensions.
-  std::vector<DimArg> reductionDims;
+  std::vector<ExprHandle> reductionDims;
   reductionDims.reserve(rank);
   for (size_t axis : axes) {
     reductionDims.emplace_back(sizes[axis]);
   }
-  std::vector<DimArg> outputDims;
+  std::vector<ExprHandle> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
   for (size_t dim = 0; dim < rank; ++dim) {
@@ -100,36 +102,66 @@ Tensor* computeSum(
       reductionDims);
 }
 
-Tensor* computeMean(
+Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
   }
+  bool keepdim = false;
   BufHandle ResultBuf("mean", outputShape, dtype);
   BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
-  std::vector<ExprHandle> mean_dims_expr;
+  std::vector<ExprHandle> extra_args;
+  if (inputs.size() > 2) {
+    keepdim = c10::get<bool>(inputs[2]);
+  }
+
   if (auto mean_dims = c10::get_if<IntList>(&inputs[1])) {
-    mean_dims_expr = c10::fmap<ExprHandle>(*mean_dims);
+    extra_args = c10::fmap<ExprHandle>(*mean_dims);
   } else {
     // When dims argument is not specified, reduce over all dimensions
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
-      mean_dims_expr.emplace_back(idx);
+      extra_args.emplace_back(idx);
     }
   }
-  return new Tensor(
+  extra_args.push_back(LongImm::make(static_cast<int64_t>(keepdim)));
+  return Tensor(
       ResultBuf.node(),
-      ExternalCall::make(
-          ResultBuf, "nnc_aten_mean", {InputBuf}, mean_dims_expr));
+      ExternalCall::make(ResultBuf, "nnc_aten_mean", {InputBuf}, extra_args));
 }
 
-Tensor* computeAdaptiveAvgPool2d(
+Tensor computeMax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("max", outputShape, dtype);
+  BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
+  std::vector<ExprHandle> max_dims_expr;
+  auto max_dim = c10::get<int64_t>(inputs[1]);
+  auto keep_dim = c10::get<bool>(inputs[2]);
+  return Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_max_red",
+          {InputBuf},
+          {max_dim, (int64_t)keep_dim}));
+}
+
+Tensor computeAdaptiveAvgPool2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -137,7 +169,7 @@ Tensor* computeAdaptiveAvgPool2d(
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto out_size_param = c10::get<IntList>(inputs[1]);
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,

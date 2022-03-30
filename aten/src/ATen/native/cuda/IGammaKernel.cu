@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -7,6 +8,10 @@
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
+
+// TODO: review jiterating igamma and igammac if/when a persistent (across processes)
+//   cache is implemented, because they take a VERY long time to compile
+// TODO: it's also odd these ops use gpu_kernel_with_scalars
 
 namespace {
 
@@ -509,6 +514,19 @@ __noinline__ __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
   return _igam_helper_series(a, x);
 }
 
+template<typename scalar_t>
+struct CalcIgamma{
+  CalcIgamma(bool calc_igammac): calc_igammac_(calc_igammac){}
+  bool calc_igammac_;
+  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
+    if (calc_igammac_) {
+      return calc_igammac(a,b);
+    } else {
+      return calc_igamma(a,b);
+    }
+  }
+};
+
 }
 
 // end of regularized lower & upper incomplete gamma
@@ -516,20 +534,14 @@ __noinline__ __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 namespace at { namespace native {
 
 void igamma_kernel_cuda(TensorIteratorBase& iter) {
-
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return calc_igamma(a, b);
-    });
+    gpu_kernel(iter, CalcIgamma<scalar_t>(false));
   });
 }
 
 void igammac_kernel_cuda(TensorIteratorBase& iter) {
-
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return calc_igammac(a, b);
-    });
+    gpu_kernel(iter, CalcIgamma<scalar_t>(true));
   });
 }
 

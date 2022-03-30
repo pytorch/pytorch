@@ -26,17 +26,16 @@ void clear_registered_instances(void* ptr) {
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
-      auto var = py::cast<autograd::Variable>(obj);
-      if (var.is_sparse()) {
-        TORCH_WARN_ONCE(
-            "Using sparse tensors in TorchScript is experimental. Many optimization "
-            "pathways have not been thoroughly tested with sparse tensors. Please "
-            "include the fact that the network is running sparse tensors in any bug "
-            "reports submitted.");
+      if (obj.ptr() == Py_None) {
+        // None gets converted to undefined Tensors
+        return autograd::Variable();
       }
+      auto var = py::cast<autograd::Variable>(obj);
       guardAgainstNamedTensor<autograd::Variable>(var);
       return var;
     }
+    case TypeKind::StorageType:
+      return py::cast<at::Storage>(obj);
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
@@ -88,6 +87,19 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return tuple_type->name()
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
           : c10::ivalue::Tuple::create(std::move(values));
+    }
+    case TypeKind::UnionType: {
+      auto actual_type = toTypeInferredIValue(obj);
+      auto actual_type_ptr = actual_type.type();
+      auto union_type = type->expect<UnionType>();
+      if (!actual_type_ptr->isSubtypeOf(union_type)) {
+        throw py::cast_error(c10::str(
+            "Expected a member of ",
+            union_type->annotation_str(),
+            " but instead found type ",
+            actual_type.type()->annotation_str()));
+      }
+      return actual_type;
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -257,7 +269,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       // check if the classType conform with the interface or not
       std::stringstream why_not;
-      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
+      if (!classType->isSubtypeOfExt(*interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
             "Object of type ",
             classType->repr_str(),
@@ -311,9 +323,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
+    case TypeKind::DynamicType:
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
-    case TypeKind::StorageType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:

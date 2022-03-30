@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 from textwrap import dedent
 from unittest import skipIf
@@ -49,7 +51,7 @@ class ModelTest(PackageTestCase):
         # test that it works
         input = torch.rand(1, 3, 224, 224)
         ref = resnet(input)
-        self.assertTrue(torch.allclose(r2(input), ref))
+        self.assertEqual(r2(input), ref)
 
         # functions exist also to get at the private modules in each package
         torchvision = i.import_module("torchvision")
@@ -81,7 +83,7 @@ class ModelTest(PackageTestCase):
 
         i2 = PackageImporter(f2)
         r3 = i2.load_pickle("model", "model.pkl")
-        self.assertTrue(torch.allclose(r3(input), ref))
+        self.assertEqual(r3(input), ref)
 
     @skipIfNoTorchVision
     def test_model_save(self):
@@ -159,7 +161,7 @@ class ModelTest(PackageTestCase):
             r = the_model(input)
             results.append(r)
 
-        self.assertTrue(torch.allclose(*results))
+        self.assertEqual(*results)
 
     @skipIfNoTorchVision
     def test_script_resnet(self):
@@ -188,7 +190,7 @@ class ModelTest(PackageTestCase):
         loaded = torch.jit.load(f2)
 
         input = torch.rand(1, 3, 224, 224)
-        self.assertTrue(torch.allclose((loaded(input)), resnet(input)))
+        self.assertEqual(loaded(input), resnet(input))
 
 
 if __name__ == "__main__":

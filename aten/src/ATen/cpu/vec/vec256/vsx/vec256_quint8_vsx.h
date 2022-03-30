@@ -3,6 +3,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/quint8.h>
 #include <array>
 
@@ -29,7 +31,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 const vint16 mask_unsigned = vec_splats((short int)0xFF);
 template <>
@@ -367,15 +369,6 @@ struct Vectorized<c10::quint8> {
     vuint8 vec1 = vec_packsu(vecshi2, vecshi3);
 
     return {vec0, vec1};
-  }
-
-  void dump() const {
-    value_type vals[size()];
-    store((void*)vals);
-    for (int i = 0; i < size(); ++i) {
-      std::cout << (int)(vals[i]) << " ";
-    }
-    std::cout << std::endl;
   }
 
   DEFINE_MEMBER_OP(operator==, c10::quint8, vec_cmpeq)

@@ -1,9 +1,12 @@
+# Owner(s): ["module: __torch_function__"]
+
 import torch
 import numpy as np
 import inspect
 import functools
 import pprint
 import pickle
+import collections
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
@@ -128,12 +131,13 @@ class DiagonalTensor(object):
     def tensor(self):
         return self._i * torch.eye(self._N)
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if func not in self.handled_functions:
+        if func not in cls.handled_functions:
             return NotImplemented
-        return self.handled_functions[func](*args, **kwargs)
+        return cls.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
         if type(other) is type(self):
@@ -203,7 +207,8 @@ class SubTensor(torch.Tensor):
     This is useful for testing that the semantics for overriding torch
     functions are working correctly.
     """
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -353,7 +358,8 @@ class TensorLike(object):
     This class is used to explicitly test that the full torch.tensor API
     can be overriden with a class that defines __torch_function__.
     """
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -565,6 +571,16 @@ def generate_tensor_like_override_tests(cls):
             def instance_gen():
                 return TensorLike()
 
+        # FIXME The following code does not support kwonly args without defaults.
+        # The fix is easy, as one just needs to save these args when generating the variable
+        # annotated_args. The problem is that, if one does so, one finds a number
+        # of functions that have problematic signatures in native_functions.yaml.
+        # Fixing these would be BC breaking, so hence this terrible hack
+        # https://github.com/pytorch/pytorch/issues/67008
+        kwargs = {}
+        if hasattr(func, "__name__") and "linalg_solve_triangular" in func.__name__:
+            kwargs = {"upper": True}
+
         func_args = []
         is_method = is_tensor_method_or_property(func)
         if func in annotated_args:
@@ -627,7 +643,7 @@ def generate_tensor_like_override_tests(cls):
                 func_args += [instance_gen(), instance_gen()]
 
         def test(self):
-            ret = func(*func_args)
+            ret = func(*func_args, **kwargs)
             # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
             # This is currently the best check but doesn't work for, for example,
             # Tensor.__add__ because it redirects to Tensor.add.
@@ -674,7 +690,7 @@ def generate_tensor_like_override_tests(cls):
         test_method.__name__ = name
         setattr(cls, name, test_method)
 
-generate_tensor_like_override_tests(TestTorchFunctionOverride)
+# generate_tensor_like_override_tests(TestTorchFunctionOverride)
 
 class Wrapper:
     "Basic data container that knows how to unwrap itself"
@@ -714,10 +730,19 @@ class Wrapper:
     def __getitem__(self, key):
         return wrap(self._data[unwrap(key)])
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        self.used_calls.add(func)
+        # Find an instance of this class in the arguments
+        args_of_this_cls = []
+        for a in args:
+            if isinstance(a, cls):
+                args_of_this_cls.append(a)
+            elif isinstance(a, collections.abc.Sequence):
+                args_of_this_cls.extend(el for el in a if isinstance(el, cls))
+        assert len(args_of_this_cls) > 0
+        args_of_this_cls[0].used_calls.add(func)
         args = unwrap(tuple(args))
         kwargs = {k: unwrap(v) for k, v in kwargs.items()}
 
@@ -762,6 +787,9 @@ class Wrapper:
     def __int__(self):
         return self.__torch_function__(torch.Tensor.__int__, (Wrapper,), (self,))
 
+    def __len__(self):
+        return len(self._data)
+
 
 # unwrap inputs if necessary
 def unwrap(v):
@@ -782,15 +810,15 @@ class TestEinsumOverride(TestCase):
     def test_wrapper(self):
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
-        self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
-                                       torch.ger(x, y)))
+        self.assertEqual(torch.einsum('i,j->ij', x, y)._data,
+                         torch.ger(x, y)._data)
 
         # in the old einsum interface, `operands` is a list
         a = Wrapper(torch.randn(2, 3))
         b = Wrapper(torch.randn(5, 3, 7))
         c = Wrapper(torch.randn(2, 7))
-        self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
-                                       torch.nn.functional.bilinear(a, c, b)))
+        self.assertEqual(torch.einsum('ik,jkl,il->ij', [a, b, c])._data,
+                         torch.nn.functional.bilinear(a, c, b)._data)
 
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
@@ -819,10 +847,12 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
+                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
                 'requires_grad',
+                'requires_grad_',
                 'retain_grad',
                 'size',
                 'stride',
@@ -839,6 +869,7 @@ class TestGradCheckOverride(TestCase):
                 torch.Tensor.numel,
                 torch.Tensor.retain_grad,
                 torch.Tensor.stride,
+                torch.Tensor.requires_grad_,
                 torch.autograd.grad,
                 torch.add,
             }
@@ -997,6 +1028,42 @@ class TestRNN(TestCase):
         input = Wrapper(torch.randn(1, 5, 10))
         model(input)
 
+
+class TestDisabledTorchFunction(TestCase):
+    # Regression test for gh-64687
+    def test_parameter_does_not_prevent_dispatch(self):
+        class MyTensor():
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return "called"
+
+        t1 = MyTensor()
+        t2 = torch.nn.Parameter(torch.rand(2, 2))
+        self.assertEqual(torch.add(t2, t1), "called")
+
+        inp = torch.rand(10, 10)
+        self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
+        self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
+
+class TestTorchFunctionWarning(TestCase):
+    def test_warn_on_invalid_torch_function(self):
+        class Bad1():
+            def __torch_function__(self, *args, **kwargs):
+                pass
+
+        class Bad2(torch.Tensor):
+            def __torch_function__(self, *args, **kwargs):
+                pass
+
+        a = Bad1()
+        with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            # This needs to be a function that handle torch_function on the python side
+            torch.split(a, (2))
+
+        a = Bad2()
+        with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            # This needs to be a function that handle torch_function on the python side
+            torch.split(a, (2))
 
 if __name__ == '__main__':
     run_tests()

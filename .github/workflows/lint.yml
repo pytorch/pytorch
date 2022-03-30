@@ -8,6 +8,7 @@ on:
 
 jobs:
   quick-checks:
+    name: quick-checks
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -16,7 +17,11 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Install requirements
         id: requirements
         run: pip3 install -r requirements.txt --user
@@ -49,7 +54,7 @@ jobs:
       - name: Ensure canonical include
         if: always()
         run: |
-          (! git --no-pager grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
+          (! git --no-pager grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' ':(exclude)torch/csrc/jit/serialization/mobile_bytecode_generated.h'|| (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -64,6 +69,18 @@ jobs:
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' '**.pyi' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+      - name: Ensure GitHub PyPi dependencies are pinned
+        if: always()
+        run: |
+          (! git --no-pager grep --color=always -InP \
+                '(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install ([a-z][\.a-z-0-9]*+(?!(=|.*\.whl))([[:blank:]]|))+' \
+                -- .github \
+                ':(exclude)**.rst' \
+                ':(exclude)**.py' \
+                ':(exclude)**.md' \
+                ':(exclude)**.diff' \
+                ':(exclude)third_party' ||
+            (echo "The above lines have unpinned PyPi installs; please pin them to a specific version: e.g. 'thepackage==1.2'"; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -85,13 +102,19 @@ jobs:
       - name: Ensure no direct cub include
         if: always()
         run: |
-          (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+          (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub*.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
       - name: Ensure no raw cuda api calls
         if: always()
         run: |
           (! git --no-pager grep -I -no $'cudaStreamSynchronize' --  ./aten ./c10 ':(exclude)aten/src/ATen/test' ':(exclude)c10/cuda/CUDAFunctions.h' || (echo "The above files call raw cuda APIs directly; please use at::cuda wrappers instead"; false))
+      - name: Ensure all test files have header containing ownership information
+        if: always()
+        run: |
+          python3 -m pip install boto3==1.19.12
+          .github/scripts/lint_test_ownership.py
 
   clang-format:
+    name: clang-format
     runs-on: ubuntu-18.04
     if: ${{ github.event_name == 'pull_request' }}
     steps:
@@ -101,7 +124,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Run clang-format
@@ -132,6 +155,7 @@ jobs:
           exit 1
 
   py2-setup-validate-errormsg:
+    name: py2-setup-validate-errormsg
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -140,7 +164,7 @@ jobs:
           python-version: 2.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Attempt to run setup.py
         run: |
           if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
@@ -151,6 +175,7 @@ jobs:
         run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
+    name: shellcheck
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -159,7 +184,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install requirements
         id: requirements
         run: |
@@ -168,7 +193,7 @@ jobs:
         run: |
           pip3 install Jinja2==3.0.1 --user
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -230,6 +255,7 @@ jobs:
           rm actionlint
 
   toc:
+    name: toc
     runs-on: ubuntu-18.04
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
@@ -238,7 +264,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v2
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -266,6 +292,7 @@ jobs:
           fi
 
   flake8-py3:
+    name: flake8-py3
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -274,7 +301,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
       - name: Prepare output dir with HEAD commit SHA
@@ -287,7 +314,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install typing-extensions --user # for tools/linter/translate_annotations.py
+          pip3 install typing-extensions==3.10 --user # for tools/linter/translate_annotations.py
           pip3 install -r requirements-flake8.txt --user
           flake8 --version
       - name: Run flake8
@@ -304,11 +331,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: flake8-py3
-          path: flake8-output/
       - name: Fail if there were any warnings
         run: |
           set -eu
@@ -318,15 +340,31 @@ jobs:
             echo 'Please fix the above Flake8 warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: flake8-output/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   clang-tidy:
-    runs-on: linux.2xlarge
+    name: clang-tidy
+    runs-on: [self-hosted, linux.2xlarge]
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
     steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 0 # to allow tools/linter/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
@@ -348,7 +386,7 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
-      - name: Run clang-tidy
+      - name: Run PR clang-tidy
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -361,15 +399,21 @@ jobs:
 
       # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
-      - name: Run clang-tidy
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+      - name: Run master clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
 
           python3 -m tools.linter.clang_tidy \
-            --paths torch/csrc/fx \
+            --paths \
+              torch/csrc/cuda \
+              torch/csrc/fx \
+              torch/csrc/utils \
+              torch/csrc/generic \
+              torch/csrc/deploy \
+              torch/csrc/onnx \
+              torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
-            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
       - name: Annotate output
         if: ${{ github.event_name == 'pull_request' }}
@@ -383,11 +427,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: clang-tidy
-          path: clang-tidy-output/
       - name: Check for warnings
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -397,8 +436,20 @@ jobs:
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'clang-tidy'
+          linter_output_path: clang-tidy/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   cmakelint:
+    name: cmakelint
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -407,11 +458,11 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install cmakelint --user
+          pip3 install cmakelint==1.4.1 --user
           cmakelint --version
       - name: Run cmakelint
         run: |
@@ -421,6 +472,7 @@ jobs:
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
 
   mypy:
+    name: mypy
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -429,21 +481,21 @@ jobs:
           python-version: 3.8
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install -r requirements.txt --user
-          pip3 install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
-          pip3 install expecttest==0.1.3 mypy==0.812 --user
+          python3 -mpip install -r requirements.txt --user
+          python3 -mpip install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
+          python3 -mpip install expecttest==0.1.3 mypy==0.812 --user
           # Needed to check tools/render_junit.py
-          pip3 install junitparser rich --user
+          python3 -mpip install junitparser==2.1.1 rich==10.9.0 --user
       - name: Run autogen
         run: |
           set -eux
-          time python -mtools.generate_torch_version --is_debug=false
-          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
-          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+          time python3 -mtools.generate_torch_version --is_debug=false
+          time python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
         env:
           MYPY_FORCE_COLOR: 1
@@ -452,7 +504,7 @@ jobs:
           set -eux
           STATUS=
           for CONFIG in mypy*.ini; do
-            if ! mypy --config="$CONFIG"; then
+            if ! python3 -mmypy --config="$CONFIG"; then
               STATUS=fail
             fi
           done
@@ -461,6 +513,60 @@ jobs:
             false
           fi
 
+  test-tools:
+    name: Test tools
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          fetch-depth: 0 # deep clone, to allow us to use git log
+      - name: Install dependencies
+        # mypy and boto3 versions copied from
+        # .circleci/docker/common/install_conda.sh
+        run: |
+          set -eux
+          python3 -mpip install -r requirements.txt
+          python3 -mpip install boto3==1.16.34
+          make setup_lint
+      - name: Test tools
+        run: |
+          python3 -m unittest discover -vs tools/test -p 'test_*.py'
+          python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+
+  test_collect_env:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Test collect_env
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        with_torch: [with_torch, without_torch]
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          fetch-depth: 0 # deep clone, to allow us to use git log
+      - name: Install torch
+        if: matrix.with_torch == 'with_torch'
+        run: |
+          # Doesn't really matter what torch version, we just need ANY torch installed
+          pip install 'torch==1.*'
+      - name: Run collect_env.py
+        run: |
+          # All we need to see is that it passes
+          python3 torch/utils/collect_env.py
+
 concurrency:
-  group: lint-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

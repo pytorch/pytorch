@@ -1,4 +1,5 @@
 #include <benchmark/benchmark.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -15,14 +16,14 @@ class ConcatBench : public benchmark::Fixture {
     input_sizes_ = std::move(input_sizes);
     concat_dim_ = concat_dim;
     inputs_.resize(input_sizes_.size());
-    for (size_t i = 0; i < input_sizes_.size(); ++i) {
+    for (const auto i : c10::irange(input_sizes_.size())) {
       inputs_[i] = torch::ones({input_sizes_[i][0], input_sizes_[i][1]});
     }
     output_size_.resize(input_sizes_.front().size());
-    for (size_t i = 0; i < output_size_.size(); ++i) {
+    for (const auto i : c10::irange(output_size_.size())) {
       if (i == static_cast<size_t>(concat_dim_)) {
         output_size_[i] = 0;
-        for (size_t j = 0; j < input_sizes_.size(); ++j) {
+        for (const auto j : c10::irange(input_sizes_.size())) {
           output_size_[i] += input_sizes_[j][i];
         }
       } else {
@@ -47,26 +48,24 @@ class ConcatBench : public benchmark::Fixture {
   }
 
   void runNNC(benchmark::State& state) {
-    KernelScope ks;
-
     size_t num_inputs = inputs_.size();
     size_t num_dims = 2;
 
-    std::vector<Placeholder> inputs;
+    std::vector<BufHandle> inputs;
     for (size_t i = 0; i < num_inputs; ++i) {
-      inputs.emplace_back(Placeholder(
+      inputs.emplace_back(BufHandle(
           "input" + std::to_string(i),
-          kFloat,
-          {input_sizes_[i][0], input_sizes_[i][1]}));
+          {input_sizes_[i][0], input_sizes_[i][1]},
+          kFloat));
     }
 
-    Tensor* output = Compute(
+    Tensor output = Compute(
         "aten_cat",
-        {{output_size_[0], "M"}, {output_size_[1], "N"}},
+        {output_size_[0], output_size_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           int d = 0;
           std::vector<int> cumulative_concat_dim_sizes(num_inputs);
-          for (size_t i = 0; i < num_inputs; ++i) {
+          for (const auto i : c10::irange(num_inputs)) {
             cumulative_concat_dim_sizes[i] = d;
             d += input_sizes_[i][concat_dim_];
           }
@@ -83,7 +82,7 @@ class ConcatBench : public benchmark::Fixture {
         });
     LoopNest nest({output});
     nest.prepareForCodegen();
-    Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+    StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
     std::vector<CodeGen::BufferArg> buf_args(inputs.begin(), inputs.end());
     buf_args.push_back(output);
     LLVMCodeGen cg(s, buf_args);
@@ -101,54 +100,56 @@ class ConcatBench : public benchmark::Fixture {
   }
 
   void runNNCLoop(benchmark::State& state) {
-    KernelScope ks;
-
     size_t num_inputs = inputs_.size();
     size_t num_dims = 2;
 
     TORCH_INTERNAL_ASSERT(concat_dim_ == 1);
 
-    auto output_buf = new Buf(
-        new Var("aten_cat", kHandle),
-        {new IntImm(output_size_[0]), new IntImm(output_size_[1])},
+    auto output_buf = alloc<Buf>(
+        alloc<Var>("aten_cat", kHandle),
+        std::vector<ExprPtr>(
+            {alloc<IntImm>(output_size_[0]), alloc<IntImm>(output_size_[1])}),
         kFloat);
 
-    std::vector<Placeholder> inputs;
-    std::vector<Stmt*> for_stmts(num_inputs);
+    std::vector<BufHandle> inputs;
+    std::vector<StmtPtr> for_stmts(num_inputs);
     int cumulative_input_sizes = 0;
     for (size_t i = 0; i < num_inputs; ++i) {
-      inputs.emplace_back(Placeholder(
+      inputs.emplace_back(BufHandle(
           "input" + std::to_string(i),
-          kFloat,
-          {input_sizes_[i][0], input_sizes_[i][1]}));
-      std::vector<Var*> for_vars(num_inputs);
-      for (size_t d = 0; d < num_dims; ++d) {
+          {input_sizes_[i][0], input_sizes_[i][1]},
+          kFloat));
+      std::vector<VarPtr> for_vars(num_inputs);
+      for (const auto d : c10::irange(num_dims)) {
         for_vars[d] =
-            new Var("i" + std::to_string(i) + "_" + std::to_string(d), kInt);
+            alloc<Var>("i" + std::to_string(i) + "_" + std::to_string(d), kInt);
       }
-      auto store = new Store(
+      auto store = alloc<Store>(
           output_buf,
-          {for_vars[0],
-           new Add(for_vars[1], new IntImm(cumulative_input_sizes))},
-          new Load(inputs[i].data(), {for_vars[0], for_vars[1]}));
-      auto for_st = new For(
+          std::vector<ExprPtr>(
+              {for_vars[0],
+               alloc<Add>(for_vars[1], alloc<IntImm>(cumulative_input_sizes))}),
+          alloc<Load>(
+              inputs[i].node(),
+              std::vector<ExprPtr>({for_vars[0], for_vars[1]})));
+      auto for_st = alloc<For>(
           for_vars[0],
-          new IntImm(0),
-          new IntImm(input_sizes_[i][0]),
-          new For(
+          alloc<IntImm>(0),
+          alloc<IntImm>(input_sizes_[i][0]),
+          alloc<For>(
               for_vars[1],
-              new IntImm(0),
-              new IntImm(input_sizes_[i][1]),
+              alloc<IntImm>(0),
+              alloc<IntImm>(input_sizes_[i][1]),
               store));
       for_stmts[i] = for_st;
       cumulative_input_sizes += input_sizes_[i][1];
     }
-    auto output = new Tensor(output_buf, new Block(for_stmts));
+    auto output = Tensor(output_buf, alloc<Block>(for_stmts));
 
     LoopNest nest({output});
     nest.prepareForCodegen();
     nest.vectorizeInnerLoops();
-    Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+    StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
     std::vector<CodeGen::BufferArg> buf_args(inputs.begin(), inputs.end());
     buf_args.push_back(output);
     LLVMCodeGen cg(s, buf_args);
