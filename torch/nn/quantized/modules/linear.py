@@ -6,6 +6,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, WeightedQuantizedModule
 from torch.nn.utils.fusion import fuse_linear_bn_weights
+from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
@@ -240,7 +241,6 @@ class Linear(WeightedQuantizedModule):
             mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
-        from torch.ao.quantization.utils import type_before_parametrizations  # moving this to the top causes an import error
         if hasattr(mod, 'weight_fake_quant'):
             if type_before_parametrizations(mod) == nniqat.LinearBn1d:
                 mod.weight, mod.bias = fuse_linear_bn_weights(

@@ -362,17 +362,7 @@ def _parent_name(target):
     else:
         return r[0], r[1]
 
-def type_before_parametrizations(module):
-    """
-    Returns type(module) or the original
-    type if module is currently parametrized
-    """
-    if is_parametrized(module):
-        return module.__class__.__bases__[0]
-    else:
-        return type(module)
-
-def is_leaf_or_only_parametrized(module):
+def has_no_children_ignoring_parametrizations(module):
     """
     Checks if module._modules is empty or
     if module is a parametrization, checks that module._modules only has
