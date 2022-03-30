@@ -643,6 +643,27 @@ class TestForeach(TestCase):
         foreach_op_(tensors1, tensors2, tensors3)
         self.assertEqual(expected, tensors1)
 
+    # note: BFloat16 has the same number of exponent bits as FP32
+    # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
+    @onlyCUDA
+    @ops(foreach_reduce_op_db, allowed_dtypes=(torch.half, torch.bfloat16))
+    def test_foreach_l2_large_value_input(self, device, dtype, op):
+        ord, N = 2, 10
+        max_value = torch.finfo(dtype).max
+        scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
+        inputs = [t * scaler for t in op.sample_inputs(device, dtype, N, noncontiguous=False, low=1)],
+        # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
+        self.assertTrue(scaler * scaler * N > max_value)
+        fn, ref_fn, *_ = self._get_funcs(op, 3)
+        actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord)
+        expect = ref_fn(inputs, ord=ord)
+        if dtype == torch.float16:
+            # making sure the reference L2 norm values are in the range of FP16.
+            self.assertFalse(any(torch.isinf(e) for e in expect))
+        else:
+            self.assertTrue(all(torch.isinf(e) for e in expect))
+        self.assertEqual(expect, actual, equal_nan=False)
+
 
 instantiate_device_type_tests(TestForeach, globals())
 

@@ -25,12 +25,13 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
+from jit.test_op_decompositions import TestOpDecompositions  # noqa: F401
 from jit.test_if_hoisting import TestIfHoisting  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
-from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_save_load import TestSaveLoad, TestSaveLoadFlatbuffer  # noqa: F401
 from jit.test_save_load_for_op_version import TestSaveLoadForOpVersion  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
 from jit.test_python_bindings import TestPythonBindings  # noqa: F401
@@ -204,11 +205,6 @@ def doAutodiffCheck(testname):
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
-# even though FULL_PROFILER should be our default
-# we haven't tested every single test in this file
-# but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode_for_profiling_tests"
-torch._C._jit_set_profiling_mode(False)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -969,6 +965,56 @@ class TestJit(JitTestCase):
         dropout.eval()
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
+
+    def test_nn_lp_pool2d(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.LPPool2d(2, 3)
+                self.n = torch.nn.LPPool2d(2, (7, 1))
+
+            def forward(self, x):
+                return (self.l(x),
+                        self.n(x),
+                        torch.nn.functional.lp_pool2d(x, float(2), 3),
+                        torch.nn.functional.lp_pool2d(x, 2, 3),
+                        torch.nn.functional.lp_pool2d(x, float(2), (7, 1)))
+
+        self.checkModule(Mod(), (torch.rand(1, 3, 7, 7),))
+
+    def test_nn_lp_pool1d(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.LPPool1d(2, 3)
+                self.n = torch.nn.LPPool1d(2, 7)
+
+            def forward(self, x):
+                return (self.l(x),
+                        self.n(x),
+                        torch.nn.functional.lp_pool1d(x, float(2), 3),
+                        torch.nn.functional.lp_pool1d(x, 2, 3),
+                        torch.nn.functional.lp_pool1d(x, float(2), 7))
+
+        self.checkModule(Mod(), (torch.rand(1, 3, 7),))
+
+    def test_nn_padding_functional(self):
+        class Mod(nn.Module):
+            def __init__(self, *pad):
+                super().__init__()
+                self.pad = pad
+
+            def forward(self, x):
+                return F.pad(x, self.pad, mode='constant', value=3.5)
+
+        inputs = [
+            (Mod(1, 2), torch.randn(1, 3, 4)),  # 1D
+            (Mod(1, 2, 3, 4), torch.randn(1, 3, 4)),  # 2D
+            (Mod(1, 2, 3, 4, 5, 6), torch.randn(1, 3, 4)),  # 3D
+        ]
+
+        for m, inp in inputs:
+            self.checkModule(m, (inp,))
 
     def test_nn_padding(self):
         class Mod(nn.Module):
@@ -5716,12 +5762,7 @@ a")
                'frac']
 
         def lookup_c_equivalent_fn(aten_fn):
-            if aten_fn == 'min':
-                return 'fmin'
-            elif aten_fn == 'max':
-                return 'fmax'
-            else:
-                return aten_fn
+            return aten_fn
 
         def test_dispatch(op, expects, dtype, binary=False):
             if dtype == torch.double:
@@ -5755,7 +5796,9 @@ a")
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + '(', torch.double)
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float)
 
-        binary_fns = ['min', 'max', 'pow']
+        # 'min', 'max' were previously tested but are now replaced with ternary expressions
+        # instead of fmin() and fmax()
+        binary_fns = ['pow']
         for fn in binary_fns:
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + '(', torch.double, binary=True)
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float, binary=True)
@@ -7313,7 +7356,7 @@ a")
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *, requires_grad=0, device=cpu) = aten::as_tensor").run(g)
 
-
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "testing legacy behavior")
     def test_tensor_requires_grad(self):
         @torch.jit.script
         def test(b):
