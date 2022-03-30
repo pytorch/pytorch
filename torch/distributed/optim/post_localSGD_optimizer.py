@@ -77,8 +77,8 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         self.optim.step()
         self.averager.average_parameters(params=self.param_groups)
 
-    def zero_grad(self):
-        self.optim.zero_grad()
+    def zero_grad(self, set_to_none: bool = False):
+        self.optim.zero_grad(set_to_none=set_to_none)
 
     def add_param_group(self, param_group):
         self.optim.add_param_group(param_group)

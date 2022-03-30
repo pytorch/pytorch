@@ -1054,10 +1054,9 @@ class DistributedTest:
                     # Reset the parameters at every step.
                     for param_group in opt.param_groups:
                         for params in param_group["params"]:
-                            if params.grad is None:
-                                continue
+                            # mock grad
+                            params.grad = torch.ones_like(param.data) * rank
                             params.data = torch.ones_like(param.data) * rank
-
                     averager.average_parameters(opt.param_groups)
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         for param_group in opt.param_groups:
@@ -1091,8 +1090,8 @@ class DistributedTest:
                     # Reset the parameters at every step.
                     for param_group in opt.param_groups:
                         for params in param_group["params"]:
-                            if params.grad is None:
-                                continue
+                            # mock grad
+                            params.grad = torch.ones_like(param.data) * rank
                             params.data = torch.ones_like(param.data) * rank
 
                     averager.average_parameters(opt.param_groups)
