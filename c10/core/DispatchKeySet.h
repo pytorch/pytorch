@@ -419,7 +419,6 @@ class DispatchKeySet final {
     return 64 - llvm::countLeadingZeros(repr_);
   }
 
-#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
   // [Note: Trimmed Mobile Dispatch Keys]
   /**
    * The method below maps the dispatch key in the enum DispatchKey to an
@@ -451,24 +450,6 @@ class DispatchKeySet final {
         return -1;
     }
   }
-#else
-  // returns the index in the operator table of highest priority key in the the
-  // keyset Note that we could in theory implement this using
-  // highestPriorityTypeId(), but this code is very hotpath and we can do it
-  // faster without it.
-  int getDispatchTableIndexForDispatchKeySet() const {
-    auto functionality_idx =
-        DispatchKeySet(repr_ >> num_backends).indexOfHighestBit();
-    auto offset_and_mask = offsetsAndMasks()[functionality_idx];
-    // Mask the functionality bits out first, then right-shift by 1.
-    // right-shifting by 1 because everything is zero-indexed.
-    // E.g. 000001 (CPU) should give us an offset of 0, 000010 (CUDA) should
-    // give us an offset of 1, etc.
-    auto backend_idx =
-        DispatchKeySet((repr_ & offset_and_mask.mask) >> 1).indexOfHighestBit();
-    return offset_and_mask.offset + backend_idx;
-  }
-#endif
 
   // returns the "index" of the highest priority backend in the keyset.
   // This is pretty similar to getBackendKey(), but:

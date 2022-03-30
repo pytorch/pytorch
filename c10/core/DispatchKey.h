@@ -591,13 +591,8 @@ constexpr uint8_t numPerBackendFunctionalityKeys() {
   return count;
 }
 
-#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
 // See [Note: Trimmed Mobile Dispatch Keys]
 constexpr uint16_t num_runtime_entries = 8;
-#else
-constexpr uint16_t num_runtime_entries = num_functionality_keys +
-    (numPerBackendFunctionalityKeys() * (num_backends - 1));
-#endif
 
 // See Note [No More Than 16 Backends]
 constexpr uint16_t full_backend_mask =
