@@ -2,7 +2,7 @@
 import json
 import os
 from hashlib import sha256
-from trymerge import find_matching_merge_rule, gh_graphql, GitHubPR
+from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any
 from unittest import TestCase, main, mock
@@ -44,6 +44,13 @@ class TestGitHubPR(TestCase):
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_lint_fails(self, mocked_gql: Any) -> None:
+        "Tests that PR fails mandatory lint check"
+        pr = GitHubPR("pytorch", "pytorch", 74649)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_last_comment(self, mocked_gql: Any) -> None:
         "Tests that last comment can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 71759)
@@ -82,6 +89,31 @@ class TestGitHubPR(TestCase):
         "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
         self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_comments_pagination(self, mocked_gql: Any) -> None:
+        "Tests that PR with 50+ comments can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        self.assertGreater(len(pr.get_comments()), 50)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_gql_complexity(self, mocked_gql: Any) -> None:
+        "Fetch comments and conclusions for PR with 60 commits"
+        # Previous version of GrapQL query used to cause HTTP/502 error
+        # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
+        pr = GitHubPR("pytorch", "pytorch", 68111)
+        self.assertGreater(len(pr.get_comments()), 20)
+        self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
+        self.assertGreater(pr.get_commit_count(), 60)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_team_members(self, mocked_gql: Any) -> None:
+        "Test fetching team members works"
+        dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
+        self.assertGreater(len(dev_infra_team), 2)
+        with self.assertWarns(Warning):
+            non_existing_team = gh_get_team_members("pytorch", "qwertyuiop")
+            self.assertEqual(len(non_existing_team), 0)
 
 
 if __name__ == "__main__":
