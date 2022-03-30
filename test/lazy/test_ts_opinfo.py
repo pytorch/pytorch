@@ -91,9 +91,6 @@ class TestLazyOpInfo(TestCase):
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST], allowed_dtypes=(torch.float,))
     def test_dispatched_to_lazy(self, device, dtype, op):
-        if IS_WINDOWS:
-            raise unittest.SkipTest("TODO debug windows failure (gh #74519)")
-
         def get_name(op):
             l = [op.name]
             if op.variant_test_name != '':
@@ -112,7 +109,13 @@ class TestLazyOpInfo(TestCase):
         r = op(*args, **kwargs)
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
-        prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
+        if op.name in FALLBACK_LIST:
+            prefix = "aten"
+        else:
+            if IS_WINDOWS:
+              prefix = "lazy::torch::lazy::LazyNativeFunctions"
+            else:
+              prefix = "lazy"
         found = f"{prefix}::{op.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
         # check aliases
         if not found:
