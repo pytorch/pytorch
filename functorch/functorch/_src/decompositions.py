@@ -381,7 +381,7 @@ def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Option
     if M > 0:
         input_reshaped = input.view(1, M, -1)
     else:
-        return (input, aten.new_empty(input, (0,)), aten.new_empty(input, (0,)))
+        return (input, aten.new_zeros(input, (0,)), aten.new_zeros(input, (0,)))
 
     # Unlike Batch Normalization, which applies scalar scale and bias for each
     # entire channel/plane with the affine option, Layer Normalization applies
@@ -438,6 +438,72 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     if beta == 0:
         return out
     return beta * self + out
+
+@register_decomposition(aten.native_layer_norm_backward)
+def native_layer_norm_backward(grad_out: Tensor, input: Tensor, normalized_shape: List[int], mean: Tensor, rstd: Tensor, weight: Optional[Tensor], bias: Optional[Tensor], output_mask: List[bool]) -> Tuple[Tensor, Tensor, Tensor]:
+    input_shape = input.shape
+    input_ndim = input.dim()
+
+    axis = input_ndim - len(normalized_shape)
+    inner_dims = input_shape[axis:]
+    outer_dims = input_shape[:axis]
+    inner_dim_indices = []
+    outer_dim_indices = []
+    for i in range(input_ndim):
+        if(i >= axis):
+            inner_dim_indices.append(i)
+        else:
+            outer_dim_indices.append(i)
+
+    N = float(prod(inner_dims))      
+    M = prod(outer_dims)
+    if M <= 0 or N <= 0.0:
+        return (aten.new_empty(input, input_shape), aten.new_zeros(input[axis:], input_shape[axis:]), aten.new_zeros(input[axis:], input_shape[axis:]))
+
+    x_hat = aten.mul(aten.sub(input, mean), rstd)
+    if weight is not None:
+        grad_x_hat = aten.mul(grad_out, weight)
+    else:
+        grad_x_hat = grad_out
+    a = aten.mul(grad_x_hat, N)
+    b = aten.sum(grad_x_hat, inner_dim_indices, True)
+    c1 = aten.mul(grad_x_hat, x_hat)
+    c2 = aten.sum(c1, inner_dim_indices, True)
+    c3 = aten.mul(x_hat, c2)
+
+    inner = aten.sub(aten.sub(a, b), c3)
+
+    if output_mask[0]:
+        d_input = aten.mul(aten.div(rstd, N), inner)
+    else:
+        d_input = None
+
+    if output_mask[1] and weight is not None:
+        if len(outer_dim_indices) > 0:
+            d_weight = aten.sum(aten.mul(grad_out, x_hat), outer_dim_indices, False)
+        else:
+            d_weight = aten.mul(grad_out, x_hat)
+    else:
+        d_weight = None
+
+    if output_mask[2] and bias is not None:
+        if len(outer_dim_indices) > 0:
+            d_bias = aten.sum(grad_out, outer_dim_indices, False)
+        else:
+            d_bias = grad_out
+    else:
+        d_bias = None
+    return (d_input, d_weight, d_bias)
+
+# @register_decomposition(aten.addmm)
+# def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta=1, alpha=1):
+#     if not self.is_floating_point():
+#         beta = int(beta)
+#         alpha = int(alpha)
+#     out = alpha * aten.mm(mat1, mat2)
+#     if beta == 0:
+#         return out
+#     return beta * self + out
 
 
 @register_decomposition(aten.clamp_min)
