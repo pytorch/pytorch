@@ -574,9 +574,12 @@ def regression_info(
 class TestCase:
     def __init__(self, dom: Any) -> None:
         self.class_name = str(dom.attributes['classname'].value)
-        self.file = str(dom.attributes['file'].value)
         self.name = str(dom.attributes['name'].value)
         self.time = float(dom.attributes['time'].value)
+        # The following attribute is currently ONLY used in process_intentional_test_runs for validation
+        # reasons. The test filename that populates TestFile is calculated and passed down through the test report path.
+        # The reason we don't just use this attribute is because it doesn't exist for cpp tests, e.g., in test_libtorch
+        self.file = str(dom.attributes['file'].value) if dom.hasAttribute('file') else 'N/A - probably a cpp test'
         error_elements = dom.getElementsByTagName('error')
         # DISCLAIMER: unexpected successes and expected failures are currently not reported in assemble_s3_object
         self.expected_failure = False
@@ -788,7 +791,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
     if len(flaky_tests) > 0:
         # write to RDS
         register_rds_schema("flaky_tests", schema_from_sample(flaky_tests[0]))
-        rds_write("flaky_tests", flaky_tests, only_on_master=False)
+        # rds_write("flaky_tests", flaky_tests, only_on_master=False)
 
         # write to S3 to go to Rockset as well
         import uuid
@@ -797,7 +800,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
             flaky_test["workflow_id"] = workflow_id
             key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
             obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
-            obj.put(Body=json.dumps(flaky_test), ContentType="application/json")
+            # obj.put(Body=json.dumps(flaky_test), ContentType="application/json")
 
 
 def build_info() -> ReportMetaMeta:
@@ -852,7 +855,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
         ]
     )
     # no need to print send result as exceptions will be captured and print later.
-    send_to_scribe(logs)
+    # send_to_scribe(logs)
 
 
 def assemble_s3_object(
@@ -929,7 +932,7 @@ def upload_failures_to_rds(reports: Dict[str, TestFile]) -> None:
 
     if len(failures) > 0:
         register_rds_schema("test_failures", schema_from_sample(failures[0]))
-        rds_write("test_failures", failures, only_on_master=False)
+        # rds_write("test_failures", failures, only_on_master=False)
 
 
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
