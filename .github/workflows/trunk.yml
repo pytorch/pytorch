@@ -95,18 +95,18 @@ jobs:
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
   linux-bionic-rocm4_5-py3_7-distributed-build:
-    name: linux-bionic-rocm4.5-py3.7-distributed
+    name: linux-bionic-rocm5.0-py3.7-distributed
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm4.5-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
 
   linux-bionic-rocm4_5-py3_7-distributed-test:
-    name: linux-bionic-rocm4.5-py3.7-distributed
+    name: linux-bionic-rocm5.0-py3.7-distributed
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-bionic-rocm4_5-py3_7-distributed-build
     with:
-      build-environment: linux-bionic-rocm4.5-py3.7
+      build-environment: linux-bionic-rocm5.0-py3.7
       docker-image: ${{ needs.linux-bionic-rocm4_5-py3_7-distributed-build.outputs.docker-image }}
       test-matrix: |
         { include: [
