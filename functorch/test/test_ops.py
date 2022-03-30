@@ -1313,7 +1313,7 @@ class TestDecompositionOpInfo(TestCase):
                 f.write(f'{op}\n')
 
     def test_decompositions_torchscriptable(self, device):
-        skip_list = []
+        skip_list = [torch.ops.aten.native_layer_norm_backward.default]
         for op, decomposition in decomposition_table.items():
             if op in skip_list:
                 continue
