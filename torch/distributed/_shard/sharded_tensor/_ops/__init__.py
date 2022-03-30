@@ -1,5 +1,4 @@
 import torch.distributed._shard.sharded_tensor._ops.elementwise_ops
-import torch.distributed._shard.sharded_tensor._ops.math_ops
 
 from .binary_cmp import equal, allclose
 from .embedding import sharded_embedding
