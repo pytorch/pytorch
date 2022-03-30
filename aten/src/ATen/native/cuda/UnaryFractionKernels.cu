@@ -2,6 +2,7 @@
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
@@ -96,6 +97,7 @@ C10_HOST_DEVICE static inline c10::complex<T> reciprocal_wrapper(c10::complex<T>
   return one/v;
 }
 
+const char reciprocal_name[] = "reciprocal_kernel";
 void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -126,7 +128,7 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
         const c10::complex<T> one = c10::complex<T>(1.0, 0);
         return one/v;
       }
-  );
+  ); // reciprocal_string
   AT_DISPATCH_COMPLEX_TYPES(dtype, "reciprocal_cuda", [&]() {
       jitted_gpu_kernel<
         /*name=*/ reciprocal_name,
@@ -140,8 +142,9 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
       return reciprocal_wrapper(a);
     });
   });
+#endif
   } else { 
-    AT_DISPATCH_FLOATING_AND2(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       dtype, "reciprocal_cuda",
       [&]() {
