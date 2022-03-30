@@ -31,11 +31,11 @@ class NNConvolutionModule(torch.nn.Module):
         )
 
     def forward(self):
-        return len((
+        return (
             [module(self.input1d) for i, module in enumerate(self.module1d)],
             [module(self.input2d) for i, module in enumerate(self.module2d)],
             [module(self.input3d) for i, module in enumerate(self.module3d)],
-        ))
+        )
 
 
 class NNPoolingModule(torch.nn.Module):
@@ -77,11 +77,11 @@ class NNPoolingModule(torch.nn.Module):
         # TODO max_unpool
 
     def forward(self):
-        return len((
+        return (
             [module(self.input1d) for i, module in enumerate(self.module1d)],
             [module(self.input2d) for i, module in enumerate(self.module2d)],
             [module(self.input3d) for i, module in enumerate(self.module3d)],
-        ))
+        )
 
 
 class NNPaddingModule(torch.nn.Module):
@@ -116,11 +116,11 @@ class NNPaddingModule(torch.nn.Module):
         )
 
     def forward(self):
-        return len((
+        return (
             [module(self.input1d) for i, module in enumerate(self.module1d)],
             [module(self.input2d) for i, module in enumerate(self.module2d)],
             [module(self.input3d) for i, module in enumerate(self.module3d)],
-        ))
+        )
 
 
 class NNNormalizationModule(torch.nn.Module):
@@ -155,11 +155,11 @@ class NNNormalizationModule(torch.nn.Module):
         )
 
     def forward(self):
-        return len((
+        return (
             [module(self.input1d) for i, module in enumerate(self.module1d)],
             [module(self.input2d) for i, module in enumerate(self.module2d)],
             [module(self.input3d) for i, module in enumerate(self.module3d)],
-        ))
+        )
 
 
 class NNActivationModule(torch.nn.Module):
@@ -202,9 +202,9 @@ class NNActivationModule(torch.nn.Module):
 
     def forward(self):
         input = torch.randn(2, 3, 4)
-        return len((
-            [module(input) for i, module in enumerate(self.activations)],
-        ))
+        for i, module in enumerate(self.activations):
+            x = module(input)
+        return x
 
 
 class NNRecurrentModule(torch.nn.Module):
@@ -228,13 +228,14 @@ class NNRecurrentModule(torch.nn.Module):
         input = torch.randn(5, 3, 4)
         h = torch.randn(2, 3, 8)
         c = torch.randn(2, 3, 8)
-        r = self.rnn[0](input, h)
-        r = self.rnn[1](input[0], h[0])
-        r = self.gru[0](input, h)
-        r = self.gru[1](input[0], h[0])
-        r = self.lstm[0](input, (h, c))
-        r = self.lstm[1](input[0], (h[0], c[0]))
-        return len(r)
+        return (
+            self.rnn[0](input, h),
+            self.rnn[1](input[0], h[0]),
+            self.gru[0](input, h),
+            self.gru[1](input[0], h[0]),
+            self.lstm[0](input, (h, c)),
+            self.lstm[1](input[0], (h[0], c[0])),
+        )
 
 
 class NNTransformerModule(torch.nn.Module):
@@ -257,10 +258,11 @@ class NNTransformerModule(torch.nn.Module):
     def forward(self):
         input = torch.rand(1, 16, 2)
         tgt = torch.rand((1, 16, 2))
-        r = self.transformers[0](input, tgt)
-        r = self.transformers[1](input)
-        r = self.transformers[2](input, tgt)
-        return len(r)
+        return (
+            self.transformers[0](input, tgt),
+            self.transformers[1](input),
+            self.transformers[2](input, tgt),
+        )
 
 
 class NNLinearModule(torch.nn.Module):
@@ -277,10 +279,11 @@ class NNLinearModule(torch.nn.Module):
 
     def forward(self):
         input = torch.randn(32, 20)
-        r = self.linears[0](input)
-        r = self.linears[1](input)
-        r = self.linears[2](input, input)
-        return len(r)
+        return (
+            self.linears[0](input),
+            self.linears[1](input),
+            self.linears[2](input, input),
+        )
 
 
 class NNDropoutModule(torch.nn.Module):
@@ -291,7 +294,7 @@ class NNDropoutModule(torch.nn.Module):
         a = torch.randn(8, 4)
         b = torch.randn(8, 4, 4, 4)
         c = torch.randn(8, 4, 4, 4, 4)
-        return len(
+        return (
             F.dropout(a),
             F.dropout2d(b),
             F.dropout3d(c),
@@ -309,7 +312,7 @@ class NNSparseModule(torch.nn.Module):
         input2 = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
         embedding_matrix = torch.rand(10, 3)
         offsets = torch.tensor([0, 4])
-        return len(
+        return (
             F.embedding(input, embedding_matrix),
             F.embedding_bag(input2, embedding_matrix, offsets),
             F.one_hot(torch.arange(0, 5) % 3, num_classes=5),
@@ -323,7 +326,7 @@ class NNDistanceModule(torch.nn.Module):
     def forward(self):
         a = torch.randn(8, 4)
         b = torch.randn(8, 4)
-        return len(
+        return (
             F.pairwise_distance(a, b),
             F.cosine_similarity(a, b),
             F.pdist(a),
@@ -344,7 +347,7 @@ class NNLossFunctionModule(torch.nn.Module):
         targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         input_lengths = torch.full((16,), 50, dtype=torch.long)
         target_lengths = torch.randint(10, 30, (16,), dtype=torch.long)
-        return len(
+        return (
             F.binary_cross_entropy(torch.sigmoid(a), b),
             F.binary_cross_entropy_with_logits(torch.sigmoid(a), b),
             F.poisson_nll_loss(a, b),
@@ -389,10 +392,8 @@ class NNVisionModule(torch.nn.Module):
 
     def forward(self):
         input = torch.randn(1, 3, 16, 16)
-        for i, module in enumerate(self.vision_modules):
-            r = module(self.input)
-        return len(
-            r,
+        return (
+            [module(self.input) for i, module in enumerate(self.vision_modules)],
             self.linear_sample(torch.randn(4, 9, 9)),
             self.trilinear_sample(torch.randn(1, 3, 4, 9, 9)),
             F.grid_sample(input, torch.ones(1, 4, 4, 2)),
@@ -405,7 +406,7 @@ class NNShuffleModule(torch.nn.Module):
         self.shuffle = nn.ChannelShuffle(2)
 
     def forward(self):
-        return len(self.shuffle(torch.randn(1, 4, 2, 2)),)
+        return (self.shuffle(torch.randn(1, 4, 2, 2)),)
 
 
 class NNUtilsModule(torch.nn.Module):
@@ -418,6 +419,6 @@ class NNUtilsModule(torch.nn.Module):
 
     def forward(self):
         input = torch.randn(2, 50)
-        return len(
+        return (
             self.flatten(input),
         )
