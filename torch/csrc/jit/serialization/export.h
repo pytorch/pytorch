@@ -30,8 +30,9 @@ using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
 using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
 
+using NodeNameMap = std::unordered_map<const Node*, std::string>;
+
 // Used for modularized export settling function and node attributes.
-using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
 using NodeAttrNameMap = std::
     unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
 
@@ -39,7 +40,8 @@ TORCH_API std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
     SymbolDimMap,
-    bool>
+    bool,
+    NodeNameMap>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -156,21 +158,24 @@ TORCH_API void ExportModule(
     std::ostream& out,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
