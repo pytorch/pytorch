@@ -2,9 +2,23 @@
 
 import torch
 import torch._lazy.ts_backend
+import torch.testing
 from torch._lazy.lazy_mode import lazy_mode
 
 torch._lazy.ts_backend.init()
+
+def test_nested():
+    x = torch.randn(2, 3, 4, device='cpu')
+    y = torch.randn(2, 3, 4, device='cpu')
+    with lazy_mode():
+        with lazy_mode():
+            temp = x + y
+        # this line was also causing the 'lazy kernel calls meta with lazy+eager tensor' error, reenable after fixing that
+        # out = temp + 1
+
+    # this line was segfaulting on lazy .to cpu, which isn't related to nesting
+    # torch.testing.assert_allclose(out, x + 1)
+
 
 def test_single_operation():
     device = 'cpu'
@@ -41,5 +55,6 @@ def test_lazy_mode():
 
 
 if __name__ == "__main__":
-    test_lazy_mode()
+    # test_lazy_mode()
     # test_single_operation()
+    test_nested()

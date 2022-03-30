@@ -13,39 +13,62 @@
 namespace torch {
 namespace lazy {
 
-std::atomic<bool>& in_lazy_mode() {
-    static std::atomic<bool> _in_lazy_mode{false};
-    return _in_lazy_mode;
+// _nests, _inc, _dec are for handling nested lazy mode calls, and should only be called by LazyModeEnter,Exit
+size_t& _lazy_mode_nests() {
+    thread_local size_t _nest_counter{0};
+    return _nest_counter;
+}
+
+size_t _lazy_mode_inc() {
+    // postincrementing so first call returns 0
+    return _lazy_mode_nests()++;
+}
+
+size_t _lazy_mode_dec() {
+    // preincrementing so last call returns 0
+    TORCH_CHECK(_lazy_mode_nests() > 0, "Attempting to exit from a lazy mode without entering");
+    return --_lazy_mode_nests();
+}
+
+// in_lazy_mode is a real API used by other parts of lazy tensor code to adjust behavior for lazy mode
+bool in_lazy_mode() {
+    return _lazy_mode_nests() > 0;
 }
 
 void LazyModeEnter(c10::Device device) {
-    in_lazy_mode() = true;
-    // It is straightforward why we want to set the lazy key on entering the mode:
-    // we force operators (even on regular eager tensors) to route to lazy implementations
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Lazy, true);
+    // We ignore nested lazy modes mainly to enable lazy modes being applied to small regions of library code
+    // and then again around larger regions.  Only the 'outer' mode scope should cause behavior to change.
+    if (_lazy_mode_inc() == 0) {
+        // It is straightforward why we want to set the lazy key on entering the mode:
+        // we force operators (even on regular eager tensors) to route to lazy implementations
+        c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Lazy, true);
+        return;
+    }
 }
 
 void LazyModeExit(c10::Device device) {
-    // Equally straightforward is that we no longer want the lazy key when we exit the mode:
-    // this lets operations on eager tensors outside the mode go back to normal eager behavior
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Lazy, false);
+    if (_lazy_mode_dec() == 0) {
+        // Equally straightforward is that we no longer want the lazy key when we exit the mode:
+        // this lets operations on eager tensors outside the mode go back to normal eager behavior
+        c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Lazy, false);
 
-    // Less obvious is that we also set an 'unlazy' key on mode exit, which lets us specially handle
-    // any 'lazy' tensors that are alive after the mode exit.  This could be avoided if we can find another way
-    // to make lazy tensors interoperable with eager kernels.
-    // TODO(whc) PrivateUse1 is just for prototyping
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::PrivateUse1, true);
+        // Less obvious is that we also set an 'unlazy' key on mode exit, which lets us specially handle
+        // any 'lazy' tensors that are alive after the mode exit.  This could be avoided if we can find another way
+        // to make lazy tensors interoperable with eager kernels.
+        // TODO(whc) PrivateUse1 is just for prototyping
+        c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::PrivateUse1, true);
 
-    // At mode exit, we use the currently 'live' lazy tensors to define a graph to compile/execute
-    auto backend_device = torch::lazy::atenDeviceToBackendDevice(device);
-    auto backend_devices = {backend_device.toString()};
-    // wait=true: means we definitely submit all gpu work before exiting,
-    // does not sync on gpu completion
-    torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&backend_device, backend_devices, /*wait=*/true);
+        // At mode exit, we use the currently 'live' lazy tensors to define a graph to compile/execute
+        auto backend_device = torch::lazy::atenDeviceToBackendDevice(device);
+        auto backend_devices = {backend_device.toString()};
+        // wait=true: means we definitely submit all gpu work before exiting,
+        // does not sync on gpu completion
+        torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&backend_device, backend_devices, /*wait=*/true);
 
-    // Live lazy tensors should now all have eager tensors replacing their 'ir_value' fields, which can be
-    // accessed by eager kernels using the 'unlazy handler'
-    in_lazy_mode() = false;
+        // Live lazy tensors should now all have eager tensors replacing their 'ir_value' fields, which can be
+        // accessed by eager kernels using the 'unlazy handler'
+        return;
+    }
 }
 
 void unlazy_handler(
