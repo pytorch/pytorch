@@ -488,6 +488,8 @@ class Argument:
 class FunctionSchema:
     arguments: List[Argument]
     returns: List[Argument]
+    name: str
+    overload_name: str
     ...
 
 class _UpgraderEntry:
