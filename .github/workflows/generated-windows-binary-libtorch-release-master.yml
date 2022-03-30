@@ -32,6 +32,7 @@ concurrency:
 
 jobs:
   libtorch-cpu-shared-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
