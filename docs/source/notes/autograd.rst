@@ -222,7 +222,7 @@ Evaluation Mode (``nn.Module.eval()``)
 Evaluation mode is not actually a mechanism to locally disable gradient computation.
 It is included here anyway because it is sometimes confused to be such a mechanism.
 
-Functionally, ``module.eval()`` (or equivalently ``module.train()``) are completely
+Functionally, ``module.eval()`` (or equivalently ``module.train(False)``) are completely
 orthogonal to no-grad mode and inference mode. How ``model.eval()`` affects
 your model depends entirely on the specific modules used in your model and
 whether they define any training-mode specific behavior.
@@ -278,8 +278,8 @@ Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
-that can help you make the best use of it in a multithreaded environment.(this is
-relevant only for PyTorch 1.6+ as the behavior in previous version was different).
+that can help you make the best use of it in a multithreaded environment. (This is
+relevant only for PyTorch 1.6+ as the behavior in previous version was different.)
 
 User could train their model with multithreading code (e.g. Hogwild training), and
 does not block on the concurrent backward computations, example code could be:
@@ -352,9 +352,9 @@ Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
 parallel backwards that share part/whole of the GraphTask.
 
-Custom Python ``autograd.function`` is automatically thread safe because of GIL.
-for built-in C++ Autograd Nodes(e.g. AccumulateGrad, CopySlices) and custom
-``autograd::Function``, the Autograd Engine uses thread mutex locking to protect
+Custom Python ``autograd.Function`` is automatically thread safe because of GIL.
+For built-in C++ Autograd Nodes (e.g. AccumulateGrad, CopySlices) and custom
+``autograd::Function``\s, the Autograd Engine uses thread mutex locking to ensure
 thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks

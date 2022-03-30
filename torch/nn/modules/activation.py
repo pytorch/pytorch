@@ -654,6 +654,13 @@ class GELU(Module):
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
+    When the approximate argument is 'tanh', Gelu is estimated with:
+        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    Args:
+        approximate (string, optional): the gelu approximation algorithm to use:
+            ``'none'`` | ``'tanh'``. Default: ``'none'``
+
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
@@ -666,8 +673,18 @@ class GELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['approximate']
+    approximate: str
+
+    def __init__(self, approximate: str = 'none') -> None:
+        super(GELU, self).__init__()
+        self.approximate = approximate
+
     def forward(self, input: Tensor) -> Tensor:
-        return F.gelu(input)
+        return F.gelu(input, approximate=self.approximate)
+
+    def extra_repr(self) -> str:
+        return 'approximate={}'.format(self.approximate)
 
 
 class Hardshrink(Module):
@@ -1003,7 +1020,7 @@ class MultiheadAttention(Module):
             the attention weight.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
-            effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
+            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1014,14 +1031,22 @@ class MultiheadAttention(Module):
           returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
           :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
-          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
+          head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
 
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
         if self.batch_first and is_batched:
-            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+            # make sure that the transpose op does not affect the "is" property
+            if key is value:
+                if query is key:
+                    query = key = value = query.transpose(1, 0)
+                else:
+                    query, key = [x.transpose(1, 0) for x in (query, key)]
+                    value = key
+            else:
+                query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = F.multi_head_attention_forward(

@@ -26,6 +26,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 def gen_registration_headers(
         backend_index: BackendIndex,
         per_operator_headers: bool,
+        rocm: bool,
 ) -> List[str]:
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
@@ -35,11 +36,16 @@ def gen_registration_headers(
     if backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.Meta):
         headers.append("#include <ATen/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.CUDA:
-        headers.append("#include <ATen/cuda/EmptyTensor.h>")
+        if rocm:
+            headers.append("#include <ATen/hip/EmptyTensor.h>")
+        else:
+            headers.append("#include <ATen/cuda/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
-            "#include <ATen/ops/empty_strided.h>"]
+            "#include <ATen/ops/empty_strided.h>",
+            "#include <ATen/ops/_copy_from_and_resize.h>",
+            "#include <ATen/ops/_copy_from.h>"]
     else:
         headers.append("#include <ATen/Functions.h>")
 
@@ -187,6 +193,10 @@ class RegisterDispatchKey:
     # all of the existing kernel signatures scattered across aten/src/ATen/native.
     class_method_name: Optional[str]
 
+    # Only set to true in lightweight dispatch. If lightweight dispatch is enabled we are registering
+    # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
+    skip_dispatcher_op_registration: bool
+
     @staticmethod
     def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
         if type == DeviceCheckType.NoCheck:
@@ -278,6 +288,7 @@ class RegisterDispatchKey:
             self.rocm,
             self.cpp_namespace,
             self.class_method_name,
+            self.skip_dispatcher_op_registration,
             g
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -412,7 +423,7 @@ namespace {{
 """
 
             elif self.target is Target.REGISTRATION:
-                if f.manual_kernel_registration:
+                if f.manual_kernel_registration or self.skip_dispatcher_op_registration:
                     return None
                 else:
                     payload = f"TORCH_FN({name})"

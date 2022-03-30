@@ -8,6 +8,15 @@
 #define GPU_LAMBDA __host__ __device__
 #endif
 
-constexpr int num_threads() { return C10_WARP_SIZE * 4; }
+#if defined(USE_ROCM)
+constexpr int num_threads() {
+  return 256;
+}
+#else
+constexpr int num_threads() {
+  return C10_WARP_SIZE * 4;
+}
+#endif
+
 constexpr int thread_work_size() { return 4; }
 constexpr int block_work_size() { return thread_work_size() * num_threads(); }

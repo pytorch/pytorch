@@ -219,6 +219,12 @@ index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
 See :meth:`~Tensor.index_add_` for function description.
 """)
 
+add_docstr(torch.index_copy, r"""
+index_copy(input, dim, index, source, *, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
@@ -1025,9 +1031,6 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
-           tensor or a NumPy array, copying otherwise.
-
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
 
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
@@ -1035,7 +1038,7 @@ CPU device, and not share its memory.
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
            implement the buffer protocol.
 
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that always shares memory from
+    :func:`torch.from_dlpack` creates a tensor that always shares memory from
            DLPack capsules.
 
 Args:
@@ -8541,6 +8544,59 @@ scatter_add(input, dim, index, src) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
+add_docstr(torch.scatter_reduce, r"""
+scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
+
+Reduces all values from the :attr:`input` tensor to the indices specified in
+the :attr:`index` tensor. For each value in :attr:`input`, its output index is
+specified by its index in :attr:`input` for ``dimension != dim`` and by the
+corresponding value in :attr:`index` for ``dimension = dim``.
+The applied reduction for non-unique indices is defined via the :attr:`reduce`
+argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
+For non-existing indices, the output will be filled with the identity of the
+applied reduction (1 for :obj:`"prod"` and 0 otherwise).
+
+It is also required that ``index.size(d) == input.size(d)`` for all dimensions ``d``.
+Moreover, if :attr:`output_size` is defined the the values of :attr:`index` must be
+between ``0`` and ``output_size - 1`` inclusive.
+
+
+For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
+
+    out[index[i][j][k]][j][k] += input[i][j][k]  # if dim == 0
+    out[i][index[i][j][k]][k] += input[i][j][k]  # if dim == 1
+    out[i][j][index[i][j][k]] += input[i][j][k]  # if dim == 2
+
+Note:
+    This out-of-place operation is similar to the in-place versions of
+    :meth:`~torch.Tensor.scatter_` and :meth:`~torch.Tensor.scatter_add_`,
+    in which the output tensor is automatically created according to the
+    maximum values in :attr:`index` and filled based on the identity of the
+    applied reduction.
+
+Note:
+    {forward_reproducibility_note}
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter and reduce.
+    src (Tensor): the source elements to scatter and reduce
+    reduce (str): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+    output_size (int, optional): the size of the output at dimension :attr:`dim`.
+        If set to :obj:`None`, will get automatically inferred according to
+        :obj:`index.max() + 1`
+
+Example::
+
+    >>> input = torch.tensor([1, 2, 3, 4, 5, 6])
+    >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
+    >>> torch.scatter_reduce(input, 0, index, reduce="sum", output_size=3)
+    tensor([4, 12, 5])
+
+""".format(**reproducibility_notes))
+
 add_docstr(torch.select,
            r"""
 select(input, dim, index) -> Tensor
@@ -9741,10 +9797,10 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension(s). Elements that are shifted beyond the
-last position are re-introduced at the first position. If a dimension is not
-specified, the tensor will be flattened before rolling and then restored
-to the original shape.
+Roll the tensor :attr:`input` along the given dimension(s). Elements that are
+shifted beyond the last position are re-introduced at the first position. If
+:attr:`dims` is `None`, the tensor will be flattened before rolling and then
+restored to the original shape.
 
 Args:
     {input}
@@ -9762,6 +9818,11 @@ Example::
             [3, 4],
             [5, 6],
             [7, 8]])
+    >>> torch.roll(x, 1)
+    tensor([[8, 1],
+            [2, 3],
+            [4, 5],
+            [6, 7]])
     >>> torch.roll(x, 1, 0)
     tensor([[7, 8],
             [1, 2],
@@ -11507,6 +11568,34 @@ Example::
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
     tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
        quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
+""")
+
+add_docstr(torch.quantize_per_tensor_dynamic,
+           r"""
+quantize_per_tensor_dynamic(input, dtype, reduce_range) -> Tensor
+
+Converts a float tensor to a quantized tensor with scale and zero_point calculated
+dynamically based on the input.
+
+Arguments:
+    input (Tensor): float tensor or list of tensors to quantize
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``
+    reduce_range (bool): a flag to indicate whether to reduce the range of quantized
+    data by 1 bit, it's required to avoid instruction overflow for some hardwares
+
+Returns:
+    Tensor: A newly (dynamically) quantized tensor
+
+Example::
+
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> print(t)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
+           zero_point=85)
+    >>> t.int_repr()
+    tensor([  0,  85, 170, 255], dtype=torch.uint8)
 """)
 
 add_docstr(torch.quantize_per_channel,

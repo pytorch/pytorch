@@ -39,9 +39,11 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/simple_graph_executor_impl.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/logging.h>
 
 #include <cstdint>
@@ -56,17 +58,16 @@ namespace torch {
 namespace jit {
 
 EnableProfilingGuard::EnableProfilingGuard() {
-  auto& profiling_mode = getProfilingMode();
-  old_profiling_mode = profiling_mode;
-  profiling_mode = true;
   auto& executor_mode = getExecutorMode();
   old_executor_mode = executor_mode;
   executor_mode = true;
+  old_get_optimize = getGraphExecutorOptimize();
+  setGraphExecutorOptimize(true);
 }
 
 EnableProfilingGuard::~EnableProfilingGuard() {
-  getProfilingMode() = old_profiling_mode;
   getExecutorMode() = old_executor_mode;
+  setGraphExecutorOptimize(old_get_optimize);
 }
 
 namespace {
@@ -201,6 +202,9 @@ struct UnpackInstructions {
   void pushTensor() {
     insts_.emplace_back(PUSH_TENSOR);
   }
+  void pushNone() {
+    insts_.emplace_back(PUSH_NONE);
+  }
   void pushTensorList(size_t size) {
     insts_.emplace_back(PUSH_LIST);
     sizes_.push_back(size);
@@ -218,6 +222,9 @@ struct UnpackInstructions {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
           stack.emplace_back(lst);
         } break;
+        case PUSH_NONE: {
+          stack.emplace_back(IValue());
+        }
       }
     }
   }
@@ -226,6 +233,7 @@ struct UnpackInstructions {
   enum Inst : uint8_t {
     PUSH_TENSOR,
     PUSH_LIST, // consumes one size
+    PUSH_NONE,
   };
   std::vector<Inst> insts_;
   std::vector<size_t> sizes_;
@@ -315,7 +323,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.scalar_type())) {
+    if (at::isFloatingType(output.scalar_type()) ||
+        at::isComplexType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
@@ -333,6 +342,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
     } else if (v.isTensor()) {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
+    } else if (v.isNone()) {
+      input_instructions_.pushNone();
+      addInputVariable(Variable{});
     }
   }
 
@@ -397,8 +409,7 @@ struct DifferentiableGraphOp {
 
     detachVariables(stack);
     if (IsNewExecutorEnabled()) {
-      const ExecutionPlan& plan =
-          f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+      const ExecutionPlan& plan = f_ptr->getPlanFor(stack);
       InterpreterState(plan.code).run(stack);
     } else {
       InterpreterState(legacy_f).run(stack);
@@ -539,8 +550,7 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  const ExecutionPlan& plan =
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+  const ExecutionPlan& plan = getPlanFor(stack);
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
@@ -565,9 +575,8 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
     ExecutionPlan plan;
     InterpreterState state;
   };
-  auto frame = std::make_shared<Frame>(
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()),
-      std::move(taskLauncher));
+  auto frame =
+      std::make_shared<Frame>(getPlanFor(stack), std::move(taskLauncher));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
@@ -592,8 +601,9 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
-      override {
+  const ExecutionPlan& getPlanFor(
+      Stack& stack,
+      c10::optional<size_t> remaining_bailout_depth) override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -755,12 +765,33 @@ GraphExecutor::GraphExecutor(
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()
+              ? (getProfilingMode() ?
+
+                                    dynamic_cast<GraphExecutorImplBase*>(
+                                        new ProfilingGraphExecutorImpl(
+                                            graph,
+                                            std::move(function_name)))
+                                    : dynamic_cast<GraphExecutorImplBase*>(
+                                          new SimpleGraphExecutorImpl(
+                                              graph,
+                                              std::move(function_name))))
+              : dynamic_cast<GraphExecutorImplBase*>(
+                    new GraphExecutorImpl(graph, std::move(function_name)))) {}
+
+GraphExecutor::GraphExecutor(
+    const std::shared_ptr<Graph>& graph,
+    std::string function_name,
+    ExecutorExecutionMode executor_mode)
+    : pImpl(
+          executor_mode == ExecutorExecutionMode::SIMPLE
               ? dynamic_cast<GraphExecutorImplBase*>(
-                    new ProfilingGraphExecutorImpl(
+                    new SimpleGraphExecutorImpl(
                         graph,
                         std::move(function_name)))
               : dynamic_cast<GraphExecutorImplBase*>(
-                    new GraphExecutorImpl(graph, std::move(function_name)))) {}
+                    new ProfilingGraphExecutorImpl(
+                        graph,
+                        std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
@@ -772,13 +803,9 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
   return pImpl->runAsync(stack, std::move(taskLauncher));
 }
 
-size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth() : 0;
-}
-
 const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
@@ -876,10 +903,8 @@ void runNondiffOptimization(
 
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
-  if (!getProfilingMode()) {
-    DecomposeOps(graph);
-    GRAPH_DEBUG("After DecomposeOps\n", *graph);
-  }
+  DecomposeOps(graph);
+  GRAPH_DEBUG("After DecomposeOps\n", *graph);
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
@@ -890,7 +915,7 @@ void runNondiffOptimization(
   BatchMM(graph);
 
   GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-  if (getProfilingMode()) {
+  if (getExecutorMode()) {
     if (tensorExprFuserEnabled()) {
       auto min_size = getFusionGroupInlining() ? 2 : 1;
       auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();

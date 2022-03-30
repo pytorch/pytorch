@@ -402,8 +402,6 @@ Tensor quantized_max_pool2d(
 }
 
 std::tuple<at::Tensor &,at::Tensor &> max_pool2d_with_indices_out_quantized_cpu(const at::Tensor & self, at::IntArrayRef kernel_size, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode, at::Tensor & out, at::Tensor & indices) {
-  out = at::native::quantized_max_pool2d(self, kernel_size, stride, padding, dilation, ceil_mode);
-  indices = at::empty(out.sizes(), indices.options());
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
@@ -418,9 +416,12 @@ std::tuple<at::Tensor &,at::Tensor &> max_pool2d_with_indices_out_quantized_cpu(
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
   // the output tensor is already computed from quantized_max_pool2d. junk_out is used as a dummy
   // argument because it is required by max_pool2d_kernel
-  auto junk_out = at::empty(out.sizes(), self.int_repr().options());
-  max_pool2d_kernel(kCPU, junk_out, indices, self.int_repr(), kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-  return std::tuple<at::Tensor &,at::Tensor &>(out, indices);
+  auto out_int_repr = at::empty(out.sizes(), out.int_repr().options());
+  indices = at::empty(out.sizes(), indices.options());
+  max_pool2d_kernel(kCPU, out_int_repr, indices, self.int_repr(), kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+  // TODO: move the int8 ptr into the qint8 tensor instead of calling _make_per_tensor_quantized_tensor?
+  out = _make_per_tensor_quantized_tensor(out_int_repr, out.q_scale(), out.q_zero_point());
+  return std::tuple<at::Tensor &, at::Tensor &>(out, indices);
 }
 
 

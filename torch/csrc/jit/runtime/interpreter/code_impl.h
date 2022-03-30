@@ -869,10 +869,12 @@ struct MobileCodeImpl : CodeImpl {
       std::string function_name,
       bool emit_default_input_instructions,
       bool support_default_args_before_out,
+      bool emit_promoted_ops,
       size_t remaining_bailout_depth)
       : CodeImpl(graph, function_name, remaining_bailout_depth, false),
         emit_default_input_instructions_(emit_default_input_instructions),
-        support_default_args_before_out_(support_default_args_before_out) {
+        support_default_args_before_out_(support_default_args_before_out),
+        emit_promoted_ops_(emit_promoted_ops) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
@@ -965,7 +967,6 @@ struct MobileCodeImpl : CodeImpl {
       int64_t X = 0,
       uint64_t N = 0,
       bool emit_inputs = true) override {
-    bool emit_promoted_ops_ = false;
     if (emit_promoted_ops_) {
       CodeImpl::emitOperatorOrInstruction(node, op, X, N, emit_inputs);
     } else {
@@ -977,6 +978,8 @@ struct MobileCodeImpl : CodeImpl {
   bool emit_default_input_instructions_;
   // To support forward compatibility for bytecode version bump from v6 to v7
   bool support_default_args_before_out_;
+  // To support forward compatibility for bytecode version bump from v7 to v8
+  bool emit_promoted_ops_;
 };
 
 } // namespace interpreter
