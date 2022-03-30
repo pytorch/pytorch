@@ -188,29 +188,6 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
 class PythonReturns:
     returns: Tuple[Return, ...]
 
-    def named_tuple_pyi(self) -> Optional[Tuple[str, str]]:
-        python_returns = [argument_type_str_pyi(r.type) for r in self.returns]
-        field_names = namedtuple_fieldnames(self.returns)
-        if field_names:
-            namedtuple_name = '_'.join(['namedtuple'] + field_names)
-            tuple_args = [f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)]
-            namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
-            return namedtuple_name, namedtuple_def
-        return None
-
-    def returns_str_pyi(self) -> str:
-        named_tuple = self.named_tuple_pyi()
-        if named_tuple is not None:
-            namedtuple_name, _ = named_tuple
-            return namedtuple_name
-
-        python_returns = [argument_type_str_pyi(r.type) for r in self.returns]
-        if len(python_returns) > 1:
-            return 'Tuple[' + ', '.join(python_returns) + ']'
-        if len(python_returns) == 1:
-            return python_returns[0]
-        return 'None'
-
 
 @dataclass(frozen=True)
 class PythonArgument:
@@ -399,7 +376,7 @@ class PythonSignature:
             schema_formals.insert(positional_argc, '*')
 
         # only pyi signatures include returns
-        returns_str = self.returns.returns_str_pyi()
+        returns_str = returns_str_pyi(self)
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
@@ -425,7 +402,7 @@ class PythonSignature:
         # vararg signatures also omit the asterix
         schema_formals[0] = '*' + args[0].name + ': _int'
 
-        returns_str = self.returns.returns_str_pyi()
+        returns_str = returns_str_pyi(self)
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
@@ -465,7 +442,7 @@ class PythonSignatureDeprecated(PythonSignature):
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, '*')
 
-        returns_str = self.returns.returns_str_pyi()
+        returns_str = returns_str_pyi(self)
         return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> Optional[str]:
@@ -824,6 +801,51 @@ def argument_type_str_pyi(t: Type) -> str:
     return ret
 
     raise RuntimeError(f'unrecognized type {repr(t)}')
+
+
+def return_type_str_pyi(t: Type) -> str:
+    # Where arguments are open to accepting Union, return types should return
+    # concrete types
+
+    if isinstance(t, OptionalType):
+        inner = return_type_str_pyi(t.elem)
+        return f"Optional[{inner}]"
+
+    if isinstance(t, BaseType):
+        if t.name == BaseTy.Device:
+            return '_device'
+        elif t.name == BaseTy.Dimname:
+            ret = 'Optional[str]'
+        else:
+            return argument_type_str_pyi(t)
+
+    if isinstance(t, ListType):
+        inner = return_type_str_pyi(t.elem)
+        return f"List[{inner}]"
+
+    return argument_type_str_pyi(t)
+
+def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, str]]:
+    python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
+    namedtuple_name = signature.name
+    field_names = namedtuple_fieldnames(signature.returns.returns)
+    if field_names:
+        tuple_args = [f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)]
+        namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
+        return namedtuple_name, namedtuple_def
+    return None
+
+def returns_str_pyi(signature: PythonSignature) -> str:
+    field_names = namedtuple_fieldnames(signature.returns.returns)
+    if field_names:
+        return f"torch.return_types.{signature.name}"
+
+    python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
+    if len(python_returns) > 1:
+        return 'Tuple[' + ', '.join(python_returns) + ']'
+    if len(python_returns) == 1:
+        return python_returns[0]
+    return 'None'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
