@@ -340,10 +340,10 @@ List of supported operators
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Visit the auto generated :doc:`list of supported ATen operators <../onnx_supported_aten_ops>`
-for details on which operator and OpSet(s) are currently supported.
+for details on which operator are supported in each ``opset_version``.
 
-Adding a new operator
-~~~~~~~~~~~~~~~~~~~~~
+Adding support for an operator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If the operator is not in the list above:
 

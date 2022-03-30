@@ -1,7 +1,7 @@
 """
 This script will generate a CSV table with all ATen operators
-currently supported by ONNX converter. The generated table is included by
-docs/source/onnx_supported_aten_list.rst and rendered on a proper public format
+supported by `torch.onnx.export`. The generated table is included by
+docs/source/onnx_supported_aten_list.rst.
 """
 
 import os
@@ -15,7 +15,7 @@ print('Generating list of ATen operators supported by ONNX converter')
 os.makedirs(BUILD_DIR, exist_ok=True)
 
 # Retrieve list of supported ATen operators
-aten_list = onnx_supported_ops.get_onnx_supported_ops()
+aten_list = onnx_supported_ops.onnx_supported_ops()
 
 # Write CSV file
 with open(os.path.join(BUILD_DIR, AUTO_GEN_ATEN_OPS_CSV_FILE), 'w') as f:
