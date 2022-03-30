@@ -325,7 +325,7 @@ struct cpu_scatter_gather_base_kernel {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
-      "scatter_gather_tensor_cpu_func", [&]() {
+      "scatter_gather_tensor_cpu", [&]() {
         _cpu_scatter_gather_tensor_dispatched_func<scalar_t, is_scatter_like>()(iter, grain_size,
                                                                                 self_dim_stride,
                                                                                 index_dim_stride,
