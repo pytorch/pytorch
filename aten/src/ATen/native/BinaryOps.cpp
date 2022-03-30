@@ -618,6 +618,11 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
+Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
+  self.values().mul_(other);
+  return self;
+}
+
 Device correct_out_device(const Tensor& self, const Tensor& other) {
   if (self.device() == at::kCPU){
       return other.device();
