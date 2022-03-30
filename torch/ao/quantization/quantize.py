@@ -17,7 +17,7 @@ from torch.ao.quantization.quantization_mappings import (
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
-from .utils import get_qparam_dict, type_before_parametrizations, has_no_children_ignoring_parametrizations
+from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
@@ -26,6 +26,7 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or

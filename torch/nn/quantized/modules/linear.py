@@ -6,6 +6,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, WeightedQuantizedModule
 from torch.nn.utils.fusion import fuse_linear_bn_weights
+from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
@@ -241,7 +242,7 @@ class Linear(WeightedQuantizedModule):
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
-            if torch.ao.quantization.utils.type_before_parametrizations(mod) == nniqat.LinearBn1d:
+            if type_before_parametrizations(mod) == nniqat.LinearBn1d:
                 mod.weight, mod.bias = fuse_linear_bn_weights(
                     mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                     mod.bn.eps, mod.bn.weight, mod.bn.bias)
@@ -255,10 +256,10 @@ class Linear(WeightedQuantizedModule):
                 cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
             supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
             error_msg = 'nnq.{}.from_float only works for {}, but got: {}'.format(cls.__name__, supported_modules, type(mod))
-            assert torch.ao.quantization.utils.type_before_parametrizations(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
+            assert type_before_parametrizations(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
-            if torch.ao.quantization.utils.type_before_parametrizations(mod) == nni.LinearReLU:
+            if type_before_parametrizations(mod) == nni.LinearReLU:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
