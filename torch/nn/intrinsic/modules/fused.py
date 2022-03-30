@@ -1,17 +1,6 @@
 import torch
 from torch.nn import Conv1d, Conv2d, Conv3d, ReLU, Linear, BatchNorm1d, BatchNorm2d, BatchNorm3d
-
-# from torch.ao.quantization.utils import type_before_parametrizations
-from torch.nn.utils.parametrize import is_parametrized
-def type_before_parametrizations(module):
-    """
-    Returns type(module) or the original
-    type if module is currently parametrized
-    """
-    if is_parametrized(module):
-        return module.__class__.__bases__[0]
-    else:
-        return type(module)
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 # Used for identifying intrinsic modules used in quantization
 class _FusedModule(torch.nn.Sequential):
