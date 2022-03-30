@@ -936,23 +936,41 @@ void BlockRunner::set_inputs(
   TORCH_CHECK(consumed_kwargs == kwargs.size());
 }
 
+namespace {
+std::unique_ptr<MemoryPlanner> memory_planner_factory(
+    MemoryPlannerAlgorithm algorithm,
+    BlockRunner* block_runner,
+    const BlockInfo& block_info,
+    const StaticModuleOptions& opts,
+    bool manage_output_tensors_enabled) {
+  switch (algorithm) {
+    case MemoryPlannerAlgorithm::kStandardResizing:
+      return std::make_unique<StandardMemoryPlanner>(
+          block_runner,
+          block_info,
+          opts.enable_out_variant,
+          manage_output_tensors_enabled,
+          opts.optimize_memory);
+    case MemoryPlannerAlgorithm::kPrecomputedOffsets:
+      return std::make_unique<PrecomputedOffsetsMemoryPlanner>(
+          block_runner,
+          block_info,
+          opts.enable_out_variant,
+          manage_output_tensors_enabled,
+          opts.optimize_memory);
+  }
+}
+} // namespace
+
 void BlockRunner::create_memory_planner() {
   if (!planner_) {
-    if (static_module_.opts().precompute_offsets) {
-      planner_ = std::make_unique<PrecomputedOffsetsMemoryPlanner>(
-          this,
-          block_info_,
-          static_module_.opts().enable_out_variant,
-          manage_output_tensors_enabled_,
-          static_module_.opts().optimize_memory);
-    } else {
-      planner_ = std::make_unique<StandardMemoryPlanner>(
-          this,
-          block_info_,
-          static_module_.opts().enable_out_variant,
-          manage_output_tensors_enabled_,
-          static_module_.opts().optimize_memory);
-    }
+    const auto& opts = static_module_.opts();
+    planner_ = memory_planner_factory(
+        opts.memory_planner_algorithm,
+        this,
+        block_info_,
+        opts,
+        manage_output_tensors_enabled_);
   }
 }
 
