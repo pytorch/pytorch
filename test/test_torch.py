@@ -5062,7 +5062,7 @@ else:
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
-    def test_multinomial(self, device, dtype):
+    def test_multinomial_cpu(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
                 if dtype == torch.half or dtype == torch.bfloat16:
