@@ -665,6 +665,7 @@ def transfer_parametrizations_and_params(from_module: Module, to_module: Module)
         to_module (nn.Module): module to transfer to
     """
     if is_parametrized(from_module):
+        assert isinstance(from_module.parametrizations, ModuleDict)
         for parameter_name in from_module.parametrizations:
             for param_func in from_module.parametrizations[parameter_name]:
                 setattr(to_module, parameter_name, from_module.parametrizations[parameter_name].original)
