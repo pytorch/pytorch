@@ -4269,6 +4269,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
+    SparseCsrCPU, SparseCsrCUDA: sum_csr
 
 - func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
