@@ -19,22 +19,16 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     with_comms,
 )
 
+from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
+    gen_binary_op_func
+)
+
 class TestMathOps(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_basic_math_ops(self):
-        import builtins
         ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*", "/"]
-
-        def gen_code(python_op):
-            src_lines = ['def f(lhs, rhs):']
-            if "torch" in python_op:
-                src_lines.append(f'  return {python_op}(lhs, rhs)\n')
-            else:
-                src_lines.append(f'  return lhs {python_op} rhs\n')
-
-            return '\n'.join(src_lines)
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -56,34 +50,32 @@ class TestMathOps(ShardedTensorTestBase):
 
         res = sharded_lhs * 3
         for op in ops:
-            g = {'torch': torch}
-            code = gen_code(op)
-            builtins.exec(code, g)
+            binary_op = gen_binary_op_func(op)
 
             # test basic math ops between ShardedTensors
-            sharded_output = g["f"](sharded_lhs, sharded_rhs)
+            sharded_output = binary_op(sharded_lhs, sharded_rhs)
             output = torch.empty((12, 3)) if current_rank == 0 else None
             sharded_output.gather(dst=0, out=output)
 
             if current_rank == 0:
-                global_output = g["f"](global_lhs, global_rhs)
+                global_output = binary_op(global_lhs, global_rhs)
 
                 self.assertEqual(output, global_output)
 
             # test basic math ops between ShardedTensor and scalar
             scalars = [3, 1.8]
             for scalar in scalars:
-                sharded_output_lhs = g["f"](sharded_lhs, scalar)
+                sharded_output_lhs = binary_op(sharded_lhs, scalar)
                 output_lhs = torch.empty((12, 3)) if current_rank == 0 else None
                 sharded_output_lhs.gather(dst=0, out=output_lhs)
 
-                sharded_output_rhs = g["f"](scalar, sharded_lhs)
+                sharded_output_rhs = binary_op(scalar, sharded_lhs)
                 output_rhs = torch.empty((12, 3)) if current_rank == 0 else None
                 sharded_output_rhs.gather(dst=0, out=output_rhs)
 
                 if current_rank == 0:
-                    global_output_lhs = g["f"](global_lhs, scalar)
-                    global_output_rhs = g["f"](scalar, global_lhs)
+                    global_output_lhs = binary_op(global_lhs, scalar)
+                    global_output_rhs = binary_op(scalar, global_lhs)
 
                     self.assertEqual(output_lhs, global_output_lhs)
                     self.assertEqual(output_rhs, global_output_rhs)

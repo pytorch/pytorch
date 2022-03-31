@@ -17,6 +17,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
+    gen_binary_op_func
+)
 
 
 class TestReplicatedTensor(ShardedTensorTestBase):
@@ -82,10 +85,11 @@ class TestReplicatedTensor(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_replicated_tensor_inter_op_sharded_tensor(self):
-        local_tensor = torch.ones(3, 3, device=f"cuda:{self.rank}") * 4
-        replica_tensor = ReplicatedTensor(local_tensor)
-
         torch.manual_seed(self.rank)
+
+        local_tensor1 = torch.rand(12, 3, device=f"cuda:{self.rank}") * 4
+        local_tensor2 = torch.ones(12, 3, device=f"cuda:{self.rank}") * 4
+
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -96,64 +100,34 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             ],
         )
 
-        st = sharded_tensor.rand(spec, (12, 3))
+        st = _shard_tensor(local_tensor1, spec, src_rank=0)
+        replica_tensor = ReplicatedTensor(local_tensor2)
 
-        # add op
-        new_tensor = replica_tensor + st
-        # replica + sharded = sharded
-        self.assertTrue(
-            isinstance(new_tensor, sharded_tensor.ShardedTensor)
-            and not isinstance(new_tensor, ReplicatedTensor)
-        )
-        self.assertEqual(new_tensor.local_tensor(), st.local_tensor() + 4)
-        # test torch.add
-        new_tensor = torch.add(replica_tensor, st)
-        self.assertEqual(new_tensor.local_tensor(), st.local_tensor() + 4)
+        ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*", "/"]
 
-        new_tensor = st + replica_tensor
-        self.assertEqual(new_tensor.local_tensor(), st.local_tensor() + 4)
+        for op in ops:
+            binary_op = gen_binary_op_func(op)
+            res = binary_op(st, replica_tensor)
+            self.assertIsInstance(res, sharded_tensor.ShardedTensor)
+            self.assertNotIsInstance(res, ReplicatedTensor)
+            output = torch.empty((12, 3)) if self.rank == 0 else None
+            res.gather(dst=0, out=output)
 
-        # sub op
-        new_tensor = replica_tensor - st
-        self.assertTrue(
-            isinstance(new_tensor, sharded_tensor.ShardedTensor)
-            and not isinstance(new_tensor, ReplicatedTensor)
-        )
-        self.assertEqual(new_tensor.local_tensor(), 4 - st.local_tensor())
-        # test torch.sub
-        new_tensor = torch.sub(replica_tensor, st)
-        self.assertEqual(new_tensor.local_tensor(), 4 - st.local_tensor())
+            if self.rank == 0:
+                local_output = binary_op(local_tensor1, local_tensor2)
+                self.assertEqual(output, local_output)
 
-        new_tensor = st - replica_tensor
-        self.assertEqual(new_tensor.local_tensor(), st.local_tensor() - 4)
+            # reflective
+            reflect_res = binary_op(replica_tensor, st)
+            self.assertIsInstance(reflect_res, sharded_tensor.ShardedTensor)
+            self.assertNotIsInstance(reflect_res, ReplicatedTensor)
+            reflect_output = torch.empty((12, 3)) if self.rank == 0 else None
+            reflect_res.gather(dst=0, out=reflect_output)
 
-        # mul op
-        new_tensor = replica_tensor * st
-        self.assertTrue(
-            isinstance(new_tensor, sharded_tensor.ShardedTensor)
-            and not isinstance(new_tensor, ReplicatedTensor)
-        )
-        self.assertEqual(new_tensor.local_tensor(), 4 * st.local_tensor())
-        # test torch.mul
-        new_tensor = torch.mul(replica_tensor, st)
-        self.assertEqual(new_tensor.local_tensor(), 4 * st.local_tensor())
+            if self.rank == 0:
+                reflect_local_output = binary_op(local_tensor2, local_tensor1)
+                self.assertEqual(reflect_output, reflect_local_output)
 
-        new_tensor = st * replica_tensor
-        self.assertEqual(new_tensor.local_tensor(), 4 * st.local_tensor())
-
-        # div op
-        new_tensor = replica_tensor / st
-        self.assertTrue(
-            isinstance(new_tensor, sharded_tensor.ShardedTensor)
-            and not isinstance(new_tensor, ReplicatedTensor)
-        )
-        self.assertEqual(new_tensor.local_tensor(), 4 / st.local_tensor())
-        # test torch.div
-        new_tensor = torch.div(replica_tensor, st)
-        self.assertEqual(new_tensor.local_tensor(), 4 / st.local_tensor())
-
-        new_tensor = st / replica_tensor
-        self.assertEqual(new_tensor.local_tensor(), st.local_tensor() / 4)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -179,16 +153,20 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         st = _shard_tensor(local_tensor1, spec, src_rank=0)
         replica_tensor = ReplicatedTensor(local_tensor2)
 
-        # replicated tensor should automatically broadcasted
-        res = torch.add(st, replica_tensor)
+        ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*", "/"]
 
-        self.assertIsInstance(res, sharded_tensor.ShardedTensor)
-        output = torch.empty((12, 3)) if self.rank == 0 else None
-        res.gather(dst=0, out=output)
+        for op in ops:
+            binary_op = gen_binary_op_func(op)
+            # replicated tensor should automatically broadcasted
+            res = binary_op(st, replica_tensor)
 
-        if self.rank == 0:
-            local_output = torch.add(local_tensor1, local_tensor2)
-            self.assertEqual(output, local_output)
+            self.assertIsInstance(res, sharded_tensor.ShardedTensor)
+            output = torch.empty((12, 3)) if self.rank == 0 else None
+            res.gather(dst=0, out=output)
+
+            if self.rank == 0:
+                local_output = binary_op(local_tensor1, local_tensor2)
+                self.assertEqual(output, local_output)
 
 
     @with_comms(init_rpc=False)

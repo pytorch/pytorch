@@ -7,6 +7,10 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 
+from ._common import (
+    narrow_tensor,
+)
+
 def register_math_op(op):
     @sharded_op_impl(op)
     def binary_math_op(types, args=(), kwargs=None, pg=None):
@@ -40,7 +44,15 @@ def register_math_op(op):
 
         elif isinstance(lhs, ReplicatedTensor):
             assert isinstance(rhs, ShardedTensor)
-            res = op(lhs, rhs.local_tensor())
+            st_size = rhs.size()
+            st_meta = rhs.local_shards()[0].metadata
+            if st_size != rhs.size():
+                # try to broadcast replicated tensor
+                lhs.expand(st_size)
+
+            replica_part = narrow_tensor(lhs, st_meta)
+            res = op(replica_part, rhs.local_tensor())
+
             return ShardedTensor._init_from_local_tensor(
                 res,
                 rhs.sharding_spec(),
@@ -49,7 +61,14 @@ def register_math_op(op):
 
         elif isinstance(rhs, ReplicatedTensor):
             assert isinstance(lhs, ShardedTensor)
-            res = op(lhs.local_tensor(), rhs)
+            st_size = lhs.size()
+            st_meta = lhs.local_shards()[0].metadata
+            if st_size != lhs.size():
+                # try to broadcast replicated tensor
+                rhs.expand(st_size)
+
+            replica_part = narrow_tensor(rhs, st_meta)
+            res = op(lhs.local_tensor(), replica_part)
             return ShardedTensor._init_from_local_tensor(
                 res,
                 lhs.sharding_spec(),

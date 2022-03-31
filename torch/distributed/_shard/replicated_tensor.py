@@ -56,11 +56,13 @@ class ReplicatedTensor(torch.Tensor):
         replicated_pg = None
 
         def dispatch_arg(arg):
+            # This function returns a tuple, first element represents whether the op been
+            # executed, the second element represents the result of the execution
             nonlocal replicated_pg, all_replicated
             if isinstance(arg, ShardedTensor):
                 # redispatch to ShardedTensor
                 # TODO: handle ShardedTensor/PartialTensor inter-op with ReplicatedTensor
-                return arg.__torch_function__(func, types, args, kwargs)
+                return True, arg.__torch_function__(func, types, args, kwargs)
             if isinstance(arg, ReplicatedTensor):
                 if replicated_pg is None:
                     replicated_pg = arg.process_group
@@ -72,16 +74,18 @@ class ReplicatedTensor(torch.Tensor):
             else:
                 all_replicated = False
 
+            return False, None
+
         for arg in args:
-            redispatched_res = dispatch_arg(arg)
-            if redispatched_res:
-                return redispatched_res
+            redispatched, res = dispatch_arg(arg)
+            if redispatched:
+                return res
 
         if kwargs is not None:
             for k, v in kwargs.items():
-                redispatched_res = dispatch_arg(v)
-                if redispatched_res:
-                    return redispatched_res
+                redispatched, res = dispatch_arg(v)
+                if redispatched:
+                    return res
 
         # We cann't do super().__torch_function__() as it implicitly convert the result
         # back to tensor subclasses, where in our case, we need to control the output type
