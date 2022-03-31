@@ -1641,6 +1641,14 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
                             ord=ord,
                             keepdim=keepdim,
                             dim=(0, 1))))
+
+                # Test norm subgradient
+                inputs.append(SampleInput(
+                    torch.zeros(
+                        test_size, dtype=dtype, device=device,
+                        requires_grad=requires_grad),
+                    args=(ord,),
+                    kwargs=dict(keepdim=keepdim)))
         return inputs
 
 def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):

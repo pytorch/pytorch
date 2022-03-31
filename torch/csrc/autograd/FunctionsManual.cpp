@@ -253,11 +253,10 @@ Tensor norm_jvp(
     result = at::real(result);
     return result.sum(dim, keepdim);
   } else if (p == 2.0) {
-    auto result = self_p;
-    result = areAnyTensorSubclassLike({self_t}) ? result.mul(self_t.conj()) : result.mul_(self_t.conj());
+    auto result = self_p.mul(self_t.conj());
     result = at::real(result);
     result = result.sum(dim, keepdim);
-    return result.div_(norm);
+    return result.div_(norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     if (!keepdim && self_p.dim() != 0) {
       norm = unsqueeze_multiple(norm, dim, ndim);
@@ -274,13 +273,11 @@ Tensor norm_jvp(
     }
     return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
   } else if (p < 2.0) {
-    // TODO: This codepath can be modified to do more things inplace
     // TODO: norm_jvp and norm_backward both compute NaN at zero when p < 1
     auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
     auto out = sumpow_t / norm.pow(p - 1);
     return out.masked_fill_(norm == 0, 0);
   } else {
-    // TODO: This codepath can be modified to do more things inplace
     auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
     auto out = sumpow_t / norm.pow(p - 1);
     return out.masked_fill_(norm == 0, 0);
