@@ -652,6 +652,50 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   return tensor.narrow(dim, n * g, n).contiguous();
 }
 
+at::Tensor complex_convolution(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  check_input_same_type_as_parameters(input, weight, bias);
+  auto w_view_as_complex = at::view_as_real(weight);
+  auto i_view_as_complex = at::view_as_real(input);
+
+  auto dim_i = i_view_as_complex.dim() - 1;
+  auto i_r = i_view_as_complex.select(dim_i, 0);
+  auto i_i = i_view_as_complex.select(dim_i, 1);
+
+  auto dim_w = w_view_as_complex.dim() - 1;
+  auto w_r = w_view_as_complex.select(dim_w, 0);
+  auto w_i = w_view_as_complex.select(dim_w, 1);
+
+  // conv(W, x, b) = conv(Wr, xr, br) - conv(Wi, xi, 0) + i(conv(Wi, xr, bi) + conv(Wr, xi, 0))
+  // With Gauss Trick:
+  // a = conv(Wr, xr, br),
+  // b = conv(Wi, xi, 0),
+  // c = conv(Wr + Wi, xr + xi, bi + br)
+  // conv(W, x, b) = a - b + i(c - a - b)
+  Tensor a, b, c;
+  if (!bias.defined()) {
+    a = at::convolution(i_r, w_r, bias, stride, padding, dilation, false, {0}, groups);
+    b = at::convolution(i_i, w_i, bias, stride, padding, dilation, false, {0}, groups);
+    c = at::convolution(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, false, {0}, groups);
+  } else {
+    auto b_view_as_complex = at::view_as_real(bias);
+    auto dim_b = b_view_as_complex.dim() - 1;
+    auto b_r = b_view_as_complex.select(dim_b, 0);
+    auto b_i = b_view_as_complex.select(dim_b, 1);
+    a = at::convolution(i_r, w_r, b_r, stride, padding, dilation, false, {0}, groups);
+    b = at::convolution(i_i, w_i, Tensor(), stride, padding, dilation, false, {0}, groups);
+    c = at::convolution(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, false, {0}, groups);
+  }
+
+  auto i = c10::Scalar(c10::complex<double>(0, 1));
+  return a - b + i * (c - a - b);
+}
 
 at::Tensor conv1d(
     const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
@@ -663,7 +707,12 @@ at::Tensor conv1d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
-  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(input, weight, bias, stride, padding, dilation, groups);
+  } else {
+    output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
