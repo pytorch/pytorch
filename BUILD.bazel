@@ -31,7 +31,7 @@ py_binary(
     name = "gen",
     srcs = ["tools/setup_helpers/gen.py"],
     deps = [
-        ":tools_codegen"
+        "//tools/codegen"
     ],
 )
 
@@ -106,18 +106,13 @@ generate_aten(
 )
 
 py_library(
-    name = "tools_codegen",
-    srcs = glob(["tools/codegen/**/*.py"]),
-)
-
-py_library(
     name = "tools_autograd",
     srcs = glob(["tools/autograd/*.py"]),
     data = glob([
         "tools/autograd/*.yaml",
         "tools/autograd/templates/*",
     ]),
-    deps = [":tools_codegen"],
+    deps = ["//tools/codegen"],
 )
 
 py_library(
@@ -1380,7 +1375,7 @@ cc_library(
 py_binary(
     name = "gen_op",
     srcs = ["caffe2/contrib/aten/gen_op.py"],
-    deps = [":tools_codegen"],
+    deps = ["//tools/codegen"],
 )
 
 genrule(
