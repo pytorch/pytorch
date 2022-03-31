@@ -84,15 +84,29 @@ class CommitList:
     def categorize(commit_hash, title):
         features = get_features(commit_hash, return_dict=True)
         title = features['title']
+        labels = features['labels']
         category = 'Uncategorized'
         topic = 'Untopiced'
+
+        # We ask contributors to label their PR's appropriately
+        # when they're first landed.
+        # Check if the labels are there first.
+        already_categorized = already_topiced = False
+        for label in labels:
+            if label.startswith('release notes: '):
+                category = label.split('release notes: ', 1)[1]
+                already_categorized = True
+            if label.startswith('topic: '):
+                topic = label.split('topic: ', 1)[1]
+                already_topiced = True
+        if already_categorized and already_topiced:
+            return Commit(commit_hash, category, topic, title)
 
         # update this to check if each file starts with caffe2
         if 'caffe2' in title:
             return Commit(commit_hash, 'caffe2', topic, title)
         if '[codemod]' in title.lower():
             return Commit(commit_hash, 'skip', topic, title)
-        labels = features['labels']
         if 'Reverted' in labels:
             return Commit(commit_hash, 'skip', topic, title)
         if 'bc_breaking' in labels:
