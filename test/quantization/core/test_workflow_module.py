@@ -766,8 +766,8 @@ class TestFakeQuantize(TestCase):
         self.assertEqual(fq_module.activation_post_process.quant_max, 127)
         # test quant_min/quant_max override
         fq_module = FakeQuantize(observer, quant_min=0, quant_max=127)
-        self.assertEqual(fq_module.activation_post_process.quant_min, -64)
-        self.assertEqual(fq_module.activation_post_process.quant_max, 63)
+        self.assertEqual(fq_module.activation_post_process.quant_min, 0)
+        self.assertEqual(fq_module.activation_post_process.quant_max, 127)
 
 def _get_buffer_ids(module):
     """
