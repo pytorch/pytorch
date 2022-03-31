@@ -90,9 +90,9 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce, bool 
       TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin.");
     }
   } else {
-    if (reduce == "add" || reduce == "sum") {
+    if (reduce == "add") {
       return native::SCATTER_GATHER_OP::REDUCE_ADD;
-    } else if (reduce == "multiply" || reduce == "prod") {
+    } else if (reduce == "multiply") {
       return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
     } else {
       TORCH_CHECK(false, "reduce argument must be either add or multiply.")
