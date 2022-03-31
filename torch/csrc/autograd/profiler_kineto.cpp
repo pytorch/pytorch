@@ -631,7 +631,6 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             }
 
             torch::profiler::impl::kineto::popCorrelationId();
-            torch::profiler::impl::kineto::recordThreadInfo();
           })
           .needsInputs(registration_state_ptr->config().report_input_shapes)
           .scopes(scopes));
@@ -667,8 +666,6 @@ void reportBackendEventToActiveKinetoProfiler(
     ctx_ptr->dtypes = inputTypes(fn);
   }
   */
-
-  torch::profiler::impl::kineto::recordThreadInfo();
 }
 
 void prepareProfiler(
