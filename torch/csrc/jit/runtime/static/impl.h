@@ -154,7 +154,7 @@ class TORCH_API ManagedTensorRanges {
   FastMap<const Value*, Lifetime> value_lifetimes_{};
 };
 
-enum class TORCH_API MemoryPlannerAlgorithm {
+enum class MemoryPlannerAlgorithm {
   // The default in StaticModuleOptions
   kStandardResizing,
   // See [Precomputed Offsets Memory Planning Algorithm] for details.
