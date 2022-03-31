@@ -317,6 +317,25 @@ TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+TEST(TEFuserPass, FuserPass_Stack) {
+  WithCPUFuser cf;
+  const auto graph_string =
+      R"IR(graph(%y.1 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu),
+      %x.1 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu)):
+  %1 : int = prim::Constant[value=2]()
+  %9 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu) = aten::tanh(%x.1)
+  %7 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu) = aten::tanh(%y.1)
+  %5 : Tensor[] = prim::ListConstruct(%9, %7)
+  %z.2 : Float(5, 3, 2, 3, 6, strides=[108, 36, 18, 6, 1], requires_grad=0, device=cpu) = aten::stack(%5, %1)
+  return (%z.2)
+  )IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2);
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
+}
+
 TEST(TEFuserPass, FuserPass_Where) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
