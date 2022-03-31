@@ -1,6 +1,10 @@
-#include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/core/TensorAccessor.h>
 #include <ATen/cuda/Atomic.cuh>
+
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/OptionalArrayRef.h>
 
 #include <math.h>
 
@@ -11,7 +15,7 @@ namespace upsample {
 // TODO: Remove duplicate declaration.
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
-    c10::optional<c10::IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
 } // namespace upsample
 

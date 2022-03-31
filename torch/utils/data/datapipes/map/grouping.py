@@ -1,4 +1,5 @@
-from torch.utils.data import MapDataPipe, functional_datapipe, DataChunk
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe, DataChunk
 from typing import List, Optional, Sized, TypeVar
 
 
@@ -16,6 +17,13 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp = SequenceWrapper(range(10))
+        >>> batch_dp = dp.batch(batch_size=2)
+        >>> list(batch_dp)
+        [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
     """
     datapipe: MapDataPipe
     batch_size: int

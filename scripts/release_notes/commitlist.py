@@ -132,7 +132,7 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz', 'torch/ao/quantization']):
                 category = 'quantization'
                 break
-            if CommitList.keywordInFile(file, ['torch/package', 'test/package', 'torch/csrc/deploy']):
+            if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
                 category = 'package'
                 break
             if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py']):
@@ -154,6 +154,8 @@ class CommitList:
                 category = 'jit'
                 break
         else:
+            # Below are some extra quick checks that aren't necessarily file-path related,
+            # but I found that to catch a decent number of extra commits.
             if len(files_changed) > 0 and all([f_name.endswith('.cu') or f_name.endswith('.cuh') for f_name in files_changed]):
                 category = 'cuda'
             elif '[PyTorch Edge]' in title:
@@ -275,6 +277,10 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--create_new', nargs=2)
     group.add_argument('--update_to')
+    # I found this flag useful when experimenting with adding new auto-categorizing filters.
+    # After running commitlist.py the first time, if you add any new filters in this file,
+    # re-running with "rerun_with_new_filters" will update the existing commitlist.csv file,
+    # but only affect the rows that were previously marked as "Uncategorized"
     group.add_argument('--rerun_with_new_filters', action='store_true')
     group.add_argument('--stat', action='store_true')
     group.add_argument('--export_markdown', action='store_true')

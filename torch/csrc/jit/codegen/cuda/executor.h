@@ -35,9 +35,9 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   void compileFusion(
       Fusion* fusion,
-      CompileOptions options = CompileOptions(),
       const at::ArrayRef<IValue>& inputs = {},
-      const LaunchParams& launch_constraints = LaunchParams());
+      const LaunchParams& launch_constraints = LaunchParams(),
+      CompileOptions options = CompileOptions());
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
@@ -55,7 +55,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // function to query whether a `FusionExecutor` has a compiled kernel to
   // execute
   bool compiled() const {
-    return fusion_id_ != -1;
+    return fusion_id_ != -1 && lowered_;
   };
 
   void evictCache(size_t cache_id) {
@@ -85,7 +85,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       executor_utils::caching::ExecutorCompileTimeInfoCache;
 
   kir::Kernel* kernel() const {
-    return lowered_.kernel();
+    TORCH_INTERNAL_ASSERT(lowered_);
+    return lowered_->kernel();
   }
 
   //! Internal knob used for debugging/profiling only
@@ -164,6 +165,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // skip allocating real storage for those, but still maintain its spot to
   // maintain the indexing from output aliases to inputs
   std::vector<at::Tensor> allocOutputs(
+      const at::ArrayRef<IValue>& inputs,
       kir::ExpressionEvaluator& expr_eval,
       const std::unordered_set<int>& alias_indices = {});
 
@@ -178,8 +180,6 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   }
 
  private:
-  Fusion fusion_;
-
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
   int warp_size_ = 0;
@@ -192,7 +192,13 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   int fusion_id_ = -1;
   static int fusion_id_counter_;
 
-  GpuLower lowered_;
+  std::unique_ptr<GpuLower> lowered_;
+  // Copy of lowered_->kernel()
+  Fusion* fusion_ = nullptr;
+
+  // Track the block size this kernel was compiled with. If the block size
+  // increases, recompile to adjust maxregister count.
+  int64_t block_size_high_water_mark = 1;
 
   // lookup table to take short cut to retrieve recorded information in order to
   // launch kernels without re-inference parameters.

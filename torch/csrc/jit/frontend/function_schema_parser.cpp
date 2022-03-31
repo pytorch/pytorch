@@ -111,6 +111,17 @@ struct SchemaParser {
     if (L.nextIf('.')) {
       overload_name = L.expect(TK_IDENT).text();
     }
+    // default is used as an attribute on the `OpOverloadPacket`
+    // (obtained using `torch.ops.aten.foo`) to get the operator
+    // overload with overload name as an empty string
+    // and so shouldn't be used as an overload name
+    // also disallow dunder attribute names to be overload names
+    bool is_a_valid_overload_name =
+        !((overload_name == "default") || (overload_name.rfind("__", 0) == 0));
+    TORCH_CHECK(
+        is_a_valid_overload_name,
+        overload_name,
+        " is not a legal overload name for aten operators");
     return {name, overload_name};
   }
 
@@ -130,7 +141,7 @@ struct SchemaParser {
     return result;
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+  Argument parseArgument(size_t /*idx*/, bool is_return, bool kwarg_only) {
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -265,7 +276,7 @@ struct SchemaParser {
     return convertToList(type, kind, tok.range, vs);
   }
 
-  IValue parseTensorDefault(const SourceRange& range) {
+  IValue parseTensorDefault(const SourceRange& /*range*/) {
     L.expect(TK_NONE);
     return IValue();
   }
@@ -339,12 +350,12 @@ struct SchemaParser {
 };
 } // namespace
 
-C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
+either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
   return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
-C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
+FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
   TORCH_CHECK(
       parsed.is_right(),
@@ -352,7 +363,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   return std::move(parsed.right());
 }
 
-C10_EXPORT OperatorName parseName(const std::string& name) {
+OperatorName parseName(const std::string& name) {
   auto parsed = parseSchemaOrName(name);
   TORCH_CHECK(
       parsed.is_left(),

@@ -344,7 +344,7 @@ bool THPStorage_(init)(PyObject *module)
 
 void THPStorage_(postInit)(PyObject *module)
 {
-  THPStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
+  THPStorageClass = PyObject_GetAttrString(module, "_UntypedStorage");
   if (!THPStorageClass) throw python_error();
 
   at::Backend backend = at::Backend::CPU;
