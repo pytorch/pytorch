@@ -136,11 +136,8 @@ class TORCH_CUDA_CU_API ComputeAtMap {
           trivial_reduction_info,
       TensorView* tv);
 
-  // Should be run on consumer id after producer id and consumer id are mapped
-  // together, will place all id's in consumer_id's disjoint set into
-  // count_one_concrete_dims if consumer_id is in
-  // rfactor_concrete_count_reset_domains_
-  void maybePropagateConcreteCountOne(IterDomain* consumer_id);
+  //! Keep track of producer-consumer domain dependencies across rfactor
+  void markRFactorDependency(IterDomain* producer_id, IterDomain* consumer_id);
 
   MappingMode mapping_mode_ = MappingMode::LOOP;
 
@@ -181,16 +178,9 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   // IDs.
   std::unordered_set<IterDomain*> rfactor_concrete_count_reset_domains_;
 
-  // Gather all dimensions that should be considered having one concrete
-  // dimension, this is propagated from the domains in
-  // rfactor_concrete_count_reset_domains_ as we're building the map. This will
-  // reset all domains topologically before the domains in
-  // rfactor_concrete_count_reset_domains_ to have count of 1 concrete domain.
-  // This prevents pre-view ID's from being involved in concrete resolution when
-  // mapped to post view domains in the current map (Parallel and Loop maps
-  // IndexMap is valid with any domain in any disjoint set being the concrete
-  // ID).
-  std::unordered_set<IterDomain*> count_one_concrete_dims_;
+  // Track all domains that are the result of a view operation and its
+  // subsequent consumer domains. Maps to the corresponding rfactor domains.
+  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>> rf_dep_map_;
 };
 
 } // namespace cuda

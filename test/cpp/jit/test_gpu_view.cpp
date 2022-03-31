@@ -726,6 +726,120 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain3_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_output}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionViewConcreteDomain4_CUDA) {
+  std::vector<int64_t> shape1 = {3, 4, 5};
+  std::vector<int64_t> shape2 = {3 * 4 * 5};
+
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(shape1.size() - 1);
+  fusion.addInput(tv0);
+
+  auto tv1 = makeSymbolicTensor(shape1.size());
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false, false});
+  auto tv3 = add(tv1, tv2);
+  auto tv4 = view(tv3, shape1, shape2);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv0->computeAt(tv5, -1);
+  tv1->computeAt(tv5, -1);
+
+  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
+  ComputeAtMap index_map(&fusion, ComputeAtMap::MappingMode::INDEX);
+
+  TORCH_CHECK(tv5->nDims() == 1);
+
+  // The concrete domain of tv5, which is 1D, in the loop map (or
+  // parallel map) needs to be either the domain of tv4 or tv5, both
+  // of which have the three concrete root domains of tv1. In other
+  // words, it must map with tv4 and tv5 in the index map.
+  auto concrete_id = loop_map.getConcreteMappedID(tv5->axis(0));
+  TORCH_CHECK(
+      index_map.areMapped(concrete_id, tv5->axis(0)),
+      "Invalid concrete ID: ",
+      concrete_id->toString());
+  TORCH_CHECK(
+      index_map.areMapped(concrete_id, tv4->axis(0)),
+      "Invalid concrete ID: ",
+      concrete_id->toString());
+}
+
+TEST_F(NVFuserTest, FusionViewConcreteDomain5_CUDA) {
+  const std::vector<int64_t> shape1 = {12};
+  const std::vector<int64_t> shape2 = {4, 3};
+  const std::vector<int64_t> shape3 = {12, 5};
+  const std::vector<int64_t> shape4 = {4, 3, 5};
+
+  for (auto order : {true, false}) {
+    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+    Fusion& fusion = *fusion_ptr.get();
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeSymbolicTensor(1);
+    fusion.addInput(tv0);
+
+    auto tv1 = makeSymbolicTensor(2);
+    fusion.addInput(tv1);
+
+    auto tv0_cache = set(tv0);
+
+    auto path1 = [&]() {
+      auto view_2d = view(tv0_cache, shape1, shape2);
+      auto view_2d_copy = set(view_2d);
+      fusion.addOutput(view_2d_copy);
+      return view_2d_copy;
+    };
+
+    auto path2 = [&]() {
+      auto tv0_bc = broadcast(tv0_cache, {false, true});
+      auto tv0_bc_plus_tv1 = add(tv0_bc, tv1);
+      auto view_3d = view(tv0_bc_plus_tv1, shape3, shape4);
+      auto view_3d_copy = set(view_3d);
+      fusion.addOutput(view_3d_copy);
+      return view_3d_copy;
+    };
+
+    TensorView* path1_out = nullptr;
+    TensorView* path2_out = nullptr;
+
+    if (order) {
+      // Fails before #1544. Concrete ID is picked from path1_out, which
+      // doesn't have the second root domain of tv1
+      path2_out = path2();
+      path1_out = path1();
+    } else {
+      // Works fine
+      path1_out = path1();
+      path2_out = path2();
+    }
+
+    path2_out->merge(-2, -1);
+    path2_out->merge(-2, -1);
+
+    tv0->computeAt(path2_out, -1);
+    tv1->computeAt(path2_out, -1);
+
+    TORCH_CHECK(path1_out->nDims() == 1);
+    TORCH_CHECK(path2_out->nDims() == 1);
+
+    ComputeAtMap par_map(&fusion, ComputeAtMap::MappingMode::PARALLEL);
+
+    // Make sure the two output tensors are mapped. Note both are 1D.
+    TORCH_CHECK(par_map.areMapped(path1_out->axis(0), path2_out->axis(0)));
+
+    auto concrete_id = par_map.getConcreteMappedID(path2_out->axis(0));
+    TORCH_CHECK(
+        path2_out->axis(0) == concrete_id,
+        "Incorrect concrete ID: ",
+        concrete_id->toString());
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

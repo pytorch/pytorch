@@ -26,9 +26,10 @@ class InputDomainCounter : public IterVisitor {
   // to generate the iteration domains in provided target domain.
   static std::unordered_map<IterDomain*, std::pair<int, int>> produceCounts(
       const std::vector<TensorView*>& tvs,
-      const std::unordered_set<IterDomain*>& count_one_concrete_dims,
+      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+          rfactor_dep_map,
       const TrivialReductionInfo* trivial_reduction_info) {
-    InputDomainCounter counter(count_one_concrete_dims);
+    InputDomainCounter counter(rfactor_dep_map);
 
     for (auto tv : tvs) {
       auto& domain = tv->domain()->domain();
@@ -53,31 +54,25 @@ class InputDomainCounter : public IterVisitor {
       count_map[id] = {concrete_counts, broadcast_counts};
     }
 
+    // Make sure all domains are mapped.
     for (auto tv : tvs) {
       auto& domain = tv->domain()->domain();
-      // Inputs may be root domains which wouldn't have any entries if no exprs
-      // were traversed, so manually insert their count
       for (auto id : domain) {
-        if (count_map.find(id) == count_map.end()) {
-          TORCH_INTERNAL_ASSERT(
-              id->definition() == nullptr,
-              "Expected id: ",
-              id->toString(),
-              " to not have transformations in its history.");
-          count_map[id] =
-              (id->isBroadcast() || trivial_reduction_info->isDerived(id))
-              ? std::make_pair(0, 1)
-              : std::make_pair(1, 0);
-        }
+        TORCH_INTERNAL_ASSERT(
+            count_map.find(id) != count_map.end(),
+            "Missing count of ",
+            id->toString());
       }
     }
+
     return count_map;
   }
 
  private:
   InputDomainCounter(
-      const std::unordered_set<IterDomain*>& count_one_concrete_dims)
-      : count_one_concrete_dims_(count_one_concrete_dims) {}
+      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+          rfactor_dep_map)
+      : rfactor_dep_map_(rfactor_dep_map) {}
 
  private:
   void traverse(std::vector<IterDomain*> domain) {
@@ -86,18 +81,23 @@ class InputDomainCounter : public IterVisitor {
     }
     traverseFrom(
         domain[0]->fusion(), std::vector<Val*>(domain.begin(), domain.end()));
+
+    // Inputs may be root domains which wouldn't have any entries if no exprs
+    // were traversed, so manually insert their count
+    for (auto id : domain) {
+      if (domain_set_.find(id) == domain_set_.end()) {
+        TORCH_INTERNAL_ASSERT(
+            id->definition() == nullptr,
+            "Expected id: ",
+            id->toString(),
+            " to not have transformations in its history.");
+        getEntry(id);
+      }
+    }
   }
 
   std::unordered_set<IterDomain*>& getEntry(IterDomain* id) {
     auto domain_set_it = domain_set_.find(id);
-
-    // If count one, enforce domain entry is self
-    bool count_one =
-        count_one_concrete_dims_.find(id) != count_one_concrete_dims_.end();
-    if (count_one && domain_set_it != domain_set_.end()) {
-      domain_set_.erase(domain_set_it);
-      domain_set_it = domain_set_.end();
-    }
 
     if (domain_set_it == domain_set_.end()) {
       domain_set_it =
@@ -105,6 +105,23 @@ class InputDomainCounter : public IterVisitor {
               .emplace(std::make_pair(id, std::unordered_set<IterDomain*>()))
               .first;
       domain_set_it->second.emplace(id);
+    }
+
+    // If id is a consumer of an rfactor ID, propagates the domains
+    // accumulated in the rfactor ID.
+    auto rf_dep_it = rfactor_dep_map_.find(id);
+    if (rf_dep_it != rfactor_dep_map_.end()) {
+      auto& ds = domain_set_it->second;
+      for (IterDomain* rf_dep : rf_dep_it->second) {
+        auto rf_dep_domain_set_it = domain_set_.find(rf_dep);
+        TORCH_INTERNAL_ASSERT(
+            rf_dep_domain_set_it != domain_set_.end(),
+            "Domains for an rfactor domain should have already been computed but not found: ",
+            rf_dep->toString());
+        ds.insert(
+            rf_dep_domain_set_it->second.begin(),
+            rf_dep_domain_set_it->second.end());
+      }
     }
 
     return domain_set_it->second;
@@ -122,7 +139,7 @@ class InputDomainCounter : public IterVisitor {
             false, "Invalid expr type found in transform traversal.");
     }
 
-    // Gather all non-broadcast input domains
+    // Gather all input domains
     std::unordered_set<IterDomain*> resulting_set;
     for (auto input_id : ir_utils::filterByType<IterDomain>(expr->inputs())) {
       const auto& input_entry = getEntry(input_id);
@@ -130,18 +147,19 @@ class InputDomainCounter : public IterVisitor {
     }
 
     for (auto output_id : ir_utils::filterByType<IterDomain>(expr->outputs())) {
-      if (count_one_concrete_dims_.find(output_id) ==
-          count_one_concrete_dims_.end()) {
-        domain_set_.emplace(std::make_pair(output_id, resulting_set));
-      } else {
-        // If count one just call getEntry on id which will enforce it's reset
-        // to self to be count 1
+      TORCH_INTERNAL_ASSERT(
+          domain_set_.emplace(std::make_pair(output_id, resulting_set)).second);
+      if (rfactor_dep_map_.find(output_id) != rfactor_dep_map_.end()) {
+        // If output_id has rfactor dependency, just call getEntry
+        // which will propagate the dependent domains to output_id
         getEntry(output_id);
       }
     }
   }
 
-  const std::unordered_set<IterDomain*>& count_one_concrete_dims_;
+ private:
+  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+      rfactor_dep_map_;
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>> domain_set_;
 };
 
@@ -316,9 +334,6 @@ bool ComputeAtMap::pullConcreteCountResetIds(
         if (id->isRFactorProduct()) {
           // Add id as a domain to reset concrete count on for map propagation
           rfactor_concrete_count_reset_domains_.emplace(id);
-          // Also make sure the id is in count_one_concrete_dims_, in case id
-          // never hits a maybePropagateConcreteCountOne
-          count_one_concrete_dims_.emplace(id);
         }
       }
 
@@ -328,25 +343,18 @@ bool ComputeAtMap::pullConcreteCountResetIds(
   return is_view_like_rfactor;
 }
 
-// Should be run on consumer id after producer id and consumer id are mapped
-// together, will place all id's in consumer_id's disjoint set into
-// count_one_concrete_dims if consumer_id is in
-// rfactor_concrete_count_reset_domains_
-void ComputeAtMap::maybePropagateConcreteCountOne(IterDomain* consumer_id) {
-  if (rfactor_concrete_count_reset_domains_.find(consumer_id) ==
+void ComputeAtMap::markRFactorDependency(
+    IterDomain* producer_id,
+    IterDomain* consumer_id) {
+  if (rfactor_concrete_count_reset_domains_.find(producer_id) !=
       rfactor_concrete_count_reset_domains_.end()) {
-    return;
+    rf_dep_map_[consumer_id].insert(producer_id);
+  } else {
+    auto it = rf_dep_map_.find(producer_id);
+    if (it != rf_dep_map_.end()) {
+      rf_dep_map_[consumer_id].insert(producer_id);
+    }
   }
-
-  // We need to add the disjoint set associated with id to
-  // count_one_concrete_dims
-  auto disjoint_set_it = disjoint_iter_set_maps_.find(consumer_id);
-  if (disjoint_set_it == disjoint_iter_set_maps_.end()) {
-    // Nothing to propagate to
-    return;
-  }
-  count_one_concrete_dims_.insert(
-      disjoint_set_it->second->begin(), disjoint_set_it->second->end());
 }
 
 void ComputeAtMap::build(
@@ -387,7 +395,6 @@ void ComputeAtMap::build(
     }
 
     for (auto c_tv : tv_outputs) {
-
       if (first_output_tv == nullptr) {
         first_output_tv = c_tv;
       } else {
@@ -496,7 +503,7 @@ void ComputeAtMap::build(
               continue;
             }
             mapIds(p_id, c_id);
-            maybePropagateConcreteCountOne(c_id);
+            markRFactorDependency(p_id, c_id);
           }
         } else {
           for (auto entry : c2p_map) {
@@ -504,7 +511,7 @@ void ComputeAtMap::build(
             auto p_id = entry.second;
             // Map the id's together
             mapIds(p_id, c_id);
-            maybePropagateConcreteCountOne(c_id);
+            markRFactorDependency(p_id, c_id);
           }
 
           // Make sure we always get root mapping for the loop map. Because of
@@ -515,7 +522,7 @@ void ComputeAtMap::build(
               auto p_id = entry.second;
               // Map the id's together
               mapIds(p_id, c_id);
-              maybePropagateConcreteCountOne(c_id);
+              markRFactorDependency(p_id, c_id);
             }
           }
         }
@@ -532,9 +539,7 @@ void ComputeAtMap::build(
   // index map mode this is unnecessary as it doesn't need to resolve concrete
   // ID's the ID's in a disjoint set are all the same extent there.
   concrete_id_count_map_ = InputDomainCounter::produceCounts(
-      ir_utils::allTvs(fusion),
-      count_one_concrete_dims_,
-      trivial_reduction_info);
+      ir_utils::allTvs(fusion), rf_dep_map_, trivial_reduction_info);
 
   for (const auto& set : disjoint_iter_sets_) {
     int max_concrete_count = -1;
