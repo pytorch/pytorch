@@ -186,7 +186,15 @@ table ExtraFile {
 }
 
 table Module {
-  version:int;  // overall file version, will start at 9
+  // denotes the bytecode version of the mobile Module
+  // this starts from 9 for a flatbuffer file
+  // versions 8 and below are reserved pickle
+  // To read more:
+  // https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L96
+  // Version is bumped when changes in model serialization/execution
+  // can no longer work in current version
+  bytecode_version:uint;
+
   extra_files:[ExtraFile];
   methods:[uint];  // index to ivalues
   state_obj:uint; // index to ivalues
@@ -196,8 +204,13 @@ table Module {
   object_types:[ObjectType];
   jit_sources:[ExtraFile];
   jit_constants:[uint];  // index to ivalues
-  operator_version:uint; // version of operator, depends on operators used
-  bytecode_version:uint; // version of bytecode, comes from mobile::Module
+
+  // version of operator
+  // Version is bumped when changes in operator
+  // can no longer work in current version
+  // To read more:
+  // https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md
+  operator_version:uint;
 }
 
 root_type Module;
