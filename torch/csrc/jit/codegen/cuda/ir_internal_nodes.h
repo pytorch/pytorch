@@ -1,10 +1,12 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/mma_type.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 //! Nodes in here should generally not be used by users. They should be behind
 //! the scenes and users shouldn't have to be aware of what they do to use the
@@ -20,6 +22,8 @@ namespace fuser {
 namespace cuda {
 
 class ViewTransform;
+class Scope;
+class IrCloner;
 
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
@@ -34,7 +38,7 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(UnaryOpType type, Val* out, Val* in);
+  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
@@ -63,7 +67,7 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
 //!  2) LT (A < B)
 class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
-  BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
+  BinaryOp(IrBuilderPasskey, BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
 
@@ -97,7 +101,11 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
   //! \param out The output tensor
   //! \param in The input tensor
   //! \param is_broadcast_dims True when output dim is a new broadcast domain
-  BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims);
+  BroadcastOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in,
+      std::vector<bool> is_broadcast_dims);
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
 
@@ -138,7 +146,13 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
 //! non-reduction/non-broadcast dimensions.
 class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
-  ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
+  ReductionOp(
+      IrBuilderPasskey,
+      BinaryOpType reduction_op_type,
+      Val* init,
+      Val* out,
+      Val* in,
+      bool is_fused = false);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
@@ -156,6 +170,10 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
+  bool isFused() const {
+    return is_fused_;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -163,12 +181,15 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
   Val* const init_ = nullptr;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  //! True if using the fused reduction kernel
+  bool is_fused_ = false;
 };
 
 //! Welford Scan operation.
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   WelfordOp(
+      IrBuilderPasskey,
       Val* out_avg,
       Val* out_var,
       Val* out_N,
@@ -177,7 +198,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
       Val* init_N,
       Val* in_avg,
       Val* in_var,
-      Val* in_N);
+      Val* in_N,
+      bool is_fused = false);
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
@@ -187,10 +209,6 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   Val* in() const {
     return in_avg_;
-  }
-
-  Val* init() const {
-    return init_avg_;
   }
 
   bool sameAs(const Statement* const other) const override;
@@ -241,6 +259,10 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return !init_N_->isZeroInt();
   }
 
+  bool isFused() const {
+    return is_fused_;
+  }
+
  private:
   Val* const out_avg_;
   Val* const out_var_;
@@ -251,11 +273,72 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
   Val* const in_avg_;
   Val* const in_var_;
   Val* const in_N_;
+  //! True if using the fused reduction kernel (not implemented yet)
+  bool is_fused_ = false;
+};
+
+//! Fused Matmul operation
+class TORCH_CUDA_CU_API MmaOp : public Expr {
+ public:
+  MmaOp(IrBuilderPasskey, Val* out, Val* in_a, Val* in_b, Val* init);
+
+  MmaOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in_a,
+      Val* in_b,
+      Val* init,
+      MmaOptions options);
+
+  MmaOp(const MmaOp* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+
+  Val* inA() const {
+    return in_a_;
+  }
+
+  Val* inB() const {
+    return in_b_;
+  }
+
+  Val* init() const {
+    return init_;
+  }
+
+  const auto& options() const {
+    TORCH_INTERNAL_ASSERT(options_.has_value(), "MmaOp not configured:", this);
+    return options_.value();
+  }
+
+  bool sameAs(const Statement* const other) const override;
+
+  auto accStride() const {
+    TORCH_INTERNAL_ASSERT(options_.has_value(), "MmaOp not configured:", this);
+    return options_->accumulator_stride;
+  }
+
+  void configureOptions(MmaOptions options) {
+    options_ = options;
+  }
+
+ private:
+  Val* const out_ = nullptr;
+  Val* const in_a_ = nullptr;
+  Val* const in_b_ = nullptr;
+  Val* const init_ = nullptr;
+  c10::optional<MmaOptions> options_ = c10::nullopt;
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {
  public:
-  TransposeOp(TensorView* out, TensorView* in, std::vector<int> new2old);
+  TransposeOp(
+      IrBuilderPasskey,
+      TensorView* out,
+      TensorView* in,
+      std::vector<int> new2old);
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
 
@@ -279,7 +362,13 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
 
 class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
-  TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
+  TernaryOp(
+      IrBuilderPasskey,
+      TernaryOpType type,
+      Val* out,
+      Val* in1,
+      Val* in2,
+      Val* in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
 
@@ -317,7 +406,12 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! \param out
   //! \param in
   //! \param offsets
-  ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad);
+  ShiftOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in,
+      std::vector<int> offsets,
+      std::vector<int> pad_width);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
 
@@ -336,8 +430,14 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
     return offsets_;
   }
 
-  bool pad() const {
-    return pad_;
+  const std::vector<int>& padWidth() const {
+    return pad_width_;
+  }
+
+  bool hasPadding() const {
+    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto p) {
+      return p > 0;
+    });
   }
 
   bool sameAs(const Statement* other) const override;
@@ -349,17 +449,18 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! offsets_. The sign of each value indicates the direction of
   //! shifting.
   const std::vector<int> offsets_;
-  const bool pad_;
+  const std::vector<int> pad_width_;
 };
 
 //! Gather a window around each element.
 class TORCH_CUDA_CU_API GatherOp : public Expr {
  public:
   GatherOp(
+      IrBuilderPasskey,
       Val* out,
       Val* in,
-      std::vector<Int*> window_shape,
-      std::vector<std::vector<Int*>> pad_width);
+      std::vector<int> window_shape,
+      std::vector<std::vector<int>> pad_width);
 
   GatherOp(const GatherOp* src, IrCloner* ir_cloner);
 
@@ -381,20 +482,54 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
     return pad_width_;
   }
 
+  bool hasPadding() const {
+    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto& p) {
+      return p[0] > 0 || p[1] > 0;
+    });
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
   //! Shape of a window gathered for each element.
-  std::vector<Int*> window_shape_;
+  std::vector<int> window_shape_;
   //! The size of zero-padding of each axis.
-  std::vector<std::vector<Int*>> pad_width_;
+  std::vector<std::vector<int>> pad_width_;
+};
+
+class TORCH_CUDA_CU_API ViewDtypeOp : public Expr {
+ public:
+  ViewDtypeOp(
+      IrBuilderPasskey,
+      TensorView* out,
+      TensorView* in,
+      DataType dtype);
+
+  ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+  DataType dtype_;
 };
 
 class TORCH_CUDA_CU_API ViewOp : public Expr {
  public:
-  ViewOp(TensorView* out, TensorView* in);
+  ViewOp(IrBuilderPasskey, TensorView* out, TensorView* in);
 
   ViewOp(const ViewOp* src, IrCloner* ir_cloner);
 
@@ -422,6 +557,7 @@ class IndexReferenceReplay;
 class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
   IterDomain(
+      IrBuilderPasskey,
       Val* start,
       Val* extent,
       ParallelType parallel_type = ParallelType::Serial,
@@ -429,6 +565,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       bool is_rfactor_domain = false);
 
   IterDomain(
+      IrBuilderPasskey,
       Val* start,
       Val* extent,
       Val* stop_offset,
@@ -441,20 +578,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   bool sameAs(const Statement* other) const override;
 
   // Returns a new IterDomain matching properties of this
-  // TODO: parallel_method->getParallelType
-  IterDomain* clone() const {
-    auto cloned = new IterDomain(
-        start(),
-        extent(),
-        stopOffset(),
-        getParallelType(),
-        getIterType(),
-        isRFactorProduct());
-
-    cloned->is_padded_dimension_ = is_padded_dimension_;
-    cloned->padded_to_size_ = padded_to_size_;
-    return cloned;
-  }
+  IterDomain* clone() const;
 
   //! Clone a vector domains
   static std::vector<IterDomain*> clone(
@@ -631,6 +755,55 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! domain.
   std::pair<IterDomain*, IterDomain*> stridedSplit(int factor);
 
+  // TODO: Remove
+  bool isSimple() const {
+    return definition() == nullptr;
+  }
+
+  //! Marks that this id represents a
+  //!  instruction loop, mma use only.
+  //!
+  //! An instruction loop can be considered a generalization of
+  //!  vectorization. It also represents a loop that's implemented
+  //!  by an instruction and should not be realized by codegen and
+  //!  cannot be inlined with.
+  //! As an example, if a mma macro, call it mma_eg implements:
+  //!  for m in M
+  //!    for n in N
+  //!      for k in K
+  //!         C[m,n] += A[m,k]*B[k,n],
+  //! But the generated code should simply be:
+  //!  mma_eg(C,A,B)
+  //! without the 3 level loopnest, i.e. they're instruction loops.
+  //!
+  //! In the actual mma macros, the loopnests it implements is a
+  //!  transformed version of above to match the mma swizzle.
+  //!  So it's different implicit loopnest for different macros.
+  //!  WarpMmaSwizzler will label the instruction loops case-by-case.
+  bool isMma() const {
+    return parallel_type_ == ParallelType::Mma;
+  }
+
+  bool isMmaSwizzled() const {
+    return is_mma_swizzled_;
+  }
+
+  //! Used by WarpMmaSwizzler, this is an utility for WarpMmaSwizzler
+  //!  to lock the thread swizzled iterdomains.
+  //! Only true for the iterdomains produced by WarpMmaSwizzler.
+  //! Mma ops require specific swizzle patterns
+  //!  and this label utility is to prevent any further transform on the
+  //!  iterdomains involved in the swizzle so that the pattern remain correct in
+  //!  generated code.
+  //!
+  //! Note:
+  //!    Used only through WarpMmaSwizzler only and mma validation relies on
+  //!    this
+  //!  flag being set on the correct iterdomains.
+  void toMmaSwizzled() {
+    is_mma_swizzled_ = true;
+  }
+
  protected:
   friend TensorDomain;
   friend ReplayTransformations;
@@ -647,6 +820,15 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   bool is_rfactor_domain_ = false;
   bool is_padded_dimension_ = false;
   c10::optional<int64_t> padded_to_size_ = c10::nullopt;
+
+  // TODO: Remove only used in kernel IR because IterDomains don't maintain
+  // definitions of split/merge.
+  bool is_simple_ = true;
+
+  //! Tracks if this id represents a thread swizzled loop or
+  //!   models an implicit loop within instructions. Should not make
+  //!   any changes once an id is warp mapped.
+  bool is_mma_swizzled_ = false;
 };
 
 //! TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
@@ -666,15 +848,18 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 class TORCH_CUDA_CU_API TensorDomain : public Val {
  public:
   explicit TensorDomain(
+      IrBuilderPasskey,
       std::vector<IterDomain*> root_domain,
       std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(
+      IrBuilderPasskey,
       std::vector<IterDomain*> root_domain,
       std::vector<IterDomain*> domain,
       std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(
+      IrBuilderPasskey,
       std::vector<IterDomain*> root_domain,
       std::vector<IterDomain*> rfactor_domain,
       std::vector<IterDomain*> domain,
@@ -718,6 +903,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
+  bool hasGridBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
   bool hasVectorize() const;
@@ -821,6 +1008,7 @@ class TORCH_CUDA_CU_API Split : public Expr {
   // start_offset and stop_offset are distance from the left end and
   // right ends, respectively.
   Split(
+      IrBuilderPasskey,
       IterDomain* outer,
       IterDomain* inner,
       IterDomain* in,
@@ -881,12 +1069,13 @@ class TORCH_CUDA_CU_API Split : public Expr {
 //! dictate which will be traversed first (inner). Both IterDomains must be of
 //! the same iter or reduction type, as well as the same parallelization
 //! strategy if there is one
-//!
-//! \todo Should this be a unary op type?
-//!
 class TORCH_CUDA_CU_API Merge : public Expr {
  public:
-  Merge(IterDomain* out, IterDomain* outer, IterDomain* inner);
+  Merge(
+      IrBuilderPasskey,
+      IterDomain* out,
+      IterDomain* outer,
+      IterDomain* inner);
 
   Merge(const Merge* src, IrCloner* ir_cloner);
 
@@ -918,9 +1107,7 @@ class TORCH_CUDA_CU_API Merge : public Expr {
 //!
 class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  NamedScalar(std::string name, DataType dtype)
-      : Val(ValType::NamedScalar, dtype), name_(name) {}
+  NamedScalar(IrBuilderPasskey passkey, std::string name, DataType dtype);
 
   NamedScalar(const NamedScalar* src, IrCloner* ir_cloner);
 
@@ -931,9 +1118,11 @@ class TORCH_CUDA_CU_API NamedScalar : public Val {
   bool sameAs(const Statement* other) const override;
 
   //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
+  //! WARNING: Only works with Fusion container at the moment
   static NamedScalar* getParallelDim(ParallelType p_type);
 
   //! Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
+  //! WARNING: Only works with Fusion container at the moment
   static NamedScalar* getParallelIndex(ParallelType p_type);
 
   //! Return the parallel type of this NamedScalar if it is an extent of a

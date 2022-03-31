@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -514,10 +515,9 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
 //                         v
 
 void ReplaceWithMaybeCopy(
-    std::shared_ptr<torch::jit::Graph>& graph,
+    std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-
   // for ops that have overloads, match the schema
   static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 3> supported_schema =
       {{{torch::schema(
@@ -542,7 +542,8 @@ void ReplaceWithMaybeCopy(
 
   // old node, new node, select_tensor node
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
-  for (auto* n : graph->nodes()) {
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto n = graph_it.next(); n != nullptr; n = graph_it.next()) {
     c10::Symbol new_symbol;
     if (!match_schema(n, new_symbol)) {
       continue;
@@ -561,7 +562,6 @@ void ReplaceWithMaybeCopy(
 
     // Add the did_copy flag to outputs.
     auto* new_node = graph->create(new_symbol, n->outputs().size() + 1);
-    new_node->insertBefore(n);
     for (auto* input : n->inputs()) {
       new_node->addInput(input);
     }
@@ -570,7 +570,6 @@ void ReplaceWithMaybeCopy(
     static const auto select_tensor_symbol =
         fromQualString("static_runtime::select_tensor");
     auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
-    select_tensor_node->insertBefore(n);
     DCHECK_EQ(new_node->outputs().size(), 2);
     select_tensor_node->addInput(n->input(0));
     for (auto* output : new_node->outputs()) {
@@ -584,6 +583,8 @@ void ReplaceWithMaybeCopy(
     auto* const new_node = std::get<1>(tup);
     auto* const select_tensor_node = std::get<2>(tup);
 
+    new_node->insertBefore(old_node);
+    select_tensor_node->insertBefore(old_node);
     new_node->outputs()[0]->copyMetadata(old_node->output());
     select_tensor_node->output()->copyMetadata(old_node->output());
     old_node->replaceAllUsesWith(select_tensor_node);
@@ -597,10 +598,9 @@ void ReplaceWithMaybeCopy(
 }
 
 void ReplaceWithCopy(
-    std::shared_ptr<torch::jit::Graph>& graph,
+    std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-
   const FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
       OP_PAIR("aten::permute", "static_runtime::permute_copy"),
@@ -626,7 +626,8 @@ void ReplaceWithCopy(
   };
 
   std::vector<std::pair<Node*, Node*>> replacement;
-  for (auto* n : graph->nodes()) {
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto n = graph_it.next(); n != nullptr; n = graph_it.next()) {
     c10::Symbol new_symbol;
     if (supported.count(n->kind()) && opIsRegistered(supported.at(n->kind()))) {
       new_symbol = supported.at(n->kind());
@@ -663,7 +664,6 @@ void ReplaceWithCopy(
       continue;
     }
     auto* new_node = graph->create(new_symbol, n->outputs().size());
-    new_node->insertBefore(n);
     for (auto* input : n->inputs()) {
       new_node->addInput(input);
     }
@@ -673,6 +673,7 @@ void ReplaceWithCopy(
   for (const auto& p : replacement) {
     auto* old_node = p.first;
     auto* new_node = p.second;
+    new_node->insertBefore(old_node);
     new_node->output()->copyMetadata(old_node->output());
     old_node->replaceAllUsesWith(new_node);
     old_node->destroy();
@@ -687,7 +688,8 @@ void ReplaceWithCopy(
 void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
   const auto equally_split = fromQualString("fb::equally_split");
   std::vector<Node*> to_remove;
-  for (auto* node : graph->nodes()) {
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
     if (node->kind() != equally_split) {
       continue;
     }
@@ -708,7 +710,7 @@ void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     list_unpack_node->output()->replaceAllUsesWith(node->input(0));
-    list_unpack_node->destroy();
+    to_remove.push_back(list_unpack_node);
     to_remove.push_back(node);
   }
 
@@ -717,8 +719,40 @@ void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 }
 
-// NB: The alias type of the fused op needs to be changed to
-// c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
+namespace {
+
+bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
+  const static std::array<c10::Symbol, 3> sigrid_transforms_symbols{
+      c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::sigrid_transforms")};
+
+  if (std::find(
+          sigrid_transforms_symbols.begin(),
+          sigrid_transforms_symbols.end(),
+          node->kind()) == sigrid_transforms_symbols.end()) {
+    return false;
+  }
+
+  // To fuse with sigrid transforms, we must be able to statically determine
+  // `instance` and `use_offsets` - these two together let us statically
+  // determine the types of the outputs. Rationale: it is a huge pain to write
+  // fused sigrid transforms without static type information, and these two
+  // arguments are indeed statically known in every model we've seen.
+  // The reason why trying to fuse the outputs is annoying without static type
+  // information is that, if one of the outputs is not managed, you need to
+  // reset to an empty tensor of the correct type each iteration. So, if we
+  // can't collect types ahead of time, we would have to do it lazily on the
+  // first iteration, which would could be wasteful in terms of time/memory
+  // - either each thread would have its own set of output types, or we would
+  // need a lock to prevent data races.
+  const auto num_inputs = node->inputs().size();
+  return !toIValue(node->input(0)).has_value() ||
+      !toIValue(node->input(num_inputs - 1)).has_value();
+}
+
+} // namespace
+
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
@@ -741,14 +775,14 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "static_runtime::fused_gather_ranges_to_dense"),
       OP_PAIR(
           "fb::gather_ranges_to_dense_v2",
-          "static_runtime::fused_gather_ranges_to_dense_v2")};
+          "static_runtime::fused_gather_ranges_to_dense_v2"),
+      OP_PAIR(
+          "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
 
-  AliasDb alias_db(
-      graph,
-      /*isFrozen=*/false);
-  auto nodes = graph->nodes();
-  std::vector<Node*> to_remove;
-  for (auto* node : nodes) {
+  // replacement contains (old_node, new_node, list_unpack_node)
+  std::vector<std::tuple<Node*, Node*, Node*>> replacement;
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
     auto unfused_to_fused_it = unfused_to_fused.find(node->kind());
     if (unfused_to_fused_it == unfused_to_fused.end()) {
       continue;
@@ -769,6 +803,10 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       continue;
     }
 
+    if (shouldNotFuseListUnpackSpecialCase(node)) {
+      continue;
+    }
+
     const auto& new_sym = unfused_to_fused_it->second;
     auto* new_node = graph->create(new_sym, 0);
 
@@ -781,51 +819,19 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       new_out->copyMetadata(out);
       out->replaceAllUsesWith(new_out);
     }
+    replacement.emplace_back(node, new_node, list_unpack_node);
+  }
 
-    new_node->insertAfter(node);
+  for (const auto& nodes : replacement) {
+    auto* old_node = std::get<0>(nodes);
+    auto* new_node = std::get<1>(nodes);
+    auto* list_unpack_node = std::get<2>(nodes);
+
+    new_node->insertAfter(old_node);
     list_unpack_node->destroy();
-    to_remove.push_back(node);
-  }
-  for (Node* node : to_remove) {
-    node->destroy();
-  }
-
-#ifndef NDEBUG
-  graph->lint();
-  AliasDb db2(graph);
-  torch::jit::Lint(&db2);
-#endif
-} // namespace jit
-
-void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
-  const c10::Symbol static_runtime_layer_norm_symbol =
-      fromQualString("static_runtime::layer_norm");
-  auto nodes = graph->nodes();
-  std::vector<std::pair<Node*, Node*>> replacement;
-  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-    Node* old_node = *it;
-    if (!old_node->matches(torch::schema(
-            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"))) {
-      continue;
-    }
-    TORCH_CHECK(old_node->outputs().size() == 1);
-    auto* new_node = graph->create(
-        static_runtime_layer_norm_symbol,
-        /*layer_norm*/ 1 + /*mean*/ 1 + /*rst=*/1);
-    new_node->insertBefore(old_node);
-    for (auto* input : old_node->inputs()) {
-      new_node->addInput(input);
-    }
-    replacement.emplace_back(old_node, new_node);
-  }
-  for (const auto& p : replacement) {
-    auto* old_node = p.first;
-    auto* new_node = p.second;
-    new_node->output(0)->copyMetadata(old_node->output(0));
-    old_node->output(0)->replaceAllUsesWith(new_node->output(0));
     old_node->destroy();
   }
-}
+} // namespace jit
 
 void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph) {
@@ -997,6 +1003,122 @@ void ForceNonEmptyOutputs(Graph& graph) {
   ForceNonEmptyOutputsHelper(none_node->output(), graph.block());
   if (!none_node->hasUses()) {
     none_node->destroy();
+  }
+}
+
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+  auto input_is_constant_list =
+      [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
+        auto input_opt = toIValue(node->input(input_idx));
+        if (!input_opt.has_value() || !input_opt->isIntList()) {
+          return false;
+        }
+        return input_opt->toIntList() == expected;
+      };
+
+  // SubgraphRewriter can't pattern-match on constants, so we use this
+  // extra filter to make sure the values of the `dim` arguments are
+  // correct.
+  auto dims_are_valid_constants =
+      [&input_is_constant_list](
+          const Match& match,
+          const std::unordered_map<std::string, Value*>& vmap) {
+        // Get the nodes in the real graph from the nodes in the template
+        // pattern graph
+        const auto& node_map = match.nodes_map;
+        auto* sum_node = node_map.at(vmap.at("c")->node());
+        auto* permute_node = node_map.at(vmap.at("b")->node());
+        return input_is_constant_list(sum_node, 1, c10::List<int64_t>{-1}) &&
+            input_is_constant_list(
+                   permute_node, 1, c10::List<int64_t>{0, 2, 1});
+      };
+
+  const auto pattern = R"IR(
+    graph(%a, %sum_dim, %permute_dim, %keepdim, %dtype):
+        %b = aten::permute(%a, %permute_dim)
+        %c = aten::sum(%b, %sum_dim, %keepdim, %dtype)
+        return (%c))IR";
+
+  const auto fused_pattern = R"IR(
+    graph(%a, %sum_dim, %permute_dim, %keepdim, %dtype):
+        %new_sum_dim: int[] = prim::Constant[value=[1]]()
+        %d = aten::sum(%a, %new_sum_dim, %keepdim, %dtype)
+        return (%d))IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+namespace {
+
+Node* maybeUserWithKind(Value* value, c10::Symbol kind) {
+  auto& uses = value->uses();
+  if (uses.size() != 1) {
+    return nullptr;
+  }
+  auto* user = uses[0].user;
+  if (user->kind() != kind) {
+    return nullptr;
+  }
+  return user;
+}
+
+} // namespace
+
+void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
+  std::vector<Node*> to_erase;
+  for (auto* node : graph->nodes()) {
+    if (node->kind() != aten::split) {
+      continue;
+    }
+    auto axis_opt = toIValue(node->input(2));
+    if (!axis_opt) {
+      continue;
+    }
+    auto axis = *axis_opt;
+    auto* split_node_output = node->output();
+    auto* list_unpack_node =
+        maybeUserWithKind(split_node_output, prim::ListUnpack);
+    if (list_unpack_node == nullptr) {
+      continue;
+    }
+    std::vector<Node*> squeeze_nodes;
+    squeeze_nodes.reserve(list_unpack_node->outputs().size());
+    for (auto* output : list_unpack_node->outputs()) {
+      auto* squeeze_node = maybeUserWithKind(output, aten::squeeze);
+      if (squeeze_node == nullptr) {
+        break;
+      }
+      auto dim_opt = toIValue(squeeze_node->input(1));
+      if (!dim_opt || *dim_opt != axis) {
+        break;
+      }
+      squeeze_nodes.push_back(squeeze_node);
+    }
+    auto num_outputs = list_unpack_node->outputs().size();
+    if (squeeze_nodes.size() != num_outputs) {
+      continue;
+    }
+    auto* split_and_squeeze_node = graph->create(
+        c10::Symbol::fromQualString("static_runtime::fused_split_and_squeeze"),
+        num_outputs);
+    split_and_squeeze_node->addInput(node->input(0));
+    split_and_squeeze_node->addInput(node->input(1));
+    split_and_squeeze_node->addInput(node->input(2));
+    split_and_squeeze_node->insertBefore(node);
+    for (const auto i : c10::irange(num_outputs)) {
+      auto* squeeze_node = squeeze_nodes[i];
+      split_and_squeeze_node->output(i)->copyMetadata(squeeze_node->output());
+      squeeze_node->output()->replaceAllUsesWith(
+          split_and_squeeze_node->output(i));
+    }
+    to_erase.insert(to_erase.end(), squeeze_nodes.begin(), squeeze_nodes.end());
+    to_erase.push_back(list_unpack_node);
+    to_erase.push_back(node);
+  }
+  for (auto* node : to_erase) {
+    node->destroy();
   }
 }
 

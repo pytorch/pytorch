@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
-from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
+from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info, WorkerInfo
 from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
@@ -107,7 +107,7 @@ class StubRpcAgent:
 
     def get_worker_infos(self):
         return {
-            rpc.WorkerInfo(name=worker_name(rank), id=rank)
+            WorkerInfo(name=worker_name(rank), id=rank)
             for rank in range(self.world_size)
         }
 
@@ -276,6 +276,9 @@ def delayed_add(a, b, seconds=0.05):
     time.sleep(seconds)
     return a + b
 
+
+def identity(a):
+    return a
 
 def no_result():
     print("do nothing")
@@ -571,13 +574,15 @@ def async_cuda_nested_add(to, x, y, z):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor", "lock", "event")
+    __slots__ = ("tensor", "lock", "event", "thread")
 
     def __init__(self, t):
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
         self.event = torch.cuda.Event(enable_timing=True)
+        self.thread = threading.Thread()
+        self.thread.start()
 
     def increase(self, v):
         with self.lock:
@@ -1377,7 +1382,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
-        from torch.distributed.rpc import WorkerInfo
 
         worker_id = 0
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
@@ -1393,6 +1397,14 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             info = WorkerInfo("".join(["a" for i in range(500)]), worker_id)
+
+    # Test that WorkerInfo can be pickled and sent in RPC call
+    @dist_init
+    def test_worker_info_pickle(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        worker_info = rpc.api.get_worker_info()
+        ret = rpc.rpc_sync(worker_name(dst_rank), identity, args=(worker_info,))
+        self.assertEqual(ret, worker_info)
 
     @dist_init
     def test_add(self):
@@ -2371,6 +2383,24 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 fut.wait()
 
     @dist_init
+    def test_async_record_function_legacy(self):
+        # Test the legacy _record_function ops work
+        # Note: These exist for backward compatibility with TorchScript
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            with _profile() as pf:
+                try:
+                    handle = torch.ops.profiler._record_function_enter("foo", None)
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
+                finally:
+                    torch.ops.profiler._record_function_exit(handle)
+
+                fut.wait()
+
+    @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
             with _profile() as pf:
@@ -2385,7 +2415,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         worker_name(0), my_script_func, args=(torch.tensor(1),)
                     )
                     # Intentionally calling record_function internals
-                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.handle, fut)
+                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.record, fut)
                 result = fut.wait()
                 # Validate that the profiling future returns the same value as the RPC
                 # future.
@@ -4292,6 +4322,121 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         rpc.shutdown()
 
+    # Test init_rpc without world_size argument
+    @dist_init(setup_rpc=False)
+    def test_init_rpc_without_world_size(self):
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # TODO: Need to sync before shutdown since ungraceful shutdown is not fully implemented
+        # Using process_group initialization as sync (could also use store based barrier)
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+        rpc.shutdown(graceful=False)
+
+    # Dynamic RPC new ranks communicate with existing ranks
+    @dist_init(setup_rpc=False)
+    def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
+        # TODO: Using process group for synchronization to ensure rank 0 is created first
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # TODO: Remove the sync before shutdown and replace with graceful shutdown
+        dist.barrier()
+        rpc.shutdown(graceful=False)
+
+    @dist_init(setup_rpc=False)
+    def test_init_rpc_without_world_size_without_rank(self):
+        # default initialization uses file init
+        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # env init
+        with self.assertRaisesRegex(ValueError, "environment variable RANK expected"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="env://")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+        # tcp init
+        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="tcp://127.0.0.1:23456")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
+    def test_init_dynamic_and_static_rpc_group(self):
+        # Initialize a static rpc group with size = self.world_size - 1
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        world_size_minus_one = self.world_size - 1
+        if self.rank < world_size_minus_one:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=world_size_minus_one,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+
+        # Attempt to add an additional dynamic group member
+        if self.rank == world_size_minus_one:
+            with self.assertRaisesRegex(RuntimeError, "RPC group mixes statically and dynamically\
+ initialized members which is not supported."):
+                rpc.init_rpc(
+                    name=worker_name(self.rank),
+                    backend=self.rpc_backend,
+                    rank=self.rank,
+                    rpc_backend_options=self.rpc_backend_options,
+                )
+
     def test_wrong_types(self):
         with self.assertRaisesRegex(
             TypeError,
@@ -4860,7 +5005,9 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_tensorpipe_set_default_timeout(self):
-        timeout = 0.5
+        # Set a high timeout since it doesn't affect test runtime and ensures
+        # the test doesn't erroneously timeout due to slow machines.
+        timeout = 100
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
             num_worker_threads=self.rpc_backend_options.num_worker_threads,

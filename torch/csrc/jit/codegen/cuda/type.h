@@ -3,7 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <array>
 #include <cstdint>
@@ -32,6 +32,8 @@ enum class ValType {
   TensorView,
   Scalar,
   NamedScalar,
+  Predicate,
+  TensorIndex,
 };
 
 // Manual - The user provides the Bool value. Predicate generation is bypassed.
@@ -52,12 +54,33 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
+// Index type is a convenience type that may be a 64 or 32 signed integer.
+// This is helpful for math on indexing/size when we don't know what the index
+// type might be. This allows us to prevent assuming the welford count must be
+// int64_t which is relatively heavy to carry around. Index will be resolved
+// at compile time with KernelIndexMode.
+enum class DataType {
+  Double,
+  Float,
+  Half,
+  Int,
+  Index,
+  Int32,
+  Bool,
+  BFloat16,
+  ComplexFloat,
+  ComplexDouble,
+  Null
+};
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
-// Returns if the datatype is an integer type
+// Returns if the datatype is an boolean type
 bool isIntegralType(DataType dtype);
+// Returns if the datatype is an integer type
+bool isBooleanType(DataType dtype);
+// Returns if the datatype is a complex type
+bool isComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,
@@ -67,12 +90,25 @@ enum class ExprType {
   ReductionOp,
   BroadcastOp,
   WelfordOp,
+  MmaOp,
   TransposeOp,
   ShiftOp,
   GatherOp,
+  ViewDtypeOp,
   ViewOp,
   Split,
   Merge,
+  Allocate,
+  BlockSync,
+  GridSync,
+  InitMagicZero,
+  UpdateMagicZero,
+  ForLoop,
+  IfThenElse,
+  GridReduction,
+  GridBroadcast,
+  GridWelford,
+  AllocateFusedReduction
 };
 
 enum class UnaryOpType {
@@ -99,6 +135,7 @@ enum class UnaryOpType {
   Log10,
   Log1p,
   Log2,
+  EraseType,
   Neg,
   RandLike,
   Reciprocal,
@@ -184,6 +221,7 @@ enum class ParallelType {
   MisalignedVectorize,
   Unroll,
   Unswitch,
+  Mma,
   Serial
 };
 
@@ -257,8 +295,11 @@ std::string stringifyThread(const ParallelType);
 std::string typePrefix(const DataType);
 
 // TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
+// Returns if parallel type is TID[x, y, z]
 TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
+// Returns if parallel type is BID[x, y, z]
 TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
+// Returns if parallel type is a grid or block parallelization dimension
 TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
 
 TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
@@ -266,6 +307,7 @@ TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> bool_op_str(const BinaryOpType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
