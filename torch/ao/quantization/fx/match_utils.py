@@ -131,7 +131,6 @@ def find_matches(
                 if is_match(modules, node, pattern):
                     matched: List[Any] = []
                     record_match(pattern, node, matched)
-                    quantize_handler = patterns[pattern]
                     for n in matched:
                         match_map[n.name] = (
                             node, matched, pattern, value(node, modules),  # type: ignore[operator]
