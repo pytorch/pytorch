@@ -1,4 +1,5 @@
 import re
+import torch
 
 """
 Instructions:
@@ -58,16 +59,42 @@ def belongs_to_base(test, base):
     return True
 
 
-def sanitize_base(base):
-    if base.startswith('nn_functional_'):
-        base = f'nn.functional.{base[len("nn_functional_"):]}'
-    if base.startswith('fft_'):
-        base = f'fft.{base[len("fft_"):]}'
-    if base.startswith('linalg_'):
-        base = f'linalg.{base[len("linalg."):]}'
-    if base.startswith('_masked_'):
-        base = f'_masked.{base[len("_masked_"):]}'
-    return base
+def parse_namespace(base):
+    mappings = {
+        'nn_functional_': 'nn.functional',
+        'fft_': 'fft',
+        'linalg_': 'linalg',
+        '_masked_': '_masked',
+    }
+    for heading in mappings.keys():
+        if base.startswith(heading):
+            return mappings[heading], base[len(heading):]
+    return None, base
+
+
+def get_torch_module(namespace):
+    if namespace is None:
+        return torch
+    if namespace == 'nn.functional':
+        return torch.nn.functional
+    return getattr(torch, namespace)
+
+
+def parse_base(base):
+    namespace, rest = parse_namespace(base)
+
+    apis = dir(get_torch_module(namespace))
+    apis = sorted(apis, key=lambda x: -len(x))
+
+    api = rest
+    variant = ''
+    for candidate in apis:
+        if rest.startswith(candidate):
+            api = candidate
+            variant = rest[len(candidate) + 1:]
+            break
+    print(base, namespace, api, variant)
+    return namespace, api, variant
 
 
 def any_starts_with(strs, thing):
@@ -87,17 +114,21 @@ def get_suggested_xfails(base, tests):
     for base in base_tests:
         cpu_variant = base + '_cpu_float32'
         cuda_variant = base + '_cuda_float32'
-        sanitized_base = sanitize_base(base)
+        namespace, api, variant = parse_base(base)
+        if namespace is None:
+            api = api
+        else:
+            api = f'{namespace}.{api}'
         if cpu_variant in tests and cuda_variant in tests:
-            result.append(f"xfail('{sanitized_base}'),")
+            result.append(f"xfail('{api}', '{variant}'),")
             continue
         if cpu_variant in tests:
-            result.append(f"xfail('{sanitized_base}', device_type='cpu'),")
+            result.append(f"xfail('{api}', '{variant}', device_type='cpu'),")
             continue
         if cuda_variant in tests:
-            result.append(f"xfail('{sanitized_base}', device_type='cuda'),")
+            result.append(f"xfail('{api}', '{variant}', device_type='cuda'),")
             continue
-        result.append(f"skip('{sanitized_base}'),")
+        result.append(f"skip('{api}', '{variant}',")
     return result
 
 
