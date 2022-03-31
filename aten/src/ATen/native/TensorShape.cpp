@@ -1479,10 +1479,6 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> split(const Tensor& self, IntArrayRef sizes, int64_t dim) {
-  return at::split_with_sizes(self, sizes, dim);
-}
-
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
