@@ -189,9 +189,9 @@ Node* transformToONNXConcatNode(
     // This particular Concat operation concats along axis=0 and this requires
     // inputs to the node to have the same shape along dim-0. To ensure this,
     // unsqueeze nodes are added such that all shapes along dim-0 are 1.
-    // Certain inputs from ListConstruct Int[] could be combinations of scalars and 1-D tensors,
-    // For inputs that are already 1-D tensors, we skip the step of creating a
-    // corresponding unsqueeze node.
+    // Certain inputs from ListConstruct Int[] could be combinations of scalars
+    // and 1-D tensors, For inputs that are already 1-D tensors, we skip the
+    // step of creating a corresponding unsqueeze node.
     if (auto type = new_input->type()->cast<TensorType>()) {
       if (type->dim() && type->dim() == 1) {
         unsqueezed.emplace_back(new_input);
