@@ -18,7 +18,7 @@ import warnings
 # inferred erroneously runs or skips
 # some tests
 torch._C._jit_set_profiling_executor(True)
-torch._C._jit_set_profiling_mode(True)
+torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, slowTest
@@ -738,6 +738,22 @@ class TestTEFuser(JitTestCase):
                 self.assertAllFused(graph)
                 # XXX: TE fuser can handle concats in a fusion group.
                 # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+
+    def test_stack(self):
+        # "aten::stack fusion is not enabled yet with dynamic shapes"
+        if self.dynamic_shapes:
+            return True
+        with set_fusion_group_inlining(True):
+            for device in self.devices:
+                hx = torch.randn(3, 20, dtype=torch.float, device=device)
+                cx = torch.randn(3, 20, dtype=torch.float, device=device)
+
+                def foo(hx, cx):
+                    return torch.stack((hx + cx, hx - cx))
+
+                ge = self.checkTrace(foo, (hx, cx))
+                graph = ge.graph_for(hx, cx)
+                self.assertAllFused(graph)
 
     def test_remove_output_used_only_in_size(self):
         for device in self.devices:
@@ -1781,6 +1797,7 @@ class TestTEFuser(JitTestCase):
         devices = self.devices
         list_ops = [
             torch.cat,
+            torch.stack
         ]
         for dtype, op, device in product(self.dtypes, list_ops, devices):
             if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
@@ -2608,7 +2625,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
         torch._C._jit_override_can_fuse_on_gpu(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
 
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
@@ -2625,7 +2642,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+        torch._C._get_graph_executor_optimize(self.old_profiling_mode)
 
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
