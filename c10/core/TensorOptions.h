@@ -728,7 +728,9 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCUDA;
         default:
           AT_ERROR(
-              "Unsupported device type for sparse ", layout_, " layout: ",
+              "Unsupported device type for sparse ",
+              layout_,
+              " layout: ",
               device_.type());
       }
     default:
@@ -746,7 +748,11 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
       return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
-      TORCH_CHECK(false, "Cannot map DispatchKey ", dispatch_key, " to a unique layout.");
+      TORCH_CHECK(
+          false,
+          "Cannot map DispatchKey ",
+          dispatch_key,
+          " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:

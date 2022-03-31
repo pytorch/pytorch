@@ -851,7 +851,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
   virtual Layout layout_impl() const {
-    TORCH_CHECK(false, "layout_impl is only implemented for subclasses that unset define_layout_from_dispatch_key bit.");
+    TORCH_CHECK(
+        false,
+        "layout_impl is only implemented for subclasses that unset define_layout_from_dispatch_key bit.");
   }
 
  public:
