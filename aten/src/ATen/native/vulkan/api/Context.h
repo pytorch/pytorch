@@ -72,6 +72,8 @@ class Context final {
   // Construction and destruction order matters.  Do not move members around.
   VkInstance instance_;
   size_t adapter_i_;
+  VkDevice device_;
+  Adapter::Queue queue_;
   Shader shader_;
   Pipeline pipeline_;
   ThreadContext threadcontext_;
@@ -93,8 +95,9 @@ inline GPU Context::gpu() {
   return {
     instance_,
     p_adapter,
-    p_adapter->device_handle(),
-    p_adapter->compute_queue(),
+    device_,
+    queue_.family_index,
+    queue_.handle,
   };
 }
 

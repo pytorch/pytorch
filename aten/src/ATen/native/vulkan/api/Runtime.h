@@ -27,6 +27,7 @@ struct RuntimeConfiguration final {
   bool enableValidationMessages;
   bool initDefaultDevice;
   AdapterSelector defaultSelector;
+  uint32_t numRequestedQueues;
 };
 
 class Runtime final {

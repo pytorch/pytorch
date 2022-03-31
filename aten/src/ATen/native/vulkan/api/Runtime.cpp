@@ -107,7 +107,8 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
   return instance;
 }
 
-std::vector<Adapter> enumerate_adapters(const VkInstance instance) {
+std::vector<Adapter> enumerate_adapters(const VkInstance instance,
+                                        const uint32_t num_queues) {
   if (VK_NULL_HANDLE == instance) {
     return std::vector<Adapter>();
   }
@@ -121,7 +122,7 @@ std::vector<Adapter> enumerate_adapters(const VkInstance instance) {
   std::vector<Adapter> adapters;
   adapters.reserve(device_count);
   for (const VkPhysicalDevice physical_device : devices) {
-    adapters.emplace_back(physical_device);
+    adapters.emplace_back(physical_device, num_queues);
   }
 
   return adapters;
@@ -236,11 +237,13 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
     false;
 #endif /* DEBUG */
   const bool initDefaultDevice = true;
+  const uint32_t numRequestedQueues = 1;
 
   const RuntimeConfiguration default_config {
     enableValidationMessages,
     initDefaultDevice,
     AdapterSelector::First,
+    numRequestedQueues,
   };
 
   try {
@@ -266,13 +269,13 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
 Runtime::Runtime(const RuntimeConfiguration config)
   : instance_(create_instance(config)),
-    adapters_(enumerate_adapters(instance_)),
+    adapters_(enumerate_adapters(instance_, config.numRequestedQueues)),
     default_adapter_i_{},
     debug_report_callback_(create_debug_report_callback(instance_, config)) {
   if (config.initDefaultDevice) {
     try {
-      switch (config.defaultSelector) {
-        case(AdapterSelector::First):
+      switch(config.defaultSelector) {
+        case AdapterSelector::First:
           default_adapter_i_ = init_adapter(select_first);
       }
     }

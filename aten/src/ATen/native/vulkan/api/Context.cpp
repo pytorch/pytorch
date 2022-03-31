@@ -106,12 +106,16 @@ VkQueue acquire_queue(
 Context::Context(const VkInstance instance, size_t adapter_i)
     : instance_(instance),
       adapter_i_(adapter_i),
+      device_(runtime()->get_adapter(adapter_i).device_handle()),
+      queue_(runtime()->get_adapter(adapter_i).request_queue()),
       shader_(gpu()),
       pipeline_(gpu()),
       threadcontext_(gpu()) {
 }
 
 Context::~Context() {
+  // Let the device know the context is done with the queue
+  runtime()->get_adapter(adapter_i_).return_queue(queue_);
   // Do not call flush() since all per-thread objects will be destroyed as each thread exits
 }
 

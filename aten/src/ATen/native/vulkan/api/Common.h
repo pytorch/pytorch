@@ -78,6 +78,7 @@ struct GPU final {
   VkInstance instance;
   const Adapter* adapter;
   VkDevice device;
+  uint32_t queue_family_index;
   VkQueue queue;
 };
 
