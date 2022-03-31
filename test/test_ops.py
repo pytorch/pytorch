@@ -67,8 +67,22 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
+        device_type = torch.device(device).type
+        claimed_supported = set(op.supported_dtypes(device_type))
+        claimed_backward_supported = set(op.supported_backward_dtypes(device_type))
+
+        if op.supports_complex32:
+            assert torch.complex32 in claimed_supported
+            assert torch.complex32 in claimed_backward_supported
+        else:
+            assert torch.complex32 not in claimed_supported
+            assert torch.complex32 not in claimed_backward_supported
+            
+
+        backward_extra_dtypes = (torch.bfloat16, torch.float16) + \
+            ((torch.complex32,) if op.supports_complex32 else ())
         # dtypes to try to backward in
-        allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
+        allowed_backward_dtypes = floating_and_complex_types_and(*backward_extra_dtypes)
 
         # lists for (un)supported dtypes
         supported_dtypes = []
@@ -81,7 +95,7 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in get_all_dtypes():
+        for dtype in get_all_dtypes(include_complex32=op.supports_complex32):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
@@ -144,7 +158,6 @@ class TestCommon(TestCase):
 
         # Checks that dtypes are listed correctly and generates an informative
         #   error message
-        device_type = torch.device(device).type
         claimed_supported = set(op.supported_dtypes(device_type))
         supported_dtypes = set(supported_dtypes)
         supported_but_unclaimed = supported_dtypes - claimed_supported
@@ -163,7 +176,6 @@ class TestCommon(TestCase):
         # Checks that backward dtypes are listed correctly and generates an
         #   informative error message
         # NOTE: this code is nearly identical to the check + msg generation
-        claimed_backward_supported = set(op.supported_backward_dtypes(device_type))
         supported_backward_dtypes = set(supported_backward_dtypes)
 
         supported_but_unclaimed = supported_backward_dtypes - claimed_backward_supported
@@ -704,6 +716,15 @@ class TestCommon(TestCase):
             for arg in sample.kwargs.values():
                 check_tensor_floating_is_differentiable(arg)
 
+    # Reference testing for complex32 inputs against complex64.
+    # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
+    @ops(list(filter(lambda op: op.supports_complex32, op_db)), allowed_dtypes=(torch.complex32,))
+    def test_complex_half_reference_testing(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype):
+            actual = op(sample.input, *sample.args, **sample.kwargs)
+            (inp, args, kwargs) = sample.transform(lambda x: x.to(torch.complex64))
+            expected = op(inp, *args, **kwargs)
+            self.assertEqual(actual, expected, exact_dtype=False)
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most

@@ -655,6 +655,7 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
                  supports_expanded_weight=False,
+                 supports_complex32=False,
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -818,6 +819,7 @@ class OpInfo(object):
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
         self.supports_expanded_weight = supports_expanded_weight
+        self.supports_complex32 = supports_complex32
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -950,7 +952,7 @@ class OpInfo(object):
         else:
             backward_dtypes = self.backward_dtypes
 
-        allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
+        allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32)
         return set(allowed_backward_dtypes).intersection(backward_dtypes)
 
     def supports_complex_autograd(self, device_type):
@@ -14196,11 +14198,12 @@ op_db: List[OpInfo] = [
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
            aliases=('concat',),
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
            sample_inputs_func=sample_inputs_cat_concat,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
+           supports_complex32=True,
            skips=(
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
@@ -14301,8 +14304,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
+           supports_complex32=True,
            skips=(
                # JIT has issue when op is passed as lambda
                # AssertionError: JIT Test does not execute any logic
