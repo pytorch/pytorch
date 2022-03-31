@@ -25,6 +25,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
+from jit.test_op_decompositions import TestOpDecompositions  # noqa: F401
 from jit.test_if_hoisting import TestIfHoisting  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
@@ -204,11 +205,6 @@ def doAutodiffCheck(testname):
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
-# even though FULL_PROFILER should be our default
-# we haven't tested every single test in this file
-# but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode_for_profiling_tests"
-torch._C._jit_set_profiling_mode(False)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -7360,7 +7356,7 @@ a")
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *, requires_grad=0, device=cpu) = aten::as_tensor").run(g)
 
-
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "testing legacy behavior")
     def test_tensor_requires_grad(self):
         @torch.jit.script
         def test(b):
