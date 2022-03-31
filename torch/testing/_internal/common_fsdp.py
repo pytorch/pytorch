@@ -606,7 +606,7 @@ class FSDPTest(MultiProcessTestCase):
             )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs
+        self, group, cuda_first=False, config=None, **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
@@ -627,6 +627,14 @@ class FSDPTest(MultiProcessTestCase):
             if move_to_cuda:
                 model = model.cuda()
         return model
+
+    def _get_nonwrapped_model(
+        self, group, **model_kwargs,
+    ) -> torch.nn.Module:
+        """Returns the non-wrapped model that is wrapped in
+        :meth:`_get_wrapped_model`. The model used in these two methods should
+        be kept in sync for tests that use both for parity comparisons."""
+        return TransformerWithSharedParams(group, **model_kwargs).cuda()
 
 
 def _collect_total_grad_norm_fsdp(model, norm_type, rank):

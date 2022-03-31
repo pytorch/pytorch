@@ -98,7 +98,7 @@ class TestParityWithDDP(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("cpu_offload", cpu_offload_config)
     @parametrize("sharding_strategy", sharding_strategy_config)
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_nested_wrapped_model_single_iteration_mixed_precision(
         self,
         cpu_offload,
@@ -106,6 +106,7 @@ class TestParityWithDDP(FSDPTest):
         mixed_precision
     ):
         init_modes = self._get_init_modes_for_test(cpu_offload)
+        mixed_precision = MixedPrecision() if mixed_precision else None
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
                 self._test_identical_outputs(
@@ -235,10 +236,11 @@ class TestParityWithDDP(FSDPTest):
 
 class TestParamInit(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_param_change_after_init(self, mixed_precision):
         group = dist.distributed_c10d._get_default_group()
         # Establish reference behavior.
+        mixed_precision = MixedPrecision() if mixed_precision else None
         config = {"mixed_precision": mixed_precision}
         model = self._get_wrapped_model(
             group, mixed_precision=mixed_precision, cuda_first=False

@@ -76,11 +76,12 @@ class TestSummonFullParamsNoShard(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("writeback", [True, False])
     @parametrize("modify_outer", [True, False])
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     # TODO: CPUOffload summon + writeback does not
     # work when param is not sharded
     # (currently when world_size == 1)
     def test_summon_full_param_writeback(self, writeback, modify_outer, mixed_precision):
+        mixed_precision = MixedPrecision() if mixed_precision else None
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
@@ -108,9 +109,10 @@ class TestSummonFullParams(FSDPTest):
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     @parametrize("modify_outer", [True, False])
     def test_summon_full_param_writeback(self, writeback, cpu_offload, mixed_precision, modify_outer):
+        mixed_precision = MixedPrecision() if mixed_precision else None
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
@@ -120,9 +122,9 @@ class TestSummonFullParams(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_summon_full_param_shard_value(self, mixed_precision):
-
+        mixed_precision = MixedPrecision() if mixed_precision else None
         raw_model = nn.Linear(10, 11)
         raw_model_size = self.get_model_param_count(raw_model)
         expected_shard_size = self.get_expected_sharded_size(raw_model_size)
@@ -150,8 +152,9 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("recurse", [True, False])
     @parametrize("summon_outer", [True, False])
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_summon_full_param_recursive(self, recurse, summon_outer, mixed_precision):
+        mixed_precision = MixedPrecision() if mixed_precision else None
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -223,8 +226,9 @@ class TestSummonFullParams(FSDPTest):
             output.backward()
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_summon_full_params_respects_reshard_after_forward(self, mixed_precision):
+        mixed_precision = MixedPrecision() if mixed_precision else None
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -307,8 +311,9 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_reshard_outside_forward_backward_iteration(self, rank0_only, offload_to_cpu, mixed_precision):
+        mixed_precision = MixedPrecision() if mixed_precision else None
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -393,8 +398,9 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
-    @parametrize("mixed_precision", [MixedPrecision(), None])
+    @parametrize("mixed_precision", [True, False])
     def test_params_count_and_value(self, rank0_only, offload_to_cpu, mixed_precision):
+        mixed_precision = MixedPrecision() if mixed_precision else None
         fsdp_model = FSDP(
             NestedWrappedModule(
                 group=dist.distributed_c10d._get_default_group(),
