@@ -61,21 +61,19 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     return;
   }
   at::Tensor linear_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  // TODO: combine empty & fill_ using full_like or full
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
+  at::Tensor requantize_multiplier_tensor = at::full(quantized_output.sizes(), requantize_multiplier, at::device(at::kCUDA).dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
-    // the number of trailling dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
-    // becomes quantized_output.dim() - 2 + 1. nothing needs to be done for the leading dimensions
-    std::vector<int64_t> new_size(quantized_output.dim() - 1, 1);
-    new_size[0] = bias_.value().size(0);
+    // the number of trailling dimensions is quantized_output.dim() - 2. We also append a leading dimension for clarity
+    std::vector<int64_t> new_size(quantized_output.dim(), 1);
+    new_size[1] = bias_.value().size(0);
     broadcasted_bias = bias_.value().reshape(new_size);
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
@@ -96,12 +94,14 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   } else {
     key.bias_alignment = -1;
   }
-  // cudnn expects tensors to be at least 3D. act is currently 2D. we will create a 3D view
-  // cudnn expects leading dimensions to be the dummy dimensions
+  // the matmul operation is input * transpose(weight), so we will work with the transposed weight
+  auto weight_transposed = transpose(orig_weight, 0, 1);
+  // cudnn expects tensors to be at least 3D. weight_transposed is currently 2D. we will create a 3D view
+  // by appending a leading dummy dimension (cudnn expects leading dimensions to be the dummy dimensions)
   std::vector<int64_t> new_sizes(3, 1);
-  new_sizes.back() = orig_weight.size(0);
-  new_sizes[1] = orig_weight.size(1);
-  auto weight_transposed = transpose(orig_weight, 0, 1).view(new_sizes);
+  new_sizes.back() = weight_transposed.size(1);
+  new_sizes[1] = weight_transposed.size(0);
+  weight_transposed = weight_transposed.view(new_sizes);
   // TODO: remove this with int8 matmul is supported
   auto input_fp = input.int_repr().to(at::kFloat);
   auto weight_fp = weight_transposed.int_repr().to(at::kFloat);
@@ -206,7 +206,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       .build());
   }
 
-  // relu_op computes relu(act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]) / (out_scale / (act_scale * w_scale))
+  // requant_op computes relu(act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]) / (out_scale / (act_scale * w_scale))
   // or relu(act_int8 * w_int8) / (out_scale / (act_scale * w_scale))) if bias is not present.
   // output is a fp32 tensor
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
