@@ -119,7 +119,11 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
+{%- if config["gpu_arch_type"] == "rocm" %}
+      !{{ common.setup_rocm_linux() }}
+{%- else %}
       !{{ common.setup_ec2_linux() }}
+{%- endif %}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
