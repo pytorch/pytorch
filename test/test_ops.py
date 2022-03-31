@@ -8,7 +8,7 @@ import itertools
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import floating_and_complex_types_and, get_all_dtypes
+from torch.testing._internal.common_dtype import floating_and_complex_types_and, all_types_and_complex_and
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      IS_IN_CI, suppress_warnings, noncontiguous_like,
@@ -81,7 +81,7 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in get_all_dtypes():
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
