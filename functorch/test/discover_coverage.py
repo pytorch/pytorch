@@ -677,6 +677,11 @@ class Operator:
             return Support.NO
         return self.no_opinfos_skip_test('test_jvp')
 
+    def supports_jvpvjp(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        return self.no_opinfos_skip_test('test_jvpvjp')
+
     def _supports_vmapjvp_base(self, test):
         if self.name in FACTORY_FNS:
             return Support.YES
@@ -755,6 +760,7 @@ class OperatorSet:
             'supports_jvp',
             'supports_vmapjvp',
             'supports_fast_vmapjvp',
+            'supports_jvpvjp',
         ]
         result = ['test, yes, no, unknown']
         for check in checks:
@@ -779,9 +785,10 @@ result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
 
 print("=" * 30 + " Top 125 Summary " + "=" * 30)
 opset = OperatorSet.from_top125()
-result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
+result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
 pprint.pprint(result)
-result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
 # pprint.pprint(result)
 print(opset.summary())
 
