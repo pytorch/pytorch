@@ -6544,6 +6544,17 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
             raise RuntimeError("`op_info.name` must be 'matmul' or '__rmatmul__'")
     return tuple(sample_inputs)
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = (((S, S), (S, S), (S, S)),
+                  ((S, M), (S, M), (S, S)),
+                  ((M, S), (M, S), (M, M)))
+    sample_inputs = []
+    for q_shape, k_shape, v_shape in test_cases:
+        q = make_tensor(q_shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        k = make_tensor(k_shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        v = make_tensor(v_shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(q, args=(k, v)))
+    return tuple(sample_inputs)
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
                            requires_grad: bool,
@@ -8941,6 +8952,13 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
+    OpInfo('attn',
+           dtypes=floating_types_and(torch.bfloat16, torch.complex64, torch.complex128),
+           supports_out=False,
+           assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_attn),
     OpInfo('allclose',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            ref=np.allclose,
