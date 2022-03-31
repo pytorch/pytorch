@@ -10,11 +10,8 @@ import shutil
 import sys
 from collections import namedtuple
 
-import cimodel.data.simple.android_definitions
-import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
 import cimodel.data.simple.mobile_definitions
-import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
 import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.lib.miniutils as miniutils
@@ -82,11 +79,11 @@ def _for_all_items(items, functor) -> None:
         functor(item_type, item)
 
 def filter_master_only_jobs(items):
-    def _is_master_item(item):
+    def _is_main_or_master_item(item):
         filters = item.get('filters', None)
         branches = filters.get('branches', None) if filters is not None else None
         branches_only = branches.get('only', None) if branches is not None else None
-        return 'master' in branches_only if branches_only is not None else False
+        return ('main' in branches_only or 'master' in branches_only) if branches_only is not None else False
 
     master_deps = set()
 
@@ -95,7 +92,7 @@ def filter_master_only_jobs(items):
         item_name = item.get("name", None)
         if not isinstance(requires, list):
             return
-        if _is_master_item(item) or item_name in master_deps:
+        if _is_main_or_master_item(item) or item_name in master_deps:
             master_deps.update([n.strip('"') for n in requires])
 
     def _do_filtering(items):
@@ -106,7 +103,7 @@ def filter_master_only_jobs(items):
         item_type, item = next(iter(items.items()))
         item_name = item.get("name", None)
         item_name = item_name.strip('"') if item_name is not None else None
-        if not _is_master_item(item) and item_name not in master_deps:
+        if not _is_main_or_master_item(item) and item_name not in master_deps:
             return None
         if 'filters' in item:
             item = item.copy()
@@ -114,7 +111,7 @@ def filter_master_only_jobs(items):
         return {item_type: item}
 
     # Scan of dependencies twice to pick up nested required jobs
-    # I.e. jobs depending on jobs that master-only job depend on
+    # I.e. jobs depending on jobs that main-only job depend on
     _for_all_items(items, _save_requires_if_master)
     _for_all_items(items, _save_requires_if_master)
     return _do_filtering(items)
@@ -136,11 +133,8 @@ def generate_required_docker_images(items):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
-        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
-        cimodel.data.simple.nightly_android.get_workflow_jobs,
         cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
@@ -152,18 +146,20 @@ def gen_build_workflows_tree():
     )
     master_build_jobs = filter_master_only_jobs(build_jobs)
 
-    return {
+    rc = {
         "workflows": {
             "build": {
                 "when": r"<< pipeline.parameters.run_build >>",
                 "jobs": build_jobs,
             },
-            "master_build": {
-                "when": r"<< pipeline.parameters.run_master_build >>",
-                "jobs": master_build_jobs,
-            },
         }
     }
+    if len(master_build_jobs) > 0:
+        rc["workflows"]["master_build"] = {
+            "when": r"<< pipeline.parameters.run_master_build >>",
+            "jobs": master_build_jobs,
+        }
+    return rc
 
 
 # Order of this list matters to the generated config.yml.
@@ -176,7 +172,6 @@ YAML_SOURCES = [
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
-    File("job-specs/pytorch-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),

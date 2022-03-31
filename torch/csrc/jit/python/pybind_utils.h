@@ -587,6 +587,16 @@ inline void guardAgainstNamedTensor(const T& var) {
 // python_ivalue.h
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
 
+// Extract custom class registered with torchbind
+template <typename T>
+c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
+  static_assert(
+      std::is_base_of<CustomClassHolder, T>::value, "T is not a CustomClass");
+  const auto& type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  c10::IValue ivalue = toIValue(obj, type);
+  return std::move(ivalue).toCustomClass<T>();
+}
+
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
 inline std::string friendlyTypeName(py::handle obj) {
@@ -683,13 +693,6 @@ inline py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    if (tensor.is_sparse()) {
-      TORCH_WARN_ONCE(
-          "Using sparse tensors in TorchScript is experimental. Many optimization "
-          "pathways have not been thoroughly tested with sparse tensors. Please "
-          "include the fact that the network is running sparse tensors in any bug "
-          "reports submitted.");
-    }
     guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isStorage()) {
@@ -1209,7 +1212,7 @@ inline py::object _get_operation_for_overload_or_packet(
       if (overload_name == "") {
         self_func = self_func.attr("default");
       } else {
-        self_func.attr(overload_name.c_str());
+        self_func = self_func.attr(overload_name.c_str());
       }
     }
     std::string module_name("torch.ops");

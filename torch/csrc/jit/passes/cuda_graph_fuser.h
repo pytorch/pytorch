@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
+#include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -28,6 +30,16 @@ struct TORCH_API RegisterCudaFuseGraph
     return PassManager::isRegistered();
   }
 };
+
+struct CudaFuserComparisonCallback {
+  using callback_type =
+      std::function<void(const Stack&, const Stack&, const std::string&)>;
+  bool run_fallback;
+  callback_type callback;
+};
+
+TORCH_API CudaFuserComparisonCallback getCudaFuserComparisonCallback();
+TORCH_API void setCudaFuserComparisonCallback(CudaFuserComparisonCallback);
 
 } // namespace jit
 } // namespace torch

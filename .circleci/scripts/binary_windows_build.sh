@@ -14,6 +14,7 @@ if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 
+
 echo "Free Space for CUDA DEBUG BUILD"
 if [[ "${CIRCLECI:-}" == 'true' ]]; then
     export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
@@ -71,6 +72,7 @@ pushd "$BUILDER_ROOT"
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
     ./windows/internal/build_conda.bat
 elif [[ "$PACKAGE_TYPE" == 'wheel' || "$PACKAGE_TYPE" == 'libtorch' ]]; then
+    export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
     ./windows/internal/build_wheels.bat
 fi
 
