@@ -2173,6 +2173,13 @@ class TestDataLoader2(TestCase):
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
+    class Sorter(IterDataPipe):
+        def __init__(self, datapipe):
+            self.datapipe = datapipe
+
+        def __iter__(self):
+            return iter(sorted(self.datapipe))
+
     def test_shuffle(self):
         items = list(range(1000))
         dp = IterableWrapper(items).sharding_filter().shuffle()
@@ -2180,7 +2187,7 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=False,
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False,
                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertEqual(items, list(dl))
 
@@ -2188,10 +2195,23 @@ class TestDataLoader2(TestCase):
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=True,
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True,
                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
+
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
+        dl = DataLoader2(
+            self.Sorter(dp),
+            batch_size=None,
+            num_workers=2,
+            shuffle=True,
+            worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn,
+        )
+        self.assertEqual(list(dl), items)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,

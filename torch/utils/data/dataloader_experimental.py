@@ -9,6 +9,8 @@ import torch.utils.data.backward_compatibility
 import torch.utils.data.graph_settings
 from torch.utils.data import DataLoader, IterDataPipe, communication
 from torch.utils.data.datapipes.iter import IterableWrapper
+from torch.utils.data.graph import traverse
+from torch.utils.data.datapipes.iter import Shuffler
 
 
 class _ThreadingDataLoader2:
@@ -87,8 +89,11 @@ class DataLoader2:
                 raise Exception(
                     'sampler is not yet supported by DataPipes')
             datapipe = dataset
-            if shuffle:
-                # Enforce at least one shuffle in the graph
+            # Enforce at least one shuffle in the graph if shuffle=True
+            if shuffle and not any(
+                    isinstance(dp, Shuffler)
+                    for dp in torch.utils.data.graph_settings.get_all_graph_pipes(traverse(dataset, only_datapipe=True))
+            ):
                 datapipe = datapipe.shuffle()
             if batch_outside_worker and pin_memory:
                 raise Exception(
