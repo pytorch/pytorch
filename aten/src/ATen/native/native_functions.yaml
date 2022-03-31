@@ -3258,6 +3258,11 @@
     SparseCPU, SparseCUDA: narrow_copy_sparse
     CompositeExplicitAutograd: narrow_copy_dense
 
+- func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: narrow_copy_symint
+
 - func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: narrow_copy_dense_cpu_out
