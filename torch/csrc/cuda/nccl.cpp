@@ -154,7 +154,7 @@ struct NcclCommList {
     if (comms) {
       for(const auto i : c10::irange(ndevices)) {
         int dummy_var;
-        if (cudaGetDevice(&dummy_var) != cudaSuccess) {
+        if (C10_CUDA_ERROR_HANDLED(cudaGetDevice(&dummy_var)) != cudaSuccess) {
           /* there are cases when this destructor is called after the
            CUDA driver is already unloaded from the process.
            In these cases, skip ncclCommDestroy */
