@@ -114,7 +114,10 @@ bool skipNode(const std::string& symbol_str, bool flip) {
 //! implementation is actually more relaxed.
 //!
 //! Things that we check:
-//!   a. identical rank & scalar type
+//!   a. identical rank & scalar type & device & requires_grad
+//!        note that: requires_grad is tricky! because autodiff might be marking
+//!                   gradMode to overwrite it. Look at TensorType::matchTensor
+//!                   for the check condition
 //!   b. stride check:
 //!        b.1. identical stride order
 //!        b.2. identical contiguity
@@ -146,7 +149,7 @@ bool complyWith(
       (guard_tensor_type->device().has_value() &&
        (guard_tensor_type->device().value() != tensor.device())) ||
       (guard_tensor_type->requiresGrad().has_value() &&
-       guard_tensor_type->requiresGrad().value() != tensor.requires_grad())) {
+       guard_tensor_type->requiresGrad().value() != (tensor.requires_grad() && at::GradMode::is_enabled()))) {
     return false;
   }
 
