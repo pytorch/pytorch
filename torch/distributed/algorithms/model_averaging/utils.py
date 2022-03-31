@@ -18,7 +18,7 @@ def average_parameters(
     # Do not update any parameter if not in the process group.
     if dist._rank_not_in_group(group_to_use):
         return
-    
+
     if isinstance(params, types.GeneratorType):
         # compatible with model.parameters() input
         flat_params_all_reduce(params, group_to_use)
