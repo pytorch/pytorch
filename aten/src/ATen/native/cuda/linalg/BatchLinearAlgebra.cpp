@@ -1781,7 +1781,6 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   auto m = input.size(-2);
   auto n = input.size(-1);
 
-
   bool magma_batched_buggy = false;
 #if AT_MAGMA_ENABLED()
   // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
@@ -1802,7 +1801,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_CUSOLVER
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-    if (batch_size == 1 || m != n) {
+    if (batch_size == 1 || m != n || m >= 512) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);

@@ -1149,8 +1149,8 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
-def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
-    """Sample inputs for masked var.
+def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked std/var.
     """
     inputs: List[SampleInput] = []
     for unbiased in [False, True]:
@@ -1170,11 +1170,12 @@ def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
                     inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
                     orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
                                                    dim, keepdim=True, mask=inmask)
-                if orig_count.min() <= int(unbiased):
+                if orig_count.min() <= int(unbiased) + 1:
                     # Skip samples that lead to singularities in var
                     # computation resulting nan values both in var and
                     # autograd output that test_grad_fn cannot handle
-                    # correctly.
+                    # correctly. Also, skip samples when the autograd output
+                    # for std could not be handled correctly due to torch.sqrt
                     continue
             inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
@@ -2551,14 +2552,22 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
     sample_inputs = []
     for input_args, broadcasts_input in test_cases:
-        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad) if isinstance(arg, tuple) else arg
+        # addcdiv should accept inputs with zero value
+        # Currently, it throws ZeroDivisionError when the denominator is zero
+        # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
+        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad,
+                     exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         sample_inputs.append(SampleInput(
             args[0],
             args=args[1:],
             broadcasts_input=broadcasts_input))
 
-        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad) if isinstance(arg, tuple) else arg
+        # addcdiv should accept inputs with zero value
+        # Currently, it throws ZeroDivisionError when the denominator is zero
+        # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
+        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad,
+                     exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         sample_inputs.append(SampleInput(
             args[0],
@@ -5321,7 +5330,6 @@ class SpectralFuncInfo(OpInfo):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
-            skipCUDAIfRocm,
         ]
 
         super().__init__(name=name,
@@ -15647,8 +15655,41 @@ op_db: List[OpInfo] = [
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestMasked', 'test_reference_masked'),
         ],
-        sample_inputs_func=sample_inputs_masked_var,
-        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+        sample_inputs_func=sample_inputs_masked_std_var,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        check_batched_grad=True,
+        check_batched_forward_grad=True,
+    ),
+    ReductionOpInfo(
+        '_masked.std',
+        ref=reference_reduction_numpy(np.std) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
+        method_variant=None,
+        nan_policy='propagate',
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        promotes_int_to_float=True,
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # RuntimeError: undefined value tensor
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestReductions', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestMasked', 'test_reference_masked'),
+        ],
+        sample_inputs_func=sample_inputs_masked_std_var,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        check_batched_grad=True,
+        check_batched_forward_grad=True,
     ),
     OpInfo(
         '_masked.softmax',
