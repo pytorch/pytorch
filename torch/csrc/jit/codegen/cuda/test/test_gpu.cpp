@@ -27,14 +27,13 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
-
-#include "test_gpu_validator.h"
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
@@ -802,15 +801,56 @@ TEST_F(NVFuserTest, FusionSimpleArith_CUDA) {
       "Error where explicit add nodes don't match implicit add nodes.");
 }
 
-TEST_F(NVFuserTest, FusionSimpleTypePromote_CUDA) {
+TEST_F(NVFuserTest, FusionScalarTypePromote_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Double* d4 = IrBuilder::create<Double>(4.f);
-  Int* i1 = IrBuilder::create<Int>(3);
-  auto d5 = add(d4, i1);
+  Bool* b = IrBuilder::create<Bool>(true);
+  Double* d = IrBuilder::create<Double>(4.f);
+  Int* i = IrBuilder::create<Int>(3);
+  ComplexDouble* c =
+      IrBuilder::create<ComplexDouble>(c10::complex<double>(1, 2));
 
-  TORCH_CHECK(d5->getDataType() == DataType::Double);
+  TORCH_CHECK(add(b, b)->getDataType() == DataType::Bool);
+  TORCH_CHECK(add(b, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(b, i)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(b, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(d, b)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, i)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(i, b)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(i, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(i, i)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(i, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(c, b)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, d)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, i)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, c)->getDataType() == DataType::ComplexDouble);
+}
+
+TEST_F(NVFuserTest, FusionComplexAbsTypes_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto options = at::TensorOptions().device(at::kCUDA, 0);
+  auto tensor_cf = at::randn({4, 4, 4}, options.dtype(at::kComplexFloat));
+  auto tensor_cd = at::randn({4, 4, 4}, options.dtype(at::kComplexDouble));
+
+  auto type_cf = TensorType::create(tensor_cf);
+  auto tv_cf = IrBuilder::create<TensorView>(type_cf);
+  auto type_cd = TensorType::create(tensor_cd);
+  auto tv_cd = IrBuilder::create<TensorView>(type_cd);
+
+  TORCH_CHECK(
+      tensor_cf.abs().scalar_type() ==
+      data_type_to_aten(abs(tv_cf)->getDataType().value()));
+  TORCH_CHECK(
+      tensor_cd.abs().scalar_type() ==
+      data_type_to_aten(abs(tv_cd)->getDataType().value()));
 }
 
 TEST_F(NVFuserTest, FusionRegister_CUDA) {
@@ -856,8 +896,8 @@ TEST_F(NVFuserTest, FusionTopoSort_CUDA) {
   // e1: v4     =   add(v3, v2)
   // e2: v5     =   add(v2, v4)
   // e3: v6     =   add(v5, v5)
-  Double* v0 = IrBuilder::create<Double>(1.f);
-  Double* v1 = IrBuilder::create<Double>(2.f);
+  Double* v0 = IrBuilder::create<Double>();
+  Double* v1 = IrBuilder::create<Double>();
   Double* v2 = IrBuilder::create<Double>();
   Double* v3 = IrBuilder::create<Double>();
   Double* v4 = IrBuilder::create<Double>();
@@ -1263,32 +1303,27 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
-  if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + 0) * 1) + 0) * 128) + ((nvfuser_index_t)threadIdx.x)) < T0.size[0])) {
-    constexpr nvfuser_index_t i33 = 0;
+  int64_t i52;
+  i52 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i52 < T0.size[0])) {
     float T5[1];
-    constexpr nvfuser_index_t i45 = 0;
-    T5[i45] = 0;
-    constexpr nvfuser_index_t i41 = 0;
-    T5[i41]
-       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + i33) * 1) + i41) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    T5[0] = 0;
+    T5[0]
+       = T1[i52];
     float T4[1];
-    constexpr nvfuser_index_t i47 = 0;
-    T4[i47] = 0;
-    constexpr nvfuser_index_t i39 = 0;
-    T4[i39]
-       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + i33) * 1) + i39) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    T4[0] = 0;
+    T4[0]
+       = T0[i52];
     float T6[1];
-    constexpr nvfuser_index_t i37 = 0;
     float T2[1];
     T2[0]
-      = T4[i37]
-      * T5[i37];
-    T6[i37]
+      = T4[0]
+      * T5[0];
+    T6[0]
       = T2[0]
-      * T4[i37];
-    constexpr nvfuser_index_t i35 = 0;
-    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + i33) * 1) + i35) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
-       = T6[i35];
+      * T4[0];
+    T3[i52]
+       = T6[0];
   }
 }
 )";
@@ -1500,6 +1535,65 @@ TEST_F(NVFuserTest, FusionSimplePWise_CUDA) {
   fe.runFusion({input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
+}
+
+TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  // dimensionality of the problem
+  int nDims = 3;
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeContigTensor(nDims, DataType::ComplexFloat);
+  TensorView* tv1 = makeContigTensor(nDims, DataType::ComplexFloat);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // Do math with it, it returns a `Val*` but can be static_casted back to
+  // TensorView
+  c10::complex<double> scalar1(2.0, 3.0);
+  TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar1));
+  TensorView* tv3 = add(tv0, tv2);
+
+  // Register your outputs
+  fusion.addOutput(tv3);
+
+  // Do transformations, remember, transformations are outputs to inputs
+  // This doesn't have to be in this order
+  tv3->merge(1);
+  tv3->merge(0);
+
+  // Split by n_threads
+  tv3->split(0, 128);
+  tv3->split(0, 4);
+
+  // For all inputs, computeAt the output inline, temporaries should be squeezed
+  // between them
+  tv0->computeAt(tv3, -1);
+  tv1->computeAt(tv3, -1);
+
+  // Parallelize TV3
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(-2)->parallelize(ParallelType::Unroll);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  auto options =
+      at::TensorOptions().dtype(at::kComplexFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({64, 2, 128}, options);
+  at::Tensor input2 = at::rand_like(input1);
+  at::Tensor output = at::empty_like(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input1, input2});
+  fe.runFusion({input1, input2}, {output});
+
+  at::Tensor tv2_ref = input2 + scalar1;
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));
@@ -3703,6 +3797,10 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
       return IrBuilder::create<Double>();
     } else if (desc.second == DataType::Double) {
       return IrBuilder::create<Double>();
+    } else if (desc.second == DataType::ComplexFloat) {
+      return IrBuilder::create<ComplexDouble>();
+    } else if (desc.second == DataType::ComplexDouble) {
+      return IrBuilder::create<ComplexDouble>();
     } else if (desc.second == DataType::Int) {
       return IrBuilder::create<Int>();
     } else {
@@ -3725,6 +3823,8 @@ IValue gen_aten_operand(
     bool rand) {
   if (desc.first == ValType::TensorView) {
     if (desc.second == DataType::Double || desc.second == DataType::Float ||
+        desc.second == DataType::ComplexDouble ||
+        desc.second == DataType::ComplexFloat ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
       auto options = at::TensorOptions()
                          .dtype(data_type_to_aten(desc.second))
@@ -3760,9 +3860,13 @@ IValue gen_aten_operand(
     }
   } else if (desc.first == ValType::Scalar) {
     // IValue scalars can only be double int64 or bool
-    if (desc.second == DataType::Double || desc.second == DataType::Float ||
+    if (desc.second == DataType::ComplexDouble ||
+        desc.second == DataType::ComplexFloat) {
+      return IValue(at::Scalar(c10::complex<double>(1.0, 0.0)));
+    } else if (
+        desc.second == DataType::Double || desc.second == DataType::Float ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
-      return IValue(at::Scalar(1.f));
+      return IValue(at::Scalar(1.0));
     } else if (desc.second == DataType::Int) {
       return IValue(at::Scalar(1));
     } else {
@@ -3882,42 +3986,73 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
   // list within the vector to make this code compatible with some old env
   // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
-      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
       OpTuple{at::acos, UnaryOpType::Acos, "acos"},
       OpTuple{at::asin, UnaryOpType::Asin, "asin"},
       OpTuple{at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
       // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
-      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
       OpTuple{at::cos, UnaryOpType::Cos, "cos"},
       OpTuple{at::cosh, UnaryOpType::Cosh, "cosh"},
-      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
-      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
       OpTuple{at::exp, UnaryOpType::Exp, "exp"},
-      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
-      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
-      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
-      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      // OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
       OpTuple{at::log, UnaryOpType::Log, "log"},
       OpTuple{at::log10, UnaryOpType::Log10, "log10"},
-      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
-      OpTuple{at::log2, UnaryOpType::Log2, "log2"},
       OpTuple{at::neg, UnaryOpType::Neg, "neg"},
       OpTuple{at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
-      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
-      OpTuple{at::round, UnaryOpType::Round, "round"},
-      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
       OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
       OpTuple{at::sin, UnaryOpType::Sin, "sin"},
       OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
-      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
+  };
 
-  std::vector<DataType> dtypes = {DataType::Float, DataType::Double};
+  // The following ops has no complex support in eager mode
+  std::vector<OpTuple> ops_without_complex{
+      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
+      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
+      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
+      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"},
+      OpTuple{at::round, UnaryOpType::Round, "round"},
+      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
+      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
+      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
+      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
+      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"}};
+
+  // Complex support for the following op is not working in nvFuser yet
+  std::vector<OpTuple> ops_skip_complex{
+      // TODO: abs is actually supported in nvFuser, but it has bug!!!
+      // In eager mode, abs(complex_tensor) returns floating point tensor
+      // but in nvFuser, it wrongly returns complex tensor!
+      // We need to:
+      //  1. change our type promotion logic to make a special case for abs
+      //  2. why this bug is not detected here? we should bump up test coverage
+      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
+      // TODO: the following two ops fails with compilation error like
+      // "undefined function rsqrt(complex)", we could implement them in
+      // helpers.cu, but I think it is better to check with Jiterator first,
+      // because Jiterator uses the same string for complex support.
+      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
+      OpTuple{at::log2, UnaryOpType::Log2, "log2"}};
+
+  std::vector<DataType> dtypes = {
+      DataType::Float,
+      DataType::Double,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
+    auto ops_to_test = ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      ops_to_test.insert(
+          ops_to_test.end(),
+          ops_without_complex.begin(),
+          ops_without_complex.end());
+      ops_to_test.insert(
+          ops_to_test.end(), ops_skip_complex.begin(), ops_skip_complex.end());
+    }
     std::for_each(ops.begin(), ops.end(), [&](OpTuple& op) {
       test_op(
           /*blocks*/ 640,
@@ -3934,19 +4069,24 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
           std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
     });
 
-    test_op(
-        /*blocks*/ 128,
-        /*threads*/ 64,
-        /*name*/ "rand_like",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::rand_like(vals[0].toTensor());
-        },
-        /*JIT  Func   */
-        [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    // TODO: why the rand_like test is failing for complex? Is it because each
+    // complex needs to draw 2 random numbers from the RNG? We need to enable
+    // this
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      test_op(
+          /*blocks*/ 128,
+          /*threads*/ 64,
+          /*name*/ "rand_like",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::rand_like(vals[0].toTensor());
+          },
+          /*JIT  Func   */
+          [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    }
   }
 
   dtypes = {DataType::Int, DataType::Int32, DataType::Bool};
@@ -3971,17 +4111,45 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
+
   // see [Note: explicit tuple type for uniform initialization list]
-  std::vector<OpTuple> logic_ops{
+  std::vector<OpTuple> equal_ops{
       OpTuple{at::eq, BinaryOpType::Eq, "eq"},
+      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+
+  // Complex numbers are not ordered
+  std::vector<OpTuple> order_ops{
       OpTuple{at::ge, BinaryOpType::GE, "ge"},
       OpTuple{at::gt, BinaryOpType::GT, "gt"},
       OpTuple{at::le, BinaryOpType::LE, "le"},
-      OpTuple{at::lt, BinaryOpType::LT, "lt"},
-      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+      OpTuple{at::lt, BinaryOpType::LT, "lt"}};
+
+  // see [Note: explicit tuple type for uniform initialization list]
+  std::vector<OpTuple> math_ops{
+      OpTuple{at::div, BinaryOpType::Div, "div"},
+      OpTuple{at::mul, BinaryOpType::Mul, "mul"},
+      OpTuple{at::pow, BinaryOpType::Pow, "pow"}};
+
+  // The following ops has no complex support in eager mode
+  std::vector<OpTuple> math_ops_without_complex{
+      OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
+      OpTuple{at::max, BinaryOpType::Max, "max"},
+      OpTuple{at::min, BinaryOpType::Min, "min"},
+      OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
+      // NOTE: Remainder does not match the Aten impl exactly
+      // despite using an identical function.
+      OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"}};
 
   for (auto dtype : dtypes) {
+    auto logic_ops = equal_ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      logic_ops.insert(logic_ops.end(), order_ops.begin(), order_ops.end());
+    }
     std::for_each(logic_ops.begin(), logic_ops.end(), [&](OpTuple& op) {
       test_op(
           /*blocks*/ 640,
@@ -4002,39 +4170,33 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
               std::make_pair(ValType::TensorView, dtype)));
     });
 
-    // see [Note: explicit tuple type for uniform initialization list]
-    std::vector<OpTuple> math_ops{
-        OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
-        OpTuple{at::div, BinaryOpType::Div, "div"},
-        OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
-        OpTuple{at::max, BinaryOpType::Max, "max"},
-        OpTuple{at::min, BinaryOpType::Min, "min"},
-        OpTuple{at::mul, BinaryOpType::Mul, "mul"},
-        OpTuple{at::pow, BinaryOpType::Pow, "pow"},
-        // NOTE: Remainder does not match the Aten impl exactly
-        // despite using an identical function.
-        OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
-    };
-
-    std::for_each(math_ops.begin(), math_ops.end(), [&](OpTuple& op) {
-      test_op(
-          /*blocks*/ 640,
-          /*threads*/ 64,
-          /*name*/ std::get<2>(op),
-          /*Aten Func   */
-          [&op](std::array<IValue, 2>& vals) {
-            return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
-          },
-          /*JIT  Func   */
-          [&op](Val* in1, Val* in2) -> Val* {
-            return binaryOp(std::get<1>(op), in1, in2);
-          },
-          /*Output      */ std::make_pair(ValType::TensorView, dtype),
-          /*Inputs Tuple*/
-          std::make_tuple(
-              std::make_pair(ValType::TensorView, dtype),
-              std::make_pair(ValType::TensorView, dtype)));
-    });
+    auto enabled_math_ops = math_ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      enabled_math_ops.insert(
+          enabled_math_ops.end(),
+          math_ops_without_complex.begin(),
+          math_ops_without_complex.end());
+    }
+    std::for_each(
+        enabled_math_ops.begin(), enabled_math_ops.end(), [&](OpTuple& op) {
+          test_op(
+              /*blocks*/ 640,
+              /*threads*/ 64,
+              /*name*/ std::get<2>(op),
+              /*Aten Func   */
+              [&op](std::array<IValue, 2>& vals) {
+                return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+              },
+              /*JIT  Func   */
+              [&op](Val* in1, Val* in2) -> Val* {
+                return binaryOp(std::get<1>(op), in1, in2);
+              },
+              /*Output      */ std::make_pair(ValType::TensorView, dtype),
+              /*Inputs Tuple*/
+              std::make_tuple(
+                  std::make_pair(ValType::TensorView, dtype),
+                  std::make_pair(ValType::TensorView, dtype)));
+        });
 
     test_op(
         /*blocks*/ 640,
@@ -4073,59 +4235,66 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
-    test_op(
-        /*blocks*/ 640,
-        /*threads*/ 64,
-        /*name*/ "clamp",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::clamp(vals[0].toTensor(), 0.f, 1.f);
-        },
-        /*JIT  Func   */
-        [&](Val* in1) -> Val* {
-          if (dtype == DataType::Float) {
-            return clamp(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          } else {
-            return clamp(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          }
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
-    test_op(
-        /*blocks*/ 640,
-        /*threads*/ 64,
-        /*name*/ "threshold",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::threshold(vals[0].toTensor(), 0.f, 1.f);
-        },
-        /*JIT  Func   */
-        [&](Val* in1) -> Val* {
-          if (dtype == DataType::Float) {
-            return threshold(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          } else {
-            return threshold(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          }
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    // clamp and threshold are not supported for complex on eager mode
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ "clamp",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::clamp(vals[0].toTensor(), 0.f, 1.f);
+          },
+          /*JIT  Func   */
+          [&](Val* in1) -> Val* {
+            if (dtype == DataType::Float) {
+              return clamp(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            } else {
+              return clamp(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            }
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ "threshold",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::threshold(vals[0].toTensor(), 0.f, 1.f);
+          },
+          /*JIT  Func   */
+          [&](Val* in1) -> Val* {
+            if (dtype == DataType::Float) {
+              return threshold(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            } else {
+              return threshold(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            }
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    }
     test_op(
         /*blocks*/ 640,
         /*threads*/ 64,
@@ -4146,7 +4315,11 @@ TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionCompoundOps_CUDA) {
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
     test_op(
@@ -7142,8 +7315,8 @@ TEST_F(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const size_t dimx = 13;
-  const size_t dimy = 15;
+  const int64_t dimx = 13;
+  const int64_t dimy = 15;
 
   TensorView* tv0 = makeConcreteTensor({dimx, dimy});
   fusion.addInput(tv0);
@@ -7709,6 +7882,11 @@ TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: add test for complex. Currently complex fails with the following
+  // NVRTC compilation error message:
+  //   error: no suitable user-defined conversion from
+  //   "CudaCodeGen::std::complex<double>" to "CudaCodeGen::std::complex<float>"
+  //   exists
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -7782,6 +7960,10 @@ TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
 TEST_F(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: add complex support. Currently, complex fails with the following
+  // NVRTC compilation error:
+  //   error: no instance of overloaded function "__shfl_xor_sync" matches the
+  //   argument list
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -8238,7 +8420,7 @@ TEST_F(NVFuserTest, FusionSmemReduce_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST_F(NVFuserTest, FusionSmemBlockGemm_CUDA) {
@@ -8258,9 +8440,9 @@ TEST_F(NVFuserTest, FusionSmemBlockGemm_CUDA) {
 
   // Schedule
   constexpr int BSX = 16;
-  tv5->split(2, BSX);
+  tv5->split(2, BSX - 1);
   tv5->split(1, BSX);
-  tv5->split(0, BSX);
+  tv5->split(0, BSX + 1);
   // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
   tv5->reorder({{0, 0}, {1, 3}, {2, 2}, {3, 5}, {4, 1}, {5, 4}});
   // M/BSX, N/BSX, K/BSX, MSX, NSX, KSX
@@ -8456,8 +8638,8 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
     tensor->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  const size_t dimx = 1024;
-  const size_t dimy = 4096;
+  const int64_t dimx = 1024;
+  const int64_t dimy = 4096;
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   auto aten_output = at::_softmax(aten_input.to(at::kDouble), -1, false);
@@ -8658,6 +8840,84 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
       __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormBackward_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+  const int64_t NORM_SIZE = 1024;
+  std::vector<int64_t> shape{8, 56, NORM_SIZE};
+  std::vector<int64_t> norm_shape{NORM_SIZE};
+
+  const size_t kM = shape.size();
+  const size_t kN = norm_shape.size();
+  const size_t kOuterNumDims = kM - kN;
+
+  std::vector<int64_t> outer_shape;
+  for (const auto idx : c10::irange(kOuterNumDims)) {
+    outer_shape.push_back(shape[idx]);
+  }
+  for (const auto idx : c10::irange(kOuterNumDims, kM)) {
+    outer_shape.push_back(1);
+  }
+
+  auto grad_out = makeContigTensor(shape.size());
+  auto input = makeContigTensor(shape.size());
+  auto rstd = makeConcreteTensor(outer_shape);
+  auto weight = makeContigTensor(norm_shape.size());
+  fusion.addInput(grad_out);
+  fusion.addInput(input);
+  fusion.addInput(rstd);
+  fusion.addInput(weight);
+
+  auto grads = rms_norm_backward(
+      grad_out, input, norm_shape, rstd, weight, {true, true});
+
+  fusion.addOutput(grads.grad_input);
+  fusion.addOutput(grads.grad_weight);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_grad_out = at::randn(shape, options);
+  at::Tensor aten_input = at::randn(shape, options);
+  at::Tensor aten_weight = at::randn(norm_shape, options);
+  auto at_weight = c10::optional<at::Tensor>(aten_weight);
+
+  const float kEps = 1e-6;
+  auto pow2 = at::pow(aten_input, 2);
+  auto sum = at::sum(pow2, -1, true);
+  auto var = at::mul(sum, 1.0 / NORM_SIZE);
+  auto aten_rstd = at::pow(at::add(var, kEps), -0.5);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> aten_inputs = {
+      aten_grad_out, aten_input, aten_rstd, aten_weight};
+  auto cg_outputs = fec.runFusionWithInputs(aten_inputs);
+
+  auto in_mul_rstd = at::mul(aten_input, aten_rstd);
+  auto grad_out_mul = at::mul(aten_grad_out, in_mul_rstd);
+  auto aten_grad_weight = at::sum(grad_out_mul, c10::IntArrayRef{0, 1});
+  auto sum_loss1 = at::sum(at::mul(aten_grad_out, aten_weight), -1, true);
+  auto sum_loss2 = at::sum(
+      at::mul(
+          at::mul(at::mul(aten_grad_out, aten_weight), aten_input), aten_rstd),
+      -1,
+      true);
+
+  const float fH = NORM_SIZE;
+  auto term1 = at::mul(aten_rstd, 1.0 / fH);
+  auto aten_grad_input = at::mul(at::mul(aten_grad_out, fH), aten_weight);
+  aten_grad_input = at::sub(aten_grad_input, sum_loss1);
+  aten_grad_input = at::sub(
+      aten_grad_input, at::mul(at::mul(aten_input, aten_rstd), sum_loss2));
+  aten_grad_input = at::mul(aten_grad_input, term1);
+  testValidate(
+      &fusion,
+      cg_outputs,
+      aten_inputs,
+      {aten_grad_input, aten_grad_weight},
+      __LINE__,
+      __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
@@ -8690,12 +8950,8 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  schedulePersistentKernel(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
-
-  torch::jit::fuser::cuda::FusionExecutor fe;
-  fe.compileFusion(&fusion, {aten_input}, lparams);
-  auto cg_outputs = fe.runFusion({aten_input}, lparams);
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({aten_input});
 
   testValidate(
       &fusion,
@@ -8706,8 +8962,54 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
        std::get<2>(aten_outputs)},
       __LINE__,
       __FILE__,
-      "",
-      lparams);
+      "");
+}
+
+TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormalization_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int64_t NORM_SIZE = 1024;
+  const float kEps = 1e-6;
+  Double* eps_ptr = IrBuilder::create<Double>(kEps);
+
+  std::vector<int64_t> input_shape{8, 56, NORM_SIZE};
+  std::vector<int64_t> norm_shape{NORM_SIZE};
+
+  auto input = makeContigTensor(input_shape.size());
+  fusion.addInput(input);
+  auto result = rms_norm(input, norm_shape, nullptr, eps_ptr);
+
+  fusion.addOutput(result.output);
+  fusion.addOutput(result.invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn(input_shape, options);
+  c10::optional<at::Tensor> aten_weight = c10::nullopt;
+
+  auto pow2 = at::pow(aten_input, 2);
+
+  auto sum = at::sum(pow2, -1, true);
+  auto var = at::mul(sum, 1.0 / NORM_SIZE);
+  auto invstd = at::pow(at::add(var, kEps), -0.5);
+  auto output = at::mul(aten_input, invstd);
+  //// Check reduction axis is same for all reductions
+  //// Generate Launch Parameters
+  auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({aten_input});
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {aten_input},
+      {output, invstd},
+      __LINE__,
+      __FILE__,
+      "");
 }
 
 TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
@@ -8772,11 +9074,218 @@ TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       executor_cache.fusion(),
       cg_outputs,
       aten_inputs,
-      {at_run_mean,
-       at_run_var,
-       std::get<0>(aten_outputs),
+      {std::get<0>(aten_outputs),
        std::get<1>(aten_outputs),
        std::get<2>(aten_outputs)},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
+TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalization_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  const float kMomentum = 0.1;
+  const float kEps = 1e-5;
+  const bool kUseInputStats = true;
+  std::vector<int64_t> input_shape{20, 100, 35, 45};
+
+  auto input = makeSymbolicTensor(input_shape.size());
+  auto weight = makeSymbolicTensor(1);
+  auto bias = makeSymbolicTensor(1);
+  auto running_mean = makeSymbolicTensor(1);
+  auto running_var = makeSymbolicTensor(1);
+  fusion->addInput(input);
+  fusion->addInput(weight);
+  fusion->addInput(bias);
+  fusion->addInput(running_mean);
+  fusion->addInput(running_var);
+
+  Double* momentum = IrBuilder::create<Double>(kMomentum);
+  Double* eps = IrBuilder::create<Double>(kEps);
+
+  auto result = instance_norm(
+      input,
+      weight,
+      bias,
+      running_mean,
+      running_var,
+      kUseInputStats,
+      momentum,
+      eps);
+
+  fusion->addOutput(result.output);
+  // fusion->addOutput(result.mean);
+  // fusion->addOutput(result.invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_input = at::randn(input_shape, options);
+  auto at_weight = at::ones({input_shape[1]}, options);
+  auto at_bias = at::zeros({input_shape[1]}, options);
+  auto at_run_mean = at::zeros({input_shape[1]}, options);
+  auto at_run_var = at::ones({input_shape[1]}, options);
+
+  std::vector<IValue> aten_inputs = {
+      at_input, at_weight, at_bias, at_run_mean, at_run_var};
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+  auto cg_outputs_full = {at_run_mean, at_run_var, cg_outputs[0]};
+
+  auto aten_outputs = at::instance_norm(
+      at_input,
+      c10::optional<at::Tensor>(at_weight),
+      c10::optional<at::Tensor>(at_bias),
+      c10::optional<at::Tensor>(at_run_mean),
+      c10::optional<at::Tensor>(at_run_var),
+      kUseInputStats,
+      kMomentum,
+      kEps,
+      false);
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      aten_inputs,
+      // TODO: can run_mean/run_var be checked here?
+      // fusion_outputs.size() == aten_outputs.size() && aten_outputs.size() ==
+      // fusion->outputs().size() - output_alias_indices.size()
+      {aten_outputs},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
+TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalizationBackward_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
+  auto fusion_forward = std::make_unique<Fusion>();
+  FusionGuard fg_forward(fusion_forward.get());
+
+  const float kMomentum = 0.1;
+  const float kEps = 1e-5;
+  const bool kUseInputStats = true;
+  const bool channels_last = true;
+  const int B = 2;
+  const int C = 5;
+  const int S = 3;
+  std::vector<int64_t> input_shape{B, C, S, S, S};
+  // explicit channels-last for NVFuser
+  std::vector<int64_t> nvfuser_input_shape{B, S, S, S, C};
+
+  auto input = makeContigTensor(input_shape.size());
+  auto weight = makeContigTensor(1);
+  auto bias = makeContigTensor(1);
+  fusion_forward->addInput(input);
+  fusion_forward->addInput(weight);
+  fusion_forward->addInput(bias);
+
+  Double* momentum = IrBuilder::create<Double>(kMomentum);
+  Double* eps = IrBuilder::create<Double>(kEps);
+  auto result_forward = instance_norm(
+      input,
+      weight,
+      bias,
+      nullptr,
+      nullptr,
+      kUseInputStats,
+      momentum,
+      eps,
+      channels_last);
+  fusion_forward->addOutput(result_forward.output);
+  fusion_forward->addOutput(result_forward.mean);
+  fusion_forward->addOutput(result_forward.invstd);
+
+  FusionExecutorCache executor_cache_forward(std::move(fusion_forward));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_input = at::randn(input_shape, options)
+                      .to(at::MemoryFormat::ChannelsLast3d)
+                      .set_requires_grad(true);
+  auto at_input_nvfuser = at_input.clone().detach().permute({0, 2, 3, 4, 1});
+  auto at_weight = at::ones({input_shape[1]}, options).set_requires_grad(true);
+  auto at_weight_nvfuser = at_weight.clone().detach();
+  auto at_bias = at::zeros({input_shape[1]}, options).set_requires_grad(true);
+  auto at_bias_nvfuser = at_bias.clone().detach();
+  std::vector<torch::jit::IValue> aten_inputs_forward = {
+      at_input_nvfuser, at_weight_nvfuser, at_bias_nvfuser};
+  // out, mean, invstd
+  auto outputs_forward =
+      executor_cache_forward.runFusionWithInputs(aten_inputs_forward);
+  auto at_out = at::instance_norm(
+      at_input,
+      c10::optional<at::Tensor>(at_weight),
+      c10::optional<at::Tensor>(at_bias),
+      c10::optional<at::Tensor>(c10::nullopt),
+      c10::optional<at::Tensor>(c10::nullopt),
+      kUseInputStats,
+      kMomentum,
+      kEps,
+      false);
+  auto at_grad =
+      at::randn(input_shape, options).to(at::MemoryFormat::ChannelsLast3d);
+  auto at_grad_nvfuser = at_grad.clone().detach().permute({0, 2, 3, 4, 1});
+  at_out.backward(at_grad);
+  auto fusion_backward = std::make_unique<Fusion>();
+  FusionGuard fg_backward(fusion_backward.get());
+
+  input = makeContigTensor(input_shape.size());
+  auto grad_output = makeContigTensor(input_shape.size());
+  weight = makeContigTensor(1);
+  auto save_mean = makeContigTensor(2);
+  auto save_invstd = makeContigTensor(2);
+  auto dummy = makeContigTensor(0);
+
+  fusion_backward->addInput(input);
+  fusion_backward->addInput(grad_output);
+  fusion_backward->addInput(weight);
+  fusion_backward->addInput(dummy); // dummy for run_mean
+  fusion_backward->addInput(dummy); // dummy for run_var
+  fusion_backward->addInput(save_mean);
+  fusion_backward->addInput(save_invstd);
+
+  auto result_backward = instance_norm_backward(
+      input,
+      grad_output,
+      weight,
+      nullptr,
+      nullptr,
+      save_mean,
+      save_invstd,
+      kUseInputStats,
+      eps,
+      {true, true, true},
+      channels_last);
+
+  fusion_backward->addOutput(result_backward.grad_input);
+  fusion_backward->addOutput(result_backward.grad_weight);
+  fusion_backward->addOutput(result_backward.grad_bias);
+
+  FusionExecutorCache executor_cache_backward(std::move(fusion_backward));
+  std::vector<torch::jit::IValue> aten_inputs_backward = {
+      at_input_nvfuser,
+      at_grad_nvfuser,
+      at_weight_nvfuser,
+      at::empty({}),
+      at::empty({}),
+      outputs_forward[1],
+      outputs_forward[2]};
+  auto outputs_backward =
+      executor_cache_backward.runFusionWithInputs(aten_inputs_backward);
+  outputs_backward[0] = outputs_backward[0].permute({0, 4, 1, 2, 3});
+  testValidate(
+      executor_cache_backward.fusion(),
+      outputs_backward,
+      aten_inputs_backward,
+      {at_input.grad(), at_weight.grad(), at_bias.grad()},
       __LINE__,
       __FILE__,
       "");
@@ -8884,8 +9393,8 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
     }
   }
 
-  const size_t dimx = 1024;
-  const size_t dimy = 16384;
+  const int64_t dimx = 1024;
+  const int64_t dimy = 16384;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
@@ -9328,7 +9837,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
       "",
       lparams);
 
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST_F(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
@@ -10463,7 +10972,7 @@ TEST_F(NVFuserTest, FusionTrivialReduction_CUDA) {
   fusion.addOutput(tv1);
 
   TORCH_CHECK(
-      ir_utils::getReductionOps(&fusion).empty(),
+      ir_utils::getReductionOps(&fusion, true /* ignore_trivial */).empty(),
       "Trivial reduction picked up by fusion");
 
   const auto options =
@@ -12174,7 +12683,7 @@ TEST_F(NVFuserTest, FusionWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12220,7 +12729,7 @@ TEST_F(NVFuserTest, FusionBlockWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12266,7 +12775,7 @@ TEST_F(NVFuserTest, FusionGridWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12311,7 +12820,7 @@ TEST_F(NVFuserTest, FusionRfactorWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12357,7 +12866,7 @@ TEST_F(NVFuserTest, FusionWelfordSchedule_CUDA) {
   auto at_n = at::ones({M}, options_int) * N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {at_avg, at_var, at_n},
@@ -12439,7 +12948,7 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
   at_n = at_n.sum({axis});
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {aten_input},
       {at_avg, at_var, at_n},
@@ -12453,6 +12962,11 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
 TEST_F(NVFuserTest, FusionWelfordShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: enable this for complex. Currently, complex yields
+  // silent wrong results:
+  //   Detected abs error of: 3.8062
+  //     absolute tolerance was set to 2.23704e-06
+  //     and relative tolerance set to 2.23704e-08
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -14201,348 +14715,6 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 }
 
-TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, 10, 4, 10};
-
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
-
-  auto x_add_bias = add(x, bias);
-  auto x_view = view(x_add_bias, input_shape, output_shape);
-  fusion.addOutput(x_view);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_bias = at::randn(input_shape, options);
-  std::vector<IValue> aten_inputs = {at_x, at_bias};
-
-  auto lparams = schedulePointwise(&fusion, aten_inputs);
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, aten_inputs, lparams);
-  auto outputs = fe.runFusion(aten_inputs, lparams);
-
-  auto at_x_add_bias = at_x + at_bias;
-  auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-
-  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
-}
-
-TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  // The number of elements in input and output shapes do not match,
-  // so this view transformation is invalid.
-  // 2 * 10 * 40 != 2 * 50 * 4 * 10
-
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, 50, 4, 10};
-
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
-
-  auto x_add_bias = add(x, bias);
-  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
-}
-
-TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  // Only one dimension can be inferred in the output shape.
-  // Otherwise, the size of the dimensions is ambiguous.
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, -1, 4, -1};
-
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
-
-  auto x_add_bias = add(x, bias);
-  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
-}
-
-TEST_F(NVFuserTest, FusionViewFailReduction_CUDA) {
-  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-  Fusion& fusion = *fusion_ptr.get();
-  FusionGuard fg(&fusion);
-
-  // View is only supported by the pointwise scheduler,
-  // so it should fail with any reduction operations
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, 10, 2, 20};
-
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
-
-  auto x_add_bias = add(x, bias);
-  auto x_view = view(x_add_bias, input_shape, output_shape);
-  auto x_sum = sum(x_view, {-1});
-
-  fusion.addOutput(x_sum);
-
-  const auto options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-
-  at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_bias = at::randn(input_shape, options);
-
-  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
-  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
-}
-
-TEST_F(NVFuserTest, FusionViewFailPersistent_CUDA) {
-  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-  Fusion& fusion = *fusion_ptr.get();
-  FusionGuard fg(&fusion);
-
-  // View is only supported by the pointwise scheduler,
-  // so it should fail with any persistent normalization operations
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, 10, 2, 20};
-
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
-
-  auto x_add_bias = add(x, bias);
-  auto x_view = view(x_add_bias, input_shape, output_shape);
-  auto x_softmax = softmax(x_view, -1);
-
-  fusion.addOutput(x_softmax);
-
-  const auto options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-
-  at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_bias = at::randn(input_shape, options);
-
-  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
-  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
-}
-
-void addViewGeluFusion(
-    std::vector<int64_t>& input_shape,
-    std::vector<int64_t>& output_shape) {
-  for (auto hasImplicitBroadcast : {false, true}) {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    TensorView* x = (hasImplicitBroadcast)
-        ? makeConcreteTensor(input_shape)
-        : makeSymbolicTensor(input_shape.size());
-    TensorView* bias = (hasImplicitBroadcast)
-        ? makeConcreteTensor(input_shape)
-        : makeSymbolicTensor(input_shape.size());
-    fusion.addInput(x);
-    fusion.addInput(bias);
-
-    auto x_add_bias = add(x, bias);
-    auto x_view = view(x_add_bias, input_shape, output_shape);
-    auto y = gelu(x_view);
-    fusion.addOutput(y);
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor at_x = at::randn(input_shape, options);
-    at::Tensor at_bias = at::randn(input_shape, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
-
-    auto lparams = schedulePointwise(&fusion, aten_inputs);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion, aten_inputs, lparams);
-    auto outputs = fe.runFusion(aten_inputs, lparams);
-
-    auto at_x_add_bias = at_x + at_bias;
-    auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-    auto at_y = at::gelu(at_x_view);
-
-    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
-  }
-}
-
-TEST_F(NVFuserTest, FusionViewSplit_CUDA) {
-  std::vector<int64_t> input_shape{80};
-  std::vector<int64_t> output_shape{2, 4, 10};
-  addViewGeluFusion(input_shape, output_shape);
-}
-
-TEST_F(NVFuserTest, FusionViewBroadcast_CUDA) {
-  std::vector<int64_t> input_shape{80};
-  std::vector<int64_t> output_shape{1, 80};
-  addViewGeluFusion(input_shape, output_shape);
-}
-
-TEST_F(NVFuserTest, FusionViewMerge_CUDA) {
-  std::vector<int64_t> input_shape{2, 40, 7};
-  std::vector<int64_t> output_shape{560};
-  addViewGeluFusion(input_shape, output_shape);
-}
-
-TEST_F(NVFuserTest, FusionViewAllShmoo_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> examples = {
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
-      {{3, 17, 80, 1, 9}, {51, 1, 2, 4, 10, 9}},
-      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
-      {{22, 22, 2}, {22, 11, 1, 1, 4}},
-      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
-      {{1, 1, 333, 1}, {1, 1, 333, 1}},
-      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
-      {{1, 333, 1}, {1, 37, 9, 1}},
-      {{1, 333}, {1, 1, 1, 111, 1, 3}},
-      {{22, 1, 22, 1}, {484}},
-      {{1, 333, 1}, {333}},
-      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
-      {{1, 7844, 1, 7}, {1, 27454, 2}}};
-
-  for (auto e : examples) {
-    addViewGeluFusion(e.first, e.second);
-  }
-}
-
-TEST_F(NVFuserTest, FusionViewInferShmoo_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> examples = {
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, -1, 3, 2772}},
-      {{3, 17, 80, 1}, {51, 1, 2, 4, -1}},
-      {{3, 17, 80, 1, 9}, {-1, 1, 2, 4, 10, 9}},
-      {{2, 3, 4, 5}, {1, 6, 1, -1, 2, 5, 1}},
-      {{22, 22, 2}, {22, -1, 1, 1, 4}},
-      {{37, 9, 7, 6, 10}, {333, 2, -1, 3, 35}},
-      {{1, 1, 333, 1}, {1, 1, -1, 1}},
-      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, -1}},
-      {{1, 333, 1}, {1, 37, -1, 1}},
-      {{1, 333}, {1, 1, 1, -1, 1, 3}},
-      {{22, 1, 22, 1}, {-1}},
-      {{1, 333, 1}, {-1}},
-      {{1, 27454, 1, 2}, {1, 7844, 1, -1}},
-      {{1, 7844, 1, 7}, {1, -1, 2}}};
-
-  for (auto e : examples) {
-    addViewGeluFusion(e.first, e.second);
-  }
-}
-
-void geluViewAddFusion(
-    std::vector<int64_t> input_shape,
-    std::vector<int64_t> output_shape) {
-  for (auto hasImplicitBroadcast : {false, true}) {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    TensorView* x = (hasImplicitBroadcast)
-        ? makeConcreteTensor(input_shape)
-        : makeSymbolicTensor(input_shape.size());
-    TensorView* bias = (hasImplicitBroadcast)
-        ? makeConcreteTensor(output_shape)
-        : makeSymbolicTensor(output_shape.size());
-    fusion.addInput(x);
-    fusion.addInput(bias);
-
-    auto x_gelu = gelu(x);
-    auto x_view = view(x_gelu, input_shape, output_shape);
-    auto y = add(x_view, bias);
-    fusion.addOutput(y);
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor at_x = at::randn(input_shape, options);
-    at::Tensor at_bias = at::randn(output_shape, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
-
-    auto lparams = schedulePointwise(&fusion, aten_inputs);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion, aten_inputs, lparams);
-    auto outputs = fe.runFusion(aten_inputs, lparams);
-
-    auto at_x_gelu = at::gelu(at_x);
-    auto at_x_view = at::native::view(at_x_gelu, output_shape);
-    auto at_y = at_x_view + at_bias;
-
-    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
-  }
-}
-
-TEST_F(NVFuserTest, FusionViewStride_CUDA) {
-  typedef std::vector<int64_t> shape;
-  typedef std::pair<shape, shape> view_example;
-
-  std::vector<view_example> examples = {
-      {{1, 27454, 2}, {1, 7844, 7}},
-      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      {{1, 7844, 1, 7}, {1, 27454, 2}}};
-
-  for (auto e : examples) {
-    geluViewAddFusion(e.first, e.second);
-  }
-}
-
-void geluViewBinaryAddFusion(
-    std::vector<int64_t> input_shape1,
-    std::vector<int64_t> input_shape2,
-    std::vector<int64_t> output_shape) {
-  for (auto hasImplicitBroadcast : {false, true}) {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    TensorView* x = (hasImplicitBroadcast)
-        ? makeConcreteTensor(input_shape1)
-        : makeSymbolicTensor(input_shape1.size());
-    TensorView* bias = (hasImplicitBroadcast)
-        ? makeConcreteTensor(input_shape2)
-        : makeSymbolicTensor(input_shape2.size());
-    fusion.addInput(x);
-    fusion.addInput(bias);
-
-    auto x_gelu = gelu(x);
-    auto x_view = view(x_gelu, input_shape1, output_shape);
-    auto bias_view = view(bias, input_shape2, output_shape);
-    auto y = add(x_view, bias_view);
-    fusion.addOutput(y);
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor at_x = at::randn(input_shape1, options);
-    at::Tensor at_bias = at::randn(input_shape2, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
-
-    auto lparams = schedulePointwise(&fusion, aten_inputs);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion, aten_inputs, lparams);
-    auto outputs = fe.runFusion(aten_inputs, lparams);
-
-    auto at_x_gelu = at::gelu(at_x);
-    auto at_x_view = at::native::view(at_x_gelu, output_shape);
-    auto at_bias_view = at::native::view(at_bias, output_shape);
-    auto at_y = at_x_view + at_bias_view;
-
-    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
-  }
-}
-
-TEST_F(NVFuserTest, FusionViewBinary_CUDA) {
-  geluViewBinaryAddFusion({27454, 2}, {54908}, {7844, 7});
-}
-
 TEST_F(NVFuserTest, FusionVectorization1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -14919,9 +15091,9 @@ TEST_F(NVFuserTest, FusionValidateParallelize4_CUDA) {
 
   tv1->setMemoryType(MemoryType::Global);
 
-  // tv1 and tv2 do not have the same shape
+  // tv1 and tv2 do not have the same shape but global memory comm is supported.
   FusionExecutor fe;
-  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+  fe.compileFusion(&fusion);
 }
 
 TEST_F(NVFuserTest, FusionValidateParallelize5_CUDA) {
@@ -14953,8 +15125,10 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  auto tv0 = makeSymbolicTensor(3);
-  auto tv1 = makeSymbolicTensor(4);
+  int64_t W = 5, X = 6, Y = 7, Z = 8;
+
+  auto tv0 = makeConcreteTensor({X, Y, Z});
+  auto tv1 = makeConcreteTensor({W, X, Y, Z});
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
@@ -14966,9 +15140,9 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   tv4->merge(0);
   tv4->merge(0);
   tv4->merge(0);
-  tv4->split(0, 128);
-  tv4->split(0, 1);
-  tv4->split(0, 1);
+  tv4->split(0, 4);
+  tv4->split(0, 3);
+  tv4->split(0, 2);
 
   TransformPropagator::from(tv4);
 
@@ -14979,6 +15153,7 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
   // Validation should throw an exception saying the first axes of tv2
   // and tv3 have incompatible parallelization. See also issue #995.
@@ -15776,8 +15951,7 @@ TEST_F(NVFuserTest, FusionBNRepro_CUDA) {
   auto at_mean = std::get<1>(at_results);
   auto at_invstd = std::get<2>(at_results);
 
-  std::vector<at::Tensor> aten_outputs = {
-      input4_ref, input5_ref, at_output, at_mean, at_invstd};
+  std::vector<at::Tensor> aten_outputs = {at_output, at_mean, at_invstd};
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
@@ -15997,9 +16171,13 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
                                    //  keeps normalization scheduler away)
   TensorView* tv6 = add(tv5, tv2); //  Group 1 (Broadcast after reduce)
 
-  fusion->addOutput(tv6);
   // Note: test alias;
   fusion->aliasOutputToInput(tv6, tv0);
+  // TODO: support output on aliased fusion #1488
+  // remove tv7 after #1488
+  // fusion->addOutput(tv6);
+  TensorView* tv7 = add(tv6, IrBuilder::create<Double>(1)); // Group 0
+  fusion->addOutput(tv7);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({128, 65}, options);
@@ -16010,13 +16188,15 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
   auto t4 = std::get<0>(at::max(t3, 0));
   auto t5 = t4.add(t1);
   auto t6 = t5.add(t2);
+  auto t7 = t6.add(1.0);
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
   auto outputs = executor_cache.runFusionWithInputs({t0, t1, t2});
 
+  // TODO: support output on aliased fusion #1488
   // validating aliasing
-  TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
+  // TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
 
   TORCH_CHECK(
       executor_cache.getMostRecentKernelRuntime()->isSegmented(),
@@ -16029,7 +16209,7 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
       "segmentation didn't happen as expected");
 
   testValidate(
-      executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
+      executor_cache.fusion(), outputs, {t0, t1, t2}, {t7}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionWelford1Output_CUDA) {
@@ -17807,8 +17987,8 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   tv0->computeAt(tv3, 1);
 
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+  tv3->axis(-1)->parallelize(ParallelType::TIDz);
 
   // Make sure a WAR sync is inserted at the end of the outer loop
   GpuLower gpulw(&fusion);
@@ -17816,7 +17996,7 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
     if (auto loop = dynamic_cast<kir::ForLoop*>(kir_node)) {
       const auto& body = loop->body().exprs();
       TORCH_CHECK(!body.empty());
-      auto last_expr = dynamic_cast<kir::Sync*>(body.back());
+      auto last_expr = dynamic_cast<kir::BlockSync*>(body.back());
       TORCH_CHECK(last_expr != nullptr, "Invalid expr found");
       TORCH_CHECK(last_expr->isWarHazardSync(), "Not a sync for WAR hazard");
     }
@@ -18027,7 +18207,7 @@ TEST_F(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
 
   auto x_add_bias = add(x, bias);
   auto x_bcast = broadcast(x_add_bias, {false, false, true, false});
-  auto y = unaryOp(UnaryOpType::Gelu, x_bcast);
+  auto y = gelu(x_bcast);
   fusion.addOutput(y);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -18524,31 +18704,27 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
-  if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + 0) * 1) + 0) * 128) + ((nvfuser_index_t)threadIdx.x)) < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
-    constexpr nvfuser_index_t i120 = 0;
+  int64_t i167;
+  i167 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i167 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
     __half T9[1];
-    constexpr nvfuser_index_t i132 = 0;
-    T9[i132] = 0;
-    constexpr nvfuser_index_t i128 = 0;
-    T9[i128]
-       = T2[((((((((((nvfuser_index_t)blockIdx.x) * 1) + i120) * 1) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * (((1 * T0.size[2]) * T0.size[1]) * T0.size[3])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + i120) * 1) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * ((1 * T0.size[2]) * T0.size[1])) + (((((((((((nvfuser_index_t)blockIdx.x) * 1) + i120) * 1) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * (1 * T0.size[2])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + i120) * 1) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3]) * 1)];
+    T9[0] = 0;
+    T9[0]
+       = T2[((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * ((T0.size[2] * T0.size[1]) * T0.size[3])) + ((((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * (T0.size[2] * T0.size[1])) + (((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * T0.size[2]) + (((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3])];
     __half T8[1];
-    constexpr nvfuser_index_t i134 = 0;
-    T8[i134] = 0;
-    constexpr nvfuser_index_t i126 = 0;
-    T8[i126]
-       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + i120) * 1) + i126) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    T8[0] = 0;
+    T8[0]
+       = T0[i167];
     __half T10[1];
-    constexpr nvfuser_index_t i124 = 0;
     float T3[1];
     T3[0]
-       = __half2float(T9[i124]);
+       = __half2float(T9[0]);
     float T4[1];
     T4[0]
        = T3[0];
     float T1[1];
     T1[0]
-       = __half2float(T8[i124]);
+       = __half2float(T8[0]);
     float T5[1];
     T5[0]
       = T1[0]
@@ -18556,11 +18732,10 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     float T6[1];
     T6[0]
        = relu(T5[0]);
-    T10[i124]
+    T10[0]
        = __float2half(T6[0]);
-    constexpr nvfuser_index_t i122 = 0;
-    T7[(((((((((nvfuser_index_t)blockIdx.x) * 1) + i120) * 1) + i122) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
-       = T10[i122];
+    T7[i167]
+       = T10[0];
   }
 }
 )";
@@ -20225,7 +20400,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
-  auto mem_types = {MemoryType::Shared, MemoryType::Local};
+  std::vector<MemoryType> mem_types = {MemoryType::Shared, MemoryType::Local};
 
   for (auto mem_type : mem_types) {
     Fusion fusion;
@@ -20439,6 +20614,713 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
   fusion.printKernel();
 }
 #endif
+
+TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
+  // Derived from an expression sorting issue when using loop map, now expr
+  // sorting uses parallel map.
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int V = 2, W = 3, X = 4, Y = 5, Z = 6;
+
+  // setup fusion
+  auto tv0 = TensorViewBuilder()
+                 .ndims(5)
+                 .dtype(DataType::Half)
+                 .contiguity(std::vector<bool>(5, true))
+                 .shape({V, W, X, Y, Z})
+                 .build();
+
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = castOp(DataType::Float, tv1);
+
+  auto tvs = Welford(tv2, {1, 2, 3, 4});
+  auto tv3 = tvs.avg;
+  auto tv4 = tvs.var_sum;
+  auto tv5 = tvs.n;
+
+  // avg
+  auto tv6 = broadcast(tvs.avg, {false, true, true, true, true});
+
+  // var
+  auto tv7 = mul(tv4, IrBuilder::create<Double>(1. / (W * X * Y * Z)));
+  auto tv8 = add(tv7, IrBuilder::create<Double>(1.e-6));
+  auto tv9 = broadcast(tv8, {false, true, true, true, true});
+  auto tv10 = rsqrt(tv9);
+
+  auto tv11 = castOp(DataType::Float, tv1);
+  auto tv12 = sub(tv11, tv6);
+  auto tv13 = mul(tv12, tv10);
+
+  auto tv14 = set(tv13);
+  fusion.addOutput(tv14);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDy);
+  tv3->axis(2)->parallelize(ParallelType::BIDx);
+  tv3->axis(3)->parallelize(ParallelType::TIDx);
+  tv3->axis(4)->parallelize(ParallelType::Vectorize);
+
+  // tv3->reorder({{1, -2}});
+
+  auto rfactor = ir_utils::rfactorHelper(tv3, {1, 4});
+
+  scheduler_utils::parallelizeAllLike(rfactor, ir_utils::allTvs(&fusion));
+
+  for (auto tv : ir_utils::allTvs(&fusion)) {
+    if (tv != tv1 || tv != tv3) {
+      for (auto i : c10::irange(tv->nDims())) {
+        if (isParallelTypeVectorize(tv->axis(i)->getParallelType())) {
+          tv->axis(i)->parallelize(ParallelType::Serial);
+        }
+      }
+    }
+  }
+
+  tv0->computeAt(tv14, 1);
+  tv13->computeAt(tv14, -2);
+  tv2->computeAt(tv14, -1, ComputeAtMode::MostInlined);
+  tv11->computeAt(tv14, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({V, W, X, Y, Z}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0}, LaunchParams(X, V, -1, Y, -1, -1));
+
+  auto t0_double = t0.to(at::kDouble);
+
+  auto at_mu = at::mean(t0_double, {1, 2, 3, 4})
+                   .unsqueeze(-1)
+                   .unsqueeze(-1)
+                   .unsqueeze(-1)
+                   .unsqueeze(-1);
+  auto at_var = at::var(t0_double, {1, 2, 3, 4}, false)
+                    .unsqueeze(-1)
+                    .unsqueeze(-1)
+                    .unsqueeze(-1)
+                    .unsqueeze(-1);
+
+  auto at_out = t0_double.sub(at_mu).div(at_var.add(1.e-6).sqrt());
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {t0},
+      {at_out},
+      __LINE__,
+      __FILE__,
+      "",
+      LaunchParams(X, V, -1, Y, -1, -1));
+}
+
+// Test code generation of allocated scalars
+TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Fusion is just a dummy container in this test, just used for
+  // getting a Kernel container
+  auto tv0 = makeSymbolicTensor(0);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  GpuLower gpulw(&fusion);
+  auto kernel = gpulw.kernel();
+
+  // Set the kernel as the current fusion
+  FusionGuard kg(kernel);
+
+  // Create alocated scalars
+  auto ks0 = add(kernel->zeroVal(), kernel->oneVal());
+  auto ks0_alloc = IrBuilder::create<kir::Allocate>(
+      ks0, MemoryType::Local, kernel->oneVal());
+
+  auto ks1 = add(ks0, kernel->oneVal());
+  auto ks1_alloc = IrBuilder::create<kir::Allocate>(
+      ks1, MemoryType::Local, kernel->oneVal());
+
+  auto tk0 = kernel->inputs()[0]->as<TensorView>();
+  auto tki0 = IrBuilder::create<kir::TensorIndex>(tk0, std::vector<Val*>{ks0});
+  auto tki1 = IrBuilder::create<kir::TensorIndex>(tk0, std::vector<Val*>{ks1});
+  auto tk0_expr = IrBuilder::create<UnaryOp>(UnaryOpType::Set, tki0, tki1);
+
+  // Insert the scalar expression and the allocation of the
+  // output directly to the kernel
+  auto proxy = kir::KernelInternalProxy(kernel);
+
+  const auto indent = "  ";
+  const auto ks0_name = "i" + std::to_string(ks0->name());
+  const auto ks1_name = "i" + std::to_string(ks1->name());
+  const auto tk0_name = "T" + std::to_string(tk0->name());
+
+  auto& exprs = proxy.topLevelExprs();
+  exprs.push_back(tk0_expr);
+
+  // Invalid code gen
+  const auto no_alloc_code = codegen::generateCudaKernel(kernel);
+
+  // Without alloc, Int vals are just inlined, resulting in:
+  // t0[(0 + 1)] = t0[((0 + 1) + 1)]
+  std::stringstream no_alloc_ref;
+  no_alloc_ref << "\n"
+               << indent << tk0_name << "[(0 + 1)]\n"
+               << indent << indent << " = " << tk0_name << "[((0 + 1) + 1)];\n";
+
+  TORCH_CHECK(
+      no_alloc_code.find(no_alloc_ref.str()) != std::string::npos,
+      "Invalid code generation. Expected:",
+      no_alloc_ref.str(),
+      "Actual:\n",
+      no_alloc_code);
+
+  // Insert proper allocations and definitions
+  exprs.insert(std::find(exprs.begin(), exprs.end(), tk0_expr), ks0_alloc);
+  exprs.insert(
+      std::find(exprs.begin(), exprs.end(), tk0_expr), ks0->definition());
+  exprs.insert(std::find(exprs.begin(), exprs.end(), tk0_expr), ks1_alloc);
+  exprs.insert(
+      std::find(exprs.begin(), exprs.end(), tk0_expr), ks1->definition());
+
+  const auto valid_code = codegen::generateCudaKernel(kernel);
+
+  std::stringstream valid_ref;
+  valid_ref << "\n"
+            << indent << tk0_name << "[" << ks0_name << "]\n"
+            << indent << indent << " = " << tk0_name << "[" << ks1_name
+            << "];\n";
+
+  TORCH_CHECK(
+      valid_code.find(valid_ref.str()) != std::string::npos,
+      "Invalid code generation. Expected:",
+      valid_ref.str(),
+      "Actual:\n",
+      valid_code);
+}
+
+TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
+  if (disableIndexHoisting()) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = set(tv2);
+  auto tv4 = set(tv3);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv1->split(-1, 4);
+  tv2->split(-1, 4);
+  tv3->merge(0, 1);
+  tv3->split(0, 8);
+  tv5->merge(0, 1);
+  tv5->split(0, 8);
+  tv4->computeAt(tv5, -1);
+
+  tv1->setMemoryType(MemoryType::Global);
+  tv2->setMemoryType(MemoryType::Global);
+  tv3->setMemoryType(MemoryType::Global);
+
+  GpuLower gpulw(&fusion);
+  auto kernel = gpulw.kernel();
+
+  auto is_index_times_ns = [](Val* val, Val* index, std::string name) -> bool {
+    auto def = dynamic_cast<BinaryOp*>(val->definition());
+    if (def == nullptr) {
+      return false;
+    }
+    return def->getBinaryOpType() == BinaryOpType::Mul &&
+        def->rhs()->isA<NamedScalar>() &&
+        def->rhs()->as<NamedScalar>()->name() == name && def->lhs() == index;
+  };
+
+  // Validate indices in the kernel are hoisted as
+  // intended. Validation could be also done by just string comparison
+  // as the parser test, but updating such tests would be tedious.
+  for (auto top_level_loop :
+       ir_utils::filterByType<kir::ForLoop>(kernel->topLevelExprs())) {
+    auto innermost_loop = top_level_loop;
+    while (auto first_expr_loop = dynamic_cast<kir::ForLoop*>(
+               innermost_loop->body().exprs().at(0))) {
+      innermost_loop = first_expr_loop;
+    }
+    const auto& exprs = innermost_loop->body().exprs();
+    TORCH_CHECK(!exprs.empty(), "No expression found");
+    TORCH_CHECK(
+        exprs.at(0)->isA<kir::Allocate>(),
+        "Invalid expression: ",
+        exprs.at(0)->toString());
+    auto hoisted_index = exprs.at(0)->as<kir::Allocate>()->buffer();
+    kir::Predicate* pred = nullptr;
+    for (auto expr : exprs) {
+      if (expr->isA<kir::IfThenElse>()) {
+        pred = expr->as<kir::IfThenElse>()->predicate();
+        auto arith_expr = expr->as<kir::IfThenElse>()->thenBody().exprs().at(0);
+        auto out_ti = arith_expr->outputs()[0]->as<kir::TensorIndex>();
+        if (out_ti->view()->name() == 1) {
+          // Ref: T1[*, hoisted_index] = T0[*, hoisted_index * T0.stride];
+          auto t1_index = out_ti->index(1);
+          TORCH_CHECK(
+              t1_index == hoisted_index,
+              "Invalid index: ",
+              t1_index->toInlineString());
+          // Pred: hoisted_index < T0.size[1]
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 0);
+          // hoisted_index * T0.stride[1]
+          auto t0_index = in0->index(1);
+          TORCH_CHECK(
+              is_index_times_ns(t0_index, hoisted_index, "T0.stride[1]"),
+              "Invalid index: ",
+              t0_index->toInlineString());
+        } else if (out_ti->view()->name() == 2) {
+          // Ref: T3[*, hoisted_index] = T2[*, hoisted_index];
+          auto out_index = out_ti->index(1);
+          TORCH_CHECK(
+              out_index == hoisted_index,
+              "Invalid index: ",
+              out_index->toInlineString());
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 1);
+          auto in0_index = in0->index(1);
+          TORCH_CHECK(
+              in0_index == hoisted_index,
+              "Invalid index: ",
+              in0_index->toInlineString());
+        } else if (out_ti->view()->name() == 3) {
+          // Ref: T3[hoisted_index] = T2[hoisted_index];
+          auto out_index = out_ti->index(0);
+          TORCH_CHECK(
+              out_index == hoisted_index,
+              "Invalid index: ",
+              out_index->toInlineString());
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 2);
+          auto in0_index = in0->index(0);
+          TORCH_CHECK(
+              in0_index == hoisted_index,
+              "Invalid index: ",
+              in0_index->toInlineString());
+        } else if (out_ti->view()->name() == 4) {
+          // Ref: T4[0] = T3[hoisted_index];
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 3);
+          auto in0_index = in0->index(0);
+          TORCH_CHECK(
+              in0_index == hoisted_index,
+              "Invalid index: ",
+              in0_index->toInlineString());
+        } else if (out_ti->view()->name() == 5) {
+          // Ref: T5[hoisted_index] = T4[0]
+          auto out_index = out_ti->index(0);
+          TORCH_CHECK(
+              out_index == hoisted_index,
+              "Invalid index: ",
+              out_index->toInlineString());
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+        }
+      }
+    }
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({15, 17}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Hoist indices for vectorized tensors
+TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
+  if (disableIndexHoisting()) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(1);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = add(tv2, tv3);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv5->split(-1, 4);
+  TransformPropagator::from(tv5);
+
+  tv4->split(-1, 3);
+
+  tv0->computeAt(tv5, 1);
+  tv1->computeAt(tv5, 1);
+
+  tv2->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv3->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv5->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({16}, options);
+  auto t1 = at::randn({16}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionTestGridComm_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  int X = 3, Y = 4, Z = 2;
+  auto tv0 = makeConcreteTensor({X, Y, Z});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({X, Y, Z});
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = add(tv2, tv1);
+  auto tv4 = set(tv3);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv2->setMemoryType(MemoryType::Global);
+  tv3->setMemoryType(MemoryType::Global);
+  tv4->setMemoryType(MemoryType::Global);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+  tv2->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::Vectorize);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::BIDy);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDy);
+  tv4->axis(1)->parallelize(ParallelType::BIDx);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDy);
+  tv5->axis(1)->parallelize(ParallelType::BIDx);
+  tv5->axis(2)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({X, Y, Z}, options);
+  auto t1 = at::randn({X, Y, Z}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// See issue https://github.com/csarofeen/pytorch/issues/1497
+// TODO: Enable
+#if 0
+TEST_F(NVFuserTest, FusionTestGridComm2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int64_t W = 3, X = 4;
+
+  auto tv0 = makeConcreteTensor({X});
+  auto tv1 = makeConcreteTensor({W, X});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv4->merge(0);
+  tv4->split(0, 2);
+
+  TransformPropagator::from(tv4);
+
+  tv3->computeAt(tv4, 1);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv2->setMemoryType(MemoryType::Global);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({X}, options);
+  auto t1 = at::randn({W, X}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+#endif
+
+// Vectorized reset test for double buffered registers
+TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = sum(tv1, {0});
+  auto tv2c = tv2->cache_before();
+
+  fusion.addOutput(tv2);
+
+  auto tv1cw = tv1->cache_after();
+  auto tv1cr = tv1cw->cache_after();
+
+  tv1cw->split(-1, 32);
+  tv1cr->split(-1, 32);
+  tv1cr->split(-1, 4);
+  tv1cr->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv1cw->computeAt(tv1cr, 1);
+  tv0->computeAt(tv1cw, -1);
+  tv2c->split(-1, 32);
+  tv2c->split(-1, 4);
+  tv1cr->computeAt(tv2c, 2);
+
+  tv1cw->setMemoryType(MemoryType::Shared);
+  tv1cr->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+  auto t0 = at::randn({200}, options);
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  auto ref = (t0 + 1).sum({0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of issue #1493
+TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = view(tv0, {2, 3}, {6});
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  auto tv4 = broadcast(tv3, {true, false});
+  auto tv5 = add(tv4, tv1);
+
+  fusion.addOutput(tv5);
+
+  tv5->merge(0);
+  tv0->computeAt(tv5, -1);
+  tv1->computeAt(tv5, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({2, 3}, options);
+  auto t1 = at::randn({1, 6}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = (at::native::view(t0, {6}) + 1).unsqueeze(0) + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of #1521
+TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto immediate_scalr = IrBuilder::create<Double>(0.1);
+  // Adding an immediate scalar value as an input is not allowed
+  ASSERT_ANY_THROW(fusion.addInput(immediate_scalr));
+
+  // Instead, use a symbolic value
+  auto symbolic_scalar = IrBuilder::create<Double>();
+  fusion.addInput(symbolic_scalar);
+
+  auto tv1 = add(tv0, symbolic_scalar);
+  fusion.addOutput(tv1);
+
+  // Make sure the kernel is compiled.
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+}
+
+// Repro of #1506
+TEST_F(NVFuserTest, FusionVectorizeContigIndex_CUDA) {
+  std::vector<int64_t> shape{14, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+
+  // Vectorize by 4 should be allowed
+  tv2->split(0, 4);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv2, 1);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+}
+
+// Make sure the same fusion as FusionVectorizeContigIndex fails if
+// not contig.
+TEST_F(NVFuserTest, FusionVectorizeContigIndexFail_CUDA) {
+  std::vector<int64_t> shape{14, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+
+  tv2->split(0, 4);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv2, 1);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+
+  // This should fail at the launch time as 14 is not divisible by the
+  // vector word size. The two domains are merged, but they are not
+  // contiguous, so contig indexing is not involved in this case.
+  ASSERT_ANY_THROW(fe.runFusion({t0}));
+}
+
+TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->split(0, 4);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const int n = 12;
+  auto t0 = at::randn({n}, options);
+  // Shift by one to make it non-aligned
+  auto t0_misaligned = at::randn({n + 1}, options).index({Slice(1)});
+  auto t1_misaligned = at::empty({n + 1}, options).index({Slice(1)});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+
+  // Pass misaligned input. This must fail.
+  ASSERT_ANY_THROW(fe.runFusion({t0_misaligned}));
+
+  // Pass misaligned output. This must fail too.
+  ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
+}
 
 } // namespace jit
 } // namespace torch
