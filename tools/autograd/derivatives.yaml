@@ -594,8 +594,12 @@
   self: grad * (result + 1)
   result: auto_element_wise
 
-- name: expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::ExpectIntArrayRef(self.sizes()))
+- name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
+  self: at::sum_to(grad, self.sizes())
+  result: auto_linear
+
+- name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  self: at::sum_to(grad, c10::ExpectIntArrayRef(self.sym_sizes()))
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)

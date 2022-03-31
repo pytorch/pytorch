@@ -798,8 +798,12 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, c10::ArrayRef<c10::SymInt> packed_size, bool /*unused*/) {
+Tensor expand_symint(const Tensor& self, c10::ArrayRef<c10::SymInt> packed_size, bool /*unused*/) {
   auto size = ExpectIntArrayRef(packed_size);
+  return expand(self, size, false);
+}
+
+Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
@@ -906,7 +910,8 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, SymInt
         regular narrow on _values() */
     new_indices = indices;
     int64_t dense_dim = dim - sparse_dim + 1;
-    new_values = self._values().narrow_copy(dense_dim, start, length);
+    // TODO: why there's no `narrow_copy` method???
+    new_values = self._values().narrow_copy(dense_dim, start, SymInt{length});
   }
 
   auto newTensor = at::sparse_coo_tensor(new_indices, new_values, new_sizes);

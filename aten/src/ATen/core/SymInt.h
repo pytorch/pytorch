@@ -23,7 +23,7 @@ namespace c10 {
 class TORCH_API SymInt {
     public:
 
-    SymInt(int64_t d):
+    explicit SymInt(int64_t d):
     data_(d) {};
 
     int64_t data_;
@@ -44,7 +44,7 @@ class TORCH_API SymInt {
     }
 
     SymInt operator+(SymInt sci) {
-        return data_ + sci.data_;
+        return SymInt(data_ + sci.data_);
     }
 };
 

@@ -722,7 +722,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #endif
 
   TENSORIMPL_MAYBE_VIRTUAL inline c10::ArrayRef<c10::SymInt> sym_sizes() const {
-    return c10::ArrayRef<c10::SymInt>(sizes());
+    return c10::ArrayRef<c10::SymInt>(reinterpret_cast<const c10::SymInt*>(sizes().data()), sizes().size());
   }
 
  private:

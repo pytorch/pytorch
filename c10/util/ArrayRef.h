@@ -92,46 +92,38 @@ class ArrayRef final {
     debugCheckNullptrInvariant();
   }
 
-  template <
-      typename T1 = T,
-      typename T2,
-      typename = std::enable_if_t<
-          std::is_same<c10::SymInt, T1>::value &&
-          std::is_same<int64_t, T2>::value>>
-  ArrayRef(const std::vector<T2>& Vec)
-      : Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
-        Length(Vec.size()) {
-    debugCheckNullptrInvariant();
-  }
-
-  template <
-      typename T1 = T,
-      typename T2,
-      typename = std::enable_if_t<
-          std::is_same<SymInt, T1>::value && std::is_same<int64_t, T2>::value>>
-  ArrayRef(const ArrayRef<T2> ar)
-      : Data(reinterpret_cast<const T*>(ar.data())), Length(ar.size()) {}
-
-  // template <typename T1 = T, size_t N,
-  // typename = std::enable_if_t<std::is_same<SymInt, T1>::value>>
-  // //typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
-  // ArrayRef(const SmallVector<int64_t, N>& Vec):
-  //   Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
-  //   Length(Vec.size()) { debugCheckNullptrInvariant();
+  // template <
+  //     typename T1 = T,
+  //     typename T2,
+  //     typename = std::enable_if_t<
+  //         std::is_same<c10::SymInt, T1>::value &&
+  //         std::is_same<int64_t, T2>::value>>
+  // ArrayRef(const std::vector<T2>& Vec)
+  //     : Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
+  //       Length(Vec.size()) {
+  //   debugCheckNullptrInvariant();
   // }
 
-  template <
-      typename T1 = T,
-      typename T2,
-      typename U,
-      typename = std::enable_if_t<
-          std::is_same<SymInt, T1>::value && std::is_same<int64_t, T2>::value>>
-  // typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
-  ArrayRef(const SmallVectorTemplateCommon<T2, U>& Vec)
-      : Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
-        Length(Vec.size()) {
-    debugCheckNullptrInvariant();
-  }
+  // template <
+  //     typename T1 = T,
+  //     typename T2,
+  //     typename = std::enable_if_t<
+  //         std::is_same<SymInt, T1>::value && std::is_same<int64_t, T2>::value>>
+  // ArrayRef(const ArrayRef<T2> ar)
+  //     : Data(reinterpret_cast<const T*>(ar.data())), Length(ar.size()) {}
+
+  // template <
+  //     typename T1 = T,
+  //     typename T2,
+  //     typename U,
+  //     typename = std::enable_if_t<
+  //         std::is_same<SymInt, T1>::value && std::is_same<int64_t, T2>::value>>
+  // // typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
+  // ArrayRef(const SmallVectorTemplateCommon<T2, U>& Vec)
+  //     : Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
+  //       Length(Vec.size()) {
+  //   debugCheckNullptrInvariant();
+  // }
 
   template <
       typename Container,
@@ -164,12 +156,14 @@ class ArrayRef final {
   template <size_t N>
   /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
-  /// Construct an ArrayRef from a std::initializer_list.
-  /* implicit */ constexpr ArrayRef(const std::initializer_list<T>& Vec)
-      : Data(
-            std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
-                                             : std::begin(Vec)),
-        Length(Vec.size()) {}
+
+/// Construct an ArrayRef from a std::initializer_list.
+/* implicit */ constexpr ArrayRef(const std::initializer_list<T>& Vec)
+    : Data(
+          std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
+                                            : std::begin(Vec)),
+      Length(Vec.size()) {}
+
 
   /// @}
   /// @name Simple Operations
