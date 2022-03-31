@@ -94,6 +94,7 @@ bool isSupported(Node* node) {
   };
   static const OperatorSet supported_misc_set{
       "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::stack(Tensor[] tensors, int dim=0) -> Tensor",
       "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
   };
   // clang-format on
@@ -771,7 +772,7 @@ class TensorExprFuser {
 
     std::vector<Node*> nodes_to_merge = {to_merge};
 
-    if (to_merge->kind() == aten::cat) {
+    if (to_merge->kind() == aten::cat || to_merge->kind() == aten::stack) {
       Node* listconstruct = to_merge->input(0)->node();
       nodes_to_merge.push_back(listconstruct);
     }
@@ -1053,7 +1054,6 @@ class TensorExprFuser {
     REQ(isFusableOnDevice(node));
     REQ(operators_not_to_fuse.find(node->kind()) ==
         operators_not_to_fuse.end());
-
     for (Value* input : node->inputs()) {
       if (auto const& tt = input->type()->cast<TensorType>()) {
         auto st = tt->scalarType();
@@ -1066,7 +1066,7 @@ class TensorExprFuser {
         }
       }
     }
-    if (node->kind() == aten::cat) {
+    if (node->kind() == aten::cat || node->kind() == aten::stack) {
       REQ(node->input(0)->node()->kind() == prim::ListConstruct);
       REQ(node->input(0)->uses().size() == 1);
       REQ(node->input(1)->node()->kind() == prim::Constant);
@@ -1120,7 +1120,8 @@ class TensorExprFuser {
     REQ(nInputs <= subgraphArgLimit);
 
     // Device checks
-    if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
+    if (consumer->kind() != aten::cat && producer->kind() != aten::cat &&
+        consumer->kind() != aten::stack && producer->kind() != aten::stack) {
       // aten::cat needs a special handling because it takes a Tensor[] as its
       // input We deal with that in the code below.
       auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
@@ -1154,7 +1155,7 @@ class TensorExprFuser {
       REQ(producer->kind() != prim::Constant);
     }
 
-    if (producer->kind() == aten::cat) {
+    if (producer->kind() == aten::cat || producer->kind() == aten::stack) {
       REQ(producer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
@@ -1172,7 +1173,8 @@ class TensorExprFuser {
         REQ(isFusableOnDevice(input->node()));
       }
       REQ((nInputs + listConstruct->inputs().size()) <= subgraphArgLimit);
-    } else if (consumer->kind() == aten::cat) {
+    } else if (
+        consumer->kind() == aten::cat || consumer->kind() == aten::stack) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
