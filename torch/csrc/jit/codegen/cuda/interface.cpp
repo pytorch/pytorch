@@ -149,7 +149,8 @@ bool complyWith(
       (guard_tensor_type->device().has_value() &&
        (guard_tensor_type->device().value() != tensor.device())) ||
       (guard_tensor_type->requiresGrad().has_value() &&
-       guard_tensor_type->requiresGrad().value() != (tensor.requires_grad() && at::GradMode::is_enabled()))) {
+       guard_tensor_type->requiresGrad().value() !=
+           (tensor.requires_grad() && at::GradMode::is_enabled()))) {
     return false;
   }
 
