@@ -388,7 +388,7 @@ void KernelPrecomputedIntegers::bindTensorMetaData(
     const at::Tensor& at_tensor) {
   std::vector<std::pair<Val*, int64_t>> ret;
   const auto root_domain =
-      TensorDomain::noReductions(tv->domain()->getRootDomain());
+      TensorDomain::noReductions(tv->domain()->getMaybeRFactorDomain());
   TORCH_INTERNAL_ASSERT(
       at_tensor.ndimension() == static_cast<int>(root_domain.size()),
       "Something went wrong configuring launch. Inputs do not match.");
