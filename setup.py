@@ -933,7 +933,7 @@ if __name__ == '__main__':
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
-        package_dir= {'torch.utils.hipify':'third_party/hipify_torch/hipify'},
+        package_dir={'torch.utils.hipify': 'third_party/hipify_torch/hipify'},
         entry_points=entry_points,
         install_requires=install_requires,
         package_data={

@@ -16,7 +16,7 @@ import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
-from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
+from .hipify.hipify_python import GeneratedFileCleaner
 from typing import List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
