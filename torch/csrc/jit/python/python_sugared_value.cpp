@@ -1175,6 +1175,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   };
   for (const auto& name : tensor_names) {
     if (obj.ptr() == py::module::import("torch").attr(name.first).ptr()) {
+      // torch.LongTensor and other related functions create on cpu,
+      // TODO: add support for torch.cuda.LongTensor for gpu
       return LegacyTensorConstructor::create(
           prim::LegacyTypedConstructor, name.second, at::kCPU);
     }
