@@ -8,7 +8,7 @@ import itertools
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import floating_and_complex_types_and, get_all_dtypes
+from torch.testing._internal.common_dtype import floating_and_complex_types_and, all_types_and_complex_and
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      IS_IN_CI, suppress_warnings, noncontiguous_like,
@@ -85,10 +85,10 @@ class TestCommon(TestCase):
             assert torch.complex32 not in claimed_supported
             assert torch.complex32 not in claimed_backward_supported
 
-        backward_extra_dtypes = (torch.bfloat16, torch.float16) + \
-            ((torch.complex32,) if op.supports_complex32 else ())
+        include_complex32 = ((torch.complex32,) if op.supports_complex32 else ())
         # dtypes to try to backward in
-        allowed_backward_dtypes = floating_and_complex_types_and(*backward_extra_dtypes)
+        allowed_backward_dtypes = floating_and_complex_types_and(
+            *((torch.half, torch.bfloat16) + include_complex32))
 
         # lists for (un)supported dtypes
         supported_dtypes = []
@@ -101,7 +101,8 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in get_all_dtypes(include_complex32=op.supports_complex32):
+        for dtype in all_types_and_complex_and(
+                *((torch.half, torch.bfloat16, torch.bool) + include_complex32)):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
