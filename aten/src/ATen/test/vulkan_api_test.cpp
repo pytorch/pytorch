@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/native/vulkan/ops/Gru.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
