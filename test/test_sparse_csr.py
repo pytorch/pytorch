@@ -89,9 +89,6 @@ def _test_addmm_addmv(
             return mat
 
     if mode == "all_sparse":
-        convert_layout(t)
-        convert_layout(m)
-        convert_layout(v)
         res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
         res1 = res1.to_dense()
     elif mode == "dense_result":
