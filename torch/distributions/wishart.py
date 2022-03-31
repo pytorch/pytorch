@@ -20,7 +20,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
     ).sum(-1)
 
-def _clamp_with_eps(x: torch.Tensor) -> torch.Tensor:
+def _clamp_above_eps(x: torch.Tensor) -> torch.Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
 
@@ -189,7 +189,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
-        noise = _clamp_with_eps(
+        noise = _clamp_above_eps(
             self._dist_chi2.rsample(sample_shape).sqrt()
         ).diag_embed(dim1=-2, dim2=-1)
 
@@ -258,11 +258,10 @@ class Wishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return (
-            - 0.5 * nu * p * _log_2
-            - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            - torch.mvlgamma(0.5 * nu, p=p)
-            + 0.5 * (nu - p - 1) * torch.linalg.slogdet(value).logabsdet
-            - 0.5 * torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
+            - nu * (p * _log_2 / 2 + self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1))
+            - torch.mvlgamma(nu / 2, p=p)
+            + (nu - p - 1) / 2 * torch.linalg.slogdet(value).logabsdet
+            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
         )
 
     def entropy(self):
@@ -270,25 +269,21 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            + 0.5 * p * (p + 1) * _log_2
-            + torch.mvlgamma(0.5 * nu, p=p)
-            - 0.5 * (nu - p - 1) * _mvdigamma(0.5 * nu, p=p)
-            + 0.5 * nu * p
+            (p + 1) * (p * _log_2 / 2 + self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1))
+            + torch.mvlgamma(nu / 2, p=p)
+            - (nu - p - 1) / 2 * _mvdigamma(nu / 2, p=p)
+            + nu * p / 2
         )
 
     @property
     def _natural_params(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        return (
-            - 0.5 * self.precision_matrix,
-            0.5 * (nu - p - 1),
-        )
+        return - self.precision_matrix / 2, (nu - p - 1) / 2
 
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
         return (
-            (y + 0.5 * (p + 1)) * (- torch.linalg.slogdet(-2 * x).logabsdet + _log_2 * p)
-            + torch.mvlgamma(y + 0.5 * (p + 1), p=p)
+            (y + (p + 1) / 2) * (- torch.linalg.slogdet(- 2 * x).logabsdet + _log_2 * p)
+            + torch.mvlgamma(y + (p + 1) / 2, p=p)
         )

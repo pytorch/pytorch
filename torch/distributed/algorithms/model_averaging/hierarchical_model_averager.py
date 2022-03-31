@@ -4,14 +4,15 @@ from collections import OrderedDict
 import logging
 
 import torch.distributed as dist
+import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as utils
 
 logger = logging.getLogger(__name__)
 
 
-class HierarchicalModelAverager:
+class HierarchicalModelAverager(averagers.ModelAverager):
     r"""
-    A group of model averagers used for hierarchical model averaging (hierarchical SGD).
+    Runs hierarchical model averaging (`hierarchical SGD <https://arxiv.org/pdf/2010.12998.pdf>`_).
     Process groups of different sizes are organized in a hierarhicy, and they average parameters
     by using different periods concurrently after the warm-up stage.
     This is an extension of :class:`~torch.distributed.algorithms.model_averaging.averagers.PeriodicModelAverager`
@@ -92,6 +93,7 @@ class HierarchicalModelAverager:
     """
 
     def __init__(self, period_group_size_dict=None, warmup_steps=0, process_group=None):
+        super().__init__(process_group)
         if not period_group_size_dict:
             raise ValueError("Arg ``period_group_size_dict`` must not be empty.")
         self._periods = list(period_group_size_dict.keys())
@@ -105,10 +107,7 @@ class HierarchicalModelAverager:
                 "by DistributedDataParallel in the backward pass. Therefore, only "
                 "DistributedDataParallel should be used for this case."
             )
-        ovall_group : dist.ProcessGroup = (
-            process_group if process_group is not None else dist.group.WORLD
-        )
-        overall_group_size = dist.get_world_size(group=ovall_group)
+        overall_group_size = dist.get_world_size(group=self.process_group)
         if list(period_group_size_dict.values())[-1] != overall_group_size:
             raise ValueError(
                 "The last value in arg ``period_process_group_dict`` "
@@ -122,14 +121,13 @@ class HierarchicalModelAverager:
                 "if no higher-level averaging.")
             if group_size != overall_group_size:
                 self.period_process_group_dict[period], _ = dist.new_subgroups(
-                    group_size=group_size, group=ovall_group)
+                    group_size=group_size, group=self.process_group)
             else:
-                self.period_process_group_dict[period] = ovall_group
+                self.period_process_group_dict[period] = self.process_group
 
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
-        self.step = 0
 
     def _find_process_group(self):
         """

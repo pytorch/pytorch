@@ -42,6 +42,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -1096,23 +1097,32 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
-             bool _save_mobile_debug_info = false) {
-            m._save_for_mobile(filename, _extra_files, _save_mobile_debug_info);
+             bool _save_mobile_debug_info = false,
+             bool _use_flatbuffer = false) {
+            m._save_for_mobile(
+                filename,
+                _extra_files,
+                _save_mobile_debug_info,
+                _use_flatbuffer);
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap(),
-          py::arg("_save_mobile_debug_info") = false)
+          py::arg("_save_mobile_debug_info") = false,
+          py::arg("_use_flatbuffer") = false)
       .def(
           "_save_to_buffer_for_mobile",
           [](Module& m,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
-             bool _save_mobile_debug_info = false) {
+             bool _save_mobile_debug_info = false,
+             bool _use_flatbuffer = false) {
             std::ostringstream buf;
-            m._save_for_mobile(buf, _extra_files, _save_mobile_debug_info);
+            m._save_for_mobile(
+                buf, _extra_files, _save_mobile_debug_info, _use_flatbuffer);
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap(),
-          py::arg("_save_mobile_debug_info") = false)
+          py::arg("_save_mobile_debug_info") = false,
+          py::arg("_use_flatbuffer") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -1891,6 +1901,10 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_mobile_model_contained_types(in);
       });
+  m.def("_nn_module_to_mobile", [](const Module& module) {
+    CompilationOptions options;
+    return jitModuleToMobile(module, options);
+  });
   py::class_<OperatorInfo>(m, "OperatorInfo")
       .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
   m.def("_get_model_ops_and_info", [](const std::string& filename) {
@@ -1995,7 +2009,16 @@ void initJitScriptBindings(PyObject* module) {
     setGraphExecutorOptimize(optimize);
   });
 
-  m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+  m.def(
+      "_get_graph_executor_optimize",
+      [](c10::optional<bool> new_setting = c10::nullopt) {
+        bool old_value = getGraphExecutorOptimize();
+        if (new_setting) {
+          setGraphExecutorOptimize(*new_setting);
+        }
+        return old_value;
+      },
+      py::arg("new_settings") = nullptr);
 
   m.def(
       "_enable_mobile_interface_call_export",
@@ -2190,10 +2213,6 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
-
-  m.def(
-      "_set_should_use_format_with_string_table",
-      setShouldUseFormatWithStringTable);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(

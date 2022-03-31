@@ -2343,6 +2343,8 @@ class TestDistributions(TestCase):
     def test_wishart_log_prob(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
+
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
         if version.parse(scipy.__version__) < version.parse("1.7.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
@@ -2366,6 +2368,11 @@ class TestDistributions(TestCase):
 
         # Double-check that batched versions behave the same as unbatched
         df = torch.rand(5, requires_grad=True) + ndim - 1
+
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
+            df += 1.
+
         tmp = torch.randn(5, ndim, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
@@ -2384,6 +2391,8 @@ class TestDistributions(TestCase):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
+
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
         if version.parse(scipy.__version__) < version.parse("1.7.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
@@ -2573,6 +2582,7 @@ class TestDistributions(TestCase):
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         d = InverseWishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((ndim * ndim * 100000,))
+
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.5, rtol=0)
         empirical_var = samples.var(0)
@@ -3329,12 +3339,12 @@ class TestDistributions(TestCase):
                 'alpha': torch.tensor([1, 1, 1])
             }),
             (StudentT, {
-                'df': torch.tensor([1, 1]),
-                'scale': torch.tensor([1, 1, 1])
+                'df': torch.tensor([1., 1.]),
+                'scale': torch.tensor([1., 1., 1.])
             }),
             (StudentT, {
-                'df': torch.tensor([1, 1]),
-                'loc': torch.tensor([1, 1, 1])
+                'df': torch.tensor([1., 1.]),
+                'loc': torch.tensor([1., 1., 1.])
             })
         ]
 
@@ -4863,6 +4873,8 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 # scipy var for Wishart only supports scalars
+
+                # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
                 Wishart(
                     (20 if version.parse(scipy.__version__) < version.parse("1.7.0") else 19) + positive_var[0],
                     cov_tensor,
