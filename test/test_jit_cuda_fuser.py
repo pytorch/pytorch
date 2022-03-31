@@ -4284,16 +4284,16 @@ class TestCudaFuser(JitTestCase):
         grad = torch.randn(10, device="cuda")
 
         def f(x):
-          a = x.cos().cos()
-          return a
+            a = x.cos().cos()
+            return a
         scripted = torch.jit.script(f)
 
         with profile(activities=[ProfilerActivity.CPU]) as prof:
-          for _ in range(5):
-            inp.grad = None
-            out = scripted(inp)
-            out.backward(grad)
-        
+            for _ in range(5):
+                inp.grad = None
+                out = scripted(inp)
+                out.backward(grad)
+
         # check that we do not have fallback triggered
         self.assertEqual(prof.events().table().find("fallback"), -1)
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
