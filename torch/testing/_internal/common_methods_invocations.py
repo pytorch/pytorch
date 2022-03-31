@@ -11264,7 +11264,8 @@ op_db: List[OpInfo] = [
                    'TestCommon', 'test_reference_testing'
                )
            ],
-           sample_inputs_func=sample_inputs_layer_norm,),
+           sample_inputs_func=sample_inputs_layer_norm,
+           supports_expanded_weight=True,),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64),
            dtypesIfCPU=floating_types_and(torch.int64, torch.bfloat16),
