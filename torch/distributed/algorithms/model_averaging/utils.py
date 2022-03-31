@@ -30,10 +30,10 @@ def average_parameters(
             flat_params_all_reduce(params_list, group_to_use)
         else:
             for param_group in param_groups:
-                for params in param_group["params"]:
-                    if params.grad is None:
+                for param in param_group["params"]:
+                    if param.grad is None:
                         continue
-                    flat_params_all_reduce([params], group_to_use)
+                    flat_params_all_reduce([param], group_to_use)
 
 
 def flat_params_all_reduce(params: Union[types.GeneratorType, List], process_group: dist.ProcessGroup):
