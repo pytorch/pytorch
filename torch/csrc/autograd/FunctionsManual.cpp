@@ -4667,7 +4667,7 @@ Tensor linalg_lu_solve_jvp(
     // We see that when left != adjoint, op_1(A) = A, and we can substitute A^{-1}op_3(B) by op_2(X)
     // dX = op_2(-U^{-1}(dU + L^{-1}dL U)op_2(X)) + S
     // Let R = -U^{-1}(dU + L^{-1}dL U)
-    auto R = at::linalg_solve_triangular(LU.tril(-1), dLU.tril(-1), /*upper*/false, /*left*/true, /*unitriangular*/true);
+    auto R = at::linalg_solve_triangular(LU, dLU.tril(-1), /*upper*/false, /*left*/true, /*unitriangular*/true);
     auto U = LU.triu();
     R = -at::linalg_solve_triangular(U, dLU.triu() + R.matmul(U), /*upper*/true);
     // dX = op_2(R op_2(X)) + S
