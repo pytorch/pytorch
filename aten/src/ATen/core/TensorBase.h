@@ -244,7 +244,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse() && !is_sparse_csr() && layout() != at::kSparseCsc) {
+    if (layout() == at::kStrided) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
@@ -267,10 +267,17 @@ class TORCH_API TensorBase {
   // it reports the memory the tensor would take *if* it were contiguous.
   // Defined to be numel() * itemsize()
   size_t nbytes() const {
-    TORCH_CHECK(layout() != at::kSparse,
-                "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
-                "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
-                "equivalent dense tensor, multiply numel() by element_size()");
+    switch(layout()) {
+    case at::kSparse:
+    case at::kSparseCsr:
+    case at::kSparseCsc:
+      TORCH_CHECK(false,
+                  "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                  "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                  "equivalent dense tensor, multiply numel() by element_size()");
+      break;
+    default: ;
+    }
     return impl_->numel() * impl_->itemsize();
   }
 

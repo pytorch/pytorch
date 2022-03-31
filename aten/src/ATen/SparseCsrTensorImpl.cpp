@@ -61,7 +61,6 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       values_(std::move(values)),
       is_transpose_(is_transpose) {
   set_storage_access_should_throw();
-  unset_define_layout_from_dispatch_key();
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {

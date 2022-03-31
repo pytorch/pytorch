@@ -853,7 +853,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual Layout layout_impl() const {
     TORCH_CHECK(
         false,
-        "layout_impl is only implemented for subclasses that unset define_layout_from_dispatch_key bit.");
+        "layout_impl is only implemented for subclasses.");
   }
 
  public:
@@ -997,18 +997,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
-    if (define_layout_from_dispatch_key_) {
-      if (is_sparse()) {
-        return kSparse;
-      } else if (is_mkldnn()) {
-        return kMkldnn;
-      } else {
-        return kStrided;
-      }
+    if (is_sparse()) {
+      return kSparse;
+    } else if (key_set_.has(DispatchKey::SparseCsrCPU) || key_set_.has(DispatchKey::SparseCsrCUDA)) {
+      // Typically, the tensor dispatch keys define the tensor layout
+      // uniquely. This allows using non-virtual layout method for
+      // better performance. However, when tensor's layout depends,
+      // say, on tensor attributes, one must use this execution path
+      // where the corresponding tensor impl class overwrites virtual
+      // layout_impl() method.
+      //
+      // TODO: implement layout() as native function/method so that
+      // __torch_dispatch__ users will be able to redefine the
+      // layout() method.
+      return layout_impl();
+    } else if (is_mkldnn()) {
+      return kMkldnn;
+    } else {
+      return kStrided;
     }
-    // Use slow path for determining the layout from specific tensor
-    // implementation:
-    return layout_impl();
   }
 
   /**
@@ -2435,10 +2442,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     owns_pyobj_ = b;
   }
 
-  void unset_define_layout_from_dispatch_key() {
-    define_layout_from_dispatch_key_ = false;
-  }
-
  protected:
   // Policy for adjusting the behavior of customizable methods like
   // is_contiguous() and sizes(). Allows subclass customization while
@@ -2591,7 +2594,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_customization_policy_ =
         static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
-    define_layout_from_dispatch_key_ = true;
   }
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
@@ -2650,14 +2652,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Python object's refcount goes to zero, we flip the ownership
   // direction (to make sure the pyobj stays live).
   bool owns_pyobj_ : 1;
-
-  // Typically, the tensor dispatch keys define the tensor layout
-  // uniquely. This allows using non-virtual layout method for better
-  // performance. However, when tensor's layout depends, say, on
-  // tensor attributes, set define_layout_from_dispatch_key to
-  // false. In this case, the corresponding tensor impl class must
-  // overwrite virtual layout_impl() method.
-  bool define_layout_from_dispatch_key_ : 1;
 
   // Customization policy for the sizes() virtual method.
   /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;
