@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS
-from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs
+from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
 
