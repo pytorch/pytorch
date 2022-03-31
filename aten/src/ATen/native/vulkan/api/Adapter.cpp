@@ -236,7 +236,7 @@ void Adapter::init_device() {
     VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,  // sType
     nullptr,  // pNext
     0u,  // flags
-    queue_create_infos.size(),  // queueCreateInfoCount
+    static_cast<uint32_t>(queue_create_infos.size()),  // queueCreateInfoCount
     queue_create_infos.data(),  // pQueueCreateInfos
     0u,  // enabledLayerCount
     nullptr,  // ppEnabledLayerNames
