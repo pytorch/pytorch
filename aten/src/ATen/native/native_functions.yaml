@@ -2560,6 +2560,10 @@
 
 - func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor o, Tensor a)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn
+
+- func: attn_backward(Tensor do_ext, Tensor da_ext, Tensor q, Tensor k, Tensor v, Tensor a) -> (Tensor, Tensor, Tensor)
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:

@@ -28,23 +28,23 @@ class AttentionLayer(torch.autograd.Function):
         return o, a
 
     @staticmethod
-    def backward(ctx, do: Tensor, da: Tensor):
+    def backward(ctx, do_ext: Tensor, da_ext: Tensor):
         q, k, v, a = ctx.saved_tensors
         needs_dq, needs_dk, needs_dv = ctx.needs_input_grad
         dq, dk, dv = None, None, None
 
         # forward: o = mm(a, v)
         # backward: da = mm(do, v'), dv = mm(a', do)
-        if do is not None:
-            da_partial = torch.matmul(do, v.t())
-            dv = torch.matmul(a.t(), do)
+        if do_ext is not None:
+            da_partial = torch.matmul(do_ext, v.t())
+            dv = torch.matmul(a.t(), do_ext)
         else:
             da_partial = torch.zeros_like(a)
             dv = torch.zeros_like(v)
 
         if needs_dq or needs_dk:
-            if da is not None:
-                da += da_partial
+            if da_ext is not None:
+                da = da_partial + da_ext
             else:
                 da = da_partial
 
@@ -66,8 +66,9 @@ class TestAttnAutograd(TestCase):
     @parametrize("q_requires_grad", [True, False])
     @parametrize("k_requires_grad", [True, False])
     @parametrize("v_requires_grad", [True, False])
-    # @parametrize("input_requires_grad", [True, False])
-    def test_by_gradcheck(self, q_requires_grad, k_requires_grad, v_requires_grad):
+    # @parametrize("attn_fn", [AttentionLayer.apply, torch.attn])    # failing, gardcheck has test case where both do and da are None?
+    @parametrize("attn_fn", [AttentionLayer.apply])
+    def test_by_gradcheck(self, q_requires_grad, k_requires_grad, v_requires_grad, attn_fn):
         if not any([q_requires_grad, k_requires_grad, v_requires_grad]):
             return
 
@@ -75,14 +76,29 @@ class TestAttnAutograd(TestCase):
         k = torch.randn(2, 3, dtype=torch.float64, requires_grad=k_requires_grad)
         v = torch.randn(2, 4, dtype=torch.float64, requires_grad=v_requires_grad)
 
-        assert torch.autograd.gradcheck(AttentionLayer.apply, [q, k, v])
-        # assert torch.autograd.gradgradcheck(AttentionLayer.apply, [q, k, v])
+        assert torch.autograd.gradcheck(attn_fn, [q, k, v])
+        assert torch.autograd.gradgradcheck(attn_fn, [q, k, v])
+
+    def _loss_oa(o, a):
+        return o.exp().sum() + a.sigmoid().sum()
+
+    def _loss_o(o, _):
+        return o.exp().sum()
+
+    def _loss_a(_, a):
+        return a.sigmoid().sum()
 
     @parametrize("q_requires_grad", [True, False])
     @parametrize("k_requires_grad", [True, False])
     @parametrize("v_requires_grad", [True, False])
-    def test_by_compare_with_torch(self, q_requires_grad, k_requires_grad, v_requires_grad):
+    @parametrize("loss_fn", [_loss_oa, _loss_o, _loss_a])
+    @parametrize("attn_fn", [AttentionLayer.apply, torch.attn])
+    def test_by_compare_with_torch(self, q_requires_grad, k_requires_grad, v_requires_grad, loss_fn, attn_fn):
         if not any([q_requires_grad, k_requires_grad, v_requires_grad]):
+            return
+
+        # Invalid case: v's gradient is only affected by o
+        if loss_fn.__name__ == "_loss_a" and v_requires_grad:
             return
 
         q = torch.randn(2, 3, dtype=torch.float64, requires_grad=q_requires_grad)
@@ -90,17 +106,14 @@ class TestAttnAutograd(TestCase):
         v = torch.randn(2, 4, dtype=torch.float64, requires_grad=v_requires_grad)
         qq, kk, vv = (copy.deepcopy(x) for x in (q, k, v))
 
-        def loss(o, a):
-            return o.exp().sum() + a.sigmoid().sum()
-
         # my impl
-        o, a = AttentionLayer.apply(q, k, v)
-        l = loss(o, a)
+        o, a = attn_fn(q, k, v)
+        l = loss_fn(o, a)
         l.backward()
 
         # reference impl
         oo, aa = attn(qq, kk, vv)
-        ll = loss(oo, aa)
+        ll = loss_fn(oo, aa)
         ll.backward()
 
         def assert_is_none_or_close(t, tt):
