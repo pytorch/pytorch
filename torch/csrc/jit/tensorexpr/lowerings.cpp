@@ -1603,6 +1603,9 @@ int nnc_lowerings_lazy_registration() {
   RegisterNNCLoweringsFunction aten_cat(
       {"aten::cat(Tensor[] tensors, int dim=0) -> (Tensor)"}, computeCat);
 
+  RegisterNNCLoweringsFunction aten_stack(
+      {"aten::stack(Tensor[] tensors, int dim=0) -> (Tensor)"}, computeStack);
+
   RegisterNNCLoweringsFunction aten_sum(
       {"aten::sum(Tensor self, *, int? dtype=None) -> (Tensor)",
        "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
@@ -1736,7 +1739,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_upsample_nearest2d(
       {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)"},
-      computeUpsampleNearest2d);
+      computeUpsampleNearest2dExternalCall);
 
   return 0;
 }
