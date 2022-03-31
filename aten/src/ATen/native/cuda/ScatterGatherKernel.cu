@@ -501,17 +501,33 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
     break;
+  default :
+    break;
+  }
+}
+
+void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
+                                    const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+  switch (reduce) {
+  case SCATTER_GATHER_OP::REDUCE_ADD :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+            "scatter_reduce_cuda_sum_", reduce_add);
+    break;
+  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+            "scatter_reduce_cuda_prod_", reduce_multiply);
+    break;
   case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
-                                       "scatter_reduce_cuda_maximum_", reduce_maximum);
+            "scatter_reduce_cuda_amax_", reduce_maximum);
     break;
   case SCATTER_GATHER_OP::REDUCE_MINIMUM :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
-                                       "scatter_reduce_cuda_minimum_", reduce_minimum);
+            "scatter_reduce_cuda_amin_", reduce_minimum);
     break;
   case SCATTER_GATHER_OP::REDUCE_MEAN :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
-                                       "scatter_reduce_cuda_mean_", reduce_mean);
+            "scatter_reduce_cuda_mean_", reduce_mean);
     break;
   }
 }
@@ -539,5 +555,6 @@ REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel);
 
 }} // namespace at::native
