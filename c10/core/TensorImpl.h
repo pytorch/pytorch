@@ -16,9 +16,11 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
+#include <c10/util/safe_numerics.h>
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <numeric>
 
@@ -854,103 +856,103 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has_all(c10::sparse_ks);
+    return key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseHIP) ||
+        key_set_.has(DispatchKey::SparseXPU);
   }
 
   // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
   // format.
   bool is_sparse_csr() const {
-    return key_set_.has_any(c10::sparse_csr_ks);
+    return key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto quantized_ks = DispatchKeySet(DispatchKey::Quantized);
-    return key_set_.has_all(quantized_ks);
+    return key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::QuantizedCUDA) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto meta_ks = DispatchKeySet(DispatchKey::Meta);
-    return key_set_.has_all(meta_ks);
+    return key_set_.has(DispatchKey::Meta);
   }
 
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cpu_bits_ks = DispatchKeySet(BackendComponent::CPUBit) |
-        DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::MkldnnCPU});
-    return key_set_.has_any(cpu_bits_ks);
+    return key_set_.has(DispatchKey::CPU) ||
+        key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cuda_bits_ks = DispatchKeySet(BackendComponent::CUDABit) |
-        DispatchKeySet(DispatchKey::SparseCsrCUDA);
-    return key_set_.has_any(cuda_bits_ks);
+    return key_set_.has(DispatchKey::CUDA) ||
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA) ||
+        key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto xpu_ks = DispatchKeySet(BackendComponent::XPUBit);
-    return key_set_.has_all(xpu_ks);
+    return key_set_.has(DispatchKey::XPU) ||
+        key_set_.has(DispatchKey::SparseXPU) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_xla() const {
-    constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
-    return key_set_.has_all(xla_ks);
+    return key_set_.has(DispatchKey::XLA);
   }
 
   bool is_hpu() const {
-    constexpr auto hpu_ks = DispatchKeySet(BackendComponent::HPUBit);
-    return key_set_.has_all(hpu_ks);
+    return key_set_.has(DispatchKey::HPU);
   }
 
   bool is_lazy() const {
-    constexpr auto lazy_ks = DispatchKeySet(BackendComponent::LazyBit);
-    return key_set_.has_all(lazy_ks);
+    return key_set_.has(DispatchKey::Lazy);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto hip_ks = DispatchKeySet(BackendComponent::HIPBit);
-    return key_set_.has_all(hip_ks);
+    return key_set_.has(DispatchKey::HIP) ||
+        key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto ve_ks = DispatchKeySet(BackendComponent::VEBit);
-    return key_set_.has_all(ve_ks);
+    return key_set_.has(DispatchKey::VE) || key_set_.has(DispatchKey::SparseVE);
   }
 
   bool is_mkldnn() const {
-    return key_set_.has_all(c10::mkldnn_ks);
+    return key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_vulkan() const {
-    constexpr auto vulkan_ks = DispatchKeySet(DispatchKey::Vulkan);
-    return key_set_.has_all(vulkan_ks);
+    return key_set_.has(DispatchKey::Vulkan);
   }
 
   bool is_metal() const {
-    constexpr auto metal_ks = DispatchKeySet(DispatchKey::Metal);
-    return key_set_.has_all(metal_ks);
+    return key_set_.has(DispatchKey::Metal);
   }
 
   bool is_mlc() const {
-    constexpr auto mls_ks = DispatchKeySet(DispatchKey::MLC);
-    return key_set_.has_all(mls_ks);
+    return key_set_.has(DispatchKey::MLC);
   }
 
   bool is_ort() const {
-    constexpr auto ort_ks = DispatchKeySet(DispatchKey::ORT);
-    return key_set_.has_all(ort_ks);
+    return key_set_.has(DispatchKey::ORT);
   }
 
   bool is_nested() const {
@@ -970,8 +972,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference() {
-    bool no_ADInplaceOrView = !key_set_.has_any(c10::inplace_or_view_ks);
-    bool no_Autograd = !key_set_.has_any(c10::autograd_dispatch_keyset);
+    bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
+    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         no_ADInplaceOrView == no_Autograd,
         "ADInplaceOrView and Autograd keys must be on/off at the same time.");
@@ -992,22 +994,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
-    // strided is also the most common layout type, so we check for
-    // strided case first.
-    // This keyset must also be kept in sync with the logic in
-    // is_sparse() / is_sparse_csr() / is_mkldnn()
-    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
-        c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
-    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
-      return kStrided;
-    } else if (is_sparse()) {
+    if (is_sparse()) {
       return kSparse;
     } else if (is_sparse_csr()) {
       return kSparseCsr;
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          is_mkldnn(), "There is an error in the layout calculation logic.");
+    } else if (is_mkldnn()) {
       return kMkldnn;
+    } else {
+      return kStrided;
     }
   }
 
@@ -1093,8 +1087,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the imaginary part of the tensor should be negated
    */
   inline bool is_conj() const {
-    constexpr auto conjugate_ks = DispatchKeySet(DispatchKey::Conjugate);
-    return key_set_.has_all(conjugate_ks);
+    return key_set_.has(DispatchKey::Conjugate);
   }
 
   /**
@@ -1114,8 +1107,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the tensor is a zerotensor
    */
   inline bool _is_zerotensor() const {
-    constexpr auto zerotensor_ks = DispatchKeySet(DispatchKey::ZeroTensor);
-    return key_set_.has_all(zerotensor_ks);
+    return key_set_.has(DispatchKey::ZeroTensor);
   }
 
   /**
@@ -1135,8 +1127,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the tensor should be negated
    */
   inline bool is_neg() const {
-    constexpr auto negative_ks = DispatchKeySet(DispatchKey::Negative);
-    return key_set_.has_all(negative_ks);
+    return key_set_.has(DispatchKey::Negative);
   }
 
   /**
@@ -1507,14 +1498,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_python_dispatch(bool k) {
     if (k) {
-      key_set_ = key_set_.add(c10::python_ks);
+      key_set_ =
+          key_set_.add(DispatchKey::Python).add(DispatchKey::PythonTLSSnapshot);
     } else {
-      key_set_ = key_set_ - c10::python_ks;
+      key_set_ = key_set_.remove(DispatchKey::Python)
+                     .remove(DispatchKey::PythonTLSSnapshot);
     }
   }
 
   bool is_python_dispatch() const {
-    return key_set_.has_all(c10::python_ks);
+    return key_set_.has(DispatchKey::Python);
   }
 
   /**
@@ -1579,22 +1572,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      constexpr auto dense_backends = DispatchKeySet(
-          {BackendComponent::CPUBit,
-           BackendComponent::CUDABit,
-           BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
-      constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
-      return ts.has_any(dense_k) && ts.has_any(dense_backends);
+      return ts.has(DispatchKey::CPU) || ts.has(DispatchKey::CUDA) ||
+          ts.has(DispatchKey::HIP) || ts.has(DispatchKey::XPU);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      constexpr auto sparse_backends = DispatchKeySet(
-          {BackendComponent::CPUBit,
-           BackendComponent::CUDABit,
-           BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
-      constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
-      return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
+      return ts.has(DispatchKey::SparseCPU) ||
+          ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
+          ts.has(DispatchKey::SparseXPU);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
         (is_sparse(key_set_) && is_sparse(from));
@@ -2284,11 +2268,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute the number of elements based on the sizes of a tensor.
    */
   int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
+#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+    // Use overflow checks if supported by the compiler
+    return safe_compute_numel();
+#else
+    return c10::multiply_integers(sizes());
+#endif
   }
 
   /**
@@ -2297,14 +2282,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * using a sparse layout has multiple dimensions with large sizes.
    */
   int64_t safe_compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      TORCH_CHECK(
-          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
-          "numel: integer multiplication overflow");
-      n *= s;
-    }
-    return n;
+    uint64_t n = 1;
+    bool overflows = c10::safe_multiplies_u64(sizes(), &n);
+    constexpr auto numel_max = std::min(
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+        static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
+
+    overflows |= (n > numel_max);
+    TORCH_CHECK(!overflows, "numel: integer multiplication overflow");
+    return static_cast<int64_t>(n);
   }
 
   /**
