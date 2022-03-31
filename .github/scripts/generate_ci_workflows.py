@@ -6,6 +6,9 @@ from typing import Dict, Set, List, Iterable, Any
 
 import jinja2
 import json
+import yaml
+from yaml import Loader
+
 import os
 import sys
 from typing_extensions import Literal, TypedDict
@@ -165,12 +168,13 @@ class CIWorkflow:
     build_with_debug: bool = False
     is_scheduled: str = ''
     is_default: bool = False
+    on_pull_request: bool = False
     num_test_shards: int = 1
     timeout_after: int = 240
     xcode_version: str = ''
-    only_on_pr: bool = False
     ios_arch: str = ''
     ios_platform: str = ''
+    branches: List[str] = field(default_factory=lambda: ['master', 'main', 'release/*'])
     test_jobs: Any = field(default_factory=list)
 
     enable_default_test: bool = True
@@ -185,6 +189,7 @@ class CIWorkflow:
     enable_xla_test: bool = False
     enable_noarch_test: bool = False
     enable_force_on_cpu_test: bool = False
+    enable_deploy_test: bool = False
 
     def __post_init__(self) -> None:
         if not self.build_generates_artifacts:
@@ -195,6 +200,9 @@ class CIWorkflow:
 
         if LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels:
             self.is_default = True
+
+        if self.is_default:
+            self.on_pull_request = True
 
         self.test_jobs = self._gen_test_jobs()
         self.assert_valid()
@@ -291,6 +299,8 @@ class CIWorkflow:
             configs["xla"] = {"num_shards": 1, "runner": self.test_runner_type}
         if self.enable_noarch_test:
             configs["noarch"] = {"num_shards": 1, "runner": self.test_runner_type}
+        if self.enable_deploy_test:
+            configs["deploy"] = {"num_shards": 1, "runner": self.test_runner_type}
 
         for name, config in configs.items():
             for shard in range(1, config["num_shards"] + 1):
@@ -355,6 +365,7 @@ class BinaryBuildWorkflow:
     abi_version: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ''
+    branches: str = 'nightly'
     # Mainly for macos
     cross_compile_arm64: bool = False
     xcode_version: str = ''
@@ -366,7 +377,7 @@ class BinaryBuildWorkflow:
             self.build_environment = f"{self.os}-binary-{self.package_type}"
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
+        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}-{self.branches}.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
@@ -401,6 +412,8 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         enable_force_on_cpu_test=True,
+        # TODO: Revert back to default value after https://github.com/pytorch/pytorch/issues/73489 is closed
+        timeout_after=270,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
@@ -418,18 +431,6 @@ WINDOWS_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
-        ),
-    ),
-    CIWorkflow(
-        arch="windows",
-        build_environment="periodic-win-vs2019-cuda11.1-py3",
-        cuda_version="11.1",
-        enable_distributed_test=False,
-        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
-        num_test_shards=2,
-        is_scheduled="45 0,4,8,12,16,20 * * *",
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_WIN, LABEL_CIFLOW_CUDA}
         ),
     ),
 ]
@@ -528,6 +529,18 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="deploy-linux-xenial-cuda11.3-py3.7-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_DEFAULT},
+        ),
+        enable_default_test=False,
+        enable_distributed_test=False,
+        enable_deploy_test=True,
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -539,10 +552,22 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        build_generates_artifacts=False,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-py3.7-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         num_test_shards=3,
+        timeout_after=300,
         enable_distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
@@ -642,12 +667,23 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-rocm4.5-py3.7",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        build_environment="linux-bionic-rocm5.0-py3.7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm5.0-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         num_test_shards=2,
+        enable_distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-rocm4.5-py3.7-distributed",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        test_runner_type=LINUX_ROCM_TEST_RUNNER,
+        enable_default_test=False,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
         ),
     ),
     CIWorkflow(
@@ -663,26 +699,14 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
+        build_environment="periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         build_with_debug=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
-        test_runner_type=LINUX_CUDA_TEST_RUNNER,
-        build_generates_artifacts=False,
-        exclude_test=True,
-        is_scheduled="45 0,4,8,12,16,20 * * *",
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CUDA},
         ),
     ),
     CIWorkflow(
@@ -695,6 +719,19 @@ LINUX_WORKFLOWS = [
         enable_noarch_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-py3.7-clang9-slow",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.7-clang9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        enable_default_test=False,
+        enable_distributed_test=False,
+        enable_slow_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
     CIWorkflow(
@@ -730,12 +767,12 @@ XLA_WORKFLOWS = [
         build_environment="pytorch-xla-linux-bionic-py3.7-clang8",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/xla_base",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
         enable_distributed_test=False,
         enable_xla_test=True,
         enable_default_test=False,
+        on_pull_request=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
 
@@ -769,6 +806,7 @@ ANDROID_WORKFLOWS = [
         arch="linux",
         build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        branches=['master', 'main', 'nightly', 'release/*'],
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -898,8 +936,8 @@ MACOS_WORKFLOWS = [
 ]
 
 DOCKER_IMAGES = {
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.7",               # for rocm
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",               # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm5.0-py3.7",                 # for rocm
 }
 
 DOCKER_IMAGES.update({
@@ -968,6 +1006,40 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
     ),
 ]
 
+LINUX_BINARY_SMOKE_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.LINUX,
+            arches=["10.2"],
+            python_versions=["3.7"]),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
+    ),
+]
+
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -978,23 +1050,21 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             isolated_workflow=True,
         ),
     ),
-    # NOTE: conda binaries are currently bugged on the installation step
-    #       See, https://github.com/pytorch/pytorch/pull/71484#issuecomment-1022617195
-    # BinaryBuildWorkflow(
-    #     os=OperatingSystem.WINDOWS,
-    #     package_type="conda",
-    #     build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.WINDOWS),
-    #     ciflow_config=CIFlowConfig(
-    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-    #         isolated_workflow=True,
-    #     ),
-    # ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="conda",
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.WINDOWS),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            isolated_workflow=True,
+        ),
+    ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
-        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.CXX11_ABI
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -1004,14 +1074,47 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        abi_version=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.PRE_CXX11_ABI
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
+    ),
+]
+WINDOWS_BINARY_SMOKE_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="wheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.WINDOWS,
+            arches=["11.3"],
+            python_versions=["3.7"]),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.RELEASE,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.DEBUG,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
     ),
 ]
 
@@ -1086,18 +1189,13 @@ def main() -> None:
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
+
+    # not ported yet
     template_and_workflows = [
-        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
-        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
-        (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
-        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
-        (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
-        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
+        (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
@@ -1117,6 +1215,57 @@ def main() -> None:
             workflow.generate_workflow_file(workflow_template=template)
             ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+    # check ported workflows for correctness
+    ported_workflows = LINUX_WORKFLOWS + \
+        XLA_WORKFLOWS + \
+        WINDOWS_WORKFLOWS + \
+        BAZEL_WORKFLOWS + \
+        IOS_WORKFLOWS + \
+        MACOS_WORKFLOWS + \
+        ANDROID_WORKFLOWS + \
+        ANDROID_SHORT_WORKFLOWS
+
+    ciflow_ruleset = CIFlowRuleset()
+    for workflow in ported_workflows:  # type: ignore[assignment]
+        ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+
+
+    # check new pull workflow matches ciflow/default
+    with open(f"{GITHUB_DIR}/workflows/pull.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_pull = set([i["name"] for i in y["jobs"].values()])
+
+    # binary builds are erroneously marked as ciflow/default
+    old_pull_ex_binary = set([i for i in ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT] if "binary" not in i])
+    print(new_pull - old_pull_ex_binary)
+    print(old_pull_ex_binary - new_pull)
+    assert new_pull == old_pull_ex_binary
+
+    # check new trunk workflow matches ciflow/trunk
+    with open(f"{GITHUB_DIR}/workflows/trunk.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_trunk = set([i["name"] for i in y["jobs"].values()])
+    old_trunk = ciflow_ruleset.label_rules[LABEL_CIFLOW_TRUNK] - ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT]
+
+    # docker builds are erroneously marked ciflow/trunk
+    old_trunk = old_trunk - {"docker-builds"}
+    assert new_trunk == old_trunk
+
+    with open(f"{GITHUB_DIR}/workflows/periodic.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_periodic = set([i["name"] for i in y["jobs"].values()])
+    old_periodic_l = list(ciflow_ruleset.label_rules[LABEL_CIFLOW_SCHEDULED])
+
+    # strip "periodic-" from beginning, since we removed those as part of migration.
+    for i, job in enumerate(old_periodic_l):
+        if job.startswith("periodic-"):
+            old_periodic_l[i] = job[len("periodic-"):]
+    old_periodic = set(old_periodic_l)
+    # this is moved to nightly
+    old_periodic = old_periodic - {"linux-docs-push"}
+
+    assert new_periodic == old_periodic
 
 
 if __name__ == "__main__":

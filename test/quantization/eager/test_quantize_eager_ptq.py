@@ -74,6 +74,202 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    @override_qengines
+    def _test_reference_module_impl(self,
+                                    float_module_class,
+                                    quantized_module_class,
+                                    extra_module_kwargs,
+                                    input_size):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = float_module_class(**extra_module_kwargs)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.dequant(x)
+                return x
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = float_module_class(**extra_module_kwargs)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines or qengine == 'qnnpack':
+            return   # qnnpack does not support nnq.ConvTranspose3d
+
+        data = torch.randn(*input_size, dtype=torch.float)
+        original_m = M()
+        original_ref_m = RefM()
+
+        original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+
+        original_m.qconfig = torch.quantization.default_qconfig
+
+        m = prepare(original_m)
+        # calibration
+        m(data)
+        m = convert(m)
+        # check if the module is properly quantized
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.conv), quantized_module_class)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+        res = m(data)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = torch.quantization.default_qconfig
+
+        ref_m = prepare(original_ref_m)
+        ref_m(data)
+        ref_m = convert(ref_m, is_reference=True)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
+
+    def test_conv_1d(self):
+        self._test_reference_module_impl(
+            nn.Conv1d,
+            nnq.Conv1d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 1)
+        )
+
+    def test_conv_2d(self):
+        self._test_reference_module_impl(
+            nn.Conv2d,
+            nnq.Conv2d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10)
+        )
+
+    def test_conv_3d(self):
+        self._test_reference_module_impl(
+            nn.Conv3d,
+            nnq.Conv3d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10, 10)
+        )
+
+    def test_conv_transpose_1d(self):
+        self._test_reference_module_impl(
+            nn.ConvTranspose1d,
+            nnq.ConvTranspose1d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 1)
+        )
+
+    def test_conv_transpose_2d(self):
+        self._test_reference_module_impl(
+            nn.ConvTranspose2d,
+            nnq.ConvTranspose2d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10)
+        )
+
+    def test_conv_transpose_3d(self):
+        self._test_reference_module_impl(
+            nn.ConvTranspose3d,
+            nnq.ConvTranspose3d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10, 10)
+        )
+
+    def test_linear(self):
+        self._test_reference_module_impl(
+            nn.Linear,
+            nnq.Linear,
+            {'in_features': 5, 'out_features': 10},
+            (16, 5)
+        )
+
+    @override_qengines
+    def test_int16_reference_module(self):
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+
+        input_size = (16, 1, 10, 10)
+        data = torch.randn(*input_size, dtype=torch.float)
+
+        original_ref_m = RefM()
+        rand_w = torch.randn_like(original_ref_m.conv.weight)
+        rand_b = torch.randn_like(original_ref_m.conv.bias)
+        original_ref_m.conv.weight = torch.nn.Parameter(rand_w, requires_grad=False)
+        original_ref_m.conv.bias = torch.nn.Parameter(rand_b, requires_grad=False)
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines:
+            return
+        from torch.ao.quantization.observer import MovingAverageMinMaxObserver
+
+        weight_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            # set qmin and qmax to represent qint16
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        act_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+        )
+        custom_qconfig = QConfig(activation=act_obs, weight=weight_obs)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = custom_qconfig
+
+        ref_m = prepare(original_ref_m)
+        # calibration
+        ref_m(torch.randn(*input_size, dtype=torch.float))
+
+        ref_m = convert(ref_m, is_reference=True)
+
+        myobs = MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                            dtype=torch.qint32,
+                                            # set qmin and qmax to represent qint16
+                                            quant_min=-1 * (2 ** 15),
+                                            quant_max=(2 ** 15) - 1,
+                                            qscheme=torch.per_tensor_symmetric,
+                                            )
+        result = myobs(rand_w)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(ref_m.conv.weight_scale, qparams[0])
+
+
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
         """ Implementation for testing common activation ops like leaky relu
@@ -814,6 +1010,19 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         m.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         m[0].qconfig = None
         mp = torch.ao.quantization.prepare(m)
+
+    @skipIfNoFBGEMM
+    def test_quantwrapper_attaches_qconfig_to_dequant(self):
+        qconfig = torch.ao.quantization.default_qconfig
+
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        for i in range(len(m)):
+            m[i].qconfig = qconfig
+            m[i] = torch.ao.quantization.QuantWrapper(m[i])
+
+        mp = torch.ao.quantization.prepare(m)
+        mq = torch.ao.quantization.convert(mp)
+        self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
 
 
 @skipIfNoFBGEMM

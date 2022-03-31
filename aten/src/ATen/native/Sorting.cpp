@@ -99,7 +99,7 @@ void quick_select_template(
     }
 
     // Use median of three for pivot choice
-    P = (L + R) >> 1;
+    P = L + (R - L) / 2;
     swap_fn(P, L + 1);
     if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);
