@@ -171,7 +171,7 @@ Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_i
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   SparseCsrTensor self = new_csr_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size);
+  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size, false);
   return self;
 }
 

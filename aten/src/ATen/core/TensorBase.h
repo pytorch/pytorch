@@ -244,7 +244,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse() && !is_sparse_csr() && !is_sparse_csc()) {
+    if (!is_mkldnn() && !is_sparse() && !is_sparse_csr() && layout() != at::kSparseCsc) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
@@ -267,7 +267,7 @@ class TORCH_API TensorBase {
   // it reports the memory the tensor would take *if* it were contiguous.
   // Defined to be numel() * itemsize()
   size_t nbytes() const {
-    TORCH_CHECK(layout () != at::kSparse,
+    TORCH_CHECK(layout() != at::kSparse,
                 "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
                 "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
                 "equivalent dense tensor, multiply numel() by element_size()");
@@ -413,12 +413,6 @@ class TORCH_API TensorBase {
   bool is_sparse_csr() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_sparse_csr();
-  }
-
-  /// Returns is a `Tensor` has a sparse CSR backend with transpose=True.
-  bool is_sparse_csc() const {
-    // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_sparse_csc();
   }
 
   /// Returns if a `Tensor` is mkldnn tensor.

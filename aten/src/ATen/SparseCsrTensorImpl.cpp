@@ -44,6 +44,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
               at::initialTensorOptions()
                   .device(SparseCsrTensorSetToDeviceType(key_set))
                   .dtype(data_type)) // values
+          ,
+          false // is_transpose
       ) {}
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
@@ -91,6 +93,7 @@ void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
       src.values().options(),
       src.values().suggest_memory_format());
   sizes_and_strides_.set_sizes(src.sizes());
+  is_transpose_ = src.layout() == kSparseCsc;
   refresh_numel();
 }
 
@@ -98,7 +101,8 @@ void SparseCsrTensorImpl::set_member_tensors(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
-    IntArrayRef size) {
+    IntArrayRef size,
+    const bool is_transpose) {
 
   // CSR Type Invariants
   TORCH_CHECK(
@@ -114,6 +118,7 @@ void SparseCsrTensorImpl::set_member_tensors(
   values_ = values;
 
   sizes_and_strides_.set_sizes(size);
+  is_transpose_ = is_transpose;
   refresh_numel();
 }
 } // namespace at

@@ -39,12 +39,15 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       const Tensor& crow_indices,
       const Tensor& col_indices,
       const Tensor& values,
-      IntArrayRef size);
+      IntArrayRef size,
+      bool is_transpose);
 
   const Tensor& crow_indices() const { return crow_indices_; }
   const Tensor& col_indices() const { return col_indices_; }
   const Tensor& values() const { return values_; }
   int nnz() { return values_.size(0); }
+  bool is_transpose() const { return is_transpose_; }
+
   Layout layout_impl() const {
     if (is_transpose_) {
       return kSparseCsc;
@@ -98,7 +101,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       at::Tensor crow_indices,
       at::Tensor col_indices,
       at::Tensor values,
-                               bool is_transpose=false);
+      bool is_transpose);
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
@@ -117,6 +120,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     dest_sparse_impl->crow_indices_ = src_sparse_impl->crow_indices();
     dest_sparse_impl->col_indices_ = src_sparse_impl->col_indices();
     dest_sparse_impl->values_ = src_sparse_impl->values();
+    dest_sparse_impl->is_transpose_ = src_sparse_impl->is_transpose();
   }
 };
 } // namespace at

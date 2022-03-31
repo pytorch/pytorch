@@ -148,12 +148,10 @@ class TestSparseCSR(TestCase):
         x = torch.randn(3, 3)
         self.assertFalse(x.is_sparse)
         self.assertFalse(x.is_sparse_csr)
-        self.assertFalse(x.is_sparse_csc)
 
         sparse = x.to_sparse_csr()
         self.assertFalse(sparse.is_sparse)
         self.assertTrue(sparse.is_sparse_csr)
-        self.assertFalse(sparse.is_sparse_csc)
 
     @onlyCPU
     def test_layout(self):

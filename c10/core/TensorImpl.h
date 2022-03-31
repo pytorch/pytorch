@@ -872,11 +872,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return layout() == kSparseCsr;
   }
 
-  // Whether a tensor is sparse CSC or not.
-  bool is_sparse_csc() const {
-    return layout() == kSparseCsc;
-  }
-
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.

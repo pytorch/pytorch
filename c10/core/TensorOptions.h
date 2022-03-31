@@ -360,10 +360,6 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::SparseCsr;
   }
 
-  bool is_sparse_csc() const {
-    return layout_ == c10::Layout::SparseCsc;
-  }
-
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
     return computeDispatchKey() == other.computeDispatchKey() &&
