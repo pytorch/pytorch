@@ -52,7 +52,12 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload('ailzhang/torchhub_example', force_reload=False)
+        local_dir = hub._get_cache_or_reload(
+            'ailzhang/torchhub_example',
+            force_reload=False,
+            trust_repo=True,
+            calling_fn=None
+        )
         hub_model = hub.load(local_dir, 'mnist', source='local', pretrained=True, verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
@@ -81,7 +86,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
-        entry_lists = hub.list('ailzhang/torchhub_example')
+        entry_lists = hub.list('ailzhang/torchhub_example', trust_repo=True)
         self.assertObjectIn('mnist', entry_lists)
 
     @retry(Exception, tries=3)
@@ -115,7 +120,13 @@ class TestHub(TestCase):
     # Test the default zipfile serialization format produced by >=1.6 release.
     @retry(Exception, tries=3)
     def test_load_zip_1_6_checkpoint(self):
-        hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', pretrained=True, verbose=False)
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False,
+            trust_repo=True
+        )
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
@@ -143,42 +154,78 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='')
-    def test_trust_repo_false_emptystring(self, unused_patch_input):
-        # patch sends the patched function as input, hence the extra arg
+    def test_trust_repo_false_emptystring(self, patched_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
             torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
         self._assert_trusted_list_is_empty()
+        patched_input.assert_called_once()
+
+        patched_input.reset_mock()
+        with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
+        self._assert_trusted_list_is_empty()
+        patched_input.assert_called_once()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
-    def test_trust_repo_false_no(self, unused_patch_input):
+    def test_trust_repo_false_no(self, patched_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
             torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
         self._assert_trusted_list_is_empty()
+        patched_input.assert_called_once()
+
+        patched_input.reset_mock()
+        with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
+        self._assert_trusted_list_is_empty()
+        patched_input.assert_called_once()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
-    def test_trusted_repo_false_yes(self, unused_patch_input):
+    def test_trusted_repo_false_yes(self, patched_input):
         torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
         self._assert_in_trusted_list("ailzhang_torchhub_example")
+        patched_input.assert_called_once()
+
+        # Loading a second time with "check", we don't ask for user input
+        patched_input.reset_mock()
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
+        patched_input.assert_not_called()
+
+        # Loading again with False, we still ask for user input
+        patched_input.reset_mock()
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
+        patched_input.assert_called_once()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
-    def test_trust_repo_check_no(self, unused_patch_input):
+    def test_trust_repo_check_no(self, patched_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
             torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
         self._assert_trusted_list_is_empty()
+        patched_input.assert_called_once()
+
+        patched_input.reset_mock()
+        with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
+        patched_input.assert_called_once()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
-    def test_trust_repo_check_yes(self, unused_patch_input):
+    def test_trust_repo_check_yes(self, patched_input):
         torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
         self._assert_in_trusted_list("ailzhang_torchhub_example")
+        patched_input.assert_called_once()
+
+        # Loading a second time with "check", we don't ask for user input
+        patched_input.reset_mock()
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
+        patched_input.assert_not_called()
 
     @retry(Exception, tries=3)
     def test_trust_repo_true(self):
         torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=True)
-        self._assert_in_allow_list("ailzhang_torchhub_example")
+        self._assert_in_trusted_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     def test_trust_repo_builtin_trusted_owners(self):
