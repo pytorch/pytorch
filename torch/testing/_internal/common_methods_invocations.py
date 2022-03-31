@@ -11,7 +11,7 @@ import math
 
 import torch
 import numpy as np
-from torch._six import inf
+from torch._six import inf, nan
 import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -2860,6 +2860,12 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(t))
     return tuple(samples)
 
+def error_inputs_bernoulli(op_info, device, **kwargs):
+    x = torch.rand((1,), device=device).expand((6,))
+    err_msg = 'unsupported operation'
+    yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
+                     error_regex=err_msg)
+
 def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((S, S, S), 0),
@@ -3394,33 +3400,58 @@ def error_inputs_embedding(op_info, device, **kwargs):
 
 def error_inputs_multinomial(op_info, device, **kwargs):
     x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
-    yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(2,)),
                      error_regex="prob_dist must be 1 or 2 dim")
 
     x = torch.empty(1, 2, dtype=torch.long, device=device)
-    yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(2,)),
                      error_regex="multinomial only supports floating-point dtypes for input")
 
     x = torch.empty(1, 2, dtype=torch.double, device=device)
     y = torch.empty(1, 2, dtype=torch.double, device=device)
-    yield ErrorInput(SampleInput(x, args=(2,), kwargs=dict(out=y)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(2,), kwargs=dict(out=y)),
                      error_regex="multinomial expects Long tensor out")
 
     x = torch.empty(2, dtype=torch.double, device=device)
-    yield ErrorInput(SampleInput(x, args=(0,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(0,)),
                      error_regex="cannot sample n_sample <= 0 samples")
 
     x = torch.empty(2, dtype=torch.double, device=device)
-    yield ErrorInput(SampleInput(x, args=(-1,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(-1,)),
                      error_regex="cannot sample n_sample <= 0 samples")
 
     x = torch.empty(2, dtype=torch.double, device=device)
-    yield ErrorInput(SampleInput(x, args=(3, False,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(3, False,)),
                      error_regex="cannot sample n_sample > prob_dist")
 
     x = torch.empty(16777217, dtype=torch.double, device=device)
-    yield ErrorInput(SampleInput(x, args=(3,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(x, args=(3,)),
                      error_regex="number of categories cannot exceed")
+
+    inputs = [[1., -1., 1.], [1., inf, 1.], [1., -inf, 1.], [1., 1., nan]]
+    err_msg1 = "probability tensor contains either `inf`, `nan` or element < 0"
+    err_msg2 = "invalid multinomial distribution"
+
+    err_msg = r"invalid multinomial distribution \(sum of probabilities <= 0\)"
+
+    rep_arg = [False, True] if device == 'cpu' else [False]
+
+    for rep in rep_arg:
+        for input in inputs:
+            yield ErrorInput(SampleInput(torch.tensor(input), kwargs={'num_samples': 2, 'replacement': rep}),
+                             error_regex=err_msg1 if rep is False else err_msg2)
+
+        x = torch.zeros(3, device=device)
+        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
+                         error_regex=err_msg)
+
+        x = torch.zeros(3, 3, device=device)
+        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
+                         error_regex=err_msg)
+
+        x[1, :] = 1
+        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
+                         error_regex=err_msg)
 
 def error_inputs_gradient(op_info, device, **kwargs):
     for dtype in [torch.long, torch.float32, torch.complex64]:
@@ -14083,6 +14114,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_bernoulli,
+           error_inputs_func=error_inputs_bernoulli,
            skips=(
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
