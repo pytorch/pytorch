@@ -21164,41 +21164,6 @@ TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
-// Repro of issue #1493
-TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(2);
-  fusion.addInput(tv0);
-  auto tv1 = makeContigTensor(2);
-  fusion.addInput(tv1);
-
-  auto tv2 = view(tv0, {2, 3}, {6});
-  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
-  auto tv4 = broadcast(tv3, {true, false});
-  auto tv5 = add(tv4, tv1);
-
-  fusion.addOutput(tv5);
-
-  tv5->merge(0);
-  tv0->computeAt(tv5, -1);
-  tv1->computeAt(tv5, -1);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::manual_seed(0);
-  auto t0 = at::randn({2, 3}, options);
-  auto t1 = at::randn({1, 6}, options);
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
-  auto cg_outputs = fe.runFusion({t0, t1});
-
-  auto ref = (at::native::view(t0, {6}) + 1).unsqueeze(0) + t1;
-
-  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
-}
-
 // Repro of #1521
 TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
   Fusion fusion;

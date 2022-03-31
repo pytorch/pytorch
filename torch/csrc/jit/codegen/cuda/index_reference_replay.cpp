@@ -160,12 +160,25 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
   // so their broadcast dimensions are "more" resolved than those towards the
   // inner most loops.
   std::deque<IterDomain*> to_visit(domain_ids.begin(), domain_ids.end());
-  std::unordered_set<Expr*> visited;
+  std::unordered_set<Expr*> visited_exprs;
+  std::unordered_set<IterDomain*> visited_ids;
   while (!to_visit.empty()) {
     auto out_id = to_visit.front();
     to_visit.pop_front();
 
+    if (!visited_ids.emplace(out_id).second) {
+      continue;
+    }
     auto expr = out_id->definition();
+
+    auto rfactor_ids =
+        GpuLower::current()->caLoopMap().getViewRfactorDomainsOfIdGroup(out_id);
+    for (auto rfactor_id : rfactor_ids) {
+      // TODO: Why not this line? Surprised it worked without mapping to
+      // concrete but breaks with the following line
+      // to_visit.emplace_front(concreteToRefId(toConcrete(rfactor_id)));
+      to_visit.emplace_front(rfactor_id);
+    }
 
     // ID's will be copied for the reference as we replay transformations. If
     // there was no transformations on an iteration domain, a copy of the
@@ -178,7 +191,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
       continue;
     }
 
-    if (!visited.emplace(expr).second) {
+    if (!visited_exprs.emplace(expr).second) {
       continue;
     }
 

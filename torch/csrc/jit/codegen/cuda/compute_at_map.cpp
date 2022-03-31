@@ -26,9 +26,9 @@ class InputDomainCounter : public IterVisitor {
   // to generate the iteration domains in provided target domain.
   static std::unordered_map<IterDomain*, std::pair<int, int>> produceCounts(
       const std::vector<TensorView*>& tvs,
-      const std::unordered_set<IterDomain*>& count_one_concrete_dims_,
+      const std::unordered_set<IterDomain*>& count_one_concrete_dims,
       const TrivialReductionInfo* trivial_reduction_info) {
-    InputDomainCounter counter(count_one_concrete_dims_);
+    InputDomainCounter counter(count_one_concrete_dims);
 
     for (auto tv : tvs) {
       auto& domain = tv->domain()->domain();
@@ -550,9 +550,7 @@ void ComputeAtMap::build(
     for (auto id : *set) {
       // If the previous ID is an rfactor, reset the concrete ID with
       // this ID no matter how many IDs the previous concrete ID has.
-      auto counts = mapping_mode_ == MappingMode::INDEX
-          ? std::pair<int, int>{1, 0}
-          : getConcreteIdCountOf(id);
+      auto counts = getConcreteIdCountOf(id);
       int concrete_count = counts.first;
       int broadcast_count = counts.second;
 

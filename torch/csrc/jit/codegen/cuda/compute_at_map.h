@@ -93,6 +93,32 @@ class TORCH_CUDA_CU_API ComputeAtMap {
     return concrete_count_it->second;
   }
 
+  // Returns all rfactor domains in rfactor_concrete_count_reset_domains_ that
+  // are in the disjoint set of the provided IterDomain. This will be every view
+  // like rfactor ID the provided ID "depends" on in the map.
+  //
+  // Warning: Will recompute on every call, information is not stored.
+  std::vector<IterDomain*> getViewRfactorDomainsOfIdGroup(
+      IterDomain* ref_id) const {
+    auto disjoint_set_it = disjoint_iter_set_maps_.find(ref_id);
+    if (disjoint_set_it == disjoint_iter_set_maps_.end()) {
+      if (rfactor_concrete_count_reset_domains_.find(ref_id) ==
+          rfactor_concrete_count_reset_domains_.end()) {
+        return {};
+      } else {
+        return {ref_id};
+      }
+    }
+    std::vector<IterDomain*> rfactor_ids;
+    for (auto disjoint_set_id : *(disjoint_set_it->second.get())) {
+      if (rfactor_concrete_count_reset_domains_.find(disjoint_set_id) !=
+          rfactor_concrete_count_reset_domains_.end()) {
+        rfactor_ids.emplace_back(disjoint_set_id);
+      }
+    }
+    return rfactor_ids;
+  }
+
  private:
   void mapIds(IterDomain* id0, IterDomain* id1);
 
