@@ -233,7 +233,7 @@ auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &o
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), torch_function_name);
 
     // See https://github.com/pytorch/pytorch/issues/63767
-    if (py::hasattr(torch_function, "__self__") && py::getattr(torch_function, "__self__").is(arg)) {
+    if (py::getattr(torch_function, "__self__", py::none()).is(arg)) {
       TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
                  "will be an error in future, please define it as a classmethod.");
     }
