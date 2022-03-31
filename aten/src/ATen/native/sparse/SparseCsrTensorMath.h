@@ -10,7 +10,7 @@ namespace impl {
 
 // Returns true if all entries of self are zero
 // TODO: This has potential to be a generic helper
-bool _is_all_zero(const Tensor& self) {
+inline bool _is_all_zero(const Tensor& self) {
   if (self.is_sparse_csr() || self.is_sparse()) {
     if (self._nnz() == 0) {
       return true;
@@ -20,7 +20,7 @@ bool _is_all_zero(const Tensor& self) {
   return (self.count_nonzero().item<int64_t>() == 0);
 }
 
-void _check_is_cpu(const Tensor& self, c10::string_view name) {
+inline void _check_is_cpu(const Tensor& self, c10::string_view name) {
   TORCH_CHECK(
       self.is_cpu(),
       "Expected all tensors to be on the same device. addmm expected '",
@@ -30,7 +30,7 @@ void _check_is_cpu(const Tensor& self, c10::string_view name) {
       " tensor");
 }
 
-void _check_is_cuda(const Tensor& self, c10::string_view name) {
+inline void _check_is_cuda(const Tensor& self, c10::string_view name) {
   TORCH_CHECK(
       self.is_cuda(),
       "Expected all tensors to be on the same device. addmm expected '",
@@ -40,7 +40,7 @@ void _check_is_cuda(const Tensor& self, c10::string_view name) {
       " tensor");
 }
 
-void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view name) {
+inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view name) {
   if (target_dim == 2) {
     TORCH_CHECK(
         self.dim() == target_dim,
