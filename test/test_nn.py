@@ -17064,7 +17064,7 @@ class TestNNDeviceType(NNTestCase):
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtypes[1]))
             self.assertEqual(output, torch.zeros_like(output))
 
-    @skipCUDAIf(True, "cuda assert is not recovarable.")
+    @skipCUDAIf(True, "no out-of-bounds check on CUDA for perf.")
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
     @parametrize_test("padding_idx", [None, 0])
     @parametrize_test("mode", ["sum", "mean", "max"])
