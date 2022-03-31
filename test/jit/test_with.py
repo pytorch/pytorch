@@ -655,9 +655,9 @@ class TestWith(JitTestCase):
     def test_fuser_context_manager_nnc(self):
         names = ['fuser1', 'nnc', 'tensorexpr']
 
-        def get_profiling_mode():
-            mode = torch._C._jit_set_profiling_mode(True)
-            torch._C._jit_set_profiling_executor(mode)
+        def get_graph_executor_optimize():
+            mode = torch._C._get_graph_executor_optimize(True)
+            torch._C._get_graph_executor_optimize(mode)
             return mode
 
         def get_profiling_executor():
@@ -666,16 +666,16 @@ class TestWith(JitTestCase):
             return executor
 
         for name in names:
-            mode = torch._C._jit_set_profiling_mode(False)
+            mode = torch._C._get_graph_executor_optimize(False)
             executor = torch._C._jit_set_profiling_executor(False)
             with torch.jit.fuser(name):
                 self.assertEqual(True, torch._C._jit_texpr_fuser_enabled())
                 self.assertEqual(False, torch._C._jit_nvfuser_enabled())
-                self.assertEqual(True, get_profiling_mode())
+                self.assertEqual(True, get_graph_executor_optimize())
                 self.assertEqual(True, get_profiling_executor())
-            self.assertEqual(False, get_profiling_mode())
+            self.assertEqual(False, get_graph_executor_optimize())
             self.assertEqual(False, get_profiling_executor())
-            torch._C._jit_set_profiling_mode(mode)
+            torch._C._get_graph_executor_optimize(mode)
             torch._C._jit_set_profiling_executor(executor)
 
     @unittest.skipIf(not RUN_CUDA, "needs CUDA")

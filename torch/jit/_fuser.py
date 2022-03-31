@@ -45,7 +45,7 @@ def fuser(name):
     elif name == 'fuser1' or name == 'nnc' or name == 'tensorexpr':  # NNC
         is_nnc = True
         old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        old_profiling_mode = torch._C._get_graph_executor_optimize(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
@@ -62,7 +62,7 @@ def fuser(name):
     finally:
         if is_nnc:
             torch._C._jit_set_profiling_executor(old_profiling_executor)
-            torch._C._jit_set_profiling_mode(old_profiling_mode)
+            torch._C._get_graph_executor_optimize(old_profiling_mode)
         # recover the previous values
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
