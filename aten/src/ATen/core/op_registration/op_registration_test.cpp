@@ -284,7 +284,8 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
   EXPECT_FALSE(called_kernel1);
   EXPECT_TRUE(called_kernel2);
 
-  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
+  // Test for out of tree lazy backends- ::Lazy key is now registered to TS backend in tree
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA}) {
     std::string expectMessage = expectedMessageForBackend(key);
     expectThrows<c10::Error>([&] {
       callOp(*op, dummyTensor(key));
@@ -613,12 +614,11 @@ void LazyBackendsAutogradOverridesAutogradKernel(DispatchKey key) {
   EXPECT_FALSE(called_nonautograd);
 }
 
+// no longer test ::Lazy key here
+// since it is now registered to TS backend in-tree and thus behaves differently,
+// does not throw the expected 'could not run..' messages
 TEST(OperatorRegistrationTest, AutogradXLAOverridesAutogradKernel) {
   LazyBackendsAutogradOverridesAutogradKernel(DispatchKey::XLA);
-}
-
-TEST(OperatorRegistrationTest, AutogradLazyOverridesAutogradKernel) {
-  LazyBackendsAutogradOverridesAutogradKernel(DispatchKey::Lazy);
 }
 
 void whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey key) {
