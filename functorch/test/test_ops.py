@@ -7,10 +7,8 @@
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors
 import torch
 from torch import Tensor
-import torch.nn.functional as F
 import functools
 import unittest
-import itertools
 from contextlib import contextmanager
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
@@ -29,7 +27,6 @@ from common_utils import (
     # tol2,
     opsToleranceOverride,
     check_vmap_fallback,
-    loop,
     IS_FBCODE,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -194,6 +191,35 @@ def get_vjp_fn_and_args_with_cotangents(f, sample, cotangents):
                                                  sample.output_process_fn_grad)
         _, vjp_fn = vjp(fn, *primals)
         return vjp_fn(cotangents)
+
+    return wrapped, tuple(flat_args + flat_cotangents)
+
+
+# returns a new function g(*args, *cotangents)
+# that computes vjps and (*args, cotangents) using torch.autograd.grad
+def get_autograd_fn_and_args_with_cotangents(f, sample, cotangents):
+    args = tuple([sample.input] + list(sample.args))
+    kwargs = sample.kwargs
+    flat_args, args_spec = tree_flatten(args)
+    flat_cotangents, cotangents_spec = tree_flatten(cotangents)
+
+    @functools.wraps(f)
+    def wrapped(*args):
+        assert len(args) == len(flat_args) + len(flat_cotangents)
+        actual_args = args[:len(flat_args)]
+        cotangents = args[len(flat_args):]
+        actual_args = tree_unflatten(actual_args, args_spec)
+        cotangents = tree_unflatten(cotangents, cotangents_spec)
+
+        fn, primals = normalize_op_input_output3(f, actual_args, kwargs,
+                                                 flat_args,
+                                                 sample.output_process_fn_grad)
+        out = fn(*primals)
+        diff_wrt = tuple(primal for primal in primals if (primal.requires_grad or primal.grad_fn is not None))
+        if diff_wrt:
+            return torch.autograd.grad(out, diff_wrt, grad_outputs=cotangents)
+        else:
+            return (torch.ones(()),)  # uuugh hack...this will need to be more generic
 
     return wrapped, tuple(flat_args + flat_cotangents)
 
@@ -1433,28 +1459,22 @@ class TestDecompositionOpInfo(TestCase):
                 continue
             torch.jit.script(decomposition)
 
-    def test_group_norm_backward(self, device):
-        # group norm will hit the decomposable ``infinitely_differentiable_group_norm_backward`` when
-        # GradMode is on, which happens by default in the grad transform. This avoids that
-        def f(x, weight, bias, grad_out):
-            output = F.group_norm(x, 6, weight, bias)
-            inputs = []
-            for input in (x, weight, bias):
-                if input.requires_grad:
-                    inputs.append(input)
-            return torch.autograd.grad(outputs=output, inputs=inputs, grad_outputs=grad_out)
+    @ops(filter(lambda op: op.name == "nn.functional.group_norm", functorch_lagging_op_db + additional_op_db),
+         allowed_dtypes=(torch.float32, torch.double))  # TODO: generalize
+    def test_group_norm_backward(self, device, dtype, op):
+        # hacky, only works since no group norm inputs can be scalars
+        def was_skipped_from_batched_tensors(batched_out, batch_size):
+            return batched_out.shape == (batch_size,) and all(tuple(e == 1 for e in batched_out))
 
-        B, N, C, H, W = 2, 3, 24, 5, 7
-        for (input_grad, weight_grad, bias_grad) in itertools.product((True, False), (True, False), (True, False)):
-            if not input_grad and not weight_grad and not bias_grad:
-                continue
-            x = torch.randn(N, C, H, W, device=device, requires_grad=input_grad)
-            weight = torch.randn(C, device=device, requires_grad=weight_grad)
-            bias = torch.randn(C, device=device, requires_grad=bias_grad)
-            grad_out = torch.randn(B, N, C, H, W, device=device)
-            loop_out = loop(f, (None, None, None, 0), 0, 2, x, weight, bias, grad_out)
-            batched_out = vmap(f, (None, None, None, 0), 0)(x, weight, bias, grad_out)
-            self.assertEqual(loop_out, batched_out)
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample_input in sample_inputs:
+            cotangents = get_sample_cotangents(op, sample_input)
+            f, args = get_autograd_fn_and_args_with_cotangents(op, sample_input, cotangents)
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}, opinfo=op):
+                if all(was_skipped_from_batched_tensors(bo, lo.shape[0]) for (bo, lo) in zip(batched_out, loop_out)):
+                    continue  # we weren't able to use the batched tensor in autograd.grad
+                self.assertEqual(loop_out, batched_out)
 
 
 only_for = ("cpu", "cuda")
