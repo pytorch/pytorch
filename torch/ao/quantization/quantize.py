@@ -10,6 +10,7 @@ from torch.nn.intrinsic import _FusedModule
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
+    get_default_static_quant_reference_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
     no_observer_set,
@@ -32,7 +33,7 @@ def is_activation_post_process(module):
 
 
 def _propagate_qconfig_helper(module, qconfig_dict,
-                              qconfig_parent=None, prefix=''):
+                              qconfig_parent=None, prefix='', prepare_custom_config_dict=None):
     r"""This is a helper function for `propagate_qconfig_`
 
     Args:
@@ -44,6 +45,8 @@ def _propagate_qconfig_helper(module, qconfig_dict,
                        module
         prefix: corresponding prefix of the current module, used as key in
                 qconfig_dict
+        prepare_custom_config_dict: dictionary for custom handling of modules
+                                    see docs for :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
         None, module is modified inplace with qconfig attached
@@ -60,10 +63,16 @@ def _propagate_qconfig_helper(module, qconfig_dict,
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        _propagate_qconfig_helper(child, qconfig_dict,
-                                  qconfig_with_device_check, module_prefix)
+        #  do no not propagate qconfig to child if child is non traceable
+        if prepare_custom_config_dict is None or not (
+            name in prepare_custom_config_dict.get("non_traceable_module_name", [])
+            or type(child) in prepare_custom_config_dict.get("non_traceable_module_class", [])
+        ):
+            _propagate_qconfig_helper(
+                child, qconfig_dict, qconfig_with_device_check, module_prefix
+            )
 
-def propagate_qconfig_(module, qconfig_dict=None):
+def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
 
@@ -73,13 +82,17 @@ def propagate_qconfig_(module, qconfig_dict=None):
             quantization configuration, qconfig applies to all submodules of a
             given module unless qconfig for the submodules are specified (when
             the submodule already has qconfig attribute)
+        prepare_custom_config_dict: dictionary for custom handling of modules
+            see docs for :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
         None, module is modified inplace with qconfig attached
     """
     if qconfig_dict is None:
         qconfig_dict = {}
-    _propagate_qconfig_helper(module, qconfig_dict)
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+    _propagate_qconfig_helper(module, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
 
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
@@ -472,7 +485,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -503,7 +516,7 @@ def convert(
     if not inplace:
         module = copy.deepcopy(module)
     _convert(
-        module, mapping, inplace=True,
+        module, mapping, inplace=True, is_reference=is_reference,
         convert_custom_config_dict=convert_custom_config_dict)
     if remove_qconfig:
         _remove_qconfig(module)
@@ -511,7 +524,7 @@ def convert(
 
 def _convert(
         module, mapping=None, inplace=False,
-        convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class
 
@@ -522,10 +535,12 @@ def _convert(
                  Modules
         inplace: carry out model transformations in-place, the original module
                  is mutated
+        is_reference: a flag to enable quantized reference module
 
     """
     if mapping is None:
-        mapping = get_default_static_quant_module_mappings()
+        mapping = get_default_static_quant_reference_module_mappings() if is_reference \
+            else get_default_static_quant_module_mappings()
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
@@ -539,7 +554,7 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     convert_custom_config_dict)
+                     is_reference, convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():

@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -140,17 +139,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         ref_m = prepare(original_ref_m)
         ref_m(data)
-        reference_module_mapping = {
-            QuantStub: nnq.Quantize,
-            DeQuantStub: nnq.DeQuantize,
-            nn.Conv1d: nnqr.Conv1d,
-            nn.Conv2d: nnqr.Conv2d,
-            nn.Conv3d: nnqr.Conv3d,
-            nn.ConvTranspose1d: nnqr.ConvTranspose1d,
-            nn.ConvTranspose2d: nnqr.ConvTranspose2d,
-            nn.ConvTranspose3d: nnqr.ConvTranspose3d,
-        }
-        ref_m = convert(ref_m, mapping=reference_module_mapping)
+        ref_m = convert(ref_m, is_reference=True)
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
 
@@ -201,6 +190,85 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
             (16, 1, 10, 10, 10)
         )
+
+    def test_linear(self):
+        self._test_reference_module_impl(
+            nn.Linear,
+            nnq.Linear,
+            {'in_features': 5, 'out_features': 10},
+            (16, 5)
+        )
+
+    @override_qengines
+    def test_int16_reference_module(self):
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+
+        input_size = (16, 1, 10, 10)
+        data = torch.randn(*input_size, dtype=torch.float)
+
+        original_ref_m = RefM()
+        rand_w = torch.randn_like(original_ref_m.conv.weight)
+        rand_b = torch.randn_like(original_ref_m.conv.bias)
+        original_ref_m.conv.weight = torch.nn.Parameter(rand_w, requires_grad=False)
+        original_ref_m.conv.bias = torch.nn.Parameter(rand_b, requires_grad=False)
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines:
+            return
+        from torch.ao.quantization.observer import MovingAverageMinMaxObserver
+
+        weight_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            # set qmin and qmax to represent qint16
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        act_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+        )
+        custom_qconfig = QConfig(activation=act_obs, weight=weight_obs)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = custom_qconfig
+
+        ref_m = prepare(original_ref_m)
+        # calibration
+        ref_m(torch.randn(*input_size, dtype=torch.float))
+
+        ref_m = convert(ref_m, is_reference=True)
+
+        myobs = MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                            dtype=torch.qint32,
+                                            # set qmin and qmax to represent qint16
+                                            quant_min=-1 * (2 ** 15),
+                                            quant_max=(2 ** 15) - 1,
+                                            qscheme=torch.per_tensor_symmetric,
+                                            )
+        result = myobs(rand_w)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(ref_m.conv.weight_scale, qparams[0])
+
 
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):

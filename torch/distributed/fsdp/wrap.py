@@ -9,6 +9,15 @@ from typing import Any, Callable, Dict, Generator, Optional, Set, Tuple, Type, c
 import torch.nn as nn
 
 
+def always_wrap_policy(*args, **kwargs) -> bool:
+    """
+    A simple wrapper policy that always returns ``True``,
+    i.e. when passed as the `auto_wrap_policy` into FSDP,
+    this will result in all submodules being wrapped as
+    distinct FSDP instances.
+    """
+    return True
+
 def default_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,

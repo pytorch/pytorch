@@ -133,6 +133,7 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
+        "test_deploy",
     ]
 )
 
@@ -168,6 +169,7 @@ USE_PYTEST_LIST = [
     "test_typing",
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
+    "test_deploy",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -210,7 +212,9 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -228,9 +232,10 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_replicated_tensor",
     "test_determination",
-    "test_multiprocessing",
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
@@ -257,6 +262,8 @@ CORE_TEST_LIST = [
     "test_modules",
     "test_nn",
     "test_ops",
+    "test_ops_gradients",
+    "test_ops_jit",
     "test_torch"
 ]
 

@@ -279,7 +279,7 @@ class Linear(WeightedQuantizedModule):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
 
         Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+            ref_qlinear (Module): a reference quantized linear module, either produced by torch.ao.quantization
                           utilities or provided by the user
             output_scale (float): scale for output Tensor
             zero_point (int): zero point for output Tensor
