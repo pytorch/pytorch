@@ -32,6 +32,7 @@ base_names = {
     'test_jvp_',
     'test_vmapjvp_',
     'test_vmapjvpall_',
+    'test_jvpvjp_',
     'test_decomposition_',
     'test_make_fx_',
 }

@@ -1019,6 +1019,120 @@ class TestOperators(TestCase):
 
                 self.assertEqual(result_vjps, expected_vjps)
 
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
+        # These are weirdly non-deterministic
+        skip('nn.functional.conv2d', '', device_type='cpu'),
+        skip('nn.functional.conv2d', 'no_bias', device_type='cpu'),
+        skip('nn.functional.conv2d', 'stride_no_bias', device_type='cpu'),
+        skip('nn.functional.conv2d', 'stride_padding_no_bias', device_type='cpu'),
+        skip('nn.functional.fractional_max_pool2d'),  # Random
+        skip('nn.functional.fractional_max_pool3d'),  # Random
+
+        xfail('_masked.log_softmax'),
+        xfail('_masked.softmax'),
+        xfail('_masked.softmin'),
+        xfail('block_diag'),
+        xfail('cdist'),
+        xfail('fft.fft'),
+        xfail('fft.fft2'),
+        xfail('fft.fftn'),
+        xfail('fft.hfft'),
+        xfail('fft.hfft2'),
+        xfail('fft.hfftn'),
+        xfail('fft.ifft'),
+        xfail('fft.ifft2'),
+        xfail('fft.ifftn'),
+        xfail('fft.ihfft'),
+        xfail('fft.ihfft2'),
+        xfail('fft.ihfftn'),
+        xfail('fft.irfft'),
+        xfail('fft.irfft2'),
+        xfail('fft.irfftn'),
+        xfail('fft.rfft'),
+        xfail('fft.rfft2'),
+        xfail('fft.rfftn'),
+        xfail('istft'),
+        xfail('log_softmax'),
+        xfail('log_softmax', 'dtype'),
+        xfail('logcumsumexp'),
+        xfail('nn.functional.batch_norm'),
+        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
+        xfail('nn.functional.bilinear'),
+        xfail('nn.functional.binary_cross_entropy'),
+        xfail('nn.functional.binary_cross_entropy_with_logits', device_type='cuda'),
+        xfail('nn.functional.celu'),
+        xfail('nn.functional.cross_entropy'),
+        xfail('nn.functional.cross_entropy', 'mean'),
+        xfail('nn.functional.cross_entropy', 'none'),
+        xfail('nn.functional.cross_entropy', 'sum'),
+        xfail('nn.functional.elu'),
+        xfail('nn.functional.embedding'),
+        xfail('nn.functional.embedding', 'functorch'),
+        xfail('nn.functional.embedding_bag'),
+        xfail('nn.functional.glu'),
+        xfail('nn.functional.grid_sample'),
+        xfail('nn.functional.hardsigmoid'),
+        xfail('nn.functional.hardswish'),
+        xfail('nn.functional.huber_loss'),
+        xfail('nn.functional.instance_norm'),
+        xfail('nn.functional.layer_norm'),
+        xfail('nn.functional.leaky_relu'),
+        xfail('nn.functional.logsigmoid'),
+        xfail('nn.functional.mse_loss'),
+        xfail('nn.functional.nll_loss'),
+        xfail('nn.functional.pad', 'circular'),
+        xfail('nn.functional.prelu'),
+        xfail('nn.functional.selu'),
+        xfail('nn.functional.softmin'),
+        xfail('nn.functional.softmin', 'with_dtype'),
+        xfail('nn.functional.softplus'),
+        xfail('put'),
+        xfail('softmax'),
+        xfail('softmax', 'with_dtype'),
+        xfail('stft'),
+        xfail('take'),
+    }))
+    def test_jvpvjp(self, device, dtype, op):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        for sample in samples:
+            fn, primals = normalize_op_input_output(op, sample)
+            result = fn(*primals)
+            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+            tangents = tree_map(lambda x: torch.randn_like(x), result)
+
+            _, vjp_fn = vjp(fn, *primals)
+            result = jvp(vjp_fn, (cotangents,), (tangents,))
+            self.assertEqual(len(result), 2)
+
+            def reference(primals, cotangents, tangents):
+                _, vjp_fn = ref_vjp(fn, *primals)
+                with fwAD.dual_level():
+                    flat_cotangents, spec = tree_flatten(cotangents)
+                    flat_tangents, spec = tree_flatten(tangents)
+                    flat_duals = [fwAD.make_dual(c, t) for c, t in zip(flat_cotangents, flat_tangents)]
+                    duals = tree_unflatten(flat_duals, spec)
+                    result = vjp_fn(duals)
+                    flat_result, spec = tree_flatten(result)
+                    primals_out, tangents_out = zip(*[fwAD.unpack_dual(r) for r in flat_result])
+                    tangents_out = [t if t is not None else torch.zeros_like(p)
+                                    for p, t in zip(primals_out, tangents_out)]
+                    expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
+                return expected
+
+            expected = reference(primals, cotangents, tangents)
+            self.assertEqual(result, expected)
+
 
 class InplaceError(Exception):
     def __repr__(self):
