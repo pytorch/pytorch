@@ -720,7 +720,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module_freeze = freeze(module);
 
   std::stringstream input_model_stream;
-  module_freeze._save_for_mobile(input_model_stream);
+  module_freeze._save_for_mobile(input_model_stream, {}, false, true);
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
   std::vector<IValue> expect_result_list;

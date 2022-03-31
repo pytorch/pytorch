@@ -122,7 +122,7 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  Refer. See https://github.com/pytorch/pytorch/pull/63651 for details
 //  0x8L: Emit promoted operators as instructions.
 //  See https://github.com/pytorch/pytorch/pull/71662 for details
-constexpr uint64_t kProducedBytecodeVersion = 0x8L;
+constexpr uint64_t kProducedBytecodeVersion = 0x9L;
 
 // static_assert(
 //     kProducedBytecodeVersion >= kProducedFileFormatVersion,
@@ -135,7 +135,7 @@ constexpr uint64_t kProducedBytecodeVersion = 0x8L;
 // (in loader), we should support this model_version. For example, we provide a
 // wrapper to handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
-constexpr uint64_t kMaxSupportedBytecodeVersion = 0x8L;
+constexpr uint64_t kMaxSupportedBytecodeVersion = 0x9L;
 
 } // namespace serialize
 } // namespace caffe2
