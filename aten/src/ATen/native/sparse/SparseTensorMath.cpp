@@ -707,6 +707,34 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
+Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
+  // // TODO: Use a specialized CSR kernel for performance if needed
+  TORCH_CHECK(t_.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(src_.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  Tensor t = t_.to_sparse();
+  Tensor src = src_.to_sparse();
+  Tensor tmp_result = t.mul(src);
+  auto r_sparse_csr = tmp_result.to_sparse_csr();
+  r.resize_as_sparse_(r_sparse_csr);
+  r.copy_(r_sparse_csr);
+  return r;
+}
+
+Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
+  auto commonDtype = at::result_type(self, other);
+  TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  auto result_options = self.options().dtype(commonDtype);
+  // CSR is 2d!
+  Tensor result = at::empty({0, 0}, result_options);
+  return at::mul_out(result, self, other); // redispatch!
+}
+
+Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
+  return at::mul_out(self, self, other); // redispatch!
+}
+
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r, t_, src_);
