@@ -4,6 +4,8 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 import lazy_tensor_core
+import lazy_tensor_core.core.lazy_model as ltm
+
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
 def setup(rank, world_size):
@@ -11,24 +13,32 @@ def setup(rank, world_size):
     os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.Backend.register_backend("lazy", ltm.create_lazy_process_group)
+    dist.init_process_group("lazy", rank=rank, world_size=world_size)
+
 
 def cleanup():
     dist.destroy_process_group()
 
 
 def broadcast(device):
-    x = torch.zeros(20, 5).to(device)
+    x = torch.zeros(2, 3).to(device)
     if device.index == 0:
-        x = torch.randn(20, 5).to(device)
+        x = torch.randn(2, 3).to(device)
     dist.broadcast(x, 0)
     print(f"{os.getpid()} broadcast: {x.cpu()}")
 
 
 def all_reduce(device):
-    x = torch.full((20, 5), device.index + 1).to(device)
+    x = torch.full((2, 3), device.index + 1).to(device)
     dist.all_reduce(x, op=dist.ReduceOp.SUM)
     print(f"{os.getpid()} all_reduce: {x.cpu()}")
+
+def all_gather(device):
+    tensor_list = [torch.zeros(2, 3, dtype=torch.int64) for _ in range(2)]
+    x = torch.full((2, 3), device.index + 1).to(device)
+    dist.all_gather(tensor_list, x)
+    print(f"{os.getpid()} all_gather: {[tensor.cpu() for tensor in tensor_list]}")
 
 
 def demo_basic(rank, world_size):
@@ -37,10 +47,10 @@ def demo_basic(rank, world_size):
     setup(rank, world_size)
 
     device = torch.device("lazy", rank)
-    # device = torch.device("cuda", rank)
 
     broadcast(device)
     all_reduce(device)
+    all_gather(device)
 
     cleanup()
 

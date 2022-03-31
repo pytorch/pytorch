@@ -69,11 +69,14 @@ class CpuTimer : public Timer {
 
 C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 
-bool is_lazy_or_alias(const at::Tensor& tensor, const at::Tensor& view) {
-  if (tensor.device().type() == at::kLazy) {
-    // TODO(alanwaketan): Currently we can't assert this as bucket_view_out (L1457) is on cuda given
-    // it's set by ProcessGroupNCCL::collective (L1480) which is before the copyLazy hack.
-    // TORCH_INTERNAL_ASSERT(view.device().type() == at::kLazy);
+bool is_alias(const at::Tensor& tensor, const at::Tensor& view) {
+  // Some TensorImpl subclasses might not have storages, for example,
+  // LazyTensor (LTCTensorImpl). Thus, we double check that before
+  // calling into tensor.is_alias_of() which relies on the storages
+  // to perform the actual check.
+  // FIXME(alanwaketan): 1) Investigate why LazyTensor demands this to
+  // return true. 2) Consider moving this check to tensor.is_alias_of().
+  if (!tensor.has_storage() || !view.has_storage()) {
     return true;
   }
 
@@ -338,7 +341,7 @@ void Reducer::check_grad_layout(
         bucket_view.strides());
   }
   if (!gradient_as_bucket_view_) {
-    TORCH_INTERNAL_ASSERT(!is_lazy_or_alias(grad, bucket_view));
+    TORCH_INTERNAL_ASSERT(!is_alias(grad, bucket_view));
   }
 }
 
@@ -363,7 +366,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // bucket_view. If gradient_as_bucket_view_ is set as true, let grad point
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
-      if (!is_lazy_or_alias(grad, bucket_view)) {
+      if (!is_alias(grad, bucket_view)) {
         if (comm_hook_ == nullptr) {
           auto wrapped =
               at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
@@ -1142,7 +1145,7 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     if (gradient_as_bucket_view_) {
       auto& bucket_view = bucket.bucket_views_in.back();
       runGradCallbackForVariable(v, [&](auto& grad) {
-        if (grad.defined() && !is_lazy_or_alias(grad, bucket_view)) {
+        if (grad.defined() && !is_alias(grad, bucket_view)) {
           bucket_view.copy_(grad);
           grad = bucket_view;
           // The grad is modefied and needs to be written back.
@@ -1425,7 +1428,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // If a communication hook is registered, then `bucket_view_out` stores
       // the allreduced results in a newly allocated tensor, so we copy
       // `bucket_view_out` back to `bucket_view_in` for this gradient.
-      if (!is_lazy_or_alias(bucket_view_in, bucket_view_out)) {
+      if (!is_alias(bucket_view_in, bucket_view_out)) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
@@ -1436,7 +1439,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           if (!grad.defined()) {
             grad = bucket_view_in;
           } else {
-            if (!is_lazy_or_alias(grad, bucket_view_in)) {
+            if (!is_alias(grad, bucket_view_in)) {
               REDUCER_CHECK(
                   false,
                   logger_,

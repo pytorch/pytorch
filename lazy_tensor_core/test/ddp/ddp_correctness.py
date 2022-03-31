@@ -6,9 +6,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.multiprocessing as mp
 
+from datetime import timedelta
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import lazy_tensor_core
+import lazy_tensor_core.core.lazy_model as ltm
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
 # from caffe2.python import workspace
@@ -19,7 +21,8 @@ def setup(rank, world_size):
     os.environ['MASTER_PORT'] = '12356'
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.Backend.register_backend("lazy", ltm.create_lazy_process_group)
+    dist.init_process_group("lazy", rank=rank, world_size=world_size)
 
 
 def cleanup():
@@ -67,9 +70,18 @@ def print_param(param_a, param_b):
     print("=====cuda=====")
     print(param_b.cpu())
 
-def init(model, device, rank):
+def init(model, device, rank, size):
     model = copy.deepcopy(model).to(device)
-    model = DDP(model, device_ids=[rank], gradient_as_bucket_view=True)
+    if device.type == "lazy":
+        model = DDP(model, gradient_as_bucket_view=True)
+    if device.type == "cuda":
+        model = DDP(
+            model,
+            gradient_as_bucket_view=True,
+            device_ids=[rank],
+            process_group=dist.ProcessGroupNCCL(
+                dist.distributed_c10d._get_default_store(), rank, size, timedelta(minutes=3))
+        )
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
@@ -86,11 +98,11 @@ def demo_basic(rank, world_size):
 
     model = ToyModel()
 
-    device_lazy = f"lazy:{rank}"
-    model_lazy, loss_fn_lazy, optimizer_lazy = init(model, device_lazy, rank)
+    device_lazy = torch.device("lazy", rank)
+    model_lazy, loss_fn_lazy, optimizer_lazy = init(model, device_lazy, rank, world_size)
 
-    device_cuda = f"cuda:{rank}"
-    model_cuda, loss_fn_cuda, optimizer_cuda = init(model, device_cuda, rank)
+    device_cuda = torch.device("cuda", rank)
+    model_cuda, loss_fn_cuda, optimizer_cuda = init(model, device_cuda, rank, world_size)
 
     assert all_close(model_lazy.parameters(), model_cuda.parameters())
     for i in range(101):

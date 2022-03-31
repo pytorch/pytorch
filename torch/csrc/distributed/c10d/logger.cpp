@@ -268,9 +268,7 @@ void Logger::set_runtime_stats_and_log() {
   // Sync with reducer's data
   std::lock_guard<std::mutex> lock(reducer_->mutex_);
   // Set runtime stats at the sampling iterations.
-  // FIXME(alanwaketan): Enable reducer_->timer_ for lazy device.
-  // Currently timers are tied to the specific device, e.g., CudaTimer, CpuTimer.
-  if (!reducer_->should_collect_runtime_stats() || !reducer_->timer_) {
+  if (!reducer_->should_collect_runtime_stats()) {
     return;
   }
   num_iterations_stats_recorded_++;
@@ -328,6 +326,14 @@ void Logger::set_runtime_stats_and_log() {
   if (reducer_->params_[0].is_cuda() && reducer_->is_multi_device_module_) {
     TORCH_WARN_ONCE(
       "Cuda time stats are not collected for multi-device modules."
+    );
+    return;
+  }
+  if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
+    TORCH_WARN_ONCE(
+      "Time stats are currently only collected for CPU and CUDA devices. "
+      "Please refer to CpuTimer or CudaTimer for how to register timer "
+      "for other device type."
     );
     return;
   }

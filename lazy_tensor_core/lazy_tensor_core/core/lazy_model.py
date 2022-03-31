@@ -6,12 +6,14 @@ import re
 import threading
 import time
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import lazy_tensor_core
 import lazy_tensor_core.core.ltc_env_vars as xenv
 import lazy_tensor_core.debug.metrics_saver as ms
 import lazy_tensor_core.utils.utils as xu
 import lazy_tensor_core.utils.closures as xc
+from datetime import timedelta
 
 _DEVICES = xu.LazyProperty(lambda: lazy_tensor_core._LAZYC._ltc_get_devices())
 
@@ -973,3 +975,81 @@ def get_memory_info(device):
 
 def set_noop_execution_mode(enable):
     return lazy_tensor_core._LAZYC._ltc_set_noop_execution_mode(enable)
+
+
+def create_lazy_process_group(store: dist.Store, rank: int, size: int, timeout: timedelta):
+    """
+    Create a ProcessGroup that is dedicated to handle lazy devices for torch.distributed.
+
+    Args:
+        store (dist.Store): key/value store accessible to all workers, used
+                            to exchange connection/address information.
+        rank (int): Rank of the current process (it should be a
+                    number between 0 and ``size``-1).
+        size (int): Number of processes participating in the job.
+        timeout (timedelta): Timeout for operations executed against
+                             the process group.
+
+    Returns:
+        A new LazyProcessGroup instance.
+    """
+    return LazyProcessGroup(store, rank, size, timeout)
+
+
+class LazyProcessGroup(dist.ProcessGroup):
+    """
+    A class to build a custom dist.ProcessGroup instance which overwrites
+    the ``dist.ProcessGroup.getBackendName()``, ``dist.ProcessGroup.allgather()``,
+    ``dist.ProcessGroup.allreduce()``, ``dist.ProcessGroup.broadcast()``
+    methods to handle lazy devices. It currently only works for NCCL and
+    CUDA backend devices.
+
+    Args:
+        store (dist.Store): key/value store accessible to all workers, used
+                            to exchange connection/address information.
+        rank (int): Rank of the current process (it should be a
+                    number between 0 and ``size``-1).
+        size (int): Number of processes participating in the job.
+        timeout (timedelta): Timeout for operations executed against
+                             the process group.
+    """
+    def __init__(self, store: dist.Store, rank: int, size: int, timeout: timedelta):
+        assert xu.getenv_as('LTC_TS_CUDA', bool, False)
+        dist.ProcessGroup.__init__(self, rank, size)
+        self.nccl_pg = dist.ProcessGroupNCCL(store, rank, size, timeout)
+
+    def getBackendName(self):
+        return "Lazy"
+
+    def allgather(self, output_tensor_lists, input_tensor_list, opts=None):
+        # The device index in output_tensor_lists could be wrong. Let's use the input_tensor_list's.
+        cuda_output_tensor_lists = [
+            [tensor.to(torch.device('cuda', input_tensor_list[0].device.index)) for tensor in tensor_list]
+            for tensor_list in output_tensor_lists
+        ]
+        cuda_input_tensor_list = [tensor.to(torch.device('cuda', tensor.device.index)) for tensor in input_tensor_list]
+        if opts == None:
+            work = self.nccl_pg.allgather(cuda_output_tensor_lists, cuda_input_tensor_list)
+        else:
+            work = self.nccl_pg.allgather(cuda_output_tensor_lists, cuda_input_tensor_list, opts)
+        work.wait()
+        for tensor_list, cuda_tensor_list in zip(output_tensor_lists, cuda_output_tensor_lists):
+            for tensor, cuda_tensor in zip(tensor_list, cuda_tensor_list):
+                tensor.copy_(cuda_tensor)
+        return work
+
+    def allreduce(self, tensor_list, opts=None):
+        cuda_tensor_list = [tensor.to(torch.device('cuda', tensor.device.index)) for tensor in tensor_list]
+        work = self.nccl_pg.allreduce(cuda_tensor_list, opts)
+        work.wait()
+        for tensor, cuda_tensor in zip(tensor_list, cuda_tensor_list):
+            tensor.copy_(cuda_tensor)
+        return work
+
+    def broadcast(self, tensor_list, opts=None):
+        cuda_tensor_list = [tensor.to(torch.device('cuda', tensor.device.index)) for tensor in tensor_list]
+        work = self.nccl_pg.broadcast(cuda_tensor_list, opts)
+        work.wait()
+        for tensor, cuda_tensor in zip(tensor_list, cuda_tensor_list):
+            tensor.copy_(cuda_tensor)
+        return work
