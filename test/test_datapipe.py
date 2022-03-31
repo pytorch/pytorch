@@ -2025,7 +2025,10 @@ class TestCircularSerialization(TestCase):
             yield from self._dp
 
     def test_circular_reference(self):
-        assert list(TestCircularSerialization.CustomIterDataPipe()) == list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe())))
+        self.assertEqual(
+            list(TestCircularSerialization.CustomIterDataPipe()),
+            list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe())))
+        )
         _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=True)
         _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=False)
 

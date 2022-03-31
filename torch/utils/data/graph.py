@@ -52,11 +52,12 @@ def list_connected_datapipes(scan_obj, only_datapipe, cache):
 
 
 def traverse(datapipe, only_datapipe=False):
-    return _traverse_helper(datapipe, only_datapipe)
+    cache = set()
+    return _traverse_helper(datapipe, only_datapipe, cache)
 
 
 # Add cache here to prevent infinite recursion on DataPipe
-def _traverse_helper(datapipe, only_datapipe=False, cache=set()):
+def _traverse_helper(datapipe, only_datapipe=False, cache=None):
     if not isinstance(datapipe, IterDataPipe):
         raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
 
