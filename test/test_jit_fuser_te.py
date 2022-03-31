@@ -739,6 +739,22 @@ class TestTEFuser(JitTestCase):
                 # XXX: TE fuser can handle concats in a fusion group.
                 # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
+    def test_stack(self):
+        # "aten::stack fusion is not enabled yet with dynamic shapes"
+        if self.dynamic_shapes:
+            return True
+        with set_fusion_group_inlining(True):
+            for device in self.devices:
+                hx = torch.randn(3, 20, dtype=torch.float, device=device)
+                cx = torch.randn(3, 20, dtype=torch.float, device=device)
+
+                def foo(hx, cx):
+                    return torch.stack((hx + cx, hx - cx))
+
+                ge = self.checkTrace(foo, (hx, cx))
+                graph = ge.graph_for(hx, cx)
+                self.assertAllFused(graph)
+
     def test_remove_output_used_only_in_size(self):
         for device in self.devices:
             def test_fuse(a, b):
@@ -1781,6 +1797,7 @@ class TestTEFuser(JitTestCase):
         devices = self.devices
         list_ops = [
             torch.cat,
+            torch.stack
         ]
         for dtype, op, device in product(self.dtypes, list_ops, devices):
             if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
