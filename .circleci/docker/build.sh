@@ -222,14 +222,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-rocm4.3.1-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=4.3.1
-    ;;
   pytorch-linux-bionic-rocm4.5-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
@@ -237,6 +229,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=4.5.2
+    ;;
+  pytorch-linux-bionic-rocm5.0-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.0
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -283,6 +283,13 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
+#when using cudnn version 8 install it separately from cuda
+if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
+  IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  if [[ ${CUDNN_VERSION} == 8 ]]; then
+    IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  fi
+fi
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
@@ -321,6 +328,7 @@ docker build \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
