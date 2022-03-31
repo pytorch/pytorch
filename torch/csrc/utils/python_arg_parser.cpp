@@ -474,9 +474,11 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+    return (
+      THPUtils_checkIndex(item.ptr()) ||
+      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+      // in an intlist argument. Even float or complex scalar tensors.
+      (jit::tracer::isTracing() && THPVariable_Check(item.ptr())));
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
   return broadcast_size > 0 && THPUtils_checkLong(obj);
