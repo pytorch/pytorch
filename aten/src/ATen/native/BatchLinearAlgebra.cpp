@@ -1581,7 +1581,7 @@ Tensor& linalg_solve_out(const Tensor& A,
   return result;
 }
 
-// We implement linalg_solve as a composite function fo _linalg_solve
+// We implement linalg_solve as a composite function of _linalg_solve
 Tensor linalg_solve(const Tensor& A,
                     const Tensor& B,
                     bool left) {
@@ -1606,7 +1606,8 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
 }
 
 std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
-  Tensor solution, LU;
+  auto solution = at::empty({0}, self.options());
+  auto LU = at::empty({0}, A.options());
   at::solve_out(solution, LU, self, A);
   return std::make_tuple(solution, LU);
 }
