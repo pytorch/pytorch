@@ -170,19 +170,6 @@ void initJITBindings(PyObject* module) {
             return DecompositionGraphForSchema(n->schema());
           })
       .def("_jit_pass_run_decompositions", RunDecompositions)
-      // using Node* here instead of Schema because looking up the schema
-      // and passing it in from Python will have a different pointer than the
-      // schema that is globally used for caching
-      .def(
-          "_jit_register_shape_compute_graph_for_node",
-          [](Node* n, std::shared_ptr<Graph>& graph) {
-            if (n->maybeSchema()) {
-              const FunctionSchema& schema = n->schema();
-              RegisterShapeComputeGraphForSchema(schema, graph);
-            } else {
-              TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
-            }
-          })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
           "_jit_pass_propagate_shapes_on_graph_and_build_compute",
