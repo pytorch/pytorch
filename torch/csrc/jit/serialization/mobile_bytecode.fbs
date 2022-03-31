@@ -186,7 +186,11 @@ table ExtraFile {
 }
 
 table Module {
-  version:int;
+  // denotes the bytecode version of the mobile Module
+  // this starts from 9 for a flatbuffer file
+  // versions 8 and below are reserved pickle
+  bytecode_version:uint;
+
   extra_files:[ExtraFile];
   methods:[uint];  // index to ivalues
   state_obj:uint; // index to ivalues
@@ -196,6 +200,10 @@ table Module {
   object_types:[ObjectType];
   jit_sources:[ExtraFile];
   jit_constants:[uint];  // index to ivalues
+
+  // version of operator, depends on operators used
+  // this is used for operator versioning
+  operator_version:uint;
 }
 
 root_type Module;
