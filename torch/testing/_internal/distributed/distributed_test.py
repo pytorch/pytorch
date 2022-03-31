@@ -4840,7 +4840,8 @@ class DistributedTest:
         )
         @sandcastle_skip_if(
             IS_WINDOWS,
-            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
+            "Process group cannot be pickled on Windows when a model averager is deep copied:"
+            "https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
         )
         def test_post_localSGD_optimizer_parity(self):
             torch.cuda.set_device(self.rank)
@@ -4855,7 +4856,8 @@ class DistributedTest:
         )
         @sandcastle_skip_if(
             IS_WINDOWS,
-            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
+            "Process group cannot be pickled on Windows when a model averager is deep copied:"
+            "https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
         )
         def test_post_localSGD_optimizer_parity_grad_is_view(self):
             torch.cuda.set_device(self.rank)
@@ -4870,7 +4872,8 @@ class DistributedTest:
         )
         @sandcastle_skip_if(
             IS_WINDOWS,
-            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
+            "Process group cannot be pickled on Windows when a model averager is deep copied:"
+            "https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
         )
         def test_post_localSGD_optimizer_parity_with_hierarchical_sgd(self):
             torch.cuda.set_device(self.rank)
@@ -4888,7 +4891,8 @@ class DistributedTest:
         )
         @sandcastle_skip_if(
             IS_WINDOWS,
-            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
+            "Process group cannot be pickled on Windows when a model averager is deep copied:"
+            "https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
         )
         def test_post_localSGD_optimizer_parity_with_hierarchical_sgd_grad_is_view(self):
             torch.cuda.set_device(self.rank)
