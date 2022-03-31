@@ -404,7 +404,7 @@ Tensor quantized_max_pool2d(
 
 // TODO: out here is not a quantized tensor. If there's structured support for quantized tensors, then I think it would have made out
 // a quantized tensor? This results in out.dtype() and sizes being undefined and incorrect, respectively.
-// The cpu variant of this function has the correct sizes. We have to implement the output shape computations in this function.
+// The non-quantized variant of this function has the correct sizes. We have to implement the output shape computations in this function.
 std::tuple<at::Tensor &,at::Tensor &> max_pool2d_with_indices_out_quantized_cpu(const at::Tensor & self, at::IntArrayRef kernel_size, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode, at::Tensor & out, at::Tensor & indices) {
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
