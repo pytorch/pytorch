@@ -146,7 +146,7 @@ static void NvFuserScheduler_SBR(
   fusion_executor_cache->profile(false);
   executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
@@ -155,7 +155,7 @@ static void NvFuserScheduler_SBR(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   const size_t size =
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
@@ -184,7 +184,7 @@ static void Baseline_SBR(benchmark::State& benchmark_state, DataType dtype) {
   at::Tensor at_bias = at::zeros(bcast_shape, options);
 
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -193,9 +193,9 @@ static void Baseline_SBR(benchmark::State& benchmark_state, DataType dtype) {
     auto output = at::relu(bias);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   const size_t size =
@@ -249,7 +249,7 @@ static void NvFuserScheduler_SBR_Norm(
   fusion_executor_cache->profile(false);
   executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
@@ -259,7 +259,7 @@ static void NvFuserScheduler_SBR_Norm(
 
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   const size_t size =
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
@@ -290,7 +290,7 @@ static void Baseline_SBR_Norm(
   at::Tensor at_mean = at::zeros(bcast_shape, options);
   at::Tensor at_var = at::ones(bcast_shape, options);
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -302,7 +302,7 @@ static void Baseline_SBR_Norm(
     auto output = at::relu(bias);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   const size_t size =

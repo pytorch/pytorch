@@ -75,7 +75,7 @@ static void NvFuserScheduler_Reduction(
   fusion_executor_cache->profile(false);
   executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs({aten_input});
@@ -84,7 +84,7 @@ static void NvFuserScheduler_Reduction(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
@@ -107,14 +107,14 @@ static void Baseline_Reduction(
 
   // Sync everything up before we start
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = aten_input.sum({reduction_dim});
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   benchmark_state.SetBytesProcessed(

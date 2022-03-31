@@ -151,7 +151,7 @@ static void Baseline_BatchNorm(
       true);
 
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = at::batch_norm(
@@ -165,9 +165,9 @@ static void Baseline_BatchNorm(
         kEps,
         true);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *

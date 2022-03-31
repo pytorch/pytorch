@@ -166,11 +166,11 @@ static void Baseline_BatchNorm_BWD(
       kMomentum,
       kEps,
       true);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   // Sync everything up before we start
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -186,9 +186,9 @@ static void Baseline_BatchNorm_BWD(
         std::get<3>(fwd_result));
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   benchmark_state.SetBytesProcessed(
