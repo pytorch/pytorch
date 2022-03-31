@@ -27,7 +27,6 @@ def all_generator_source() -> List[str]:
 
 
 def generate_code(ninja_global: Optional[str] = None,
-                  nn_path: Optional[str] = None,
                   native_functions_path: Optional[str] = None,
                   install_dir: Optional[str] = None,
                   subset: Optional[str] = None,
@@ -135,7 +134,6 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--native-functions-path')
-    parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
     parser.add_argument(
@@ -176,7 +174,6 @@ def main() -> None:
 
     generate_code(
         options.ninja_global,
-        options.nn_path,
         options.native_functions_path,
         options.install_dir,
         options.subset,

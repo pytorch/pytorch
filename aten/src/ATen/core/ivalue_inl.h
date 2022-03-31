@@ -1584,6 +1584,7 @@ DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
+DEFINE_TO(c10::SymInt, toSymInt)
 
 template <class T>
 struct _fake_type {};
@@ -1981,6 +1982,13 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
+  if (v.has_value()) {
+    *this = IValue(std::move(*v));
+  }
+}
+
 template <class T, size_t N>
 inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();

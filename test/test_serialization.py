@@ -23,7 +23,7 @@ from torch.serialization import check_module_version_greater_or_equal
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -616,10 +616,11 @@ class SerializationMixin(object):
             self.assertEqual(a, a_loaded)
             self.assertEqual(b, b_loaded)
 
-        for device, dtype in product(devices, get_all_dtypes()):
+        for device, dtype in product(devices, all_types_and_complex_and(torch.half,
+                                                                        torch.bfloat16, torch.bool)):
             a = torch.tensor([], dtype=dtype, device=device)
 
-            for other_dtype in get_all_dtypes():
+            for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
                 s = torch._TypedStorage(
                     wrap_storage=a.storage()._untyped(),
                     dtype=other_dtype)

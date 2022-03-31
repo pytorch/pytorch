@@ -1,6 +1,8 @@
 import contextlib
+import copy
 import functools
 import traceback
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -11,6 +13,7 @@ from typing import (
     Callable,
     Dict,
     Generator,
+    Iterable,
     Iterator,
     List,
     NamedTuple,
@@ -20,7 +23,6 @@ from typing import (
     Union,
     cast,
 )
-import warnings
 
 import torch
 import torch.distributed as dist
@@ -41,6 +43,14 @@ from .flatten_params_wrapper import (
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
+)
+from .optim_utils import (
+    OPTIM_TARGET_RANK,
+    _flatten_optim_state,
+    _get_flat_param_to_fsdp_module,
+    _get_param_id_to_param,
+    _get_param_to_param_id,
+    _unflatten_optim_state,
 )
 from .utils import _apply_to_tensors, _replace_by_prefix
 from .wrap import _recursive_wrap
@@ -180,11 +190,16 @@ class StateDictType(Enum):
     SHARDED_STATE_DICT = auto()
 
 
+class OptimStateKeyType(Enum):
+    PARAM_NAME = auto()
+    PARAM_ID = auto()
+
+
 class FullyShardedDataParallel(nn.Module):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
-    FullyShardedDataParallel is commonly shorten to FSDP.
+    FullyShardedDataParallel is commonly shortened to FSDP.
 
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
@@ -208,7 +223,7 @@ class FullyShardedDataParallel(nn.Module):
 
     .. warning::
         Module should be already placed on the destination device or
-        device is set properly using torch.cuda.set_device(device_id).
+        device is set properly using ``torch.cuda.set_device(device_id)``.
         FSDP will get compute device from module first, if module device
         is CPU, FSDP will then get compute device from current device.
 
@@ -224,10 +239,10 @@ class FullyShardedDataParallel(nn.Module):
         process_group (Optional[ProcessGroup]):
             process group for sharding
         sharding_strategy (Optional[ShardingStrategy]):
-            Config sharding algorithm, different sharding algorithm has trade off
-            between memory saving and communication overhead. 'FULL_SHARD' will
-            be chose if sharding_strategy is not specified.
-        cpu_offload (Optional [CPUOffload]):
+            Config sharding algorithm, different sharding algorithm has trade
+            off between memory saving and communication overhead. ``FULL_SHARD``
+            will be chosen if sharding_strategy is not specified.
+        cpu_offload (Optional[CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
             ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
@@ -235,7 +250,7 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        auto_wrap_policy: (Optional [callable]):
+        auto_wrap_policy (Optional[Callable]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
@@ -259,7 +274,7 @@ class FullyShardedDataParallel(nn.Module):
                 >>> ) -> bool:
                 >>>     return unwrapped_params >= min_num_params
 
-        backward_prefetch: (Optional[BackwardPrefetch]):
+        backward_prefetch (Optional[BackwardPrefetch]):
             This is an experimental feature that is subject to change in the
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
@@ -759,8 +774,8 @@ class FullyShardedDataParallel(nn.Module):
                 # again in FSDP later, for example after training to run inference.
                 assert (
                     m._is_root is None or not m._is_root
-                ), "Non-root instance's _is_root flag should have not been set yet \
-                    or has already been set as False."
+                ), "Non-root instance's _is_root flag should have not been set yet" \
+                    "or has already been set as False."
                 if m._is_root is None:
                     m._is_root = False
 
@@ -826,22 +841,30 @@ class FullyShardedDataParallel(nn.Module):
     @contextlib.contextmanager
     def state_dict_type(module: nn.Module, state_dict_type: StateDictType) -> Generator:
         """
-        A context manager to set the state_dict_type of all the descendant FSDP
-        modules of the target module. The target module does not have to be a FSDP
-        module. If the target module is a FSDP module, its state_dict_type will
-        also be changed.
-        .. note:: This API should be called for only the top-level (root) module.
-        .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
+        A context manager to set the ``state_dict_type`` of all the descendant
+        FSDP modules of the target module. The target module does not have to
+        be a FSDP module. If the target module is a FSDP module, its
+        ``state_dict_type`` will also be changed.
+
+        .. note:: This API should be called for only the top-level (root)
+            module.
+
         .. note:: This API enables users to transparently use the conventional
-        ``state_dict`` API to take model checkpoints in cases where the root
-        FSDP module is wrapped by another ``nn.Module``. For example, the
-        following will ensure `state_dict`  is called on all non-FSDP instances,
-        while dispatching into `local_state_dict` implementation for FSDP:
+            ``state_dict`` API to take model checkpoints in cases where the
+            root FSDP module is wrapped by another ``nn.Module``. For example,
+            the following will ensure ``state_dict``  is called on all non-FSDP
+            instances, while dispatching into `local_state_dict` implementation
+            for FSDP:
+
+        Example::
+
         >>> model = DDP(FSDP(...))
-        >> fsdp_root = model.module
-        >>> with fsdp_root.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>> fsdp_root = model.module
+        >>> with FSDP.state_dict_type(fsdp_root, StateDictType.LOCAL_STATE_DICT):
         >>>     checkpoint = model.state_dict()
+
         Args:
+            module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
         prev_state_dict_type = None
@@ -963,12 +986,12 @@ class FullyShardedDataParallel(nn.Module):
         >>> torch.cuda.set_device(device_id)
         >>> my_module = nn.Linear(...)
         >>> sharded_module = FSDP(my_module)
-        >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
         >>>     full_dict = sharded_module.state_dict()
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
-        >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
         >>>     local_dict = sharded_module.state_dict()
         >>> local_dict.keys()
         >>> odict_keys(['flat_param', 'inner.flat_param'])
@@ -1101,13 +1124,13 @@ class FullyShardedDataParallel(nn.Module):
         >>> sharded_module = FSDP(my_module)
         >>> checkpoint = torch.load(PATH)
         >>> full_state_dict = checkpoint['full_state_dict']
-        >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
         >>>     sharded_module.load_state_dict(full_state_dict)
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
         >>> local_state_dict = checkpoint['local_state_dict]
-        >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
         >>>     sharded_module.load_state_dict(local_state_dict)
         >>> local_dict.keys()
         >>> odict_keys(['flat_param', 'inner.flat_param'])
@@ -1221,7 +1244,7 @@ class FullyShardedDataParallel(nn.Module):
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
             changes will be discarded). In the case where FSDP does not shard
-            the parameters, currently only when world_size == 1, the
+            the parameters, currently only when ``world_size == 1``, the
             modification is persisted regardless of ``writeback``.
 
         .. warning:: Note that ``rank0_only=True`` in conjunction with
@@ -1359,6 +1382,25 @@ class FullyShardedDataParallel(nn.Module):
                         stack.close()
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
+
+    def named_buffers(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.Tensor]]:
+        """
+        Overrides :meth:`named_buffers()` to intercept buffer names and
+        remove all occurrences of the FSDP-specific flattened buffer prefix
+        when inside the :meth:`summon_full_params` context manager.
+        """
+        in_summon_full_params = getattr(self, "training_state", None) == \
+            TrainingState_.SUMMON_FULL_PARAMS
+        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
+            if in_summon_full_params:
+                # Remove any instances of the FSDP-specific prefix; there can
+                # be multiple in the case of nested FSDP modules
+                buffer_name = buffer_name.replace(FSDP_PREFIX, "")
+            yield (buffer_name, buffer)
 
     def named_parameters(
         self,
@@ -1998,6 +2040,346 @@ class FullyShardedDataParallel(nn.Module):
                 assert p.grad is not None
                 p.grad.detach().mul_(clip_coef.to(p.grad.device))
 
+    @staticmethod
+    def full_optim_state_dict(
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        optim_input: Optional[Union[
+            List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+        ]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Consolidates the full optimizer state on rank 0 and returns it
+        as a :class:`dict` following the convention of
+        :meth:`torch.optim.Optimizer.state_dict`, i.e. with keys ``"state"``
+        and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
+        contained in ``model`` are mapped back to their unflattened parameters.
+
+        .. warning:: This needs to be called on all ranks since synchronization
+            primitives are used.
+
+        .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
+            uses full parameter names as keys instead of parameter IDs.
+
+        .. warning:: If you do not pass ``model.parameters()`` as the first
+            argument to the optimizer, then you should pass that same value to
+            this method as ``optim_input``.
+
+        .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
+            contained in the optimizer state dict are not cloned, so there may
+            be aliasing surprises. For best practices, consider saving the
+            returned optimizer state dict immediately, e.g. using
+            ``torch.save()``.
+
+        Args:
+            model (torch.nn.Module): Root module (which may or may not be a
+                :class:`FullyShardedDataParallel` instance) whose parameters
+                were passed into the optimizer ``optim``.
+            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
+                parameters.
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Input passed into the optimizer ``optim`` representing either a
+                :class:`list` of parameter groups or an iterable of parameters;
+                if ``None``, then this method assumes the input was
+                ``model.parameters()``. (Default: ``None``)
+
+        Returns:
+            full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
+                state for ``model`` 's original unflattened parameters and
+                including keys "state" and "param_groups" following the
+                convention of :meth:`torch.optim.Optimizer.state_dict`.
+        """
+        osd = optim.state_dict()
+        osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
+
+        group = model.process_group if hasattr(model, "process_group") \
+            else None  # not all `torch.nn.Module`s have `process_group`
+        rank = dist.get_rank(group)
+        to_save = rank == OPTIM_TARGET_RANK
+        full_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
+        full_osd_state = full_osd["state"] if to_save else None  # alias
+
+        # Handle the "state" part of the optimizer state dict
+        param_to_unflat_param_names = _get_param_to_unflat_param_names(model)
+        flat_param_id_to_param = _get_param_id_to_param(model, optim_input)
+        flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
+        for flat_param_id, param in enumerate(flat_param_id_to_param):  # type: ignore[assignment]
+            # Do not include parameters without state to avoid empty mappings
+            if flat_param_id not in osd_state:
+                continue
+            assert param in param_to_unflat_param_names, \
+                "Check the `param_to_unflat_params` construction\n" \
+                f"param: {param}"
+            unflat_param_names = param_to_unflat_param_names[param]
+            # For FSDP parameters, we need to unflatten
+            if isinstance(param, FlatParameter):
+                assert param in flat_param_to_fsdp_module, \
+                    "Check the `flat_param_to_fsdp_module` construction\n" \
+                    f"param: {param}"
+                unflat_state = _unflatten_optim_state(
+                    flat_param_to_fsdp_module[param], param,
+                    osd_state[flat_param_id],
+                )
+                if to_save:
+                    assert len(unflat_state) == len(unflat_param_names) and \
+                        len(unflat_state) == param._num_unflattened_params, \
+                        f"{len(unflat_state)} {len(unflat_param_names)} " \
+                        f"{param._num_unflattened_params}"
+                    for unflat_param_name, unflat_param_state in zip(
+                        unflat_param_names, unflat_state,
+                    ):
+                        full_osd_state[unflat_param_name] = unflat_param_state
+            # For parameters from non-FSDP modules, we do not need to unflatten
+            elif to_save:
+                assert len(unflat_param_names) == 1
+                unflat_param_name = unflat_param_names[0]
+                # Do not `deepcopy()` to avoid unnecessarily duplicating
+                # tensor storage
+                full_osd_state[unflat_param_name] = \
+                    copy.copy(osd_state[flat_param_id])
+                # Move all tensor state to CPU
+                param_state = full_osd_state[unflat_param_name]
+                for state_name, value in param_state.items():
+                    if torch.is_tensor(value):
+                        param_state[state_name] = value.cpu()
+
+        # Non-target ranks may return since there is no more communication
+        if not to_save:
+            return full_osd
+
+        # Handle the "param_groups" part of the optimizer state dict
+        full_osd_param_groups = full_osd["param_groups"]  # alias
+        for flat_param_group in osd_param_groups:
+            unflat_param_group = copy.deepcopy(flat_param_group)
+            param_group_params = [
+                flat_param_id_to_param[flat_param_id]
+                for flat_param_id in flat_param_group["params"]
+            ]
+            nested_unflat_param_names = [
+                param_to_unflat_param_names[param]
+                for param in param_group_params
+            ]
+            unflat_param_group["params"] = [
+                unflat_param_name
+                for unflat_param_names in nested_unflat_param_names
+                for unflat_param_name in unflat_param_names
+            ]  # flatten the list of lists
+            full_osd_param_groups.append(unflat_param_group)
+        return full_osd
+
+
+    @staticmethod
+    def shard_full_optim_state_dict(
+        full_optim_state_dict: Dict[str, Any],
+        model: torch.nn.Module,
+        optim_input: Optional[Union[
+            List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+        ]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Shards the full optimizer state dict ``full_optim_state_dict`` by
+        remapping the state to flattened parameters instead of unflattened
+        parameters and restricting to only this rank's part of the optimizer
+        state. The first argument should be the return value of
+        :meth:`full_optim_state_dict`.
+
+        Example::
+
+            >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            >>> model, optim = ...
+            >>> full_osd = FSDP.full_optim_state_dict(model, optim)
+            >>> torch.save(full_osd, PATH)
+            >>> # Define new model with possibly different world size
+            >>> new_model, new_optim = ...
+            >>> full_osd = torch.load(PATH)
+            >>> sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, new_model)
+            >>> new_optim.load_state_dict(sharded_osd)
+
+        .. warning:: If you do not pass ``model.parameters()`` as the first
+            argument to the optimizer, then you should pass that same value to
+            this method as ``optim_input``.
+
+        Args:
+            full_optim_state_dict (Dict[str, Any]): Optimizer state dict
+                corresponding to the unflattened parameters and holding the
+                full non-sharded optimizer state.
+            model (torch.nn.Module): Root module (which may or may not be a
+                :class:`FullyShardedDataParallel` instance) whose parameters
+                correspond to the optimizer state in ``full_optim_state_dict``.
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Input passed into the optimizer representing either a
+                :class:`list` of parameter groups or an iterable of parameters;
+                if ``None``, then this method assumes the input was
+                ``model.parameters()``. (Default: ``None``)
+
+        Returns:
+            sharded_optim_state_dict (Dict[str, Any]): The full optimizer
+                state dict remapped to flattened parameters instead of
+                unflattened parameters and restricted to only include this
+                rank's part of the optimizer state.
+        """
+        full_osd = full_optim_state_dict  # alias
+        if "state" not in full_osd or "param_groups" not in full_osd:
+            raise ValueError(
+                "`full_optim_state_dict` must have the keys \"state\" and "
+                "\"param_groups\" to be a valid optimizer state dict"
+            )
+
+        flat_param_id_to_param = _get_param_id_to_param(model, optim_input)
+        flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
+        param_to_unflat_param_names = _get_param_to_unflat_param_names(model)
+
+        # Handle the "state" part of the optimizer state dict
+        sharded_osd_state: Dict[int, Any] = {}
+        full_osd_state = full_osd["state"]
+        unflat_param_names_to_flat_param_id: Dict[str, int] = {}
+        for flat_param_id, param in enumerate(flat_param_id_to_param):  # type: ignore[assignment]
+            assert param in param_to_unflat_param_names, \
+                "Check the `param_to_unflat_params` construction\n" \
+                f"param: {param}"
+            unflat_param_names = param_to_unflat_param_names[param]
+            # For FSDP parameters, we need to flatten
+            if isinstance(param, FlatParameter):
+                assert param in flat_param_to_fsdp_module, \
+                    "Check the `flat_param_to_fsdp_module` mapping " \
+                    f"construction\nparam={param}"
+                unflat_param_names = param_to_unflat_param_names[param]
+                fsdp_module = flat_param_to_fsdp_module[param]
+                flat_state = _flatten_optim_state(
+                    full_osd_state, unflat_param_names, fsdp_module, param,
+                )
+                sharded_osd_state[flat_param_id] = flat_state
+                for unflat_param_name in unflat_param_names:
+                    unflat_param_names_to_flat_param_id[unflat_param_name] = flat_param_id
+            # For parameters from non-FSDP modules, we do not need to flatten
+            else:
+                assert len(unflat_param_names) == 1
+                unflat_param_name = unflat_param_names[0]
+                # Remap from unflattened to flattened parameter ID -- do not
+                # deepcopy to avoid unnecessarily duplicating tensor storage
+                sharded_osd_state[flat_param_id] = \
+                    copy.copy(full_osd_state[unflat_param_name])
+                unflat_param_names_to_flat_param_id[unflat_param_name] = flat_param_id
+
+        # Handle the "param_groups" part of the optimizer state dict
+        sharded_osd_param_groups: List[Dict[str, Any]] = []
+        for unflat_param_group in full_osd["param_groups"]:
+            flat_param_group = copy.deepcopy(unflat_param_group)
+            # Map from unflattened parameter names to flattened parameter IDs
+            flat_param_ids = sorted(set(
+                unflat_param_names_to_flat_param_id[unflat_param_name]
+                for unflat_param_name in unflat_param_group["params"]
+            ))
+            flat_param_group["params"] = flat_param_ids
+            sharded_osd_param_groups.append(flat_param_group)
+
+        sharded_optim_state_dict = {
+            "state": sharded_osd_state,
+            "param_groups": sharded_osd_param_groups,
+        }
+        return sharded_optim_state_dict
+
+    @staticmethod
+    def rekey_optim_state_dict(
+        optim_state_dict: Dict[str, Any],
+        optim_state_key_type: OptimStateKeyType,
+        model: torch.nn.Module,
+        optim_input: Optional[Union[
+            List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+        ]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Re-keys the optimizer state dict ``optim_state_dict`` to use the key
+        type ``optim_state_key_type``. This can be used to achieve
+        compatibility between optimizer state dicts from models with FSDP
+        instances and ones without.
+
+        To re-key an FSDP full optimizer state dict (i.e. from
+        :meth:`full_optim_state_dict`) to use parameter IDs and be loadable to
+        a non-wrapped model::
+
+            >>> wrapped_model, wrapped_optim = ...
+            >>> full_osd = FSDP.full_optim_state_dict(wrapped_model, wrapped_optim)
+            >>> nonwrapped_model, nonwrapped_optim = ...
+            >>> rekeyed_osd = FSDP.rekey_optim_state_dict(full_osd, OptimStateKeyType.PARAM_ID, nonwrapped_model)
+            >>> nonwrapped_optim.load_state_dict(rekeyed_osd)
+
+        To re-key a normal optimizer state dict from a non-wrapped model to be
+        loadable to a wrapped model::
+
+            >>> nonwrapped_model, nonwrapped_optim = ...
+            >>> osd = nonwrapped_optim.state_dict()
+            >>> rekeyed_osd = FSDP.rekey_optim_state_dict(osd, OptimStateKeyType.PARAM_NAME, nonwrapped_model)
+            >>> wrapped_model, wrapped_optim = ...
+            >>> sharded_osd = FSDP.shard_full_optim_state_dict(rekeyed_osd, wrapped_model)
+            >>> wrapped_optim.load_state_dict(sharded_osd)
+
+        Returns:
+            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
+                using the parameter keys specified by ``optim_state_key_type``.
+        """
+        assert optim_state_key_type in \
+            (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)
+        osd = optim_state_dict  # alias
+        # Validate that the existing parameter keys are uniformly typed
+        uses_param_name_mask = [
+            type(param_key) is str for param_key in osd["state"]
+        ]
+        uses_param_id_mask = [
+            type(param_key) is int for param_key in osd["state"]
+        ]
+        if (any(uses_param_name_mask) and not all(uses_param_name_mask)) or \
+                (any(uses_param_id_mask) and not all(uses_param_id_mask)):
+            error_msg = f"Invalid parameter keys: {osd['state'].keys()}"
+            raise ValueError(error_msg)
+        # Return directly if the existing key type matches the target key type
+        if (optim_state_key_type == OptimStateKeyType.PARAM_NAME and
+            all(uses_param_name_mask)) or \
+            (optim_state_key_type == OptimStateKeyType.PARAM_ID and
+                all(uses_param_id_mask)):
+            return osd
+        # Otherwise, actually perform the re-keying
+        new_osd = {}
+        if optim_state_key_type == OptimStateKeyType.PARAM_NAME:  # ID -> name
+            param_id_to_param = _get_param_id_to_param(model, optim_input)
+            param_to_param_name = _get_param_to_param_name(model)
+            param_id_to_param_name: List[str] = [
+                param_to_param_name[param] for param in param_id_to_param
+            ]
+            new_osd["state"] = {
+                param_id_to_param_name[param_id]: param_state
+                for param_id, param_state in osd["state"].items()
+            }
+            new_osd["param_groups"] = copy.deepcopy(osd["param_groups"])
+            for param_group in new_osd["param_groups"]:
+                param_group["params"] = sorted([
+                    param_id_to_param_name[param_id]
+                    for param_id in param_group["params"]
+                ])
+            return new_osd
+        elif optim_state_key_type == OptimStateKeyType.PARAM_ID:  # name -> ID
+            param_name_to_param = _get_param_name_to_param(model)
+            param_to_param_id = _get_param_to_param_id(model, optim_input)
+            # Because not all model parameters may be passed as the optimizer
+            # input, we may need to drop some parameters from this mapping
+            param_name_to_param_id = {
+                param_name: param_to_param_id[param]
+                for param_name, param in param_name_to_param.items()
+                if param in param_to_param_id
+            }
+            new_osd["state"] = {
+                param_name_to_param_id[param_name]: param_state
+                for param_name, param_state in osd["state"].items()
+            }
+            new_osd["param_groups"] = copy.deepcopy(osd["param_groups"])
+            for param_group in new_osd["param_groups"]:
+                param_group["params"] = sorted([
+                    param_name_to_param_id[param_name]
+                    for param_name in param_group["params"]
+                ])
+            return new_osd
+        return new_osd  # should never reach here
+
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
     """Try to infer CUDA device from module parameters."""
@@ -2065,3 +2447,93 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
         )
     local_norm.to(dtype=parameters[0].dtype)
     return local_norm
+
+
+def _get_param_to_unflat_param_names(
+    model: torch.nn.Module,
+) -> Dict[torch.nn.Parameter, List[str]]:
+    """
+    Constructs a mapping from flattened parameters (including non-FSDP-module
+    parameters) to their unflattened parameter names. For non-FSDP-module
+    parameters, these mapped-to lists always contain a single element. The
+    unflattened parameter names should match the keys of the model state dict.
+
+    Args:
+        model (torch.nn.Module): Root module (which may or may not be a
+            :class:`FullyShardedDataParallel` instance).
+    """
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+
+    def clean_param_name(prefix, param_info):
+        """This replicates the parameter name cleaning logic in model state
+        dict but avoids gathering any parameters."""
+        name = prefix + param_info.module_name + "." + param_info.param_name
+        # FSDP full parameter names may not have both (i.e. `FSDP_PREFIX`), so
+        # we call `replace()` twice separately
+        name = name.replace(FSDP_WRAPPED_MODULE + ".", "")
+        name = name.replace(FPW_MODULE + ".", "")
+        return name
+
+    def f(param_to_unflat_param_names, module: torch.nn.Module, prefix: str):
+        # For FSDP modules, only add the entry when considering the contained
+        # `FlattenParamsWrapper` to avoid duplication
+        if not isinstance(module, FullyShardedDataParallel):
+            for param_name, param in module.named_parameters(recurse=False):
+                assert param not in param_to_unflat_param_names, \
+                    f"Incorrect recursion; already visited {param_name}"
+                if isinstance(param, FlatParameter):
+                    param_to_unflat_param_names[param] = [
+                        clean_param_name(prefix, param_info)
+                        for param_info in param._param_infos
+                    ]
+                else:
+                    param_to_unflat_param_names[param] = [prefix + param_name]
+
+        for submodule_name, submodule in module.named_children():
+            if submodule is not None:
+                new_prefix = prefix + submodule_name + "."
+                f(param_to_unflat_param_names, submodule, new_prefix)
+
+    f(param_to_unflat_param_names, model, "")
+    return param_to_unflat_param_names
+
+
+def _get_param_to_param_name(
+    model: torch.nn.Module,
+) -> Dict[torch.nn.Parameter, str]:
+    """
+    Constructs a mapping from parameters to their parameter names. ``model``
+    should not contain any :class:`FullyShardedDataParallel` instances, which
+    means that none of the parameters should be ``FlatParameter`` s. As a
+    result, compared to :meth:`_get_param_to_unflat_param_names`, the mapped
+    values may be flattened from singleton :class:`list` s to the contained
+    names themselves.
+
+    Args:
+        model (torch.nn.Module): Root module, which should not contain any
+            :class:`FullyShardedDataParallel` instances.
+    """
+    param_to_param_names = _get_param_to_unflat_param_names(model)
+    for param_names in param_to_param_names.values():
+        assert len(param_names) > 0, "`_get_param_to_unflat_param_names()` " \
+            "should not construct empty lists"
+        if len(param_names) > 1:
+            raise RuntimeError(
+                "Each parameter should only map to one parameter name but got "
+                f"{len(param_names)}"
+            )
+    param_to_param_name = {
+        param: param_names[0]
+        for param, param_names in param_to_param_names.items()
+    }
+    return param_to_param_name
+
+
+def _get_param_name_to_param(
+    model: torch.nn.Module,
+) -> Dict[str, torch.nn.Parameter]:
+    """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
+    return {
+        param_name: param
+        for param, param_name in _get_param_to_param_name(model).items()
+    }
