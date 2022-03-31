@@ -288,7 +288,7 @@ Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scala
   return norm_jvp(self_p, self_t, p_, norm, {}, true);
 }
 
-Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
 }
