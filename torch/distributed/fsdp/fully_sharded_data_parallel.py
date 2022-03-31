@@ -99,9 +99,48 @@ class ShardingStrategy(Enum):
 
 
 @dataclass
+class MixedPrecision:
+    """
+    A config to enable mixed precision training with FullyShardedDataParallel.
+    This class can be constructed with three flags:
+        ``param_dtype`` controls the precision of model parameters, inputs, and
+        therefore the precision under which computation happens. After forward
+        and backward passes, FSDP parameters point to full precision shards
+        that are kept in memory. Full precision parameters are always
+        checkpointed.
+        ``reduce_dtype`` controls the precision under which gradient reduction
+        would occur, which can potentially be different than ``param_dtype``
+        for use cases such as communication efficiency.
+        ``buffer_dtype`` controls the precision that buffers are cast to. Note
+        that buffers are unsharded and are cast in the first forward pass, and
+        remain in their reduced precision state even after forward/backward
+        passes. However, when taking checkpoints with ``state_dict``, buffers
+        are checkpointed in their full precision (and then restored back to
+        to their reduced precision) as expected. Note that this checkpoint
+        support is currently limited to ``StateDictType.FULL_STATE_DICT``.
+
+    .. note:: In ``summon_full_params``, parameters are summoned in full
+        precision but buffers are not.
+
+    .. note:: Parameters and buffers are checkpointed in full precision. For
+        buffers, this is only guaranteed to work for ``StateDictType.FULL_STATE_DICT``.
+
+    .. note:: This API is experimental and subject to change.
+    """
+    # maintain a tensor of this dtype that the fp32 param shard will be cast to.
+    # Will control the precision of model params, inputs, and thus compute as
+    # well.
+    param_dtype: torch.dtype = torch.float16
+    # Gradient communication precision.
+    reduce_dtype: torch.dtype = torch.float16
+    # Buffer precision.
+    buffer_dtype: torch.dtype = torch.float16
+
+
+@dataclass
 class CPUOffload:
     """
-    CPU offlaoding config. Currently, only parameter and gradient CPU
+    CPU offloading config. Currently, only parameter and gradient CPU
     offload are supported.
     offload_params: Offloading parameters to CPUs when these parameters are
                     not used for computation on GPUs. This implicitly enables
@@ -289,6 +328,7 @@ class FullyShardedDataParallel(nn.Module):
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
+        mixed_precision: Optional[MixedPrecision] = None
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -314,6 +354,7 @@ class FullyShardedDataParallel(nn.Module):
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                mixed_precision=mixed_precision,
             )
 
         self.process_group = process_group or _get_default_group()
@@ -335,6 +376,12 @@ class FullyShardedDataParallel(nn.Module):
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
+        self.mixed_precision = mixed_precision
+        # Original buffer type (mapping since all buffers may not be of same type). In
+        # the case of mixed precision training, this is used to restore buffers
+        # to their original type (which may not be the same as that of the
+        # parameters in the model) when checkpointing.
+        self._orig_buffer_dtypes: Dict[str, torch.dtype] = {}
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
@@ -504,32 +551,126 @@ class FullyShardedDataParallel(nn.Module):
         with torch.no_grad():
             p.data = p.to(cpu_device)
 
+    def _cast_fp_inputs_to_precision(self, dtype: torch.dtype, *args: Any, **kwargs: Any) -> Tuple[Any, Any]:
+        """
+        Casts floating point tensors in args and kwargs to precision given by dtype.
+        requires_grad field is respected.
+        """
+        def cast_fn(x: torch.Tensor) -> torch.Tensor:
+            if not torch.is_floating_point(x):
+                return x
+            y = x.to(dtype)
+            # Explicitly copy over requires_grad context since this is happening
+            # within torch.no_grad.
+            if x.is_leaf:
+                y.requires_grad = x.requires_grad
+            return y
+
+        with torch.no_grad():
+            return (
+                _apply_to_tensors(cast_fn, args),
+                _apply_to_tensors(cast_fn, kwargs)
+            )
+
+    @torch.no_grad()
+    def _cast_param_shards_to_dtype(self):
+        """
+        Allocates a mixed precision paramter shard and casts parameter shards to
+        reduced precision by copying into this mixed precision shard. Note that
+        if we are CPU offloading, this also implicitly loads the parameter shard
+        back to GPU.
+        """
+        assert self.mixed_precision is not None, "Expected to only be called when mixed precision is enabled."
+        with torch.cuda.stream(self._streams["mixed_precision_params"]):
+            for p in self.params:
+                assert p._mp_shard is not None
+                _alloc_storage(data=p._mp_shard, size=p._local_shard.size())
+                # Cast is done by copy
+                p._mp_shard.copy_(
+                    # no-op if not CPU offloading, otherwise nonblocking because
+                    # p._local_shard is pinned in _init_param_attributes.
+                    p._local_shard.to(p._mp_shard.device, non_blocking=True)
+                )
+                # Point p to the mp shard
+                p.data = p._mp_shard
+        # Block current stream on this copy work.
+        torch.cuda.current_stream().wait_stream(self._streams["mixed_precision_params"])
+
+    @torch.no_grad()
+    def _free_mp_shard(self, params: List[FlatParameter]):
+        """
+        Deallocate storage for parameter's mixed precision shard.
+        """
+        assert self.mixed_precision is not None
+        current_stream = torch.cuda.current_stream()
+        for p in params:
+            # mp_shard should always be allocated.
+            assert p._mp_shard is not None
+            # Shard is allocated in "mixed_precision_stream" and then we block
+            # current stream on this stream, so don't free it until work in the
+            # current stream is completed.
+            p._mp_shard.record_stream(current_stream)
+            _free_storage(p._mp_shard)
+
     def _cast_buffers(
-        self, device: Optional[torch.device] = None, memo: Optional[Set] = None
+        self,
+        device: Optional[torch.device] = None,
+        dtype: Optional[Dict[str, torch.dtype]] = None,
+        memo: Optional[Set] = None,
+        recurse: bool = True,
     ) -> None:
-        """Move all buffers to the given *device*.
+        """Move all buffers to the given *device* and *dtype*.
         If *device* is not given, then it will default to
-        ``self.compute_device``. In the
-        case of nested FSDP instances, we will respect the child instance's
+        ``self.compute_device``, otherwise buffer will be moved to ``device``.
+        In the case of nested FSDP instances, we will respect the child instance's
         ``compute_device`` configuration.
+        If *dtype* is given, it must be a mapping of buffer name to buffer dtype,
+            and this argument is currently only given to restore back to original
+            buffer types during checkpoint. If *dtype* is not given, and we are
+            in mixed precision training, the buffer will be cast to buffer_dtype,
+            otherwise the buffer will not be cast.
         Args:
             device (torch.device, Optional):
                 device to cast buffers to (defaults to compute_device)
+            dtype: (Dict[str, torch.dtype], Optional):
+                Mapping of buffer name to their dtype to cast to.
             memo (Set, Optional):
                 set of modules that have already been processed
+            recurse (bool, Optional):
+                Whether to call _cast_buffers recursively on nested FSDP
+                instances (default is True).
         """
         if memo is None:
             memo = set()
         for module in self.modules():
-            if module is not self and isinstance(module, FullyShardedDataParallel):
+            if module is not self and isinstance(module, FullyShardedDataParallel) and recurse:
                 # Allow any child FSDP instances to handle their own buffers.
-                module._cast_buffers(device=device, memo=memo)
+                module._cast_buffers(device=device, dtype=dtype, memo=memo, recurse=recurse)
             elif module not in memo:
                 memo.add(module)
                 for name, buf in module.named_buffers(recurse=False):
                     if buf is None:
                         continue
                     buf = buf.to(device=device or self.compute_device)
+                    if name not in self._orig_buffer_dtypes:
+                        self._orig_buffer_dtypes[name] = buf.dtype
+                    # If given, cast buffer to the given dtype. This is used to
+                    # suppport mixed precision for buffers
+                    # (given by self.mixed_precision.buffer_dtype) and also used
+                    # to restore the buffer dtype to the original precision for
+                    # state_dict() calls.
+                    # Note that non-floating point buffers are not casted.
+                    if torch.is_floating_point(buf):
+                        # We are restoring the original buffer type in
+                        # preparation for checkpoint.
+                        if dtype:
+                            buf = buf.to(dtype=dtype[name])
+                        # Note that we don't pass in self.mixed_precision.buffer_dtype
+                        # recursively into _cast_buffers, as we want to respect
+                        # mp config for child FSDP instances.
+                        elif self.mixed_precision is not None:
+                            buf = buf.to(self.mixed_precision.buffer_dtype)
+
                     setattr(module, name, buf)
 
     @torch.no_grad()
@@ -661,7 +802,7 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root:
             # Buffers stay on GPU, and don't get sharded. Since _cast_buffers
             # applies recursively, we only call this from the root instance.
-            self._cast_buffers()
+            self._cast_buffers(recurse=True)
 
             # Don't free the full params for the outer-most (root) instance,
             # In most cases, root instance contains params in the last layers
@@ -739,16 +880,38 @@ class FullyShardedDataParallel(nn.Module):
                 p, device=torch.device("cpu")
             ).pin_memory()
 
+        # If mixed_precision, maintain reduced precision param shard on
+        # compute_device for computation in fwd/bwd. We resize storage to 0 here
+        # and rematerialize before building the full param when needed. After
+        # fwd/bwd, it is freed and we only hold on to the full precision shard.
+        # As a result, this reduced precision shard is not allocated if we are
+        # not in the forward/backward pass.
+        if self.mixed_precision:
+            p._mp_shard = torch.zeros_like(
+                p._local_shard,
+                device=self.compute_device,
+                dtype=self.mixed_precision.param_dtype
+            )
+            _free_storage(p._mp_shard)
+
         # We also maintain a full-sized parameter of type self.compute_dtype.
         # We resize the storage to size 0 at init (here) and only materialize
         # as needed. The storage may contain padding elements so that it is
         # evenly divisible by world_size, although these padding elements will
         # be removed before the relevant computation.
         if p._is_sharded:  # type: ignore[attr-defined]
+            # We set p._full_param_padded's dtype to the desired parameter dtype
+            # in the case of mixed precision. This is so that when we all_gather
+            # into full_param_padded it can occur without issues and result in
+            # full_param_padded having the expected param_dtype.
+            full_param_dtype = (
+                p.dtype if self.mixed_precision is None
+                else self.mixed_precision.param_dtype
+            )
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
                 p.numel() * self.world_size,
                 device=self.compute_device,
-                dtype=p.dtype,
+                dtype=full_param_dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
@@ -789,6 +952,10 @@ class FullyShardedDataParallel(nn.Module):
             self._streams["all_gather"] = torch.cuda.Stream()
             # Stream for overlapping grad reduction with the backward pass.
             self._streams["post_backward"] = torch.cuda.Stream()
+            # Stream to move main params to self.mixed_precision.param_dtype
+            # for forward pass.
+            if self.mixed_precision:
+                self._streams["mixed_precision_params"] = torch.cuda.Stream()
 
         # We share streams with all children instances, which allows them to
         # overlap transfers across the forward pass without synchronizing with
@@ -806,6 +973,12 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not torch.cuda.is_available():
             return
+
+        if self.mixed_precision:
+            self._streams["mixed_precision_params"].wait_stream(
+                torch.cuda.current_stream()
+            )
+
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
     def _need_prefetch_pre_backward_hook(self) -> bool:
@@ -962,7 +1135,14 @@ class FullyShardedDataParallel(nn.Module):
         what postprocessing will be done.
         """
         self = cast(FullyShardedDataParallel, module)
-        return self._post_state_dict_hook_fn[self._state_dict_type](state_dict, prefix)
+        processed_state_dict = self._post_state_dict_hook_fn[self._state_dict_type](state_dict, prefix)
+        # Restore buffers, which currently are in their full precision type,
+        # back to their mixed precision type. This is because buffers are cast
+        # during lazy_init() and stay at their mixed precision type before/after
+        # forward/backward. As a result state_dict() should maintain this.
+        if self._is_root and self.mixed_precision is not None:
+            self._cast_buffers(recurse=True)
+        return processed_state_dict
 
     def state_dict(self, *args, **kwargs):
         """
@@ -1006,8 +1186,28 @@ class FullyShardedDataParallel(nn.Module):
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
                 with self.summon_full_params(recurse=False, writeback=False):
+                    # Since buffers are not sharded and stay casted, restore them to their
+                    # original user module specified types for checkpoint. We take care to
+                    # recast in post_state_dict_hook for consistency with the fact that
+                    # buffers stay casted after forward/backward. We must have the
+                    # call here instead of above because summon_full_params itself
+                    # calls _lazy_init() which would cast the buffers.
+                    if self.mixed_precision is not None and self._is_root:
+                        self._cast_buffers(
+                            dtype=self._orig_buffer_dtypes, recurse=False
+                        )
                     state_dict = super().state_dict(*args, **kwargs)
             else:
+                # Since buffers are not sharded and stay casted, restore them to their
+                # original user module specified types for checkpoint. We take care to
+                # recast in post_state_dict_hook for consistency with the fact that
+                # buffers stay casted after forward/backward. We must have the
+                # call here instead of above because summon_full_params itself
+                # calls _lazy_init() which would cast the buffers.
+                if self.mixed_precision is not None and self._is_root:
+                    self._cast_buffers(
+                        dtype=self._orig_buffer_dtypes, recurse=False
+                    )
                 state_dict = super().state_dict(*args, **kwargs)
 
             # TODO: support offload to CPU in post state dict hook.
@@ -1168,6 +1368,13 @@ class FullyShardedDataParallel(nn.Module):
         # Start of a forward pass.
         self.training_state = TrainingState_.FORWARD
 
+        # Cast inputs to their mixed precision type.
+        if self._is_root and self.mixed_precision is not None:
+            input_dtype = self.mixed_precision.param_dtype
+            args, kwargs = self._cast_fp_inputs_to_precision(
+                input_dtype, *args, **kwargs
+            )
+
         # All-gather full parameters, moving them to compute_device if
         # necessary.
         self._rebuild_full_params()
@@ -1178,7 +1385,6 @@ class FullyShardedDataParallel(nn.Module):
         # These need to be re-registered every forward pass in some cases where grad_fn
         # is mutated.
         self._register_post_backward_hooks()
-
         outputs = self.module(*args, **kwargs)
 
         if self not in self._fsdp_graph_order:
@@ -1187,6 +1393,8 @@ class FullyShardedDataParallel(nn.Module):
 
         if self.reshard_after_forward:
             self._free_full_params()
+            if self.mixed_precision is not None:
+                self._free_mp_shard(self.params)
         # Switch to original local shards of params. We maintain this invariant throughout
         # the code, i.e., ``p.data == p._local_shard`` after each function. This
         # also ensures that after the first forward, the optimizer state will be
@@ -1208,20 +1416,19 @@ class FullyShardedDataParallel(nn.Module):
         return outputs
 
     @torch.no_grad()
-    def _write_back_current_shard(self):
-        for p in self.params:
+    def _write_back_current_shard(self, full_params):
+        """
+        Writes back full_params into self.params.
+        """
+        for p, (full_param, _) in zip(self.params, full_params):
             if not p._is_sharded:  # type: ignore[attr-defined]
                 continue  # Already copied because no sharding.
-            chunks = p._full_param_padded.chunk(self.world_size)  # type: ignore[attr-defined]
+
+            # TODO: Might be able to refactor to use _get_shard.
+            chunks = full_param.chunk(self.world_size)  # type: ignore[attr-defined]
             assert len(chunks) > self.rank
             chunk = chunks[self.rank]
             p._local_shard.copy_(chunk)  # type: ignore[attr-defined]
-
-    def _collect_local_params(self):
-        def _is_full_param_in_use(p: Parameter):
-            return p._is_sharded and p._full_param_padded.storage().size() > 0  # type: ignore[attr-defined]
-
-        return [p for p in self.params if not _is_full_param_in_use(p)]
 
     @contextlib.contextmanager
     def summon_full_params(
@@ -1299,7 +1506,17 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         def _free_full_params_and_use_local_shard(params_to_free):
-            self._free_full_params(params_to_free)
+            # We may not always be able to free the full param, for example in
+            # the case where world_size == 1 and the shard actually points to
+            # the full parameter.
+            for (param, can_free) in params_to_free:
+                if can_free:
+                    current_stream = torch.cuda.current_stream()
+                    # Don't let PyTorch reuse this memory until all work in the
+                    # current stream is complete
+                    param.record_stream(current_stream)
+                    _free_storage(param)
+
             # when CPU offload is enabled, _use_param_local_shard implicitly
             # offloads the local shard to CPU by making p.data point to
             # p._local_shard, which would reside on CPU.
@@ -1332,24 +1549,23 @@ class FullyShardedDataParallel(nn.Module):
             # Even if rank0_only = True, we need to materialize all params here
             # and free them right after as full param materialization requires
             # collective comm.
-            currently_local_params = self._collect_local_params()
-            self._rebuild_full_params()
+            currently_local_params = self._rebuild_full_params()
             # Wait for all_gather to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
             my_rank = dist.get_rank(self.process_group)
             if offload_to_cpu and (not rank0_only or my_rank == 0):
                 for p in self.params:
                     if p._is_sharded:
                         with torch.no_grad():
-                            # Note that we offload the full param padded because
-                            # we have rebuilt full params.
-                            p._full_param_padded = (  # type: ignore[attr-defined]
-                                p._full_param_padded.to(torch.device("cpu"))  # type: ignore[attr-defined]
-                            )
-                            self._update_p_data(
-                                p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
-                            )
+                            # Note that we avoid using p._full_param_padded
+                            # directly here as we may not be using that param
+                            # as the full_param from _rebuild_full_params (i.e.)
+                            # in mixed precision.
+                            for p, (full_param, _) in zip(
+                                self.params, currently_local_params
+                            ):
+                                full_param = full_param.to(torch.device("cpu"))
+                                self._update_p_data(p, output_tensor=full_param)
 
             if rank0_only and my_rank != 0:
                 _free_full_params_and_use_local_shard(currently_local_params)
@@ -1370,15 +1586,22 @@ class FullyShardedDataParallel(nn.Module):
                             for p in self.params:
                                 if p._is_sharded:
                                     with torch.no_grad():
-                                        p._full_param_padded = (  # type: ignore[attr-defined]
-                                            p._full_param_padded.to(self.compute_device)  # type: ignore[attr-defined]
-                                        )
-                                        self._update_p_data(
-                                            p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
-                                        )
+                                        # Note that we avoid using
+                                        # p._full_param_padded directly here as
+                                        # we may not be using that param
+                                        # as the full_param from
+                                        # _rebuild_full_params (i.e. in mixed
+                                        # precision.
+                                        for p, (full_param, _) in zip(
+                                            self.params, currently_local_params
+                                        ):
+                                            full_param = full_param.to(self.compute_device)
+                                            self._update_p_data(
+                                                p, output_tensor=full_param,
+                                            )
 
                         if writeback:
-                            self._write_back_current_shard()
+                            self._write_back_current_shard(currently_local_params)
                         stack.close()
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
@@ -1580,6 +1803,11 @@ class FullyShardedDataParallel(nn.Module):
             # (self.reshard_after_forward = False).
             self._free_full_params(cast(List[FlatParameter], [param]))
 
+        if self.mixed_precision:
+            # Noop if reshard_after_forward=True because we'd free the param
+            # shard when rebuilding the full params in the pre_beckward_hook.
+            self._free_mp_shard(cast(List[FlatParameter], [param]))
+
         # Switch to local shard after backward. Note that
         # when CPU offload is enabled, _use_param_local_shard implicitly
         # offloads the local shard to CPU by making p.data point to
@@ -1605,6 +1833,14 @@ class FullyShardedDataParallel(nn.Module):
 
         with torch.cuda.stream(self._streams["post_backward"]):
             orig_grad_data = param.grad.data
+            if (
+                self.mixed_precision is not None and
+                self.mixed_precision.param_dtype != self.mixed_precision.reduce_dtype
+            ):
+                # Cast gradient to precision in which it should be communicated.
+                # TODO: Make this a communication hook when communication hooks
+                # are implemented for FSDP.
+                param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
             if self.gradient_predivide_factor > 1:
                 # Average grad by world_size for consistency with PyTorch DDP.
@@ -1636,6 +1872,15 @@ class FullyShardedDataParallel(nn.Module):
                 if self.gradient_postdivide_factor > 1:
                     # Average grad by world_size for consistency with PyTorch DDP.
                     output.div_(self.gradient_postdivide_factor)
+
+                if self.mixed_precision is not None:
+                    # Cast gradients back to the full parameter precision so that
+                    # optimizer.step() happens in full precision.
+                    orig_param_grad_data = output
+                    output.data = output.data.to(dtype=param.data.dtype)
+                    # Don't let this memory get reused until after the transfer.
+                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
+
                 # To support gradient accumulation outside `no_sync()`, we save
                 # the gradient data to `param._saved_grad_shard` before the
                 # backward pass, accumulate gradients into it here, and set
@@ -1668,6 +1913,13 @@ class FullyShardedDataParallel(nn.Module):
                     self.world_size == 1
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
+                if self.mixed_precision is not None:
+                    # Cast gradients back to the full parameter precision so that
+                    # optimizer.step() happens in full precision.
+                    orig_param_grad_data = param.grad.data
+                    param.grad.data = param.grad.data.to(dtype=param.data.dtype)
+                    # Don't let this memory get reused until after the transfer.
+                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
 
             # Regardless of sharding or not, offload the grad to CPU if we are
             # offloading params. This is so param and grad reside on same device
@@ -1809,13 +2061,35 @@ class FullyShardedDataParallel(nn.Module):
         p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
 
     @torch.no_grad()
-    def _rebuild_full_params(self) -> None:
+    def _rebuild_full_params(self) -> List[Tuple[torch.Tensor, bool]]:
         """
         Gather all shards of params.
         """
+        # summon_full_params must do a full precision rebuild even under mixed
+        # precision, because it is used for e.g. checkpoint where we'd like to
+        # checkpoint in full precision.
+        force_full_precision = (self.training_state == TrainingState_.SUMMON_FULL_PARAMS)
+        # full param output tensors and a flag indicating whether
+        # summon_full_params can free them or not. It is possible that we can't
+        # free the full param, which currently occurs when the returned
+        # parameter points to the unsharded param when world_size == 1, or when
+        # we're returning the full parameter and reshard_after_forward=False
+        # (because we need to ensure p._full_param_padded stays intact)
+        output_tensors: List[Tuple[torch.Tensor, bool]] = []
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
-                if self.cpu_offload.offload_params:
+                mixed_precision_cast_ran = (
+                    self.mixed_precision is not None and not force_full_precision
+                )
+                if mixed_precision_cast_ran:
+                    self._cast_param_shards_to_dtype()
+                    # TODO: remove below
+                    for p in self.params:
+                        assert p.dtype == self.mixed_precision.param_dtype
+                # We can skip moving params to GPU if mixed precision, as p.data
+                # would then be pointing to p._mp_shard which is already on
+                # self.compute_device.
+                if self.cpu_offload.offload_params and not mixed_precision_cast_ran:
                     # Move params to GPU if needed. Note that we don't use
                     # self._full_param_padded.device here because the attr is
                     # not set always, i.e. when world_size=1 and
@@ -1824,12 +2098,36 @@ class FullyShardedDataParallel(nn.Module):
                     p.data = p.data.to(self.compute_device, non_blocking=True)
                 # e.g., when world_size == 1
                 if not p._is_sharded:  # type: ignore[attr-defined]
+                    if mixed_precision_cast_ran:
+                        # p.data should be the same type as p._mp_shard, and it
+                        # is safe to free.
+                        assert p.data.dtype == p._mp_shard.dtype
+                        # Safe to free because p.data points to the mp shard.
+                        output_tensors.append((p.data, True))
+                    else:
+                        # p.data points to the unsharded parameter, so not safe to
+                        # free.
+                        output_tensors.append((p.data, False))
                     continue
                 # If full param has been rebuilt or has not been freed, no need to call all gather
                 elif (
                     p._full_param_padded.storage().size()  # type: ignore[attr-defined]
                     == p._full_param_padded.size().numel()  # type: ignore[attr-defined]
                 ):
+                    # Check that the full param is in the expected precision, if
+                    # training with mixed precision
+                    if mixed_precision_cast_ran:
+                        if p._full_param_padded.dtype != self.mixed_precision.param_dtype:
+                            raise ValueError(
+                                "_rebuild_full_params: Expected full param to be "
+                                f"of type {self.mixed_precision.param_dtype}, "
+                                f"but got {p._full_param_padded.dtype}!"
+                            )
+                    # output is full_param_padded which can be freed depending
+                    # on reshard_after_forward (this path is exercised by tests
+                    # in test_fsdp_summon_full_params).
+                    output_tensors.append((p._full_param_padded, self.reshard_after_forward))
+
                     self._update_p_data(p, output_tensor=p._full_param_padded)  # type: ignore[attr-defined]
                     continue
                 else:
@@ -1842,17 +2140,36 @@ class FullyShardedDataParallel(nn.Module):
                     assert (
                         p._full_param_padded.storage().size() == 0  # type: ignore[attr-defined]
                     ), "Full param's storage should have been freed before if all gather is needed."  # type: ignore[attr-defined]
-                    # Allocate based on full size from all shards.
-                    _alloc_storage(p._full_param_padded, size=p_full_size)  # type: ignore[attr-defined]
-                    output_tensor = p._full_param_padded  # type: ignore[attr-defined]
-
+                    if self.mixed_precision and force_full_precision:
+                        # p._full_param_padded has the reduced precision type,
+                        # but we need full precision rebuild as we're in
+                        # summon_full_params. Note that this is why
+                        # summon_full_params collects locally used params from
+                        # _rebuild_full_params instead of relying on
+                        # p._full_param_padded, as it may not always be
+                        # allocated such as during mixed precision.
+                        output_tensor = p_data.new_zeros(p_full_size)
+                    else:
+                        # Allocate based on full size from all shards.
+                        _alloc_storage(p._full_param_padded, size=p_full_size)  # type: ignore[attr-defined]
+                        output_tensor = p._full_param_padded  # type: ignore[attr-defined]
                     # Fill output_tensor with (p.data for each shard in self.world_size)
                     dist._all_gather_base(
                         output_tensor, p_data, group=self.process_group
                     )
 
+                    # The full parameter, which can be freed. Note that we
+                    # append here before update_p_data so as to not saved the
+                    # tensor with padding trimmed, which causes issues with
+                    # writeback in summon_full_params.
+                    output_tensors.append((output_tensor, True))
                     # Set p.data = output_tensor (with padding trimmed)
                     self._update_p_data(p, output_tensor=output_tensor)
+                    # We can free the reduced precision shard as we have the
+                    # full precision parameter.
+                    if self.mixed_precision is not None:
+                        self._free_mp_shard(cast(List[FlatParameter], [p]))
+        return output_tensors
 
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
@@ -1895,6 +2212,8 @@ class FullyShardedDataParallel(nn.Module):
         for p in params:
             # e.g., world_size == 1
             if not p._is_sharded:  # type: ignore[attr-defined]
+                if self.mixed_precision is not None:
+                    self._free_mp_shard(cast(List[FlatParameter], [p]))
                 continue
             # Don't let PyTorch reuse this memory until all work in the current
             # stream is complete.
