@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/jit.h>
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -935,7 +936,7 @@ TEST(ExternalCall, Inlining) {
 }
 
 TEST(ExternalCall, JitCustomFusionOp) {
-  const char* cutom_op_schema_literal =
+  const char* custom_op_schema_literal =
       "nnc_custom::add_mul(Tensor a, Tensor b, Tensor c) -> Tensor";
   const char* external_func_name = "nnc_add_mul";
 
@@ -970,7 +971,7 @@ TEST(ExternalCall, JitCustomFusionOp) {
                                   int64_t* extra_args) {};
 
   torch::jit::RegisterOperators reg({Operator(
-      cutom_op_schema_literal,
+      custom_op_schema_literal,
       [](const Node* node) -> Operation {
         return [](Stack& _stack) {
           auto a = std::move(peek(_stack, 0, 3)).toTensor();
@@ -985,11 +986,11 @@ TEST(ExternalCall, JitCustomFusionOp) {
       c10::AliasAnalysisKind::FROM_SCHEMA)});
 
   auto& custom_operator_set = torch::jit::tensorexpr::getCustomOperatorSet();
-  custom_operator_set.insert({cutom_op_schema_literal});
+  custom_operator_set.insert({custom_op_schema_literal});
 
   auto& te_lowering_registry = torch::jit::tensorexpr::getNNCLoweringRegistry();
   te_lowering_registry.insert(
-      parseSchema(cutom_op_schema_literal), add_mul_lowering_func);
+      parseSchema(custom_op_schema_literal), add_mul_lowering_func);
 
   auto& te_nnc_func_registry = torch::jit::tensorexpr::getNNCFunctionRegistry();
   te_nnc_func_registry[external_func_name] = add_mul_external_func;
@@ -1004,6 +1005,38 @@ TEST(ExternalCall, JitCustomFusionOp) {
   auto graph = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, graph.get());
 
+  std::string shape_compute_python_string = R"PY(
+  def computOutput(a: List[int], b: List[int], c: List[int]):
+    expandedSizes: List[int] = []
+    dimsA = len(a)
+    dimsB = len(b)
+    dimsC = len(c)
+    ndim = max(dimsA, dimsB, dimsC)
+    for i in range(ndim):
+        offset = ndim - 1 - i
+        dimA = dimsA - 1 - offset
+        dimB = dimsB - 1 - offset
+        dimC = dimsC - 1 - offset
+        sizeA = a[dimA] if (dimA >= 0) else 1
+        sizeB = b[dimB] if (dimB >= 0) else 1
+        sizeC = a[dimC] if (dimC >= 0) else 1
+
+        if sizeA != sizeB and sizeB != sizeC and sizeA != 1 and sizeB != 1 and sizeC != 1:
+            # TODO: only assertion error is bound in C++ compilation right now
+            raise AssertionError(
+                "The size of tensor a {} must match the size of tensor b ("
+                "{} and c {}) at non-singleton dimension {}".format(sizeA, sizeB, sizeC, i)
+            )
+
+        expandedSizes.append(max(sizeA, sizeB, sizeC))
+
+    return expandedSizes
+  )PY";
+  auto cu_ptr = torch::jit::compile(shape_compute_python_string);
+  torch::jit::GraphFunction* gf =
+      (torch::jit::GraphFunction*)&cu_ptr->get_function("computOutput");
+  ASSERT_TRUE(gf);
+
 #ifdef TORCH_ENABLE_LLVM
   auto static_graph_case = graph->copy();
   FuseTensorExprs(static_graph_case, 1);
@@ -1013,6 +1046,10 @@ TEST(ExternalCall, JitCustomFusionOp) {
       ->run(*static_graph_case);
 
   auto dynamic_graph_case = graph->copy();
+  auto custom_op = torch::jit::getOperatorForLiteral(custom_op_schema_literal);
+  ASSERT_TRUE(custom_op);
+  torch::jit::RegisterShapeComputeGraphForSchema(
+      custom_op->schema(), gf->graph());
   FuseTensorExprs(dynamic_graph_case, 1, false, true);
   torch::jit::testing::FileCheck()
       .check("prim::TensorExprGroup_")

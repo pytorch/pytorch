@@ -658,14 +658,6 @@ struct SymbolicShapeGraphAnalyzer {
 
       if (!partial_evaluated_graphs.count(curr)) {
         GRAPH_DEBUG("No graph ", getHeader(curr));
-
-        // If the custom operator does not register shape function,
-        // the custom operator is responsible to handle the dynamic shape
-        // within the func body.
-        if (curr->isMemberOf(tensorexpr::getCustomOperatorSet())) {
-          continue;
-        }
-
         return c10::nullopt;
       }
 
