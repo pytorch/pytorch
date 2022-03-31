@@ -240,16 +240,54 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
-  } else if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn(input_.scalar_type());
-  } else {
-    AT_ERROR("Unsupported input layout: ", input_.layout());
   }
+  if (input_.layout() == c10::kMkldnn) {
+    return grad.to_mkldnn(input_.scalar_type());
+  }
+  if (input_.layout() == c10::kStrided) {
+    return grad.to_dense();
+  }
+  AT_ERROR("Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
   return grad.to_dense(input_.scalar_type());
+}
+
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+  if (tensor.layout() == c10::kSparse) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kSparseCsr) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kMkldnn) {
+    return tensor._to_dense(dtype);
+  }
+  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
+  if (dtype) {
+    return tensor.to(*dtype);
+  }
+  return tensor;
+}
+
+Tensor sparse_to_dense(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+  return dst.add_(self);
+}
+
+Tensor sparse_csr_to_dense(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+  return dst.add_(self);
 }
 
 // Computes the strides for view_dtype output when the view dtype is

@@ -219,7 +219,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ['xla', 'ort', 'mlc']:
+        if self.device.type in ['xla', 'ort', 'mlc', 'hpu']:
             return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
                                                                      self.dtype,
                                                                      str(self.device),
@@ -655,7 +655,7 @@ class Tensor(torch._C._TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0:
+        if self.dim() == 0 and not self.is_meta:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
