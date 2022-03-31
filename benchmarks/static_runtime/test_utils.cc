@@ -351,8 +351,10 @@ void testStaticRuntime(
               runtime.checkOutputTensorMemoryLeaks();
             }
 
+            // The memory planner is allowed to get reallocated
+            auto* new_memory_planner = runtime.get_memory_planner();
             size_t new_managed_bytes =
-                memory_planner ? memory_planner->total_managed() : 0;
+                new_memory_planner ? new_memory_planner->total_managed() : 0;
             if (algorithm != MemoryPlannerAlgorithm::kPrecomputedOffsets &&
                 check_resize && new_managed_bytes > 0) {
               EXPECT_GT(new_managed_bytes, managed_bytes);

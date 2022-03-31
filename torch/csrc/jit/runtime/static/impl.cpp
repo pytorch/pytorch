@@ -824,6 +824,7 @@ BlockRunner::BlockRunner(
       // TODO(T108633124): Turn on manage output tensors for sub-blocks.
       manage_output_tensors_enabled_(
           is_root_block_ && sm.opts().manage_output_tensors),
+      memory_planner_algorithm_(sm.opts().memory_planner_algorithm),
       values_(values) {
   nodes_.reserve(block_info_.nodes().size());
   for (auto& pre_pnode : block_info_.nodes()) {
@@ -970,7 +971,8 @@ std::unique_ptr<MemoryPlanner> memory_planner_factory(
           block_info,
           opts.enable_out_variant,
           manage_output_tensors_enabled,
-          opts.optimize_memory);
+          opts.optimize_memory,
+          opts.max_allowed_reallocs);
   }
   // Some old compilers can't figure out that control never reaches the end
   // of this function
@@ -983,11 +985,26 @@ void BlockRunner::create_memory_planner() {
   if (!planner_) {
     const auto& opts = static_module_.opts();
     planner_ = memory_planner_factory(
-        opts.memory_planner_algorithm,
+        memory_planner_algorithm_,
         this,
         block_info_,
         opts,
         manage_output_tensors_enabled_);
+  }
+}
+
+void BlockRunner::maybe_allocate() {
+  DCHECK(planner_);
+  if (planner_->shouldFallBackToStandardStrategy()) {
+    for (auto& n : nodes_) {
+      for (const auto i : c10::irange(n.outputs().size())) {
+        n.Output(i) = IValue();
+      }
+    }
+    planner_ = nullptr;
+    memory_planner_algorithm_ = MemoryPlannerAlgorithm::kStandardResizing;
+  } else {
+    planner_->allocate();
   }
 }
 
@@ -1212,7 +1229,7 @@ c10::IValue BlockRunner::run_impl(
 
     if (planner_) {
       DCHECK(!manage_output_tensors_enabled_ || checkOutputTensorMemoryLeaks());
-      planner_->allocate();
+      maybe_allocate();
     }
 
     set_inputs(std::forward<IValueList>(args), kwargs);

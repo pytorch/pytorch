@@ -191,6 +191,9 @@ struct TORCH_API StaticModuleOptions {
   // The memory planner to use. Only meaningful if enable_out_variant == true
   MemoryPlannerAlgorithm memory_planner_algorithm{
       MemoryPlannerAlgorithm::kStandardResizing};
+  // Maximum allowed reallocations before falling back to default memory planner
+  // strategy
+  size_t max_allowed_reallocs{std::numeric_limits<size_t>::max()};
 };
 
 /// The static runime supports two execution modes.
@@ -709,6 +712,7 @@ class TORCH_API BlockRunner {
   IValue move_outputs_to_tuple(uint32_t num_outputs);
 
   void create_memory_planner();
+  void maybe_allocate();
 
   float benchmark_model(
       const std::vector<std::vector<c10::IValue>>& args_list,
@@ -730,6 +734,7 @@ class TORCH_API BlockRunner {
   const uint16_t inputs_begin_;
 
   bool manage_output_tensors_enabled_ = false;
+  MemoryPlannerAlgorithm memory_planner_algorithm_;
   std::unique_ptr<MemoryPlanner> planner_;
   // [Shared values array]
   // ProcessedNodes reference their inputs and outputs with

@@ -115,6 +115,15 @@ class MemoryPlanner {
   void deallocate();
   void deallocateOutputTensors();
 
+  // Make this function return true if something has gone horribly wrong during
+  // the inference run and we should fall back to the StandardMemoryPlanner
+  // strategy. Typically, this is due to performance related issues - perhaps
+  // there were too many dynamic shapes/reallocations.
+  // StaticRuntime checks this function after calling deallocate(). If true, it
+  // destructs the MemoryPlanner it's holding, so make sure that deallocate()
+  // does _all_ required cleanup.
+  virtual bool shouldFallBackToStandardStrategy() const = 0;
+
   size_t total_num_managed_tensors() const {
     return num_managed_tensors_;
   }
@@ -247,6 +256,11 @@ class StandardMemoryPlanner : public MemoryPlanner {
       bool manage_output_tensors,
       bool optimize_memory);
 
+  bool shouldFallBackToStandardStrategy() const override {
+    // Already using standard strategy!
+    return false;
+  }
+
  protected:
   void allocateManagedTensors() override;
   void deallocateManagedTensors() override;
@@ -261,7 +275,8 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
       const BlockInfo& block_info,
       bool enable_out_variant,
       bool managed_output_tensors,
-      bool optimize_memory);
+      bool optimize_memory,
+      size_t max_allowed_reallocs);
 
   struct ManagedTensor {
     ManagedTensor(
@@ -287,6 +302,18 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
       const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new)
       const override;
 
+  bool shouldFallBackToStandardStrategy() const override {
+    auto result = num_reallocs_ >= max_allowed_reallocs_;
+    if (result) {
+      VLOG(1) << "Too many reallocations in PrecomputedOffsetsMemoryPlanner; "
+              << num_reallocs_
+              << " is >= the maximum allowed number of reallocs "
+              << max_allowed_reallocs_
+              << ". Falling back to StandardMemoryPlanner.";
+    }
+    return result;
+  }
+
  protected:
   void allocateManagedTensors() override;
   void deallocateManagedTensors() override;
@@ -297,6 +324,9 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
   bool enable_out_variant_;
   bool manage_output_tensors_;
   bool optimize_memory_;
+
+  size_t num_reallocs_{0};
+  size_t max_allowed_reallocs_;
 
   std::vector<ManagedTensor> managed_tensors_;
 };

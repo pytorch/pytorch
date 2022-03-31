@@ -591,7 +591,8 @@ PrecomputedOffsetsMemoryPlanner::PrecomputedOffsetsMemoryPlanner(
     const BlockInfo& block_info,
     bool enable_out_variant,
     bool manage_output_tensors,
-    bool optimize_memory)
+    bool optimize_memory,
+    size_t max_allowed_reallocs)
     : MemoryPlanner(
           block_runner,
           block_info,
@@ -601,7 +602,8 @@ PrecomputedOffsetsMemoryPlanner::PrecomputedOffsetsMemoryPlanner(
       block_info_(block_info),
       enable_out_variant_(enable_out_variant),
       manage_output_tensors_(manage_output_tensors),
-      optimize_memory_(optimize_memory) {}
+      optimize_memory_(optimize_memory),
+      max_allowed_reallocs_(max_allowed_reallocs) {}
 
 std::unique_ptr<MemoryPlanner> PrecomputedOffsetsMemoryPlanner::maybe_clone(
     BlockRunner* new_block_runner,
@@ -611,7 +613,8 @@ std::unique_ptr<MemoryPlanner> PrecomputedOffsetsMemoryPlanner::maybe_clone(
       block_info_,
       enable_out_variant_,
       manage_output_tensors_,
-      optimize_memory_);
+      optimize_memory_,
+      max_allowed_reallocs_);
   result->managed_tensor_storage_impls_.reserve(
       managed_tensor_storage_impls_.size());
   result->managed_tensors_.reserve(managed_tensors_.size());
@@ -695,6 +698,7 @@ void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
     }
     VLOG(1) << "managed_bytes: " << managed_bytes_;
   } else {
+    num_reallocs_ = 0;
     for (auto& managed_tensor : managed_tensors_) {
       auto* tensor = managed_tensor.tensor;
       if (tensor->nbytes() > managed_tensor.size) {
@@ -703,6 +707,7 @@ void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
         // tensor->nbytes() be greater than the size of its storage impl,
         // so shrink it if it got bigger.
         at::native::resize_(*tensor, {0});
+        ++num_reallocs_;
       }
       auto* expected_storage_impl = managed_tensor.storage_impl;
       auto* actual_storage_impl = tensor->storage().unsafeGetStorageImpl();

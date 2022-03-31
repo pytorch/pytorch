@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <stdexcept>
 
 #include "deep_wide_pt.h"
@@ -3101,4 +3102,43 @@ TEST(StaticRuntime, CloneWithRegularMemoryPlanner) {
 
 TEST(StaticRuntime, CloneWithPrecomputedOffsets) {
   testClone(MemoryPlannerAlgorithm::kPrecomputedOffsets);
+}
+
+TEST(StaticRuntime, MemoryPlannerFallback) {
+  auto mod = getDeepAndWideSciptModel();
+  std::vector<IValue> args1{
+      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
+  std::vector<IValue> args2{
+      at::randn({8, 1, 32}), at::randn({8, 1, 32}), at::randn({8, 50})};
+
+  auto smod = StaticModule(
+      mod,
+      /*is_frozen=*/false,
+      StaticModuleOptions{
+          .enable_out_variant = true,
+          .optimize_memory = true,
+          .memory_planner_algorithm =
+              MemoryPlannerAlgorithm::kPrecomputedOffsets,
+          .max_allowed_reallocs = 1});
+  auto& runtime = smod.runtime();
+  // First run, profiling.
+  runtime(args1);
+
+  const auto* first_memory_planner = runtime.get_memory_planner();
+  EXPECT_NE(first_memory_planner, nullptr);
+  EXPECT_NE(
+      dynamic_cast<const PrecomputedOffsetsMemoryPlanner*>(
+          first_memory_planner),
+      nullptr);
+
+  // Second run, triggers reallocations
+  runtime(args2);
+
+  // Run again to reset the memory planner
+  runtime(args1);
+  const auto* second_memory_planner = runtime.get_memory_planner();
+  EXPECT_NE(second_memory_planner, nullptr);
+  EXPECT_NE(
+      dynamic_cast<const StandardMemoryPlanner*>(second_memory_planner),
+      nullptr);
 }
