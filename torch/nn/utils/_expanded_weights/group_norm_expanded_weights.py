@@ -2,7 +2,7 @@ from functools import reduce
 import operator
 import torch
 import torch.nn.functional as F
-from .expanded_weights_impl import implements_per_sample_grads
+from .expanded_weights_impl import ExpandedWeight, implements_per_sample_grads
 from .expanded_weights_utils import standard_kwargs, \
     forward_helper, set_grad_sample_if_exists, unpack_expanded_weight_or_tensor
 from typing import List, Optional
@@ -19,8 +19,12 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
         weight, bias, eps = expanded_kwargs['weight'], expanded_kwargs['bias'], expanded_kwargs['eps']
         output, mean, rstd = forward_helper(torch.native_group_norm, (input, weight, bias, N, C, HxW, num_groups, eps), {})
         ctx.input, ctx.num_groups = input, num_groups
-        ctx.weight, ctx.bias, ctx.eps = weight, bias, eps
+        ctx.weight, ctx.eps = weight, eps
         ctx.mean, ctx.rstd = mean, rstd
+        if isinstance(bias, ExpandedWeight):
+            ctx.bias = bias
+        if input.requires_grad and isinstance(weight, ExpandedWeight):
+            ctx.weight = weight
         return output
 
     @staticmethod
@@ -52,7 +56,9 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
         results = results + [None] * 4
 
         # set grad_sample field for weight and bias with per sample gradients
-        set_grad_sample_if_exists(weight,
-                                  lambda _: torch.einsum("ni...->ni", F.group_norm(input, num_groups, eps=eps) * grad_output))
-        set_grad_sample_if_exists(bias, lambda _: torch.einsum("ni...->ni", grad_output))
+        if hasattr(ctx, "weight"):
+            set_grad_sample_if_exists(weight,
+                                      lambda _: torch.einsum("ni...->ni", F.group_norm(input, num_groups, eps=eps) * grad_output))
+        if hasattr(ctx, "bias"):
+            set_grad_sample_if_exists(bias, lambda _: torch.einsum("ni...->ni", grad_output))
         return tuple(results)
