@@ -263,8 +263,7 @@ CORE_TEST_LIST = [
     "test_ops",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_torch",
-    "test_attn_autograd"
+    "test_torch"
 ]
 
 # the JSON file to store the S3 test stats

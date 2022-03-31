@@ -29,6 +29,12 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
 
   Tensor dq, dk, dv;
 
+  // Alternatively, this check can be expressed in derivatives.yaml as
+  // - q, k, v: "grads[0].defined() || grads[1].defined() ? attn_backward(grads[0], grads[1], q, k, v, a) : std::tuple<Tensor, Tensor, Tensor>()"
+  if (!do_ext.defined() && !da_ext.defined()) {
+    return std::make_tuple(dq, dk, dv);
+  }
+
   bool needs_dq = q.requires_grad();
   bool needs_dk = k.requires_grad();
   bool needs_dv = v.requires_grad();

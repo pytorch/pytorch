@@ -2558,7 +2558,7 @@
     CUDA: layer_norm_cuda
     CompositeImplicitAutograd: math_native_layer_norm
 
-- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor o, Tensor a)
+- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CompositeExplicitAutograd: attn

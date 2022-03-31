@@ -2657,5 +2657,5 @@
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
 
-- name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor o, Tensor a)
-  q, k, v: attn_backward(grads[0], grads[1], q, k, v, a)
+- name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  q, k, v: attn_backward(grads[0], grads[1], q, k, v, result1)

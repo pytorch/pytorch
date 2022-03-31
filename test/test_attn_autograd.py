@@ -4,11 +4,20 @@ import copy
 
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, instantiate_parametrized_tests
 
-def attn(q, k, v):
+def _attn(q, k, v):
     x = torch.matmul(q, k.t())
     a = torch.tanh(x)
     o = torch.matmul(a, v)
     return o, a
+
+def _loss_oa(o, a):
+    return o.exp().sum() + a.sigmoid().sum()
+
+def _loss_o(o, _):
+    return o.exp().sum()
+
+def _loss_a(_, a):
+    return a.sigmoid().sum()
 
 class AttentionLayer(torch.autograd.Function):
     @staticmethod
@@ -17,10 +26,11 @@ class AttentionLayer(torch.autograd.Function):
         assert k.dim() == 2, f"Expecting k's rank to be 2, got {k.dim()}"
         assert v.dim() == 2, f"Expecting v's rank to be 2, got {v.dim()}"
 
-        assert q.size(0) == k.size(0) == v.size(0), f"Expecting qkv's first dim to be same, got ({q.size(0)}, {k.size(0)}, {v.size(0)})"
+        assert q.size(0) == k.size(0) == v.size(0), \
+            f"Expecting qkv's first dim to be same, got ({q.size(0)}, {k.size(0)}, {v.size(0)})"
         assert q.size(1) == k.size(1), f"Expecting qk's second dim to be same, got ({q.size(1)}, {k.size(1)})"
 
-        o, a = attn(q, k, v)
+        o, a = _attn(q, k, v)
 
         ctx.save_for_backward(q, k, v, a)
         ctx.set_materialize_grads(False)
@@ -66,8 +76,7 @@ class TestAttnAutograd(TestCase):
     @parametrize("q_requires_grad", [True, False])
     @parametrize("k_requires_grad", [True, False])
     @parametrize("v_requires_grad", [True, False])
-    # @parametrize("attn_fn", [AttentionLayer.apply, torch.attn])    # failing, gardcheck has test case where both do and da are None?
-    @parametrize("attn_fn", [AttentionLayer.apply])
+    @parametrize("attn_fn", [AttentionLayer.apply, torch.attn])
     def test_by_gradcheck(self, q_requires_grad, k_requires_grad, v_requires_grad, attn_fn):
         if not any([q_requires_grad, k_requires_grad, v_requires_grad]):
             return
@@ -78,15 +87,6 @@ class TestAttnAutograd(TestCase):
 
         assert torch.autograd.gradcheck(attn_fn, [q, k, v])
         assert torch.autograd.gradgradcheck(attn_fn, [q, k, v])
-
-    def _loss_oa(o, a):
-        return o.exp().sum() + a.sigmoid().sum()
-
-    def _loss_o(o, _):
-        return o.exp().sum()
-
-    def _loss_a(_, a):
-        return a.sigmoid().sum()
 
     @parametrize("q_requires_grad", [True, False])
     @parametrize("k_requires_grad", [True, False])
@@ -112,7 +112,7 @@ class TestAttnAutograd(TestCase):
         l.backward()
 
         # reference impl
-        oo, aa = attn(qq, kk, vv)
+        oo, aa = _attn(qq, kk, vv)
         ll = loss_fn(oo, aa)
         ll.backward()
 
