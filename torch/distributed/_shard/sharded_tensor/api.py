@@ -316,6 +316,16 @@ class ShardedTensor(object):
     def to(self,
            device=None,
            process_group=None):
+        """
+        Peform ShardedTensor dtype and/or device conversion to its
+        local shards on each rank.
+
+        NOTE: When converting to a device that needs to be managed by a
+        different type of ProcessGroup(i.e. GPU to CPU), need to explicitly
+        pass in a new process_group that is compatible with the device.
+
+        Only device conversion is supported for now.
+        """
         if device is not None:
             device_is_cuda = "cuda" in str(device)
             pg_is_nccl = isinstance(self._process_group, distributed_c10d.ProcessGroupNCCL)
