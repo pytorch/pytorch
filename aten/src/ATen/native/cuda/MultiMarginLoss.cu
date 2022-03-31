@@ -248,6 +248,7 @@ Tensor& multi_margin_loss_cuda_out(
               margin);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
+        out = at::empty({0}, out.options());
         at::sum_out(out, tmp_output, /*dims=*/IntArrayRef{});
       }
     }
@@ -262,7 +263,7 @@ Tensor& multi_margin_loss_cuda_out(
 Tensor multi_margin_loss_cuda(
     const Tensor &input, const Tensor &target, const Scalar &p, const Scalar &margin,
     const c10::optional<Tensor> &weights, int64_t reduction) {
-  auto out = at::empty({}, input.options());
+  auto out = at::empty({0}, input.options());
   multi_margin_loss_cuda_out(input, target, p, margin, weights, reduction, out);
   return out;
 }
