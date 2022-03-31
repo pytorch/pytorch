@@ -159,26 +159,18 @@ Tensor& add_out_dense_sparse_csr_cuda(
       " in add operation");
 
   Tensor src_values = src.values();
+  Tensor src_crow_indices = src.crow_indices();
+  Tensor src_col_indices = src.col_indices();
 
   resize_output(output, dense.sizes());
 
   Tensor resultBuffer = output;
-
+  Tensor valuesBuffer = src_values.to(commonDtype);
   if (output.scalar_type() != commonDtype) {
     resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(output, dense)) {
     resultBuffer.copy_(dense);
   }
-
-  if (src._nnz() == 0) {
-    return output;
-  }
-
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
-  resultBuffer = resultBuffer.view({-1, output.size(-2), output.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
-
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kHalf, kBool, kBFloat16,
       commonDtype,
@@ -188,7 +180,6 @@ Tensor& add_out_dense_sparse_csr_cuda(
             src_crow_indices.scalar_type(),
             "csr_add_out_crow_indices",
               [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
-                auto batch_count = resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
                 scalar_t* values_accessor = valuesBuffer.data_ptr<scalar_t>();
                 scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
                 scalar_t cast_value = alpha.to<scalar_t>();
@@ -198,11 +189,8 @@ Tensor& add_out_dense_sparse_csr_cuda(
                 int64_t out_storage_offset = resultBuffer.storage_offset();
 
                 auto out_strides = resultBuffer.strides();
-                auto out_strides0 = out_strides[0];
-                auto out_strides1 = out_strides[1];
-                auto crow_stride0 = src_crow_indices.stride(0);
-                auto col_stride0 = src_col_indices.stride(0);
-                auto val_stride0 = valuesBuffer.stride(0);
+                int64_t out_strides0 = out_strides[0];
+                int64_t out_strides1 = out_strides[1];
 
                 cudaStream_t stream = at::cuda::getCurrentCUDAStream();
                 at::cuda::ThrustAllocator allocator;
@@ -212,29 +200,24 @@ Tensor& add_out_dense_sparse_csr_cuda(
                thrust::for_each(
                     policy,
                     thrust::make_counting_iterator(int64_t(0)),
-                    thrust::make_counting_iterator(int64_t(src_crow_indices.size(-1) - 1)),
+                    thrust::make_counting_iterator(int64_t(src_crow_indices.size(0) - 1)),
                     [values_accessor,
                     crow_indices_accessor,
                     col_indices_accessor,
                     out_ptr,
-                    cast_value,
+                    out_storage_offset,
                     out_strides0,
-                    out_strides1,
-                    crow_stride0,
-                    col_stride0,
-                    val_stride0,
-                    batch_count
+                    cast_value,
+                    out_strides1
                     ]__device__(int64_t irow) {
-                      for (index_t batch_idx = 0; batch_idx < batch_count; batch_idx++) {
-                        index_t start_index = crow_indices_accessor[batch_idx*crow_stride0 + irow];
-                        index_t end_index = crow_indices_accessor[batch_idx*crow_stride0 + irow + 1];
+                        index_t start_index = crow_indices_accessor[irow];
+                        index_t end_index = crow_indices_accessor[irow + 1];
 
                         for (index_t i = start_index; i < end_index; ++i) {
-                            auto icol = col_indices_accessor[batch_idx*col_stride0 + i];
-                            auto index = batch_idx * out_strides0 + irow * out_strides1 + icol;
-                            out_ptr[index] += cast_value * values_accessor[batch_idx*val_stride0 + i];
+                            auto icol = col_indices_accessor[i];
+                            auto index = out_storage_offset + irow * out_strides0 + icol * out_strides1;
+                            out_ptr[index] += cast_value * values_accessor[i];
                         }
-                      }
                     });
               });
       });
