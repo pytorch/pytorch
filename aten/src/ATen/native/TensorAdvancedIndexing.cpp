@@ -90,9 +90,9 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce, bool 
       TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin.");
     }
   } else {
-    if (reduce == "add" || reduce == "sum") {
+    if (reduce == "add") {
       return native::SCATTER_GATHER_OP::REDUCE_ADD;
-    } else if (reduce == "multiply" || reduce == "prod") {
+    } else if (reduce == "multiply") {
       return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
     } else {
       TORCH_CHECK(false, "reduce argument must be either add or multiply.")
@@ -321,6 +321,7 @@ DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 DEFINE_DISPATCH(scatter_reduce_stub);
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
+DEFINE_DISPATCH(scatter_reduce_two_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -1311,7 +1312,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
   TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.");
 
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
-                                         scatter_reduce_stub,
+                                         scatter_reduce_two_stub,
                                          scatter_stub,
                                          reduce);
 
