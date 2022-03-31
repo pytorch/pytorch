@@ -11684,7 +11684,8 @@ op_db: List[OpInfo] = [
         ref=lambda x, weight:
             np.maximum(0., x) + np.minimum(0., x) *
             (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(0, x.ndim)])),
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_forward_ad=False,
         supports_autograd=True,
