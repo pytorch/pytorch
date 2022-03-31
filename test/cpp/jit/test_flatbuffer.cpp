@@ -249,6 +249,23 @@ TEST(FlatbufferTest, Inline) {
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
+#if defined ENABLE_FLATBUFFER
+TEST(FlatbufferTest, GetByteCodeVersion) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor):
+      return input + 1
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, true);
+  auto version = _get_model_bytecode_version(ss);
+  AT_ASSERT(version == caffe2::serialize::kProducedBytecodeVersion);
+  ss.seekg(0, ss.beg);
+  auto version_again = _get_model_bytecode_version(ss);
+  AT_ASSERT(version == version_again);
+}
+#endif
+
 TEST(FlatbufferTest, Tuple) {
   Module m("m");
   m.define(R"JIT(
