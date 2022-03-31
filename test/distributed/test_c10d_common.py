@@ -825,8 +825,14 @@ class CommonDistributedDataParallelTest(object):
 
         model.train()
         x = torch.zeros((1 if self.rank != 0 else 0, 2, 11, 13), dtype=torch.float32, device=self.rank)
+        #x = torch.zeros((2, 2, 11, 13), dtype=torch.float32, device=self.rank)
+        x.requires_grad = True
         y = model(x)
-        print(y)
+        y.sum().backward()
+
+        x.requires_grad = False
+        y = model(x)
+        y.sum().backward()
 
 
 class ComputeBucketAssignmentTest(TestCase):
