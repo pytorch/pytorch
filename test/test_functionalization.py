@@ -31,7 +31,7 @@ class InplaceLoggingTensor(LoggingTensor):
         return f'InplaceLoggingTensor({self.elem})'
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e):
             if isinstance(e, InplaceLoggingTensor):
                 return e.elem

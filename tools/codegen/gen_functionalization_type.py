@@ -8,10 +8,11 @@ from tools.codegen.context import (
     with_native_function, with_native_function_and_selector_and_index,
     with_native_function_and
 )
+from tools.codegen.api.types import Expr, Binding
 from tools.codegen.model import (
     Argument, NativeFunction, SchemaKind, BackendIndex,
-    FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy,
-    NativeFunctionsViewGroup, ListType
+    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy,
+    NativeFunctionsViewGroup
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
@@ -32,33 +33,30 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
 
+    view_tensor_name = view_copy_sig.arguments()[0].name
+    view_clone_name = 'self_clone'
+
     view_api_name = g.view.func.name.unambiguous_name()
-    exprs = ', '.join([e.expr for e in translate(view_copy_sig.arguments(), view_sig.arguments())])
 
-    # view ops today always return either a Tensor or a list of Tensors
-    assert len(g.view.func.returns) == 1
-    assert g.view.func.returns[0].type == BaseType(BaseTy.Tensor) \
-           or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+    context: List[Union[Binding, Expr]] = []
+    view_copy_args = list(view_copy_sig.arguments())
+    # don't include the original self tensor in the context
+    for b in view_copy_args[1:]:
+        context.append(b)
+    # but include the clone.
+    context.append(Expr(
+        expr=view_clone_name,
+        type=view_copy_args[0].nctype
+    ))
 
-    if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
-        return_cloned_output = '''\
-  return output.clone();'''
-    else:
-        # If the return type is a list, we need to clone each tensor in the list.
-        return_cloned_output = f'''\
-  {view_copy_sig.returns_type().cpp_type()} out_clone;
-  for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(output[i].clone());
-  }}
-  return out_clone;'''
 
     # The default generated composite kernel for {view}_copy() operators just clones
     # the input tensor, and runs the underlying view on the clone.
     return f"""
-{view_copy_sig.defn()} {{
-  auto output = at::_ops::{view_api_name}::call({exprs});
-  {return_cloned_output}
-}}
+  {view_copy_sig.defn()} {{
+    auto {view_clone_name} = {view_tensor_name}.clone();
+    return at::_ops::{view_api_name}::call({', '.join([e.expr for e in translate(context, view_sig.arguments())])});
+  }}
 """
 
 def modifies_arguments(f: NativeFunction) -> bool:
@@ -168,7 +166,7 @@ def emit_view_functionalization_body(
     # view op case
     assert f.is_view_op
 
-    if 'inplace_view' in f.tags:
+    if f.tag is Tag.inplace_view:
         # This op is both an inplace op AND a view op.
         # See Note [Functionalization Pass - Inplace View Ops] for details.
         # I currently have the view meta call into the out-of-place variant of the view, to avoid
@@ -202,7 +200,7 @@ def emit_view_functionalization_body(
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     meta_call_args = [e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)]
 
-    if 'inplace_view' in f.tags:
+    if f.tag is Tag.inplace_view:
         # See Note [Functionalization Pass - Inplace View Ops] for more details
         return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{

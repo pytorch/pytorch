@@ -46,7 +46,7 @@ def add_view_copy_derivatives(
 
     return view_copy_differentiability_infos
 
-def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
+def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
@@ -55,7 +55,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str, tags_yam
         with open(derivatives_yaml_path, 'r') as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
+        funcs = parse_native_yaml(native_yaml_path).native_functions
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
