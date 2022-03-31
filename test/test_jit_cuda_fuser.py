@@ -4439,6 +4439,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
             self.cuda_fuser_options.restore()
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
 
+    @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
