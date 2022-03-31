@@ -25,11 +25,6 @@ if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" ==
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
 
-  # TODO: Remove this once nvidia package repos are back online
-  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
-  # shellcheck disable=SC2046
-  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
   # Deploy feature builds cpython. It requires these packages.
   # TODO move this to dockerfile?
   sudo apt-get -qq update
