@@ -10,8 +10,7 @@ from torch import distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     StateDictType,
-    CPUOffload,
-    MixedPrecision,
+    CPUOffload
 )
 from torch.nn import Linear, Module
 import torch.nn as nn
@@ -79,8 +78,8 @@ class TestFSDPStateDict(FSDPTest):
     def _get_simple_nested_model(self, *fsdp_args, **fsdp_kwargs):
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
-                nn.Linear(10, 10, bias=False).cuda(),
+                FSDP(nn.Linear(10, 10, bias=False), *fsdp_args, **fsdp_kwargs),
+                nn.Linear(10, 10, bias=False),
             ),
             *fsdp_args,
             **fsdp_kwargs,
@@ -88,7 +87,7 @@ class TestFSDPStateDict(FSDPTest):
         return model
 
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
-        model = FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs)
+        model = FSDP(nn.Linear(10, 10, bias=False), *fsdp_args, **fsdp_kwargs)
         return model
 
     @skip_if_lt_x_gpu(2)
@@ -140,24 +139,20 @@ class TestFSDPStateDict(FSDPTest):
                             self.assertEqual(tensor.dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [True, False])
-    def test_save_and_load_after_forward_state_dict(self, mixed_precision):
+    def test_save_and_load_after_forward_state_dict(self):
         """
         Test that saving after some training results in params being updated as
         expected.
         """
         torch.cuda.set_device(self.rank)
-        mixed_precision = MixedPrecision() if mixed_precision else None
-        model = self._get_simple_nested_model(mixed_precision=mixed_precision)
+        model = self._get_wrapped_model(group=torch.distributed.distributed_c10d._get_default_group())
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         initial_params = _get_full_detached_param(model)
         for _ in range(6):
-            inp = torch.randn(1, 10, device=torch.cuda.current_device())
+            inp = model.module.get_input(torch.device("cuda"))
             output = model(*inp)
-            loss = output.sum()
-            expected_dtype = torch.float32 if mixed_precision is None else torch.float16
-            self.assertEqual(expected_dtype, loss.dtype)
-            loss.backward()
+            loss = model.module.get_loss(inp, output).cuda()
+            model.module.run_backward(loss)
             optim.step()
 
         trained_params = _get_full_detached_param(model)
@@ -166,10 +161,6 @@ class TestFSDPStateDict(FSDPTest):
         # Save a copy of the state_dict
         state_dict = {k: v.clone() for k, v in model.state_dict().items()}
         _zero_model(model)
-
-        # Ensure checkpointed params have the full param dtype
-        for tensor in state_dict.values():
-            self.assertEqual(tensor.dtype, torch.float32)
 
         # Load state_dict into zeroed model
         model.load_state_dict(state_dict)
