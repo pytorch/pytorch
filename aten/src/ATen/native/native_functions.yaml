@@ -9589,6 +9589,12 @@
 - func: _pad_circular(Tensor self, int[] pad) -> Tensor
   python_module: nn
 
+- func: _pad_enum(Tensor self, int[] pad, int mode, float? value=None) -> Tensor
+  python_module: nn
+
+- func: pad(Tensor self, int[] pad, str mode="constant", float? value=None) -> Tensor
+  python_module: nn
+
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
