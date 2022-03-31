@@ -349,6 +349,39 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   return std::make_tuple(result0, mean, rstd);
 }
 
+std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
+    const at::Tensor & grad_out, optional<int64_t> grad_out_bdim,
+    const at::Tensor & input, optional<int64_t> input_bdim,
+    const at::Tensor & mean, optional<int64_t> mean_bdim,
+    const at::Tensor & rstd, optional<int64_t> rstd_bdim,
+    int64_t N, int64_t C, int64_t HxW, int64_t group) {
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  auto mean_ = moveBatchDimToFront(mean, mean_bdim);
+  auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
+
+  const auto bdim_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
+  grad_out_ = ensure_has_bdim(grad_out, grad_out_bdim.has_value(), bdim_size);
+  input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
+  mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
+  rstd_ = ensure_has_bdim(rstd_, rstd_bdim.has_value(), bdim_size);
+
+  grad_out_ = reshape_dim_into(0, 0, grad_out_); // [B0 * N, C, *]
+  input_ = reshape_dim_into(0, 0, input_);       // [B0 * N, C, *]
+  mean_ = reshape_dim_into(0, 0, mean_);         // [B0 * N, G]
+  rstd_ = reshape_dim_into(0, 0, rstd_);         // [B0 * N, G]
+
+  const auto result = native_group_norm_backward(
+      grad_out_.contiguous(),
+      input_.contiguous(),
+      mean_.contiguous(),
+      rstd_.contiguous(),
+      nullopt, N * bdim_size, C, HxW, group, {true, false, false});
+  auto result0 = std::get<0>(result);
+  result0 = reshape_dim_outof(0, bdim_size, result0);
+  return std::make_tuple(result0, 0);
+}
+
 std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   const Tensor & grad_out, const Tensor & input, const Tensor & mean,
   const Tensor & rstd, const c10::optional<Tensor> & weight_opt,
@@ -368,9 +401,6 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     return at::native_group_norm_backward(grad_out, input, mean, rstd, weight_opt, N, C, HxW, group, output_mask);
   }
 
-  Tensor grad_out_value;
-  optional<int64_t> grad_out_bdim;
-  std::tie(grad_out_value, grad_out_bdim) = unwrapTensorAtLevel(grad_out, cur_level);
   Tensor input_value;
   optional<int64_t> input_bdim;
   std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
@@ -410,32 +440,16 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     optional<int64_t> grad_normalized_input_bdim;
     std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
-    auto grad_out_ = moveBatchDimToFront(grad_normalized_input_value, grad_normalized_input_bdim);
-    auto input_ = moveBatchDimToFront(input_value, input_bdim);
-    auto mean_ = moveBatchDimToFront(mean_value, mean_bdim);
-    auto rstd_ = moveBatchDimToFront(rstd_value, rstd_bdim);
-
-    const auto bdim_size = get_bdim_size3(grad_out_, grad_out_bdim, input_, input_bdim, weight, weight_bdim);
-    grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
-    input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
-    mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
-    rstd_ = ensure_has_bdim(rstd_, rstd_bdim.has_value(), bdim_size);
-
-    grad_out_ = reshape_dim_into(0, 0, grad_out_); // [B0 * N, C, *]
-    input_ = reshape_dim_into(0, 0, input_);       // [B0 * N, C, *]
-    mean_ = reshape_dim_into(0, 0, mean_);         // [B0 * N, G]
-    rstd_ = reshape_dim_into(0, 0, rstd_);         // [B0 * N, G]
 
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    const auto result = native_group_norm_backward(
-        grad_out_,
-        input_,
-        mean_,
-        rstd_,
-        nullopt, N * bdim_size, C, HxW, group, {true, false, false});
-    auto result0 = std::get<0>(result);
-    result0 = reshape_dim_outof(0, bdim_size, result0);
-    grad_input = makeBatched(result0, 0, cur_level);
+    const auto res = group_norm_backward_no_weight_bias_batch_rule(
+        grad_normalized_input_value, grad_normalized_input_bdim,
+        input_value, input_bdim,
+        mean_value, mean_bdim,
+        rstd_value, rstd_bdim,
+        N, C, HxW, group
+    );
+    grad_input = makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
