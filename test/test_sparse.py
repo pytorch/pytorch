@@ -7,9 +7,6 @@ import operator
 import random
 import unittest
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import (
-    all_types_and_complex,
-)
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, IS_LINUX
@@ -17,7 +14,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
@@ -26,7 +22,8 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs, sparse_masked_reduction_ops)
 from torch.testing._internal.common_dtype import (
-    floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
+    all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
+    floating_and_complex_types_and, integral_types, floating_types_and,
 )
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -1959,7 +1956,7 @@ class TestSparse(TestCase):
 
     def _test_log1p_tensor(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in get_all_int_dtypes()
+            return dtype in integral_types()
 
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
@@ -1990,7 +1987,7 @@ class TestSparse(TestCase):
                 sparse_tensor.requires_grad_()
 
     @coalescedonoff
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
+    @dtypes(*all_types())
     def test_log1p(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2098,7 +2095,7 @@ class TestSparse(TestCase):
 
     def _test_asin_arcsin(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in get_all_int_dtypes()
+            return dtype in integral_types()
         is_integral_dtype = is_integral(sparse_tensor.dtype)
 
         dense_tensor = sparse_tensor.to_dense()
@@ -2133,7 +2130,7 @@ class TestSparse(TestCase):
                     op(sparse_tensor)
 
     @coalescedonoff
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
+    @dtypes(*all_types())
     def test_asin_arcsin(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2620,14 +2617,14 @@ class TestSparse(TestCase):
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_dtypes(self, device):
-        all_sparse_dtypes = get_all_dtypes(include_complex=True)
+        all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_empty_full(self, device):
-        all_sparse_dtypes = get_all_dtypes(include_complex=True)
+        all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
             do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
@@ -3224,14 +3221,12 @@ class TestSparse(TestCase):
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
-    @dtypes(*get_all_complex_dtypes(),
-            *get_all_fp_dtypes(include_half=False, include_bfloat16=False))
-    @dtypesIfCUDA(*((torch.complex64,) if CUDA11OrLater else ()),
-                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
-                  *get_all_fp_dtypes(
-                      include_half=(CUDA11OrLater and SM53OrLater),
-                      include_bfloat16=(CUDA11OrLater and SM80OrLater)))
-    @precisionOverride({torch.bfloat16: 2.5e-2, torch.float16: 2.5e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
+    @dtypes(*floating_and_complex_types())
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if CUDA11OrLater and SM53OrLater else [],
+                                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
+                                      *[torch.complex64] if CUDA11OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
@@ -3407,21 +3402,21 @@ class TestSparseOneOff(TestCase):
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
+                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4),
                                      [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
+                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4, 0),
                                      [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
+                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
             torch.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                      torch.randn(0, 4, 4, 0),
                                      [0, 4, 4, 0])
