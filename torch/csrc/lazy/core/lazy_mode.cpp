@@ -1,13 +1,9 @@
 #include <torch/csrc/lazy/core/lazy_mode.h>
-
+#include <ATen/native/CPUFallback.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/library.h>
-
-// TODO(whc) we can't actually depend on ts backend code from here, but we could refactor if reusing the callback
-// turns out to be the best way to implement this
-#include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 
 namespace torch {
 namespace lazy {
@@ -33,6 +29,23 @@ size_t _lazy_mode_dec() {
 bool in_lazy_mode() {
     return _lazy_mode_nests() > 0;
 }
+
+// utility used for lazy_mode and ts_eager_fallback
+// TODO(whc) surely, there is such a utility in core already? I moved this from ts_backend code
+c10::DispatchKey device_to_dispatch_key(c10::DeviceType device_type) {
+  switch (device_type) {
+    case at::kCPU: {
+      return c10::DispatchKey::CPU;
+    }
+    case at::kCUDA: {
+      return c10::DispatchKey::CUDA;
+    }
+    default: {
+      AT_ERROR("Unsupported device type: ", device_type);
+    }
+  }
+}
+
 
 void LazyModeEnter(c10::Device device) {
     // We ignore nested lazy modes mainly to enable lazy modes being applied to small regions of library code
@@ -109,9 +122,15 @@ at::Tensor unwrap_materialized_lazy_tensor(at::Tensor tensor) {
 
     // For the TS backend, 'MakeTensorFromComputationData' amounts to a cast,
     // but for other backends this API could perform a copy or a transfer as needed
-    return getBackend()->MakeTensorFromComputationData(
+    auto unwrapped_tensor = getBackend()->MakeTensorFromComputationData(
         lazy_tensor->CurrentDataHandle(),
         /*logical_scalar_type=*/c10::nullopt);
+    
+    // We want to make sure that all the unwrapped tensors are on the same device,
+    // And we want it to be the efficient device for that backend, which at least for TS backend
+    // is the device that EagerFallbackDeviceType reports
+    TORCH_CHECK(unwrapped_tensor.device().type() == getBackend()->EagerFallbackDeviceType());
+    return unwrapped_tensor;
 }
 
 void unlazy_handler(
@@ -151,8 +170,7 @@ void unlazy_handler(
     }
 
     // 2) redispatch the op to an eager kernel using the 'eager' stack
-    // TODO(WHC) fix hardcoded dispatchkey
-    op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::CPU), stack);
+    op.redispatchBoxed(c10::DispatchKeySet(device_to_dispatch_key(getBackend()->EagerFallbackDeviceType())), stack);
 }
 
 TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericWrapper, m) {

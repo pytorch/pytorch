@@ -4,6 +4,7 @@
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/lazy_mode.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/library.h>
@@ -67,19 +68,6 @@ std::vector<at::Tensor> to_eager(
   return eager_tensors;
 }
 
-c10::DispatchKey dispatch_key(c10::DeviceType device_type) {
-  switch (device_type) {
-    case at::kCPU: {
-      return c10::DispatchKey::CPU;
-    }
-    case at::kCUDA: {
-      return c10::DispatchKey::CUDA;
-    }
-    default: {
-      AT_ERROR("Unsupported device type: ", device_type);
-    }
-  }
-}
 
 c10::optional<c10::Device> compute_target_device(
     std::vector<at::Tensor>& t_args,
@@ -195,7 +183,7 @@ void ts_eager_fallback(
   }
 
   // Step 2: Call the underlying eager implementation of the operator
-  op.redispatchBoxed(c10::DispatchKeySet(dispatch_key(device_type)), stack);
+  op.redispatchBoxed(c10::DispatchKeySet(device_to_dispatch_key(device_type)), stack);
 
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to directly copy the

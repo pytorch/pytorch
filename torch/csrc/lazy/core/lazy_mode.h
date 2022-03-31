@@ -10,6 +10,7 @@ namespace torch {
 namespace lazy {
 
 TORCH_API bool in_lazy_mode();
+TORCH_API c10::DispatchKey device_to_dispatch_key(c10::DeviceType device_type);
 TORCH_API void LazyModeEnter(c10::Device device);
 TORCH_API void LazyModeExit(c10::Device device);
 TORCH_API c10::DispatchKey GetUnlazyDispatchKey();

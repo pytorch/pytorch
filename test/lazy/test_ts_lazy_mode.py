@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
+import os
 import torch
 import torch._lazy.ts_backend
 import torch.testing
@@ -7,9 +8,16 @@ from torch._lazy.lazy_mode import lazy_mode
 
 torch._lazy.ts_backend.init()
 
+def get_lazy_backend_device():
+    # TODO(whc) replace this with python bindings once they are landed
+    if os.getenv("LTC_TS_CUDA"):
+        return 'cuda'
+    return 'cpu'
+
 def test_nested():
-    x = torch.randn(2, 3, 4, device='cpu')
-    y = torch.randn(2, 3, 4, device='cpu')
+    device = get_lazy_backend_device()
+    x = torch.randn(2, 3, 4, device=device)
+    y = torch.randn(2, 3, 4, device=device)
     with lazy_mode():
         with lazy_mode():
             temp = x + y
@@ -21,7 +29,7 @@ def test_nested():
 
 
 def test_single_operation():
-    device = 'cpu'
+    device = get_lazy_backend_device()
     dtype = torch.float32
     x = torch.randn(2, 3, 4, device=device, dtype=dtype)
     y = torch.randn(2, 3, 4, device=device, dtype=dtype)
@@ -38,7 +46,7 @@ def test_single_operation():
 
 
 def test_lazy_mode():
-    device = 'cpu'
+    device = get_lazy_backend_device()
     dtype = torch.float32
     x = torch.randn(2, 3, 4, device=device, dtype=dtype)
     y = torch.randn(2, 3, 4, device=device, dtype=dtype)
@@ -49,6 +57,8 @@ def test_lazy_mode():
         temp = x / y
 
         # but z is still a cuda tensor, so + has to handle multi-device
+        # This line errs on cuda but not cpu:
+        # RuntimeError: !tensor.device().has_index() INTERNAL ASSERT FAILED at "/home/whc/pytorch/torch/csrc/lazy/core/lazy_mode.cpp":102
         out = temp + z
 
     # This line causes torch.testing to raise
