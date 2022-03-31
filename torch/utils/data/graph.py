@@ -13,7 +13,7 @@ def stub_unpickler():
 
 
 # TODO(VitalyFedyunin): Make sure it works without dill module installed
-def list_connected_datapipes(scan_obj, only_datapipe):
+def list_connected_datapipes(scan_obj, only_datapipe, cache):
 
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
@@ -31,7 +31,7 @@ def list_connected_datapipes(scan_obj, only_datapipe):
         return state
 
     def reduce_hook(obj):
-        if obj == scan_obj:
+        if obj == scan_obj or obj in cache:
             raise NotImplementedError
         else:
             captured_connections.append(obj)
@@ -52,11 +52,17 @@ def list_connected_datapipes(scan_obj, only_datapipe):
 
 
 def traverse(datapipe, only_datapipe=False):
+    return _traverse_helper(datapipe, only_datapipe)
+
+
+# Add cache here to prevent infinite recursion on DataPipe
+def _traverse_helper(datapipe, only_datapipe=False, cache=set()):
     if not isinstance(datapipe, IterDataPipe):
         raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
 
-    items = list_connected_datapipes(datapipe, only_datapipe)
+    cache.add(datapipe)
+    items = list_connected_datapipes(datapipe, only_datapipe, cache)
     d: Dict[IterDataPipe, Any] = {datapipe: {}}
     for item in items:
-        d[datapipe].update(traverse(item, only_datapipe))
+        d[datapipe].update(_traverse_helper(item, only_datapipe, cache.copy()))
     return d

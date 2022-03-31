@@ -2011,18 +2011,23 @@ class TestGraph(TestCase):
 
 class TestCircularSerialization(TestCase):
 
-    class _CustomIterDataPipe(IterDataPipe):
-        def noop(self, x):
+    class CustomIterDataPipe(IterDataPipe):
+        def add_one(self, x):
             return x + 1
 
+        def classify(self, x):
+            return 0
+
         def __init__(self):
-            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.noop)
+            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.add_one).demux(2, self.classify)[0]
 
         def __iter__(self):
             yield from self._dp
 
-    def test_circular_serialization_with_pickle(self):
-        assert list(self._CustomIterDataPipe()) == list(pickle.loads(pickle.dumps(self._CustomIterDataPipe())))
+    def test_circular_reference(self):
+        assert list(TestCircularSerialization.CustomIterDataPipe()) == list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe())))
+        _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=True)
+        _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=False)
 
     # TODO: Ensure this works with `dill` installed
     # @skipIfNoDill
