@@ -10,6 +10,7 @@
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
@@ -17,6 +18,10 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
+
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#endif
 
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
@@ -357,9 +362,26 @@ Module load(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = load(std::move(rai), device, extra_files);
-  return module;
+  auto format = getFileFormat(in);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_stream(in, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+    }
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<IStreamAdapter> rai =
+          std::make_unique<IStreamAdapter>(&in);
+      auto module = load(std::move(rai), device, extra_files);
+      return module;
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 Module load(const std::string& filename, c10::optional<at::Device> device) {
@@ -371,9 +393,27 @@ Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = load(std::move(rai), device, extra_files);
-  return module;
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_file(filename, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+
+      case FileFormat::ZipFileFormat: {
+        std::unique_ptr<FileAdapter> rai =
+            std::make_unique<FileAdapter>(filename);
+        auto module = load(std::move(rai), device, extra_files);
+        return module;
+      }
+
+      default:
+        TORCH_CHECK(false, "Unrecognized data format");
+    }
+  }
 }
 
 Module load(
@@ -387,8 +427,8 @@ Module load(
     std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
-  // Verify that we're loading a zip archive and not a torch.save pickle archive
-  // (marked by the 0x80 0x02 bytes at the start)
+  // Verify that we're loading a zip archive and not a torch.save pickle
+  // archive (marked by the 0x80 0x02 bytes at the start)
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   TORCH_CHECK(
       check_zip_file(rai),

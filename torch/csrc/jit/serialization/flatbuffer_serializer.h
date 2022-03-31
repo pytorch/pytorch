@@ -47,5 +47,9 @@ TORCH_API Module load_jit_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
 
+TORCH_API Module load_jit_module_from_stream(
+    std::istream& in,
+    c10::optional<at::Device> device = c10::nullopt);
+
 } // namespace jit
 } // namespace torch
