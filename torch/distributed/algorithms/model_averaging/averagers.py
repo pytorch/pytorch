@@ -1,6 +1,5 @@
 import warnings
 from abc import ABC, abstractmethod
-import types
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 

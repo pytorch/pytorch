@@ -2,7 +2,6 @@
 import warnings
 from collections import OrderedDict
 import logging
-import types
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as utils
