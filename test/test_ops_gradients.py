@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck, first_sample)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, OpDTypes)
+    (instantiate_device_type_tests, ops, OpDTypes, skipCUDAIfRocm)
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -113,6 +113,7 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Complex autograd not supported.")
 
     # Tests that gradients are computed correctly
+    @skipCUDAIfRocm
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)

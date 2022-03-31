@@ -232,7 +232,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   return self_scaled * scale_v;
 }
 
-Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
@@ -1066,7 +1066,7 @@ static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t cor
   return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> dim_opt,
+Tensor var_backward(Tensor grad, const Tensor& self, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self.dim() == 0 || !dim_opt.has_value()) {
@@ -1081,7 +1081,7 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
+Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self_p.dim() == 0 || !dim_opt.has_value()) {
@@ -1094,7 +1094,7 @@ Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result,
 
 Tensor std_backward(
     const Tensor& result, const Tensor& grad, const Tensor& self,
-    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim) {
+    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
   return var_backward(grad_var, self, dim, correction, keepdim);
 }
@@ -1109,7 +1109,7 @@ Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
 
 static Tensor mean_backward(
     const Tensor& grad, const IntArrayRef sizes, int64_t numel,
-    c10::optional<IntArrayRef> dim, bool keepdim) {
+    at::OptionalIntArrayRef dim, bool keepdim) {
   if (dim.has_value()) {
     return mean_backward(grad, sizes, *dim, keepdim);
   } else {
@@ -1119,7 +1119,7 @@ static Tensor mean_backward(
 
 Tensor var_std_mean_backward(
     const variable_list& grads, const Tensor& self, const Tensor& r1,
-    const Tensor& r2, c10::optional<IntArrayRef> dim,
+    const Tensor& r2, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {

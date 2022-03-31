@@ -3258,6 +3258,11 @@
     SparseCPU, SparseCUDA: narrow_copy_sparse
     CompositeExplicitAutograd: narrow_copy_dense
 
+- func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: narrow_copy_symint
+
 - func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: narrow_copy_dense_cpu_out
@@ -4269,6 +4274,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
+    SparseCsrCPU, SparseCsrCUDA: sum_csr
 
 - func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
@@ -5338,8 +5344,13 @@
 
 - func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
+
+# Special case of to_dense with custom derivative
+- func: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+  variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: sparse_to_dense
+    SparseCPU, SparseCUDA: sparse_to_dense
+    SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -7414,6 +7425,12 @@
   dispatch:
     CPU: histogramdd_cpu
 
+- func: histogramdd(Tensor self, int[] bins, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor[] bin_edges)
+
+- func: histogramdd.int_bins(Tensor self, int bins, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor[] bin_edges)
+
+- func: histogramdd.TensorList_bins(Tensor self, Tensor[] bins, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor[] bin_edges)
+
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -8603,6 +8620,9 @@
   dispatch:
     CPU: _convert_indices_from_csr_to_coo_structured_cpu
     CUDA: _convert_indices_from_csr_to_coo_structured_cuda
+
+- func: _csr_to_block_csr(Tensor self, int[2] block_size) -> Tensor
+  python_module: sparse
 
 ## NN wrappers
 
@@ -10263,6 +10283,19 @@
   dispatch:
     CPU, CUDA: special_ndtri_out
 
+- func: special_log_ndtr(Tensor self) -> Tensor
+  structured_delegate: special_log_ndtr.out
+  python_module: special
+  variants: function
+
+- func: special_log_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_log_ndtr_out
+
 - func: special_expm1(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -11265,5 +11298,5 @@
   variants: function
   python_module: nn
 
-- func: _nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: function

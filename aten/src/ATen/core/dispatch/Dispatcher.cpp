@@ -268,6 +268,7 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
   std::lock_guard<std::mutex> lock(mutex_);
 
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
   TORCH_CHECK(
     !backendFallbackKernels_[idx].kernel.isValid(),
     "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",

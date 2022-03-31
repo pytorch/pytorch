@@ -59,8 +59,8 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   checkSetStorage(result, storage, storage_offset, size, stride);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
-                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ?
+                                          at::OptionalIntArrayRef(stride) : c10::nullopt;
   // We can re-use this kernel for the meta device.
   // We just need to make sure we don't actually try to resize the (null) storage.
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
@@ -892,6 +892,19 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
+Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
+  return narrow_copy(self, dim, start, sym_length.expect_int());
+}
+
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+}
+
+Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  auto output = at::empty_like(self);
+  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
+}
+
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   int64_t allDim = self.dim();
   int64_t end = start+length;
@@ -929,6 +942,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 Tensor& narrow_copy_dense_cpu_out(
   const Tensor& self, int64_t dim, int64_t start, int64_t length, Tensor& output
 ) {
+
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(self.dtype() == output.dtype());
 
@@ -1004,15 +1018,6 @@ Tensor& narrow_copy_dense_cpu_out(
         local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
   }
   return output;
-}
-
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
-}
-
-Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  auto output = at::empty_like(self);
-  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -2221,7 +2226,7 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
 }
 
 Tensor ravel(const Tensor& self) {
-  return self.reshape(-1);
+  return self.contiguous().view(-1);
 }
 
 static inline void handle_unflatten_exception(const std::runtime_error &e,
