@@ -823,14 +823,26 @@ def special_pattern_replacement(model: QuantizedGraphModule):
     for n in model.graph.nodes:
         q_node = n
         is_quantize = q_node.target == torch.quantize_per_tensor
-        if not is_quantize:
+        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+        if not (is_quantize or is_to_fp16):
             continue
         ref_node = q_node.args[0]
         # get output scale/zero_point/dtype from the quantize node
         # ref_node, scale_node, zero_point_node, dtype = q_node.args
         # TODO: add safety checks that users for the ref_node and dq_node needs to be one
         is_call_function, is_call_method, is_call_module = is_fixed_qparams_node(ref_node, modules)
+        if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
+            # TODO: add a warning or error out here? (bc-breaking if error out)
+            # warnings.warn(
+            #     "Only reference patterns are currently supported for {dtype} dtype with {op} op"
+            #     "".format(dtype=dtypes, op=ref_node))
+            continue
+
         is_call_function, is_call_method, is_call_module = is_default_node(ref_node, modules)
+        if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
+            # TODO: add a warning or error out here? (bc-breaking if error out)
+            continue
+
         # This check includes all supported ops
         is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
