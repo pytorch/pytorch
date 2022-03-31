@@ -454,6 +454,7 @@ class NativeFunction:
 
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
+        assert python_module is None or Variant.method not in variants, f'functions in modules cannot be methods'
 
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'

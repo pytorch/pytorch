@@ -10544,7 +10544,7 @@
 
 - func: special_polygamma(int n, Tensor self) -> Tensor
   python_module: special
-  variants: function, method
+  variants: function
 
 - func: special_polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
