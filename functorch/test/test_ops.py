@@ -1055,69 +1055,109 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # Random
         skip('nn.functional.fractional_max_pool3d'),  # Random
 
-        xfail('_masked.log_softmax'),
-        xfail('_masked.softmax'),
-        xfail('_masked.softmin'),
-        xfail('block_diag'),
-        xfail('cdist'),
-        xfail('fft.fft'),
-        xfail('fft.fft2'),
-        xfail('fft.fftn'),
-        xfail('fft.hfft'),
-        xfail('fft.hfft2'),
-        xfail('fft.hfftn'),
-        xfail('fft.ifft'),
-        xfail('fft.ifft2'),
-        xfail('fft.ifftn'),
-        xfail('fft.ihfft'),
-        xfail('fft.ihfft2'),
-        xfail('fft.ihfftn'),
-        xfail('fft.irfft'),
-        xfail('fft.irfft2'),
-        xfail('fft.irfftn'),
-        xfail('fft.rfft'),
-        xfail('fft.rfft2'),
-        xfail('fft.rfftn'),
-        xfail('istft'),
-        xfail('log_softmax'),
+        xfail('__rsub__', ''),
+        xfail('_masked.amax', ''),
+        xfail('_masked.amin', ''),
+        xfail('_masked.log_softmax', ''),
+        xfail('_masked.norm', ''),
+        xfail('_masked.normalize', ''),
+        xfail('_masked.softmax', ''),
+        xfail('_masked.softmin', ''),
+        xfail('amax', ''),
+        xfail('amin', ''),
+        xfail('atan2', ''),
+        xfail('block_diag', ''),
+        xfail('cdist', ''),
+        xfail('cholesky', ''),
+        xfail('cholesky_inverse', ''),
+        xfail('dist', ''),
+        xfail('eig', ''),
+        xfail('fft.fft', ''),
+        xfail('fft.fft2', ''),
+        xfail('fft.fftn', ''),
+        xfail('fft.hfft', ''),
+        xfail('fft.hfft2', ''),
+        xfail('fft.hfftn', ''),
+        xfail('fft.ifft', ''),
+        xfail('fft.ifft2', ''),
+        xfail('fft.ifftn', ''),
+        xfail('fft.ihfft', ''),
+        xfail('fft.ihfft2', ''),
+        xfail('fft.ihfftn', ''),
+        xfail('fft.irfft', ''),
+        xfail('fft.irfft2', ''),
+        xfail('fft.irfftn', ''),
+        xfail('fft.rfft', ''),
+        xfail('fft.rfft2', ''),
+        xfail('fft.rfftn', ''),
+        xfail('istft', ''),
+        xfail('linalg.det', ''),
+        xfail('linalg.eigh', ''),
+        xfail('linalg.eigvalsh', ''),
+        xfail('linalg.matrix_norm', ''),
+        xfail('linalg.norm', ''),
+        xfail('linalg.slogdet', ''),
+        xfail('linalg.vector_norm', ''),
+        xfail('log_softmax', ''),
         xfail('log_softmax', 'dtype'),
-        xfail('logcumsumexp'),
-        xfail('nn.functional.batch_norm'),
+        xfail('logcumsumexp', ''),
+        xfail('logdet', ''),
+        xfail('lu', ''),
+        xfail('lu_solve', ''),
+        xfail('lu_unpack', ''),
+        xfail('max', 'binary'),
+        xfail('maximum', ''),
+        xfail('min', 'binary'),
+        xfail('minimum', ''),
+        xfail('nanmean', ''),
+        xfail('nansum', ''),
+        xfail('nn.functional.batch_norm', ''),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
-        xfail('nn.functional.bilinear'),
-        xfail('nn.functional.binary_cross_entropy'),
-        xfail('nn.functional.binary_cross_entropy_with_logits', device_type='cuda'),
-        xfail('nn.functional.celu'),
-        xfail('nn.functional.cross_entropy'),
+        xfail('nn.functional.bilinear', ''),
+        xfail('nn.functional.binary_cross_entropy', ''),
+        xfail('nn.functional.binary_cross_entropy_with_logits', ''),
+        xfail('nn.functional.celu', ''),
+        xfail('nn.functional.cross_entropy', ''),
         xfail('nn.functional.cross_entropy', 'mean'),
         xfail('nn.functional.cross_entropy', 'none'),
         xfail('nn.functional.cross_entropy', 'sum'),
-        xfail('nn.functional.elu'),
-        xfail('nn.functional.embedding'),
+        xfail('nn.functional.elu', ''),
+        xfail('nn.functional.embedding', ''),
         xfail('nn.functional.embedding', 'functorch'),
-        xfail('nn.functional.embedding_bag'),
-        xfail('nn.functional.glu'),
-        xfail('nn.functional.grid_sample'),
-        xfail('nn.functional.hardsigmoid'),
-        xfail('nn.functional.hardswish'),
-        xfail('nn.functional.huber_loss'),
-        xfail('nn.functional.instance_norm'),
-        xfail('nn.functional.layer_norm'),
-        xfail('nn.functional.leaky_relu'),
-        xfail('nn.functional.logsigmoid'),
-        xfail('nn.functional.mse_loss'),
-        xfail('nn.functional.nll_loss'),
+        xfail('nn.functional.embedding_bag', ''),
+        xfail('nn.functional.glu', ''),
+        xfail('nn.functional.grid_sample', ''),
+        xfail('nn.functional.hardsigmoid', ''),
+        xfail('nn.functional.hardswish', ''),
+        xfail('nn.functional.huber_loss', ''),
+        xfail('nn.functional.instance_norm', ''),
+        xfail('nn.functional.layer_norm', ''),
+        xfail('nn.functional.leaky_relu', ''),
+        xfail('nn.functional.logsigmoid', ''),
+        xfail('nn.functional.mse_loss', ''),
+        xfail('nn.functional.nll_loss', ''),
+        xfail('nn.functional.normalize', ''),
         xfail('nn.functional.pad', 'circular'),
-        xfail('nn.functional.prelu'),
-        xfail('nn.functional.selu'),
-        xfail('nn.functional.softmin'),
+        xfail('nn.functional.pairwise_distance', ''),
+        xfail('nn.functional.prelu', ''),
+        xfail('nn.functional.selu', ''),
+        xfail('nn.functional.softmin', ''),
         xfail('nn.functional.softmin', 'with_dtype'),
-        xfail('nn.functional.softplus'),
-        xfail('put'),
-        xfail('softmax'),
+        xfail('nn.functional.softplus', ''),
+        xfail('norm', ''),
+        xfail('norm', 'fro'),
+        xfail('norm', 'inf'),
+        xfail('polar', ''),
+        xfail('put', ''),
+        xfail('renorm', ''),
+        xfail('softmax', ''),
         xfail('softmax', 'with_dtype'),
-        xfail('stft'),
-        xfail('take'),
+        xfail('solve', ''),
+        xfail('std_mean', ''),
+        xfail('stft', ''),
+        xfail('symeig', ''),
+        xfail('take', ''),
+        xfail('var_mean', ''),
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1135,20 +1175,32 @@ class TestOperators(TestCase):
             fn, primals = normalize_op_input_output(op, sample)
             result = fn(*primals)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
-            tangents = tree_map(lambda x: torch.randn_like(x), result)
 
-            _, vjp_fn = vjp(fn, *primals)
-            result = jvp(vjp_fn, (cotangents,), (tangents,))
+            primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+            cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
+
+            def push_vjp(primals, cotangents):
+                _, vjp_fn = vjp(fn, *primals)
+                return vjp_fn(cotangents)
+
+            result = jvp(push_vjp, (primals, cotangents), (primals_tangents, cotangents_tangents))
             self.assertEqual(len(result), 2)
 
-            def reference(primals, cotangents, tangents):
-                _, vjp_fn = ref_vjp(fn, *primals)
+            def tree_map2(fn, first, second):
+                flat_first, spec_first = tree_flatten(first)
+                flat_second, spec_second = tree_flatten(second)
+                assert spec_first == spec_second
+                flat_result = [fn(f, s) for f, s in zip(flat_first, flat_second)]
+                return tree_unflatten(flat_result, spec_first)
+
+            def reference(primals, cotangents, primals_tangents, cotangents_tangents):
                 with fwAD.dual_level():
-                    flat_cotangents, spec = tree_flatten(cotangents)
-                    flat_tangents, spec = tree_flatten(tangents)
-                    flat_duals = [fwAD.make_dual(c, t) for c, t in zip(flat_cotangents, flat_tangents)]
-                    duals = tree_unflatten(flat_duals, spec)
-                    result = vjp_fn(duals)
+                    primal_duals = tree_map2(fwAD.make_dual, primals, primals_tangents)
+                    _, vjp_fn = ref_vjp(fn, *primal_duals)
+
+                    cotangent_duals = tree_map2(fwAD.make_dual, cotangents, cotangents_tangents)
+                    result = vjp_fn(cotangent_duals)
+
                     flat_result, spec = tree_flatten(result)
                     primals_out, tangents_out = zip(*[fwAD.unpack_dual(r) for r in flat_result])
                     tangents_out = [t if t is not None else torch.zeros_like(p)
@@ -1156,7 +1208,7 @@ class TestOperators(TestCase):
                     expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
                 return expected
 
-            expected = reference(primals, cotangents, tangents)
+            expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
 
