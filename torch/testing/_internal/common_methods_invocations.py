@@ -655,6 +655,9 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
                  supports_expanded_weight=False,
+                 # whether the op supports complex32 inputs.
+                 # NOTE: This is temporary and relevant tests (like (test_dtypes))
+                 # will be updated to expect complex32 support
                  supports_complex32=False,
                  ):
 

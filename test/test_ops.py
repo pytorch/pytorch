@@ -723,7 +723,7 @@ class TestCommon(TestCase):
             for arg in sample.kwargs.values():
                 check_tensor_floating_is_differentiable(arg)
 
-    # Reference testing for complex32 inputs against complex64.
+    # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
     @ops(list(filter(lambda op: op.supports_complex32, op_db)), allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
