@@ -1,9 +1,6 @@
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
@@ -163,140 +160,6 @@ const at::optional<const FunctionSchema*> getInplaceVariant(
   return at::nullopt;
 }
 
-TypePtr mapTensorToListOfInts(TypePtr type) {
-  if (type->cast<TensorType>()) {
-    return ListType::ofInts();
-  }
-  at::ArrayRef<TypePtr> contained = type->containedTypes();
-  if (contained.empty()) {
-    return type;
-  }
-  return type->withContained(
-      fmap(type->containedTypes(), mapTensorToListOfInts));
-}
-
-void checkForWhileLoop(
-    const FunctionSchema* schema,
-    std::shared_ptr<Graph> graph) {
-  DepthFirstGraphNodeIterator graph_it(graph);
-  for (auto* node = graph_it.next(); node != nullptr; node = graph_it.next()) {
-    if (node->kind() != prim::Loop) {
-      continue;
-    }
-    LoopView loop(node);
-    if (loop.loopType() != LoopView::For) {
-      TORCH_WARN(
-          "While loops are not yet implemented in unrolling which may make this shape function difficult to partially evaluate: ",
-          *node,
-          " for schema ",
-          *schema);
-    }
-  }
-}
-
-void checkInputReturnedAsOutput(
-    const FunctionSchema* schema,
-    const std::shared_ptr<Graph>& graph) {
-  // Could use alias db here as well but would have to warn because it's
-  // imprecise
-  for (size_t i : c10::irange(graph->inputs().size())) {
-    Value* input = graph->inputs().at(i);
-    for (size_t j : c10::irange(graph->outputs().size())) {
-      Value* output = graph->outputs().at(j);
-      TORCH_CHECK(
-          input != output,
-          "For schema: ",
-          *schema,
-          " input index ",
-          i,
-          " is returned as output index ",
-          j,
-          ". Shape functions must return new unaliased lists");
-    }
-  }
-}
-
-void checkInputAndOutputTypes(
-    const FunctionSchema* schema,
-    const std::shared_ptr<Graph>& graph) {
-  // allow extra unused arguments to map multiple functions to e.g. unary
-  TORCH_CHECK(
-      graph->inputs().size() <= schema->arguments().size(),
-      "Shape function must have fewer arguments than schema. Got ",
-      graph->inputs().size(),
-      " graph arguments and ",
-      schema->arguments().size(),
-      " schema arguments of schema: ",
-      *schema);
-
-  for (auto i : c10::irange(graph->inputs().size())) {
-    auto inp_type = schema->arguments().at(i).type();
-    auto mapped_type = mapTensorToListOfInts(inp_type);
-    auto graph_type = graph->inputs().at(i)->type();
-    TORCH_INTERNAL_ASSERT(
-        mapped_type->isSubtypeOf(graph->inputs().at(i)->type()),
-        "For schema type: ",
-        inp_type->str(),
-        " Expected supertype of ",
-        mapped_type->str(),
-        " but got graph_type ",
-        graph_type->str(),
-        " at index ",
-        i,
-        " of schema: ",
-        *schema);
-  }
-
-  TORCH_CHECK(
-      graph->outputs().size() == schema->returns().size(),
-      "Shape function equal number of outputs as schema. Got ",
-      graph->outputs().size(),
-      " graph outputs and ",
-      schema->returns().size(),
-      " schema returns of schema: ",
-      *schema);
-
-  for (auto i : c10::irange(schema->returns().size())) {
-    auto out_type = schema->returns().at(i).type();
-    auto mapped_type = mapTensorToListOfInts(out_type);
-    auto graph_type = graph->outputs().at(i)->type();
-    TORCH_INTERNAL_ASSERT(
-        mapped_type->isSubtypeOf(graph->outputs().at(i)->type()),
-        "For schema type: ",
-        out_type->str(),
-        " Expected supertype of ",
-        mapped_type->str(),
-        " but got graph_type ",
-        graph_type->str(),
-        " at output index ",
-        i,
-        " of schema: ",
-        *schema);
-  }
-}
-
-void transformShapeFunction(
-    const FunctionSchema* schema_string,
-    std::shared_ptr<Graph> graph) {
-  Inline(*graph);
-
-  // ATEN operators can return multiple unboxed values, this in contrast to
-  // functions defined in TorchScript or User-Registered Operators
-  // Which must use a Tuple
-  // Here, modify the shape graph of aten operators with multiple outputs
-  // so that they correspond to each other
-  if (schema_string->returns().size() > 1) {
-    TORCH_INTERNAL_ASSERT(
-        graph->outputs().size() == 1 &&
-        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
-    auto tuple_node = graph->outputs().at(0)->node();
-    graph->eraseOutput(0);
-    for (Value* v : tuple_node->inputs()) {
-      graph->registerOutput(v);
-    }
-  }
-}
-
 void registerSchema(
     const FunctionSchema* schema_string,
     const std::string& shape_compute_function_name,
@@ -317,11 +180,26 @@ void registerSchema(
       module.get_function(shape_compute_function_name);
   std::shared_ptr<Graph> graph =
       toGraphFunction(shape_compute_function).graph();
+  Inline(*graph);
 
-  transformShapeFunction(schema_string, graph);
-  // NB: we lint the shape functions registered in source
-  // in a test file
-  // LintShapeComputeGraph(schema_string, graph);
+  // ATEN operators can return multiple unboxed values, this in contrast to
+  // functions defined in TorchScript or User-Registered Operators
+  // Which must use a Tuple
+  // Here, modify the shape graph of aten operators with multiple outputs
+  // so that they correspond to each other
+  if (schema_string->returns().size() > 1) {
+    TORCH_INTERNAL_ASSERT(
+        graph->outputs().size() == 1 &&
+        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+    auto tuple_node = graph->outputs().at(0)->node();
+    graph->eraseOutput(0);
+    for (Value* v : tuple_node->inputs()) {
+      graph->registerOutput(v);
+    }
+  }
+  // allow extra unused arguments to map multiple functions to e.g. unary
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs().size() <= schema_string->arguments().size());
 
   cached_schema_to_graph[schema_string] = graph;
   reused_functions[shape_compute_function_name] = graph;
@@ -421,33 +299,7 @@ void RegisterShapeComputeGraphForSchema(
   if (cached_schema_to_graph.size() == 0) {
     loadFunctions();
   }
-  transformShapeFunction(&schema, g);
-  LintShapeComputeGraph(&schema, g);
-
   cached_schema_to_graph[&schema] = g;
-}
-
-std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas() {
-  std::lock_guard<std::mutex> guard(lock);
-  if (cached_schema_to_graph.size() == 0) {
-    loadFunctions();
-  }
-
-  std::vector<const FunctionSchema*> schemas;
-  schemas.reserve(cached_schema_to_graph.size());
-  for (const auto& pair : cached_schema_to_graph) {
-    schemas.push_back(pair.first);
-  }
-  return schemas;
-}
-
-void LintShapeComputeGraph(
-    const FunctionSchema* schema,
-    const std::shared_ptr<Graph>& graph) {
-  checkInputAndOutputTypes(schema, graph);
-  checkForWhileLoop(schema, graph);
-  checkInputReturnedAsOutput(schema, graph);
-  // TODO: other checks ? list ops which we don't symbolically optimize, etc ?
 }
 
 } // namespace jit
