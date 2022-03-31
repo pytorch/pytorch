@@ -71,7 +71,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
-    // the number of trailling dimensions is quantized_output.dim() - 2. We also append a leading dimension for clarity
+    // the number of trailling dimensions is quantized_output.dim() - 2. We also prepend a leading dimension for clarity
     std::vector<int64_t> new_size(quantized_output.dim(), 1);
     new_size[1] = bias_.value().size(0);
     broadcasted_bias = bias_.value().reshape(new_size);
