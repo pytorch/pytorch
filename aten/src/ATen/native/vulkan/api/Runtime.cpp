@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Adapter.h>
-#include <iostream>
 
 namespace at {
 namespace native {
