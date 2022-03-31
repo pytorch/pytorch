@@ -20,3 +20,27 @@ def wait_device_ops(devices=None):
     if devices is None:
         devices = []
     torch._C._lazy._wait_device_ops(devices=devices)
+
+def sync_multi(tensors, devices):
+    """
+    Sync the list of lazy tensors so there IR get lowered for the activate backend
+    and the compiled computation graph get cached.
+    """
+    torch._C._lazy._sync_multi(tensors, devices)
+
+def get_tensor_id(tensor):
+    """Return a unique id of the lazy tensor maintained by LTC"""
+    return torch._C._lazy._get_tensor_id(tensor)
+
+def get_tensors_text(tensors):
+    """Return a dump of LTC IRs for the tensors"""
+    return torch._C._lazy._get_tensors_text(tensors)
+
+def get_tensors_dot(tensors):
+    """Return a text dump of the LTC IR graph in dot format for the tensors.
+       The text can be processed by tools like dot to be rendered in pdf,png etc."""
+    return torch._C._lazy._get_tensors_dot(tensors)
+
+def get_tensors_backend(tensors):
+    """Return a dump of the current activate backend's IRs for the tensors"""
+    return torch._C._lazy._get_tensors_backend(tensors)
