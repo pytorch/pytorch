@@ -19,6 +19,7 @@ class _StorageBase(object):
     is_cuda: bool = False
     is_sparse: bool = False
     is_sparse_csr: bool = False
+    is_sparse_csc: bool = False
     device: torch.device
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704

@@ -850,7 +850,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
+  virtual Layout layout_impl() const {
+    TORCH_CHECK(false, "layout_impl is only implemented for subclasses that unset define_layout_from_dispatch_key bit.");
+  }
+
  public:
+  // Whether a tensor is sparse COO or not.
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -860,11 +865,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::SparseXPU);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
-  // format.
+  // Whether a tensor is sparse CSR or not.
   bool is_sparse_csr() const {
-    return key_set_.has(DispatchKey::SparseCsrCPU) ||
-        key_set_.has(DispatchKey::SparseCsrCUDA);
+    return layout() == kSparseCsr;
+  }
+
+  // Whether a tensor is sparse CSC or not.
+  bool is_sparse_csc() const {
+    return layout() == kSparseCsc;
   }
 
   bool is_quantized() const {
@@ -992,15 +1000,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
-    if (is_sparse()) {
-      return kSparse;
-    } else if (is_sparse_csr()) {
-      return kSparseCsr;
-    } else if (is_mkldnn()) {
-      return kMkldnn;
-    } else {
-      return kStrided;
+    if (define_layout_from_dispatch_key_) {
+      if (is_sparse()) {
+        return kSparse;
+      } else if (is_mkldnn()) {
+        return kMkldnn;
+      } else {
+        return kStrided;
+      }
     }
+    // Use slow path for determining the layout from specific tensor
+    // implementation:
+    return layout_impl();
   }
 
   /**
@@ -2427,6 +2438,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     owns_pyobj_ = b;
   }
 
+  void unset_define_layout_from_dispatch_key() {
+    define_layout_from_dispatch_key_ = false;
+  }
+
  protected:
   // Policy for adjusting the behavior of customizable methods like
   // is_contiguous() and sizes(). Allows subclass customization while
@@ -2579,6 +2594,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_customization_policy_ =
         static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
+    define_layout_from_dispatch_key_ = true;
   }
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
@@ -2637,6 +2653,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Python object's refcount goes to zero, we flip the ownership
   // direction (to make sure the pyobj stays live).
   bool owns_pyobj_ : 1;
+
+  // Typically, the tensor dispatch keys define the tensor layout
+  // uniquely. This allows using non-virtual layout method for better
+  // performance. However, when tensor's layout depends, say, on
+  // tensor attributes, set define_layout_from_dispatch_key to
+  // false. In this case, the corresponding tensor impl class must
+  // overwrite virtual layout_impl() method.
+  bool define_layout_from_dispatch_key_ : 1;
 
   // Customization policy for the sizes() virtual method.
   /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;

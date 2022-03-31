@@ -51,12 +51,15 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
     const caffe2::TypeMeta data_type,
     at::Tensor crow_indices,
     at::Tensor col_indices,
-    at::Tensor values)
+    at::Tensor values,
+    bool is_transpose)
     : TensorImpl(key_set, data_type, values.device()),
       crow_indices_(std::move(crow_indices)),
       col_indices_(std::move(col_indices)),
-      values_(std::move(values)) {
+      values_(std::move(values)),
+      is_transpose_(is_transpose) {
   set_storage_access_should_throw();
+  unset_define_layout_from_dispatch_key();
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {

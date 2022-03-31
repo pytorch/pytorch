@@ -244,7 +244,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse()) {
+    if (!is_mkldnn() && !is_sparse() && !is_sparse_csr() && !is_sparse_csc()) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
@@ -409,10 +409,16 @@ class TORCH_API TensorBase {
     return impl_->is_sparse();
   }
 
-  /// Returns is a `Tensor` has a sparse CSR backend.
+  /// Returns is a `Tensor` has a sparse CSR backend with transpose=False.
   bool is_sparse_csr() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_sparse_csr();
+  }
+
+  /// Returns is a `Tensor` has a sparse CSR backend with transpose=True.
+  bool is_sparse_csc() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_sparse_csc();
   }
 
   /// Returns if a `Tensor` is mkldnn tensor.

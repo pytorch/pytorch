@@ -6,12 +6,13 @@
 #include <ostream>
 
 namespace c10 {
-enum class Layout : int8_t { Strided, Sparse, SparseCsr, Mkldnn, NumOptions };
+enum class Layout : int8_t { Strided, Sparse, SparseCsr, Mkldnn, SparseCsc, NumOptions };
 
 constexpr auto kStrided = Layout::Strided;
 constexpr auto kSparse = Layout::Sparse;
 constexpr auto kSparseCsr = Layout::SparseCsr;
 constexpr auto kMkldnn = Layout::Mkldnn;
+constexpr auto kSparseCsc = Layout::SparseCsc;
 
 inline Layout layout_from_backend(Backend backend) {
   switch (backend) {
@@ -25,6 +26,7 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Mkldnn;
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
+      TORCH_CHECK(false, "Cannot map Backend SparseCsrCPU/CUDA to a unique layout.");
       return Layout::SparseCsr;
     default:
       return Layout::Strided;
@@ -41,6 +43,8 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "SparseCsr";
     case at::kMkldnn:
       return stream << "Mkldnn";
+    case at::kSparseCsc:
+      return stream << "SparseCsc";
     default:
       TORCH_CHECK(false, "Unknown layout");
   }

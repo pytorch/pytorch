@@ -138,6 +138,28 @@ class TestSparseCSR(TestCase):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
+    @onlyCPU
+    def test_csc_layout(self):
+        self.assertEqual(str(torch.sparse_csc), 'torch.sparse_csc')
+        self.assertEqual(type(torch.sparse_csc), torch.layout)
+
+    @onlyCPU
+    def test_is_sparse(self):
+        x = torch.randn(3, 3)
+        self.assertFalse(x.is_sparse)
+        self.assertFalse(x.is_sparse_csr)
+        self.assertFalse(x.is_sparse_csc)
+
+        sparse = x.to_sparse_csr()
+        self.assertFalse(sparse.is_sparse)
+        self.assertTrue(sparse.is_sparse_csr)
+        self.assertFalse(sparse.is_sparse_csc)
+
+    @onlyCPU
+    def test_layout(self):
+        sparse = torch.randn(3, 3).to_sparse_csr()
+        self.assertEqual(torch.sparse_csr, sparse.layout)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_constructor_shape_inference(self, device, dtype):
         crow_indices = [0, 2, 4]

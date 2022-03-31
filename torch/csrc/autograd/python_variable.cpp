@@ -931,6 +931,17 @@ PyObject *THPVariable_is_sparse_csr(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_sparse_csc(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_sparse_csc");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_sparse_csc());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_mkldnn(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -1130,6 +1141,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
+  {"is_sparse_csc", (getter)THPVariable_is_sparse_csc, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
   {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
