@@ -891,10 +891,10 @@ class FullyShardedDataParallel(nn.Module):
                     state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
                     warnings.warn(
-                        f"Failed to clone() tensor with name {key}. This may mean"
-                        "that this state_dict entry could point to invalid memory"
-                        "regions after returning from state_dict() call if this"
-                        "parameter is managed by FSDP. Please check clone"
+                        f"Failed to clone() tensor with name {key}. This may mean "
+                        "that this state_dict entry could point to invalid memory "
+                        "regions after returning from state_dict() call if this "
+                        "parameter is managed by FSDP. Please check clone "
                         f"implementation of {key}. Error: {str(e)}"
                     )
 
