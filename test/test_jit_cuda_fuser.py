@@ -595,7 +595,7 @@ class TestCudaFuser(JitTestCase):
             self._unary_test_helper(op, dtype, False)  # test special numbers
             self._unary_test_helper(op, dtype, True)  # test random data
 
-    @unittest.expectedFailure  # see issue 73395
+    @unittest.skipIf(True, "See issues 73395 and 75029")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
