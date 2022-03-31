@@ -3307,6 +3307,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(True, "See 75029")
     def test_linear_1d_weight_mismatch_bias_dtype(self):
         def t(x: torch.Tensor, w: torch.Tensor, b: torch.Tensor):
             o = torch.nn.functional.linear(x, w, b)
@@ -4035,6 +4036,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(True, "See 75029")
     def test_reduction_empty_axes(self):
         x = torch.randn(4, 2, 3, device="cuda").permute([1, 2, 0])
 
@@ -4049,6 +4051,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(True, "See 75029")
     def test_int_tensor_input(self):
         x = torch.randn(4, 2, device="cuda").to(dtype=torch.int)
 
@@ -4159,6 +4162,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(True, "See 75029")
     def test_native_batch_norm_backward(self):
         grad_output = torch.randn(4, 2, 3, device="cuda")
         input = torch.randn(4, 2, 3, device="cuda")
@@ -4366,6 +4370,7 @@ class TestPassManagerCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(True, "See 75029")
     def test_context_manager_test(self):
         x = torch.randn(4, 8, dtype=torch.float, device="cuda")
         y = torch.randn(4, 8, dtype=torch.float, device="cuda")
@@ -4400,6 +4405,7 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertGraphContainsExactly(t_jit_3.graph_for(x, y), FUSION_GUARD, 0)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(True, "See 75029")
     def test_register_fuser(self):
         self.assertFalse(torch._C._jit_set_nvfuser_enabled(True))
         self.assertTrue(torch._C._jit_nvfuser_enabled())
