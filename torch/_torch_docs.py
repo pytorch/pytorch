@@ -5738,7 +5738,7 @@ Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3, 1)
-    >>> LU, pivots, _ = torch.linalg.lu_factor_ex(A, check_errors=True)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
     >>> x = torch.lu_solve(b, LU, pivots)
     >>> torch.dist(A @ x, b)
     tensor(1.00000e-07 *
