@@ -182,7 +182,6 @@ void compileCudaFusionGroup(Node* fusion_node) {
     // node only insert meta information after itself).
     PropagateShapesOnGraph(graph);
     TypePropagate(graph);
-    PropagateShapesOnGraph(graph);
 
     int32_t fusion_cache_id =
         CudaFusionManager::getManager().registerOrGetCacheId(graph);
