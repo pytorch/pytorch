@@ -22,14 +22,13 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
-    @dtypes(*(get_all_dtypes(include_half=True, include_bfloat16=False,
-                             include_bool=True, include_complex=True)))
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_assertEqual_numpy(self, device, dtype):
         S = 10
         test_sizes = [
@@ -40,7 +39,7 @@ class TestTesting(TestCase):
             (0, S),
             (S, 0)]
         for test_size in test_sizes:
-            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
             a_n = a.cpu().numpy()
             msg = f'size: {test_size}'
             self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
@@ -255,7 +254,7 @@ class TestTesting(TestCase):
         def check(size, low, high, requires_grad, noncontiguous):
             if dtype not in [torch.float, torch.cfloat]:
                 requires_grad = False
-            t = make_tensor(size, device, dtype, low=low, high=high,
+            t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
@@ -278,6 +277,11 @@ class TestTesting(TestCase):
         for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
             check(size, None, None, False, False)
             check(size, 2, 4, True, True)
+
+    def test_make_tensor_complex32(self, device):
+        # verify that we can generate torch.complex32 tensor
+        t = make_tensor((1, 2, 3), dtype=torch.complex32, device=device)
+        self.assertEqual(t.dtype, torch.complex32)
 
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
@@ -403,7 +407,7 @@ if __name__ == '__main__':
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
-            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op.op, op.sample_inputs_func, self.device_type)
+            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
             dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypesIfCPU

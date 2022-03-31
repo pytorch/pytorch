@@ -7,26 +7,23 @@ import operator
 import random
 import unittest
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import (
-    all_types_and_complex,
-)
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample
+    DeterministicGuard, first_sample, IS_LINUX
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (sparse_unary_ufuncs)
+    (sparse_unary_ufuncs, sparse_masked_reduction_ops)
 from torch.testing._internal.common_dtype import (
-    floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
+    all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
+    floating_and_complex_types_and, integral_types, floating_types_and,
 )
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -43,6 +40,8 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
 class TestSparse(TestCase):
 
     def setUp(self):
+        TestCase.setUp(self)
+
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
         def sparse_empty_factory(*args, **kwargs):
@@ -188,7 +187,8 @@ class TestSparse(TestCase):
         self.assertEqual(x._values().numel(), 0)
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 1e-2})
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -312,6 +312,10 @@ class TestSparse(TestCase):
             self.assertEqual(res, dense_x)
             self.assertEqual(res, safe_dense_x)
 
+            # Only run autograd test for float64
+            if x.dtype != torch.float64:
+                return
+
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
@@ -343,6 +347,7 @@ class TestSparse(TestCase):
             ], dtype=dtype, device=device)
 
             test_tensor(x, res)
+            test_tensor(res, res)
 
             i = self.index_tensor([
                 [0, 1, 2, 2],
@@ -662,7 +667,9 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @skipIfRocm
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
@@ -1238,8 +1245,10 @@ class TestSparse(TestCase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
+    # TODO: remove skipIf when https://github.com/pytorch/pytorch/pull/73428 lands
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @unittest.skipIf(IS_WINDOWS or IS_LINUX, "See https://github.com/pytorch/pytorch/issues/73145")
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -1666,6 +1675,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/73173")
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
@@ -1946,7 +1956,7 @@ class TestSparse(TestCase):
 
     def _test_log1p_tensor(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in get_all_int_dtypes()
+            return dtype in integral_types()
 
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
@@ -1977,7 +1987,7 @@ class TestSparse(TestCase):
                 sparse_tensor.requires_grad_()
 
     @coalescedonoff
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
+    @dtypes(*all_types())
     def test_log1p(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2085,7 +2095,7 @@ class TestSparse(TestCase):
 
     def _test_asin_arcsin(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in get_all_int_dtypes()
+            return dtype in integral_types()
         is_integral_dtype = is_integral(sparse_tensor.dtype)
 
         dense_tensor = sparse_tensor.to_dense()
@@ -2120,7 +2130,7 @@ class TestSparse(TestCase):
                     op(sparse_tensor)
 
     @coalescedonoff
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
+    @dtypes(*all_types())
     def test_asin_arcsin(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2607,14 +2617,14 @@ class TestSparse(TestCase):
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_dtypes(self, device):
-        all_sparse_dtypes = get_all_dtypes(include_complex=True)
+        all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_empty_full(self, device):
-        all_sparse_dtypes = get_all_dtypes(include_complex=True)
+        all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
             do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
@@ -3211,13 +3221,11 @@ class TestSparse(TestCase):
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
-    @dtypes(*get_all_complex_dtypes(),
-            *get_all_fp_dtypes(include_half=False, include_bfloat16=False))
-    @dtypesIfCUDA(*((torch.complex64,) if CUDA11OrLater else ()),
-                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
-                  *get_all_fp_dtypes(
-                      include_half=(CUDA11OrLater and SM53OrLater),
-                      include_bfloat16=(CUDA11OrLater and SM80OrLater)))
+    @dtypes(*floating_and_complex_types())
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if CUDA11OrLater and SM53OrLater else [],
+                                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
+                                      *[torch.complex64] if CUDA11OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
@@ -3356,7 +3364,7 @@ class TestSparse(TestCase):
             (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
         )
         for s0, s1 in itertools.combinations(sizes, r=2):
-            t = make_tensor(s0, device, dtype, low=-9, high=9)
+            t = make_tensor(s0, dtype=dtype, device=device, low=-9, high=9)
             for sparse_dims in range(1, len(s0) + 1):
                 s = t.to_sparse(sparse_dims)
                 if can_broadcast(s0, s1):
@@ -3539,8 +3547,47 @@ class TestSparseUnaryUfuncs(TestCase):
                 fast_mode=op.gradcheck_fast_mode))
 
 
+class TestSparseMaskedReductions(TestCase):
+    exact_dtype = True
+
+    @ops(sparse_masked_reduction_ops)
+    def test_future_empty_dim(self, device, dtype, op):
+        """Currently, `dim=()` in reductions operations means "reduce over
+        all dimensions" while in future, it will read "no reduce". See
+        https://github.com/pytorch/pytorch/issues/29137
+
+        For sparse masked reductions, we'll implement the current behavior.
+
+        For testing, we'll use samples with `dim=0` and map it to
+        `dim=()` until
+        torch.testing._internal.common_methods_invocations._generate_reduction_kwargs
+        is made to generate samples with `dim=()` for non-scalar
+        inputs. With this and after gh-29137 is resolved, this test
+        can be deleted. See also `torch._masked._canonical_dim`
+        implementation about changing the `dim=()` behavior.
+        """
+
+        samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        for sample_input in samples:
+            if sample_input.kwargs.get('dim') != 0:
+                continue
+            sample_input_kwargs = dict(sample_input.kwargs)
+            sample_input_kwargs['dim'] = ()    # reduce over all dimensions
+
+            t = sample_input.input
+            mask = sample_input_kwargs.get('mask')
+            sparse_op_kwargs = dict(sample_input_kwargs)
+            actual = op(t.to_sparse(), *sample_input.args, **sample_input_kwargs)
+            self.assertEqual(actual.layout, torch.sparse_coo)
+
+            expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
+            self.assertEqual(actual, expected)
+
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
+
+instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals(), except_for='meta')

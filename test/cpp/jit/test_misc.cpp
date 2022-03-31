@@ -42,15 +42,18 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
@@ -2867,6 +2870,33 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check_not("aten::relu_")->run(*graph);
 }
 
+TEST(TestRegisterShapeOp, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph():
+  %2 : int = prim::Constant[value=5]()
+  %3: int[] = prim::ListConstruct(%2, %2)
+  return (%3))IR",
+      &*graph,
+      vmap);
+
+  auto g2 = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %2 : Tensor = prim::MakeTestTensor()
+  return (%2))IR",
+      &*g2,
+      vmap);
+
+  const FunctionSchema& schema = g2->nodes().begin()->schema();
+  torch::jit::RegisterShapeComputeGraphForSchema(schema, graph);
+  PropagateShapesOnGraph(g2);
+  testing::FileCheck().check("5, 5")->run(*g2);
+}
+
 TEST(TestFunctionalToInplaceActivation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -2882,6 +2912,74 @@ graph(%x.1 : Tensor):
   FunctionalToInplaceActivation(graph);
   testing::FileCheck().check("aten::relu_")->run(*graph);
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
+}
+
+TEST(TestFunctionExecutor, SimpleExecutorTest) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph);
+  {
+    auto func = torch::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+  {
+    auto func = torch::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = func->getDebugState().graph;
+    testing::FileCheck()
+        .check_not("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+}
+
+TEST(TestFunctionExecutor, RunDecompositionTest) {
+  GraphFunction* func;
+  std::once_flag flag1;
+  for (bool unbiased : {true, false}) {
+    std::call_once(flag1, [&]() {
+      // NB: take reference to schema here, `auto schema =` will not work
+      auto& schema = getOperatorForLiteral(
+                         "aten::var(Tensor self, bool unbiased=True) -> Tensor")
+                         ->schema();
+      auto maybe_func = GetDecompositionFunction(schema);
+      TORCH_INTERNAL_ASSERT(maybe_func);
+      func = *maybe_func;
+    });
+    auto input = at::rand({4, 4});
+    Stack stack = {input, unbiased};
+    func->run(stack);
+    at::Tensor out = pop(stack).toTensor();
+    ASSERT_TRUE(at::allclose(out, input.var(unbiased)));
+  }
+}
+
+TEST(TestShapeGraphLinting, Basic) {
+  auto schemas = RegisteredShapeComputeSchemas();
+  for (const auto& schema : schemas) {
+    auto g = shapeComputeGraphForSchema(*schema);
+    TORCH_INTERNAL_ASSERT(g);
+    LintShapeComputeGraph(schema, *g);
+  }
 }
 
 // TODO: move to test_kernel when global settings are explicit

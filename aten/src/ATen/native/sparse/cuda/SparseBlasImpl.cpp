@@ -120,6 +120,15 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.sizes());
 }
 
+void inline bsrsv2_bsrsm2_may_need_to_sync() {
+#if defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11703
+  // cusparse bsrsv2 and bsrsm2 have a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
+  // See https://github.com/pytorch/pytorch/issues/71297
+  ::c10::cuda::device_synchronize();
+#endif
+  // else: do nothing!
+}
+
 void block_sparse_triangular_solve_vec(
     const at::sparse_csr::SparseCsrTensor& A,
     const Tensor& B,
@@ -230,6 +239,8 @@ void block_sparse_triangular_solve_vec(
             X_->data_ptr<scalar_t>(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
+
+        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -360,6 +371,8 @@ void block_sparse_triangular_solve_mat(
             ldx,
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
+
+        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -803,7 +816,8 @@ void addmm_out_sparse_csr(
   } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "Received unexpected tensor layouts as input.");
+    TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
+                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
 }
 

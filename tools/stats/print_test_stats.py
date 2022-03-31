@@ -107,8 +107,14 @@ def plural(n: int) -> str:
 
 
 def get_base_commit(sha1: str) -> str:
+    default_branch = os.environ.get('GIT_DEFAULT_BRANCH')
+    # capture None and "" cases
+    if not default_branch:
+        default_branch = "master"
+
+    default_remote = f"origin/{default_branch}"
     return subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
+        ["git", "merge-base", sha1, default_remote],
         encoding="ascii",
     ).strip()
 
@@ -206,7 +212,7 @@ def analyze(
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
     nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
-    # most recent master ancestor with at least one S3 report,
+    # most recent main ancestor with at least one S3 report,
     # or empty list if there are none (will show all tests as added)
     base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
@@ -525,7 +531,7 @@ def regression_info(
     and its test times. Since Python dicts maintain insertion order
     (guaranteed as part of the language spec since 3.7), the
     base_reports argument must list the head's several most recent
-    master commits, from newest to oldest (so the merge-base is
+    main commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
     simpler_head = simplify(head_report)
@@ -570,6 +576,10 @@ class TestCase:
         self.class_name = str(dom.attributes['classname'].value)
         self.name = str(dom.attributes['name'].value)
         self.time = float(dom.attributes['time'].value)
+        # The following attribute is currently ONLY used in process_intentional_test_runs for validation
+        # reasons. The test filename that populates TestFile is calculated and passed down through the test report path.
+        # The reason we don't just use this attribute is because it doesn't exist for cpp tests, e.g., in test_libtorch
+        self.file = str(dom.attributes['file'].value) if dom.hasAttribute('file') else 'N/A - probably a cpp test'
         error_elements = dom.getElementsByTagName('error')
         # DISCLAIMER: unexpected successes and expected failures are currently not reported in assemble_s3_object
         self.expected_failure = False
@@ -595,9 +605,9 @@ class TestCase:
         return self.__str__()
 
     def __str__(self) -> str:
-        return f'[TestCase name: {self.name} | class_name: {self.class_name} | time: {self.time} | ' \
+        return f'[TestCase name: {self.name} | class_name: {self.class_name} | file: {self.file} | time: {self.time} | ' \
             f'expected_failure: {self.expected_failure} | skipped: {self.skipped} | errored: {self.errored} | ' \
-            f'unexpected_success: {self.unexpected_success} | failed: {self.failed}]'
+            f'unexpected_success: {self.unexpected_success} | failed: {self.failed}]\n'
 
 class TestSuite:
     def __init__(self, name: str) -> None:
@@ -638,6 +648,17 @@ class TestSuite:
         self.test_cases[name].expected_failure |= test_case.expected_failure
 
 
+# Tests that spawn duplicates (usually only twice) intentionally
+MULTITESTS = [
+    'test_cpp_extensions_aot',
+    'distributed/test_distributed_spawn',
+    'distributed\\test_distributed_spawn',  # for windows
+    'distributed/test_c10d_gloo',
+    'distributed\\test_c10d_gloo',  # for windows
+    'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
+]
+
+
 DuplicatedDict = Dict[str, Dict[str, List[TestCase]]]
 
 class TestFile:
@@ -647,27 +668,20 @@ class TestFile:
         self.test_suites: Dict[str, TestSuite] = dict()
 
     def append(self, test_case: TestCase, test_type: str, duplicated_tests_dict: DuplicatedDict) -> None:
-        is_multi_test = self.name == 'test_cpp_extensions_aot' or \
-            self.name == 'distributed/test_distributed_spawn' or \
-            self.name == 'distributed/test_c10d_gloo' or \
-            self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
-        if is_multi_test:
-            suite_name = test_case.class_name + '__' + test_type
-        else:
-            suite_name = test_case.class_name
+        suite_name = test_case.class_name
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            if is_multi_test:
+            if self.name in MULTITESTS:
                 self.test_suites[suite_name].update(test_case)
                 self.total_time += test_case.time
-            else:
-                # Gather up duplicated test cases
-                if suite_name not in duplicated_tests_dict:
-                    duplicated_tests_dict[suite_name] = dict()
-                if test_case.name not in duplicated_tests_dict[suite_name]:
-                    duplicated_tests_dict[suite_name][test_case.name] = [self.test_suites[suite_name].test_cases[test_case.name]]
-                duplicated_tests_dict[suite_name][test_case.name].append(test_case)
+
+            # Gather up duplicated test cases to parse for flaky reruns
+            if suite_name not in duplicated_tests_dict:
+                duplicated_tests_dict[suite_name] = dict()
+            if test_case.name not in duplicated_tests_dict[suite_name]:
+                duplicated_tests_dict[suite_name][test_case.name] = [self.test_suites[suite_name].test_cases[test_case.name]]
+            duplicated_tests_dict[suite_name][test_case.name].append(test_case)
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -737,17 +751,9 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
         else:
             num_pass += 1
 
-    REPEAT_TEST_FOR_TYPES_TESTS = [
-        "test_data_parallel_module",
-        "test_data_parallel_module_kwargs_only",
-        "test_data_parallel_module_kwargs_only_empty_list",
-        "test_data_parallel_module_kwargs_only_empty_dict",
-        "test_data_parallel_module_kwargs_only_empty_tuple"
-    ]
-
-    # Do not run checks for tests that use repeat_test_for_types decorator as they do not go well with our retry
-    # functionality. Once issue https://github.com/pytorch/pytorch/issues/69865 is fixed, we should remove the exception
-    if not any([x in test_run.name for x in REPEAT_TEST_FOR_TYPES_TESTS]):
+    # Do not run duplication checks for test files that spawn duplicate tests intentionally
+    # and are not necessarily flaky test reruns.
+    if not any(x in test_run.file for x in MULTITESTS):
         err_msg = f'Warning: unintentional test case duplicates found for {test_run.name} in suite {test_run.class_name}.'
         report_only = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') != '1'
         if report_only and num_fail + num_errored + num_unexpected_success < 1 or not report_only and num_expected_fail < 1:
@@ -774,7 +780,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
         for suite_name, testcase_to_runs in suite_to_dict.items():
             for testcase_name, list_of_runs in testcase_to_runs.items():
                 num_green, num_red = process_intentional_test_runs(list_of_runs)
-                if num_green > 0:   # Otherwise, it's likely just a failing test
+                if num_green > 0 and num_red > 0:   # Flaky tests show different results in consecutive reruns
                     flaky_tests.append({
                         "name": testcase_name,
                         "suite": suite_name,
@@ -790,6 +796,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
         # write to S3 to go to Rockset as well
         import uuid
         for flaky_test in flaky_tests:
+            flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
             flaky_test["workflow_id"] = workflow_id
             key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
             obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
@@ -887,7 +894,6 @@ def assemble_s3_object(
 def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
     sha1 = os.environ.get('SHA1', os.environ.get('CIRCLE_SHA1', ''))
-    branch = os.environ.get('BRANCH', os.environ.get('CIRCLE_BRANCH', ''))
     now = datetime.datetime.utcnow().isoformat()
 
     # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
@@ -895,12 +901,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     test_config = os.environ.get('TEST_CONFIG')
 
     job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
-
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        pr = os.environ.get('PR_NUMBER', os.environ.get('CIRCLE_PR_NUMBER', 'unknown'))
-        key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
-    else:
-        key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
+    key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
@@ -949,7 +950,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         encoding="ascii",
     ))
 
-    # if current commit is already on master, we need to exclude it from
+    # if current commit is already on main, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],

@@ -2,15 +2,63 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonModeTLS.h>
 
+#include <stack>
+
 namespace {
 
-// TLS saving the state of the include/exclude sets on entry to the dispatcher
-// This is set in the pythonTLSSnapshot fallback and used by the Python fallback.
+// This TLS is used to track the state of the dispatcher to be able to restore
+// it when calling back into python.
+// It has the following invariant:
+//  - It must be empty while python code is executed.
+//  - It should only be set once even for multiple dispatcher calls that do not come
+//    back to python.
+// To achieve this, we ensure that the tls is empty by default and emptied again both when
+// we call into user torch_dispatch or returning back to python after this call.
+
 thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
+
+// RAII guard to make working with the above TLS safer.
+struct MaybeSetTLSOnEntryGuard {
+public:
+  MaybeSetTLSOnEntryGuard() {
+    if (tls_on_entry.has_value()) {
+      value_set_ = false;
+    } else {
+      value_set_ = true;
+      tls_on_entry = c10::impl::tls_local_dispatch_key_set();
+    }
+  }
+  ~MaybeSetTLSOnEntryGuard() {
+    if (value_set_) {
+      TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
+      tls_on_entry = c10::nullopt;
+    }
+  }
+
+private:
+  bool value_set_;
+};
+
+// This guard assumes that tls_on_entry has a value.
+struct StashTLSOnEntryGuard {
+public:
+  StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
+    tls_on_entry = c10::nullopt;
+  }
+
+  ~StashTLSOnEntryGuard() {
+    TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());
+    tls_on_entry = saved_;
+  }
+
+private:
+  c10::impl::LocalDispatchKeySet saved_;
+};
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
-  c10::impl::ForceDispatchKeyGuard guard(tls_on_entry.value());
+  c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
+  StashTLSOnEntryGuard stash_guard;
 
   // If Python Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
@@ -51,14 +99,11 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 
 void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // It is ok for the tls to be already set here.
-  // A CompositeImplicitAutograd function may have been called just before this and so the tls here were never cleared
-  // This is also why we don't need an RAII to ensure the tls is reset when exceptions happen
-
-  tls_on_entry = c10::impl::tls_local_dispatch_key_set();
+  // It means that there are multiple calls into the dispatcher not originating from python code.
+  // The guard below will properly ignore such calls.
+  MaybeSetTLSOnEntryGuard guard;
 
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
-
-  tls_on_entry = c10::nullopt;
 }
 
 

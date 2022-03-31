@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -944,7 +945,11 @@ struct CudaGraphFuser {
       // extended shape expression support to reduction operations
       // TODO: `aten::sum` is too flexible, we should restrict for a better
       // match
-      if (n->kind() == aten::sum) {
+      // TODO: Add python tests where we check for existing ops and their
+      // shape expression logic.
+      static std::unordered_set<Symbol> reduction_ops(
+          {aten::sum, aten::mean, aten::var, aten::std});
+      if (reduction_ops.find(n->kind()) != reduction_ops.end()) {
         // TODO: expand support to wire non-constant inputs, this is currently
         // blocked by profiling executor not capable of profiling scalar inputs.
         TORCH_INTERNAL_ASSERT(
@@ -1101,7 +1106,8 @@ struct CudaGraphFuser {
     // TODO: failure in buildShapeExpressions should not break fusion execution,
     // we can add a try/catch here to bailout from removeOutputsUsedOnlyInSize.
     GRAPH_DEBUG("before build shape expression: ", *graph_);
-    fusion_value_to_runtime_shape_ = buildShapeExpressions(fusion_group);
+    auto shape_map = buildShapeExpressions(fusion_group);
+    fusion_value_to_runtime_shape_.insert(shape_map.begin(), shape_map.end());
     GRAPH_DEBUG("after build shape expression: ", *graph_);
 
     auto outputs = fusion_group->outputs().vec();
@@ -1112,14 +1118,12 @@ struct CudaGraphFuser {
     for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
       auto output = outputs[i];
       auto soutput = soutputs[i];
-      if (usedOnlyInDtypeAndSize(output) &&
-          fusion_value_to_runtime_shape_.count(soutput) > 0) {
+      if (usedOnlyInDtypeAndSize(output) && shape_map.count(soutput) > 0) {
         bool has_dtype = usedInDtype(output);
         auto uses = output->uses();
         for (Use u : uses) {
           if (u.user->matches("aten::size(Tensor self) -> int[]")) {
-            u.user->output()->replaceAllUsesWith(
-                fusion_value_to_runtime_shape_.at(soutput));
+            u.user->output()->replaceAllUsesWith(shape_map.at(soutput));
             u.user->destroy();
           } else if (u.user->matches("prim::dtype(Tensor a) -> int")) {
             continue;
@@ -1209,7 +1213,12 @@ struct CudaGraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        CudaGraphFuser(sub_block, graph_).run();
+        CudaGraphFuser sub_block_cfg(sub_block, graph_);
+        sub_block_cfg.run();
+        // Accumulate runtime shapes for all sub-blocks
+        fusion_value_to_runtime_shape_.insert(
+            sub_block_cfg.fusion_value_to_runtime_shape_.begin(),
+            sub_block_cfg.fusion_value_to_runtime_shape_.end());
       }
     }
   }
@@ -1604,17 +1613,19 @@ void guardFusionGroup(
         // TODO: Add support for dynamic split to view guard
 
         // Path from profile-ivalue to prim::view_copy operation
-        // profile-ivalue -> Uses: [Constant, CudaFusionGroup]
+        // profile-ivalue -> Constant -> CudaFusionGroup
         // Get argument position in CudaFusionGroup
         // Get argument in subgraph for CudaFusionGroup
         // CudaFusionGroup argument -> Constant List -> prim::view_copy
-        auto cuda_fusion_group_arg = profiled_ival->uses().back().offset;
-        auto subgraph_arg = fusion_graph->inputs()[cuda_fusion_group_arg];
+        auto subgraph_arg = fusion_graph->inputs()[offset];
         auto constant = subgraph_arg->uses().front().user->output();
+
+        TORCH_INTERNAL_ASSERT(!constant->uses().empty());
         auto view = constant->uses().front().user;
         TORCH_INTERNAL_ASSERT(
             view->kind() == prim::view_copy ||
             view->kind() == prim::reshape_copy);
+
         ivalue_check = guardView(
             fusion,
             fusion_value_to_runtime_size,
@@ -1708,6 +1719,17 @@ void guardFusionGroups(
     //         b. insert guard logic of profile_ivalue with if block
     //         c. restore conditional constant to non-constant for fallback
     guardFusionGroup(fusion, fusion_value_to_runtime_size);
+  }
+}
+
+void dumpFusionGroups(std::shared_ptr<Graph>& g) {
+  DepthFirstGraphNodeIterator it(g);
+  Node* n = nullptr;
+  GRAPH_DEBUG("Exporting all NVFuser fusions:");
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      GRAPH_EXPORT("", n->g(attr::Subgraph));
+    }
   }
 }
 
@@ -2001,23 +2023,6 @@ void ExtractProfileIValue(Node* profile_ivalue) {
   }
 }
 
-void traverseProfileIValues(
-    Block* block,
-    const std::function<void(Node*)>& func) {
-  std::vector<Node*> profile_ivalues;
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      traverseProfileIValues(b, func);
-    }
-    if (n->kind() == prim::profile_ivalue) {
-      profile_ivalues.push_back(n);
-    }
-  }
-  for (Node* profile_ivalue : profile_ivalues) {
-    func(profile_ivalue);
-  }
-}
-
 // break `linear` layer into `matmul` and `add_optional`. This allows us to fuse
 // the binary operation without supporting gemm.
 // Note that we are not breaking `linear` layer without bias.
@@ -2078,47 +2083,55 @@ void decomposeLinearOps(Block* block) {
 // Replace 'operation' with 'operation_copy' to guard alias operations.
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> op_mapping(
+  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
       {{aten::view, prim::view_copy},
        {aten::reshape, prim::reshape_copy},
        {aten::squeeze, prim::squeeze_copy},
        {aten::unsqueeze, prim::unsqueeze_copy}});
 
-  std::vector<Node*> maybe_alias_nodes;
+  std::vector<Node*> maybe_safe_alias_nodes;
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       replaceAliasOpsWithCopy(graph, b);
     }
-    if (op_mapping.find(n->kind()) != op_mapping.end()) {
-      maybe_alias_nodes.push_back(n);
+    if (alias_to_copy_mapping.find(n->kind()) != alias_to_copy_mapping.end()) {
+      maybe_safe_alias_nodes.push_back(n);
     }
   }
 
   auto alias_db = std::make_unique<AliasDb>(graph);
-  for (Node* n : maybe_alias_nodes) {
-    if (!alias_db->safeToChangeAliasingRelationship(
-            n->input(0), n->output(0))) {
-      continue;
-    }
 
+  auto safeToChangeAliasToCopy = [&alias_db](Node* n) {
+    return !alias_db->hasWriters(n->input(0)) &&
+        !alias_db->hasWriters(n->output(0));
+  };
+
+  auto replaceAliasWithCopy = [&graph, &alias_db](Node* n) {
     WithInsertPoint guard(n);
-    auto op_copy =
-        graph->insertNode(graph->create(op_mapping[n->kind()], n->inputs(), 1));
-    op_copy->output()->setType(n->output(0)->type());
+    auto copy_op = graph->insertNode(
+        graph->create(alias_to_copy_mapping[n->kind()], n->inputs(), 1));
+    copy_op->output()->setType(n->output(0)->type());
 
     // adding newly created value into alias_db;
-    alias_db->createValue(op_copy->output());
+    alias_db->createValue(copy_op->output());
 
-    n->output()->replaceAllUsesWith(op_copy->output());
+    n->output()->replaceAllUsesWith(copy_op->output());
     n->destroy();
+  };
+
+  for (Node* n : maybe_safe_alias_nodes) {
+    if (!safeToChangeAliasToCopy(n)) {
+      continue;
+    }
+    replaceAliasWithCopy(n);
   }
 }
 
-// Revert all 'op_copy' with 'op' except in CudaFusionGroup
+// Revert all 'operation_copy' with 'operation' except in CudaFusionGroup
 // e.g., Any non-fused alias operation including within the prim::FallbackGraph
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> op_mapping(
+  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
       {{prim::view_copy, aten::view},
        {prim::reshape_copy, aten::reshape},
        {prim::squeeze_copy, aten::squeeze},
@@ -2139,18 +2152,22 @@ void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
       revertAliasCopyOps(graph, b);
     }
     // Revert any non-fused alias copy ops
-    if (op_mapping.find(n->kind()) != op_mapping.end()) {
+    if (copy_to_alias_mapping.find(n->kind()) != copy_to_alias_mapping.end()) {
       alias_copy_ops.push_back(n);
     }
   }
 
-  for (Node* n : alias_copy_ops) {
+  auto replaceCopyWithAlias = [&graph](Node* n) {
     WithInsertPoint guard(n);
-    auto reverted_op =
-        graph->insertNode(graph->create(op_mapping[n->kind()], n->inputs(), 1));
-    reverted_op->output()->setType(n->output(0)->type());
-    n->output()->replaceAllUsesWith(reverted_op->output());
+    auto alias_op = graph->insertNode(
+        graph->create(copy_to_alias_mapping[n->kind()], n->inputs(), 1));
+    alias_op->output()->setType(n->output(0)->type());
+    n->output()->replaceAllUsesWith(alias_op->output());
     n->destroy();
+  };
+
+  for (Node* n : alias_copy_ops) {
+    replaceCopyWithAlias(n);
   }
 }
 
@@ -2234,6 +2251,67 @@ bool removeInplaceOperations(const std::shared_ptr<Graph>& graph) {
       graph, [&](Node* node) { return inplace_ops.count(node->kind()) != 0; });
 }
 
+// Recursively traverse blocks, gather all nodes with given symbol,
+// and then apply mutator function.
+void mutateNode(
+    Block* block,
+    Symbol symbol,
+    const std::function<void(Node*)>& func) {
+  // Recursively call mutateNode on blocks
+  // Gather all nodes with given symbol
+  std::vector<Node*> nodes;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      mutateNode(b, symbol, func);
+    }
+    if (n->kind() == symbol) {
+      nodes.push_back(n);
+    }
+  }
+
+  // Apply mutator funcion to every node
+  for (Node* n : nodes) {
+    func(n);
+  }
+}
+
+// For the given CudaFusionGroup, separate nested views and remove any unused,
+// intermediate views
+void separateNestedViews(Node* cuda_fusion_group) {
+  TORCH_INTERNAL_ASSERT(cuda_fusion_group->kind() == prim::CudaFusionGroup);
+
+  auto isView = [](Node* node) {
+    static std::unordered_set<Symbol> alias_op_set(
+        {prim::view_copy, prim::reshape_copy});
+    return alias_op_set.find(node->kind()) != alias_op_set.end();
+  };
+
+  // node -> input / output values
+  auto isNestedView = [&isView](Node* node) {
+    return isView(node) && isView(node->input(0)->node());
+  };
+
+  auto subgraph = cuda_fusion_group->g(attr::Subgraph);
+  for (auto node : subgraph->block()->nodes()) {
+    if (isNestedView(node)) {
+      // grandparent -> (view / reshape) parent -> (view / reshape) node
+      auto parent_value = node->input(0);
+      auto parent = parent_value->node();
+
+      auto grandparent_value = parent->input(0);
+      auto grandparent = grandparent_value->node();
+
+      // Before: gp -> x -> n
+      // After: gp -> x / gp -> n
+      // Delete x if no more uses
+      node->replaceInputWith(parent_value, grandparent_value);
+      if (!parent->hasUses()) {
+        parent->destroy();
+      }
+    }
+  }
+}
+
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
@@ -2244,7 +2322,7 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // I don't know how to store edge/node in attribute. so let's abuse data flow
   // dependency and add inputs to conditional constant generated by
   // aten::profile_ivalue
-  traverseProfileIValues(graph->block(), ExtractProfileIValue);
+  mutateNode(graph->block(), prim::profile_ivalue, ExtractProfileIValue);
   GRAPH_DEBUG("insert conditional constant from profile_ivalue: ", *graph);
 
   // TODO: we need to properly restore shape information after fusion.
@@ -2284,7 +2362,7 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   alterBatchNormImpls(graph->block());
   GRAPH_DEBUG("After _batch_norm_impl_index: ", *graph);
 
-  traverseProfileIValues(graph->block(), RemoveProfileIValue);
+  mutateNode(graph->block(), prim::profile_ivalue, RemoveProfileIValue);
 
   GRAPH_DEBUG("Before remove missing profiling: ", *graph);
   removeFusionWithMissingProfilingInformation(graph->block());
@@ -2294,8 +2372,14 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   removeOutputUsedOnlyInDtype(graph->block());
   GRAPH_DEBUG("After removeOutputUsedOnlyInDtype: ", *graph);
 
+  mutateNode(graph->block(), prim::CudaFusionGroup, separateNestedViews);
+  GRAPH_DEBUG(
+      "separate nested and delete redundant views in CudaFusionGroup:", *graph);
+
   revertAliasCopyOps(graph, graph->block());
   GRAPH_DEBUG("revert alias_copy ops by nvfuser: ", *graph);
+
+  dumpFusionGroups(graph);
 
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);

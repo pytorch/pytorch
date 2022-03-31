@@ -9,7 +9,7 @@ graph {
     name: "Reshape_0"
     op_type: "Reshape"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 2
     data_type: 7

@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/TensorIterator.h>
 #undef TORCH_ASSERT_NO_OPERATORS
@@ -12,6 +13,13 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
@@ -1486,7 +1494,8 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
   if (common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::Lazy ||
-      common_device_.type() == DeviceType::ORT) return;
+      common_device_.type() == DeviceType::ORT  ||
+      common_device_.type() == DeviceType::HPU) return;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
