@@ -6615,9 +6615,9 @@ class ShapeFuncInfo(OpInfo):
 
 def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None):
     if same_size:
-        return [make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous) for _ in range(N)]
+        return [make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous, low=low, high=high) for _ in range(N)]
     else:
-        return [make_tensor((N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous) for i in range(N)]
+        return [make_tensor((N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous, low=low, high=high) for i in range(N)]
 
 
 def get_foreach_method_names(name):
@@ -6662,14 +6662,17 @@ class ForeachFuncInfo(OpInfo):
             self.ref = torch.linalg.vector_norm
         if name == "norm":
 
-            def _ref_foreach_norm(tensor, ord):
-                norm = torch.linalg.vector_norm(tensor, ord)
-                if norm == 0:
-                    return norm
-                else:
-                    return torch.pow(norm, ord)
+            # def _ref_foreach_norm(tensor, ord):
+            #     dtype = torch.float32 if tensor.dtype in (torch.bfloat16, torch.float16) else tensor.dtype
+            #     norm = torch.linalg.vector_norm(tensor, ord, dtype=dtype)
+            #     if norm == 0:
+            #         return norm
+            #     else:
+            #         return torch.pow(norm, ord)
 
-            self.ref = _ref_foreach_norm
+            # self.ref = _ref_foreach_norm
+
+            self.ref = torch.linalg.vector_norm
 
 
 def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -10090,11 +10093,11 @@ foreach_minmax_op_db: List[ForeachFuncInfo] = [
 ]
 
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
-    # ForeachFuncInfo(
-    #     "norm",
-    #     dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-    #     dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-    # ),
+    ForeachFuncInfo(
+        "norm",
+        dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+    ),
     ForeachFuncInfo(
         "norm",
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

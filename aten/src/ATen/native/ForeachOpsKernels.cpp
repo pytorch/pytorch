@@ -1,5 +1,7 @@
 #include <ATen/ATen.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/TypeProperties.h> // For `ScalarType at::native::result_type(TensorList)
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
@@ -243,15 +245,16 @@ Tensor foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
     p = ord.to<double>();
   }
   check_foreach_api_restrictions(tensors);
+  const auto result_scalar_type = toRealValueType(result_type(tensors));
   auto result = std::accumulate(
     tensors.begin(), tensors.end(),
-    at::zeros({1}, tensors[0].options()),
+    at::zeros({}, tensors[0].options().dtype(toOpMathType(result_scalar_type))),
     [&](const Tensor &cumulative_sum, const Tensor &t) {
       auto norm = at::linalg_vector_norm(t, ord);
       return cumulative_sum + (p == 0.0 ? norm : at::pow(norm, ord));
     }
   );
-  return p == 0.0 ? result : at::pow(result, 1 / p);
+  return (p == 0.0 ? result : at::pow(result, 1 / p)).to(result_scalar_type);
 }
 
 }} // namespace at::native
