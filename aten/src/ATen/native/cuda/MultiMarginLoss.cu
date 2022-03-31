@@ -152,6 +152,8 @@ Tensor& multi_margin_loss_cuda_out(
     return out_;
   }
 
+  bool need_resize_ = false;
+
   auto input = input_.contiguous();
   auto target = target_.contiguous();
   Tensor weights;
@@ -248,14 +250,17 @@ Tensor& multi_margin_loss_cuda_out(
               margin);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
-        out = at::empty({0}, out.options());
-        at::sum_out(out, tmp_output, /*dims=*/IntArrayRef{});
+        out = at::sum(tmp_output, /*dims=*/IntArrayRef{});
+        need_resize_ = true;
       }
     }
   });
 
   if (!out.is_alias_of(out_)) {
     out_.copy_(out);
+    if (need_resize_) {
+        out_.resize_({});
+    }
   }
   return out_;
 }
