@@ -2188,7 +2188,7 @@ class TestDataLoader2(TestCase):
         self.assertEqual(items, list(dl))
 
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertEqual(items, list(dl))
 
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
@@ -2196,20 +2196,15 @@ class TestDataLoader2(TestCase):
         self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
-        dl = DataLoader2(
-            self.Sorter(dp),
-            batch_size=None,
-            num_workers=2,
-            shuffle=True,
-            worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn,
-        )
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True,
+                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertEqual(list(dl), items)
 
 
