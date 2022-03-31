@@ -299,6 +299,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
+    # TODO(jerryzh): Figure out why custom quant_min/quant_max are still adjusted.
     if has_customized_qrange:
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
@@ -325,10 +326,6 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             assert (
                 0 < qrange_len <= 2**31
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
-        if dtype == torch.qint8:
-            quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
-        else:
-            quant_min, quant_max = 0, qrange_len - 1
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
