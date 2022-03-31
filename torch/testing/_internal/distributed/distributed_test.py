@@ -4790,8 +4790,6 @@ class DistributedTest:
 
         def _test_post_localSGD_optimizer_parity(self, averager, grad_is_view):
             learning_rate = 0.03
-            period = 4
-            warmup_steps = 10
 
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
@@ -4800,19 +4798,12 @@ class DistributedTest:
             )
             opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
 
-            averager = averagers.PeriodicModelAverager(
-                period=period, warmup_steps=warmup_steps
-            )
-            post_localSGD_net = torch.nn.parallel.DistributedDataParallel(
+            net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank],
                 gradient_as_bucket_view=grad_is_view,
             )
-            # Cannot deepcopy averager on Windows.
-            # See: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496
-            averager2 = averagers.PeriodicModelAverager(
-                period=period, warmup_steps=warmup_steps
-            )
+            averager2 = copy.deepcopy(averager)
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
                 optim=torch.optim.SGD(net_using_post_localSGD_opt.parameters(), lr=learning_rate),
                 averager=averager2,
@@ -4847,6 +4838,10 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
+        )
         def test_post_localSGD_optimizer_parity(self):
             torch.cuda.set_device(self.rank)
 
@@ -4858,6 +4853,10 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
+        )
         def test_post_localSGD_optimizer_parity_grad_is_view(self):
             torch.cuda.set_device(self.rank)
 
@@ -4868,6 +4867,10 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
         )
         def test_post_localSGD_optimizer_parity_with_hierarchical_sgd(self):
             torch.cuda.set_device(self.rank)
@@ -4882,6 +4885,10 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "Process group cannot be pickled on Windows when a model averager is deep copied: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496",
         )
         def test_post_localSGD_optimizer_parity_with_hierarchical_sgd_grad_is_view(self):
             torch.cuda.set_device(self.rank)
