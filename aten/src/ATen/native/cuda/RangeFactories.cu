@@ -22,14 +22,14 @@ constexpr int num_threads() {
 }
 #endif
 constexpr int thread_work_size = 1;
-constexpr int block_work_size = thread_work_size * num_threads;
+constexpr int block_work_size = thread_work_size * num_threads();
 
 template<typename index_t, typename func_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    index_t idx = block_work_size * blockIdx.x + num_threads * i + threadIdx.x;
+    index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
