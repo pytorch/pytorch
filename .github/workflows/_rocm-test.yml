@@ -29,6 +29,7 @@ jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
+    timeout-minutes: 270
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -40,13 +41,16 @@ jobs:
         with:
           no-sudo: true
 
-      - uses: ./.github/actions/setup-rocm
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ inputs.docker-image }}
 
-      - uses: ./.github/actions/download-build-artifacts
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
 
@@ -126,7 +130,8 @@ jobs:
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
-      - uses: ./.github/actions/upload-test-artifacts
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           use-gha: true
@@ -154,7 +159,8 @@ jobs:
           export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
-      - uses: ./.github/actions/teardown-linux
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
         if: always()
         with:
-          wait-ssh: false
+          skip-wait-ssh: true
