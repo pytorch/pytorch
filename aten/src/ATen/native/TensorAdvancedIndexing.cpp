@@ -321,6 +321,7 @@ DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 DEFINE_DISPATCH(scatter_reduce_stub);
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
+DEFINE_DISPATCH(scatter_reduce_two_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -1311,7 +1312,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
   TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.");
 
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
-                                         scatter_reduce_stub,
+                                         scatter_reduce_two_stub,
                                          scatter_stub,
                                          reduce);
 
