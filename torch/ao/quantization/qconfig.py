@@ -41,7 +41,8 @@ from .observer import (
 import warnings
 
 
-class QConfig(namedtuple('QConfig',
+class QConfig(namedtuple(
+        'QConfig',
         ['activation',
          'weight',
          'bias',
