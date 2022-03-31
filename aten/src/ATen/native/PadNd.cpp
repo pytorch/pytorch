@@ -157,7 +157,7 @@ Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
 Tensor _pad_enum(const Tensor &self, IntArrayRef pad, int64_t mode_int, c10::optional<double> value) {
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
-  TORCH_CHECK(pad.size() <= input_dim * 2, "Padding length too large");
+  TORCH_CHECK(static_cast<int64_t>(pad.size()) <= input_dim * 2, "Padding length too large");
   auto mode = static_cast<at::padding_mode>(mode_int);
 
   if (mode == at::padding_mode::constant) {
