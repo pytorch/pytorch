@@ -48,7 +48,7 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
-    get_default_quant_patterns,
+    sorted_patterns_dict,
 )
 
 from .match_utils import (
@@ -89,9 +89,7 @@ from .backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_pattern_to_input_type_to_index,
     get_module_to_qat_module,
-)
-from .backend_config import (
-    get_native_backend_config_dict,
+    get_native_quant_patterns,
 )
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
@@ -1376,16 +1374,10 @@ def prepare(
     # TODO: rename to pattern_to_quantize_handler
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
-        quant_patterns = get_default_quant_patterns()
-        patterns = get_combined_dict(
-            quant_patterns, additional_quant_patterns)
-        # TODO: currently we just extend the quantize handlers generated from
-        # `get_native_backend_config_dict`
-        # in the future we can just assign backend_config_dict when everything is defined
-        for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
-            patterns[pattern] = quantize_handler
+        patterns = get_native_quant_patterns(additional_quant_patterns)
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
+        patterns = sorted_patterns_dict(patterns)
 
         # TODO: make WEIGHT_INDEX_DICT and BIAS_INDEX_DICT an argument to the functions that needs them
         # TODO: refactor this part to return WEIGHT_INDEX_DICT and BIAS_INDEX_DICT
@@ -1411,7 +1403,7 @@ def prepare(
     equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
-    propagate_qconfig_(model, flattened_qconfig_dict)
+    propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(

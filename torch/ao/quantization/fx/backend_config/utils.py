@@ -1,8 +1,12 @@
+from typing import Dict, Any, List, Callable, Union
+
 import torch
+from torch.ao.quantization.utils import get_combined_dict
+from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, sorted_patterns_dict
 import torch.nn as nn
 from .quantize_handler import get_quantize_handler_cls
 from .fuse_handler import get_fuse_handler_cls
-from typing import Dict, Any, List, Callable, Union
+from .native import get_native_backend_config_dict
 from ..quantization_types import Pattern, QuantizerCls
 
 def get_pattern_to_quantize_handlers(
@@ -125,3 +129,18 @@ def get_fusion_pattern_to_extra_inputs_getter(
             extra_inputs_getter_mapping[pattern] = extra_inputs_getter
 
     return extra_inputs_getter_mapping
+
+def get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, QuantizerCls] = None) -> Dict[Pattern, QuantizerCls]:
+    """
+    Return a map from pattern to quantize handlers based on the default patterns and the native backend_config_dict.
+    The returned map is sorted such that longer patterns will be encountered first when iterating through it.
+    """
+    patterns = get_default_quant_patterns()
+    if additional_quant_patterns is not None:
+        patterns = get_combined_dict(patterns, additional_quant_patterns)
+    # TODO: currently we just extend the quantize handlers generated from
+    # `get_native_backend_config_dict`
+    # in the future we can just assign backend_config_dict when everything is defined
+    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
+        patterns[pattern] = quantize_handler
+    return sorted_patterns_dict(patterns)
