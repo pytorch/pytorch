@@ -1,4 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <utility>
+
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
@@ -3048,7 +3050,13 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
 
       if (P_trans) {
         // Get the inverse permutation
-        perm = at::argsort(perm);
+        // This is an insertion sort, and it's equivalent to
+        // perm = at::argsort(perm);
+        // but more parallelisable and O(n), exploiting that perm is a permutation
+        auto id_perm = at::arange(m, perm.options()).expand(perm.sizes());
+        auto inv_perm = at::empty_like(perm);
+        inv_perm.scatter_(-1, perm, id_perm);
+        perm = std::move(inv_perm);
       }
       B.scatter_(-2, perm.unsqueeze(-1).expand_as(B), B.clone());
     };
