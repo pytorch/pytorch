@@ -163,7 +163,9 @@ std::pair<bool, bool> canonicalDimReduction(
 // Return a list of tensor views that are outputs of reduction operations. If
 // multiple outputs of an expression are found, only include one in the list
 // (WelfordOp)
-TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(Fusion* fusion);
+TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(
+    Fusion* fusion,
+    bool ignore_trivial = true);
 
 // Returns a list of TensorViews that are the consumer tv for a view operation.
 std::vector<TensorView*> getViewTVs(Fusion* fusion);
@@ -247,6 +249,35 @@ struct BroadcastMultiple {
 // reference_tv if reference_tv is an input or output. Count is multiplied by
 // data type size.
 std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv);
+
+namespace matmul_utils {
+//! Utilities in this namespace facilitates scheduling matmul kernels with
+//!  hierarchichal tiling specified in MatMulTileOptions.
+
+//! Schedule utility for matmul prolog:
+//!   Use all the threads on a CTA tile to load matmul operands
+//!  into shared memory with the given vectorization word.
+//! TODO:
+//!  will need to add bank conflict removal swizzle in a follow up.
+TORCH_CUDA_CU_API void scheduleContiguousVectorLoad(
+    TensorView* tv,
+    MatMulTileOptions tile,
+    int vector_word);
+
+//! Schedule utility for mma output in matmul main loop:
+//!  Realize the hierarchical tiling based on the given tiling options.
+TORCH_CUDA_CU_API void scheduleWarpTileWithReduction(
+    TensorView* tv,
+    MatMulTileOptions tile);
+
+//! Schedule utility for mma output in matmul main loop:
+//!  Realize the hierarchical tiling based on the given tiling options
+//! on consumers of mma ops in epilog.
+TORCH_CUDA_CU_API void scheduleWarpTileWithNoReduction(
+    TensorView* tv,
+    MatMulTileOptions tile);
+
+} // namespace matmul_utils
 
 } // namespace scheduler_utils
 } // namespace cuda
