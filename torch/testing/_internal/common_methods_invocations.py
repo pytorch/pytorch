@@ -11233,7 +11233,8 @@ op_db: List[OpInfo] = [
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
            ],
-           sample_inputs_func=sample_inputs_group_norm,),
+           sample_inputs_func=sample_inputs_group_norm,
+           supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
            dtypes=floating_types(),
