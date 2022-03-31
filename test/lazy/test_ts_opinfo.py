@@ -109,13 +109,7 @@ class TestLazyOpInfo(TestCase):
         r = op(*args, **kwargs)
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
-        if op.name in FALLBACK_LIST:
-            prefix = "aten"
-        else:
-            if IS_WINDOWS:
-              prefix = "lazy::torch::lazy::LazyNativeFunctions"
-            else:
-              prefix = "lazy"
+        prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
         found = f"{prefix}::{op.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
         # check aliases
         if not found:
