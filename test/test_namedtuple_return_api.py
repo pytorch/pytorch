@@ -86,7 +86,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['linalg_inv_ex'], input=(), names=('inverse', 'info'), hasout=True),
-            op(operators=['_linalg_solve'], input=(B,), names=('result', 'LU', 'pivots'), hasout=True),
+            op(operators=['_linalg_solve'], input=('B',), names=('result', 'LU', 'pivots'), hasout=True),
             op(operators=['linalg_lu_factor'], input=(), names=('LU', 'pivots'), hasout=True),
             op(operators=['linalg_lu_factor_ex'], input=(), names=('LU', 'pivots', 'info'), hasout=True),
             op(operators=['linalg_lu'], input=(), names=('P', 'L', 'U'), hasout=True),
