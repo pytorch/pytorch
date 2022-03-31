@@ -3628,6 +3628,9 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(graph, FUSION_GUARD)
         self.assertGraphContains(graph, 'prim::view_copy', True)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_nested_view(self):
         self._ltc_helper([256, 128, 1024], torch.float, 'cuda', 1e-6)
 
