@@ -10,7 +10,7 @@ namespace profiler {
 namespace impl {
 namespace {
 
-static inline void cudaCheck(cudaError_t result, const char * file, int line) {
+static inline void torch_cuda_check_impl(cudaError_t result, const char * file, int line) {
   if(result != cudaSuccess) {
     std::stringstream ss;
     ss << file << ":" << line << ": ";
@@ -31,7 +31,7 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
     throw std::runtime_error(ss.str());
   }
 }
-#define TORCH_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
+#define TORCH_CUDA_CHECK(result) torch_cuda_check_impl(result,__FILE__,__LINE__);
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
@@ -77,16 +77,14 @@ struct CUDAMethods : public CUDAStubs {
 
   void onEachDevice(std::function<void(int)> op) const override {
     at::cuda::OptionalCUDAGuard device_guard;
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    int count = at::cuda::device_count();
-    for(const auto i : c10::irange(count)) {
+    for(const auto i : c10::irange(at::cuda::device_count())) {
       device_guard.set_index(i);
       op(i);
     }
   }
 
   void synchronize() const override {
-    cudaDeviceSynchronize();
+    TORCH_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   bool enabled() const override {
