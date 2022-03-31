@@ -97,7 +97,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   // the matmul operation is input * transpose(weight), so we will work with the transposed weight
   auto weight_transposed = transpose(orig_weight, 0, 1);
   // cudnn expects tensors to be at least 3D. weight_transposed is currently 2D. we will create a 3D view
-  // by appending a leading dummy dimension (cudnn expects leading dimensions to be the dummy dimensions)
+  // by prepending a leading dummy dimension (cudnn expects leading dimensions to be the dummy dimensions)
   std::vector<int64_t> new_sizes(3, 1);
   new_sizes.back() = weight_transposed.size(1);
   new_sizes[1] = weight_transposed.size(0);
