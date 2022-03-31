@@ -37,6 +37,11 @@ void IndexLowering::pushBack(Expr* expr) {
   }
 }
 
+void IndexLowering::insertAtTopLevel(Expr* expr) {
+  TORCH_INTERNAL_ASSERT(!lowered_exprs_.empty());
+  lowered_exprs_.insert(lowered_exprs_.end() - 1, expr);
+}
+
 void IndexLowering::handle(const kir::IfThenElse* ite) {
   const auto prev_scope = active_scope_;
 
@@ -101,7 +106,11 @@ namespace {
 
 // Get the size of the temporary work buffer for grid communication, this can be
 // grid reduction, broadcast, or grid welford.
-Val* getGridCommWorkBufferSize(const TensorDomain* td) {
+// expansion_factor can be optionally passed to expand the allocation
+// size. For example, FusedReduction should double the work buffer size.
+Val* getGridCommWorkBufferSize(
+    const TensorDomain* td,
+    int expansion_factor = 1) {
   // The buffer size is the number of thread blocks multiplied by the
   // number of threads not used for reduction domains.
   // Note: Previously it was calculated based on the shape of the
@@ -111,7 +120,11 @@ Val* getGridCommWorkBufferSize(const TensorDomain* td) {
   // size if the parallel dimensions are exact, but otherwise, just
   // computing the buffer size based on the tensor shape isn't
   // sufficient since there could be extra threads/blocks.
-  Val* buffer_size = GpuLower::current()->kernel()->oneVal();
+  TORCH_INTERNAL_ASSERT(
+      expansion_factor >= 1, "Invalid expansion factor: ", expansion_factor);
+  Val* buffer_size = expansion_factor == 1
+      ? GpuLower::current()->kernel()->oneVal()
+      : IrBuilder::create<Int>(expansion_factor);
   for (auto pt : kParallelTypeThreads) {
     auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
     if (pt_dim == nullptr || pt_dim->isOneInt()) {
@@ -172,89 +185,122 @@ void IndexLowering::handle(const ReductionOp* rop) {
   const auto out_tv = rop->out()->as<TensorView>();
   const auto out_domain = out_tv->domain();
 
-  const bool is_block_reduce = out_domain->hasBlockReduction();
-  const bool is_grid_reduce = out_domain->hasGridReduction();
-
-  // If we do a grid reduction we can't have a reduction axis that is not bound
-  // to a grid or block dim ()
-  if (is_grid_reduce) {
-    TORCH_INTERNAL_ASSERT(
-        std::none_of(
-            out_domain->domain().begin(),
-            out_domain->domain().end(),
-            [](IterDomain* id) {
-              return !id->isThread() && id->isReduction() &&
-                  !id->extent()->isOneInt();
-            }),
-        "Found a reduction stage that has both a non-parallelized ",
-        "reduction and a grid reduction.  This is not supported, ",
-        "please use rfactor to do the serialized reduction first, ",
-        "then the grid reduction.");
-  }
+  const bool has_block_reduce = out_domain->hasBlockReduction();
+  const bool has_grid_reduce = out_domain->hasGridReduction();
 
   const auto out = lowerDstIndex(rop->out());
   const auto in = lowerSrcIndex(rop->in(), rop->out());
 
-  ReductionOp* block_reduction_op = nullptr;
-
-  if (is_block_reduce) {
-    block_reduction_op = IrBuilder::create<ReductionOp>(
-        rop->getReductionOpType(), rop->init(), out, in);
-    if (rop->predicate()) {
-      block_reduction_op->setPredicate(rop->predicate());
-    }
-    if (rop->writePredicate()) {
-      block_reduction_op->setWritePredicate(rop->writePredicate());
-    }
-    pushBack(block_reduction_op);
-  }
-
-  if (is_grid_reduce) {
-    const auto reduce_buffer = allocGlobalBufferForGridComm(
-        getGridCommWorkBufferSize(out_domain), out->dtype(), false);
-
-    const auto sync_buffer = allocGlobalBufferForGridComm(
-        getGridSyncBufferSize(out_domain), DataType::Int, true);
-
-    const auto grid_reduction_op = (block_reduction_op == nullptr)
-        ? IrBuilder::create<ReductionOp>(
-              rop->getReductionOpType(), rop->init(), out, in)
-        : block_reduction_op;
-
-    // The thread predicate for GridReduction needs to be set
-    // separately from the main predicate. Do not combine them like
-    // other expressions.
-    const auto& thread_pred =
-        GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
-    auto grid_reduction = IrBuilder::create<kir::GridReduction>(
-        grid_reduction_op, reduce_buffer, sync_buffer);
-    grid_reduction->setThreadPredicate(thread_pred);
-
-    if (rop->predicate()) {
-      // If preceded by a blockReduce, all thread blocks should have
-      // valid inputs to gridReduce. In fact, using the original
-      // predicate does not work when the write predicate of the
-      // blockReduce is different from the read predicate.
-      if (is_block_reduce) {
-        grid_reduction->setPredicate(IrBuilder::create<kir::Predicate>(
-            GpuLower::current()->kernel()->trueVal()));
-      } else {
-        grid_reduction->setPredicate(rop->predicate());
-      }
-    }
-
-    if (rop->writePredicate()) {
-      grid_reduction->setWritePredicate(rop->writePredicate());
-    }
-
-    pushBack(reduce_buffer);
-    pushBack(sync_buffer);
-    pushBack(grid_reduction);
-  }
-
-  if (!is_block_reduce && !is_grid_reduce) {
+  // Serial reduction
+  if (!has_block_reduce && !has_grid_reduce) {
     pushBack(
         IrBuilder::create<BinaryOp>(rop->getReductionOpType(), out, out, in));
+    return;
+  }
+
+  ReductionOp* indexed_rop = IrBuilder::create<ReductionOp>(
+      rop->getReductionOpType(), rop->init(), out, in, rop->isFused());
+  if (rop->predicate()) {
+    indexed_rop->setPredicate(rop->predicate());
+  }
+  if (rop->writePredicate()) {
+    indexed_rop->setWritePredicate(rop->writePredicate());
+  }
+
+  // If not grid reduction, just append the new ReductionOp node
+  if (!has_grid_reduce) {
+    pushBack(indexed_rop);
+    return;
+  }
+
+  handleGridReduction(indexed_rop);
+}
+
+void IndexLowering::handleGridReduction(ReductionOp* indexed_rop) {
+  const auto out_tv = indexed_rop->out()->as<kir::TensorIndex>()->view();
+  const auto out_domain = out_tv->domain();
+
+  TORCH_INTERNAL_ASSERT(out_domain->hasGridReduction());
+
+  // If we do a grid reduction we can't have a reduction axis that is not bound
+  // to a grid or block dim.
+  TORCH_INTERNAL_ASSERT(
+      std::none_of(
+          out_domain->domain().begin(),
+          out_domain->domain().end(),
+          [](IterDomain* id) {
+            return !id->isThread() && id->isReduction() &&
+                !id->extent()->isOneInt();
+          }),
+      "Found a reduction stage that has both a non-parallelized ",
+      "reduction and a grid reduction. This is not supported, ",
+      "please use rfactor to do the serialized reduction first, ",
+      "then the grid reduction.");
+
+  // When using the fused reduction in a loop, the global work buffer
+  // is double buffered to save global synchronizations.
+  auto is_within_a_loop = std::any_of(
+      out_domain->domain().begin(),
+      out_domain->domain().end(),
+      [](IterDomain* id) { return !isTrivialIterDomain(id); });
+
+  const auto reduce_buffer = allocGlobalBufferForGridComm(
+      getGridCommWorkBufferSize(
+          out_domain, indexed_rop->isFused() && is_within_a_loop ? 2 : 1),
+      indexed_rop->out()->dtype(),
+      false);
+
+  const auto sync_buffer = allocGlobalBufferForGridComm(
+      getGridSyncBufferSize(out_domain), DataType::Int, true);
+
+  const bool block_reduce_separated =
+      out_domain->hasBlockReduction() && !indexed_rop->isFused();
+
+  // The thread predicate for GridReduction needs to be set
+  // separately from the main predicate. Do not combine them like
+  // other expressions.
+  const auto& thread_pred =
+      GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
+
+  auto grid_reduction = IrBuilder::create<kir::GridReduction>(
+      indexed_rop, reduce_buffer, sync_buffer);
+
+  grid_reduction->setThreadPredicate(thread_pred);
+
+  // If preceded by a blockReduce, all thread blocks should have
+  // valid inputs to gridReduce. In fact, using the original
+  // predicate does not work when the write predicate of the
+  // blockReduce is different from the read predicate.
+  if (indexed_rop->predicate()) {
+    if (block_reduce_separated) {
+      grid_reduction->setPredicate(IrBuilder::create<kir::Predicate>(
+          GpuLower::current()->kernel()->trueVal()));
+    } else {
+      grid_reduction->setPredicate(indexed_rop->predicate());
+    }
+  }
+
+  if (indexed_rop->writePredicate()) {
+    grid_reduction->setWritePredicate(indexed_rop->writePredicate());
+  }
+
+  // Push back the reduction op when block reduction is done
+  // separately. Otherwise, the reduction op is just referenced from
+  // the grid reduction op.
+  if (block_reduce_separated) {
+    pushBack(indexed_rop);
+  }
+
+  pushBack(reduce_buffer);
+  pushBack(sync_buffer);
+  pushBack(grid_reduction);
+
+  if (indexed_rop->isFused()) {
+    // When using the fused reduction, allocate the reduction object at
+    // the outer-most scope
+    auto fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(grid_reduction);
+    insertAtTopLevel(fused_reduction_alloc_reduction);
   }
 }
 
@@ -264,12 +310,12 @@ void IndexLowering::handle(const WelfordOp* wop) {
   const auto out_tv = wop->outAvg()->as<TensorView>();
   const auto out_domain = out_tv->domain();
 
-  const bool is_block_reduce = out_domain->hasBlockReduction();
-  const bool is_grid_reduce = out_domain->hasGridReduction();
+  const bool has_block_reduce = out_domain->hasBlockReduction();
+  const bool has_grid_reduce = out_domain->hasGridReduction();
 
   // If we do a grid reduction we can't have a reduction axis that is not bound
   // to a grid or block dim ()
-  if (is_grid_reduce) {
+  if (has_grid_reduce) {
     TORCH_INTERNAL_ASSERT(
         std::none_of(
             out_domain->domain().begin(),
@@ -298,7 +344,7 @@ void IndexLowering::handle(const WelfordOp* wop) {
   auto out_var = lowerDstIndex(wop->outVar());
   auto out_N = lowerDstIndex(wop->outN());
 
-  WelfordOp* welford_op = IrBuilder::create<WelfordOp>(
+  WelfordOp* indexed_wop = IrBuilder::create<WelfordOp>(
       out_avg,
       out_var,
       out_N,
@@ -307,68 +353,109 @@ void IndexLowering::handle(const WelfordOp* wop) {
       wop->initN(),
       in_avg,
       in_var,
-      in_N);
+      in_N,
+      wop->isFused());
 
-  WelfordOp* block_welford_op = nullptr;
-
-  if (is_block_reduce) {
-    block_welford_op = welford_op;
-    if (wop->predicate()) {
-      block_welford_op->setPredicate(wop->predicate());
-    }
-    if (wop->writePredicate()) {
-      block_welford_op->setWritePredicate(wop->writePredicate());
-    }
-    pushBack(block_welford_op);
+  if (wop->predicate()) {
+    indexed_wop->setPredicate(wop->predicate());
+  }
+  if (wop->writePredicate()) {
+    indexed_wop->setWritePredicate(wop->writePredicate());
   }
 
-  if (is_grid_reduce) {
-    // Buffer allocation
-    const auto work_buffer_size = getGridCommWorkBufferSize(out_domain);
+  // Serial welford
+  if (!has_block_reduce && !has_grid_reduce) {
+    pushBack(indexed_wop);
+    return;
+  }
 
-    const auto out_var_buffer =
-        allocGlobalBufferForGridComm(work_buffer_size, out_var->dtype(), false);
-    const auto out_avg_buffer =
-        allocGlobalBufferForGridComm(work_buffer_size, out_avg->dtype(), false);
-    const auto out_N_buffer =
-        allocGlobalBufferForGridComm(work_buffer_size, out_N->dtype(), false);
+  // Block-only welford
+  if (!has_grid_reduce) {
+    pushBack(indexed_wop);
+    return;
+  }
 
-    const auto sync_buffer = allocGlobalBufferForGridComm(
-        getGridSyncBufferSize(out_domain), DataType::Int, true);
+  handleGridWelford(indexed_wop);
+}
 
-    // Grid Welford instantiation
-    const auto grid_welford_op =
-        (block_welford_op == nullptr) ? welford_op : block_welford_op;
+void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
+  const auto out_tv = indexed_wop->out()->as<kir::TensorIndex>()->view();
+  const auto out_domain = out_tv->domain();
 
-    // The thread predicate for GridReduction needs to be set
-    // separately from the main predicate. Do not combine them like
-    // other expressions.
-    const auto& thread_pred =
-        GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
+  // Buffer allocation
+  // When using the fused reduction in a loop, the global work buffer
+  // is double buffered to save global synchronizations.
+  auto is_within_a_loop = std::any_of(
+      out_domain->domain().begin(),
+      out_domain->domain().end(),
+      [](IterDomain* id) { return !isTrivialIterDomain(id); });
 
-    auto grid_welford = IrBuilder::create<kir::GridWelford>(
-        grid_welford_op,
-        out_var_buffer,
-        out_avg_buffer,
-        out_N_buffer,
-        sync_buffer);
+  const auto work_buffer_size = getGridCommWorkBufferSize(
+      out_domain, indexed_wop->isFused() && is_within_a_loop ? 2 : 1);
 
-    grid_welford->setThreadPredicate(thread_pred);
+  const auto out_var_buffer = allocGlobalBufferForGridComm(
+      work_buffer_size, indexed_wop->outVar()->dtype(), false);
+  const auto out_avg_buffer = allocGlobalBufferForGridComm(
+      work_buffer_size, indexed_wop->outAvg()->dtype(), false);
+  const auto out_N_buffer = allocGlobalBufferForGridComm(
+      work_buffer_size, indexed_wop->outN()->dtype(), false);
 
-    if (wop->predicate()) {
-      grid_welford->setPredicate(wop->predicate());
+  const auto sync_buffer = allocGlobalBufferForGridComm(
+      getGridSyncBufferSize(out_domain), DataType::Int, true);
+
+  // The thread predicate for GridReduction needs to be set
+  // separately from the main predicate. Do not combine them like
+  // other expressions.
+  const auto& thread_pred =
+      GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
+
+  auto grid_welford = IrBuilder::create<kir::GridWelford>(
+      indexed_wop, out_var_buffer, out_avg_buffer, out_N_buffer, sync_buffer);
+
+  grid_welford->setThreadPredicate(thread_pred);
+
+  const bool block_reduce_separated =
+      out_domain->hasBlockReduction() && !indexed_wop->isFused();
+
+  if (indexed_wop->predicate()) {
+    if (block_reduce_separated) {
+      grid_welford->setPredicate(IrBuilder::create<kir::Predicate>(
+          GpuLower::current()->kernel()->trueVal()));
+    } else {
+      grid_welford->setPredicate(indexed_wop->predicate());
     }
-
-    pushBack(out_var_buffer);
-    pushBack(out_avg_buffer);
-    pushBack(out_N_buffer);
-    pushBack(sync_buffer);
-    pushBack(grid_welford);
   }
 
-  if (!is_block_reduce && !is_grid_reduce) {
-    pushBack(welford_op);
+  if (indexed_wop->writePredicate()) {
+    grid_welford->setWritePredicate(indexed_wop->writePredicate());
   }
+
+  if (block_reduce_separated) {
+    pushBack(indexed_wop);
+  }
+
+  pushBack(out_var_buffer);
+  pushBack(out_avg_buffer);
+  pushBack(out_N_buffer);
+  pushBack(sync_buffer);
+  pushBack(grid_welford);
+
+  if (indexed_wop->isFused()) {
+    // When using the fused reduction, allocate the reduction object at
+    // the outer-most scope
+    auto fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(grid_welford);
+    insertAtTopLevel(fused_reduction_alloc_reduction);
+  }
+}
+
+void IndexLowering::handle(const MmaOp* mma) {
+  const auto a = lowerSrcIndex(mma->inA(), mma->out());
+  const auto b = lowerSrcIndex(mma->inB(), mma->out());
+  const auto out = lowerDstIndex(mma->out());
+  auto mma_indexed =
+      IrBuilder::create<MmaOp>(out, a, b, mma->init(), mma->options());
+  pushBack(mma_indexed);
 }
 
 void IndexLowering::handle(const BroadcastOp* bop) {
@@ -423,9 +510,14 @@ void IndexLowering::handle(const kir::Allocate* allocate) {
   pushBack(const_cast<kir::Allocate*>(allocate)); // NOLINT
 }
 
-void IndexLowering::handle(const kir::Sync* sync) {
+void IndexLowering::handle(const kir::BlockSync* sync) {
   // TODO(kir): remove the need for const_cast
-  pushBack(const_cast<kir::Sync*>(sync)); // NOLINT
+  pushBack(const_cast<kir::BlockSync*>(sync)); // NOLINT
+}
+
+void IndexLowering::handle(const kir::GridSync* sync) {
+  // TODO(kir): remove the need for const_cast
+  pushBack(const_cast<kir::GridSync*>(sync)); // NOLINT
 }
 
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {
