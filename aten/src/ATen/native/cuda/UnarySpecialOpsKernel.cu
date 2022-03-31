@@ -291,18 +291,38 @@ void erfcx_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char kaiser_window_name[] = "kaiser_window";
 void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, double beta_){
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
-    using opmath_t = at::opmath_type<scalar_t>;
-    const opmath_t inv_alpha = static_cast<opmath_t>(2.0 / (window_length - 1));
-    const opmath_t beta = static_cast<opmath_t>(beta_);
-    const opmath_t inv_i0_beta = 1.0 / calc_i0(beta);
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      opmath_t x = static_cast<opmath_t>(a) * inv_alpha - 1;
-      opmath_t y = std::max<opmath_t>(0, 1 - x * x);
-      return calc_i0(beta * ::sqrt(y)) * inv_i0_beta;
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
+        using opmath_t = at::opmath_type<scalar_t>;
+        const opmath_t inv_alpha = static_cast<opmath_t>(2.0 / (window_length - 1));
+        const opmath_t beta = static_cast<opmath_t>(beta_);
+        const opmath_t inv_i0_beta = 1.0 / calc_i0(beta);
+        jitted_gpu_kernel<
+            /*name=*/kaiser_window_name,
+            /*return_dtype=*/scalar_t,
+            /*common_dtype=*/scalar_t,
+            /*arity=*/1>(
+            iter,
+            kaiser_window_string,
+            /*scalar_pos=*/at::cuda::jit::BinaryFuncVariant::NoScalar,
+            /*scalar_val=*/0,
+            /*extra_args=*/std::make_tuple(inv_alpha, beta, inv_i0_beta));
     });
-  });
+  #else
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
+      using opmath_t = at::opmath_type<scalar_t>;
+      const opmath_t inv_alpha = static_cast<opmath_t>(2.0 / (window_length - 1));
+      const opmath_t beta = static_cast<opmath_t>(beta_);
+      const opmath_t inv_i0_beta = 1.0 / calc_i0(beta);
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
+        opmath_t x = static_cast<opmath_t>(a) * inv_alpha - 1;
+        opmath_t y = std::max<opmath_t>(0, 1 - x * x);
+        return calc_i0(beta * ::sqrt(y)) * inv_i0_beta;
+      });
+    });
+  #endif
 }
 
 const char entr_name[] = "entr";
