@@ -10,22 +10,22 @@ kernel_metadata:
   _embedding_bag_cpu_impl:
   - Long
   _local_scalar_dense_cpu:
-  - Bool
-  - Int
-  - Double
   - Float
+  - Int
+  - Bool
   - Long
+  - Double
   abs_cpu:
   - Float
   adaptive_avg_pool2d_quantized_cpu:
   - QUInt8
   adaptive_avg_pool3d_ndhwc:
   - QUInt8
-  add_cpu/sub_cpu:
-  - Double
+  add_stub:
   - Float
-  - Long
+  - Double
   - Int
+  - Long
   addmm_impl_cpu_:
   - Float
   aminmax_cpu:
@@ -94,22 +94,22 @@ kernel_metadata:
   compute_indices_weights_nearest:
   - Float
   copy_:
-  - Bool
-  - Int
-  - Short
   - Byte
-  - Char
   - Float
-  - Double
-  - Long
-  copy_kernel:
+  - Int
   - Bool
+  - Long
+  - Char
+  - Short
+  - Double
+  copy_kernel:
+  - Float
   - QUInt8
   - Int
-  - QInt8
-  - Float
   - Long
+  - QInt8
   - Double
+  - Bool
   cos_vml_cpu:
   - Float
   cpublas_axpy_impl:
@@ -130,11 +130,13 @@ kernel_metadata:
   - QUInt8
   - QInt8
   div_cpu:
-  - Double
   - Float
+  - Double
   div_trunc_cpu:
   - Float
   - Long
+  elu_cpu:
+  - Float
   embedding_bag_no_grad_cpu_out:
   - Float
   - Long
@@ -144,17 +146,17 @@ kernel_metadata:
   - Float
   - Long
   exp_vml_cpu:
-  - Double
   - Float
+  - Double
   fill_cpu:
   - Float
-  - Long
   - Int
-  fill_out:
-  - Bool
-  - Double
   - Long
+  fill_out:
   - Float
+  - Double
+  - Bool
+  - Long
   floor_vml_cpu:
   - Float
   gather_ranges_data:
@@ -162,8 +164,8 @@ kernel_metadata:
   gather_ranges_index:
   - Int
   gather_ranges_to_dense_v2:
-  - Long
   - Int
+  - Long
   ge_cpu:
   - Float
   glu_cpu:
@@ -219,13 +221,13 @@ kernel_metadata:
   - Float
   lt_cpu:
   - Float
-  - Long
   - Int
+  - Long
   make_per_tensor_quantized_tensor:
   - QInt8
   masked_fill:
-  - Double
   - Float
+  - Double
   - Long
   max_all:
   - Float
@@ -237,42 +239,43 @@ kernel_metadata:
   max_pool2d_nhwc:
   - QUInt8
   maximum_cpu:
-  - Double
-  - Int
   - Float
+  - Int
+  - Double
   min_all:
   - Float
   min_cpu:
   - Float
   - Long
   minimum_cpu:
-  - Double
   - Float
+  - Double
   - Long
   mul_cpu:
-  - Double
   - Float
-  - Long
+  - Double
   - Int
+  - Long
   nan_to_num:
   - Float
   ne_cpu:
+  - Float
   - Double
   - Long
-  - Float
   neg_cpu:
   - Float
-  - Long
   - Int
+  - Long
   nll_loss_backward_out_frame:
   - Float
   nll_loss_out_frame:
   - Float
   nonzero_count_cpu:
-  - Bool
   - Float
+  - Bool
   - Long
   nonzero_cpu:
+  - Float
   - Bool
   - Long
   norm_cpu:
@@ -307,12 +310,12 @@ kernel_metadata:
   quantize_tensor_per_channel_affine_cpu:
   - QInt32
   quantize_tensor_per_tensor_affine:
-  - QInt32
   - QUInt8
+  - QInt32
   - QInt8
   quantize_tensor_per_tensor_affine_cpu:
-  - QInt32
   - QUInt8
+  - QInt32
   - QInt8
   quantized_layer_norm_kernel_impl_cpu:
   - QUInt8
@@ -326,6 +329,8 @@ kernel_metadata:
   - Float
   remainder_cpu:
   - Long
+  replication_pad2d_cpu:
+  - Float
   scatter_gather_scalar_cpu:
   - Long
   scatter_gather_tensor_cpu:
@@ -383,6 +388,8 @@ kernel_metadata:
   - Float
   unique:
   - Long
+  upsample_bilinear2d_channels_last:
+  - Float
   upsample_bilinear2d_nhwc:
   - QUInt8
   upsample_generic_Nd:
@@ -392,9 +399,9 @@ kernel_metadata:
   upsample_nearest2d_channels_last:
   - Float
   where_cpu:
-  - Double
   - Float
   - Long
+  - Double
 root_operators:
 - aten::Bool.Tensor
 - aten::Bool.int
@@ -660,6 +667,9 @@ root_operators:
 - aten::remainder.int
 - aten::repeat
 - aten::replace
+- aten::replication_pad1d
+- aten::replication_pad2d
+- aten::replication_pad3d
 - aten::requires_grad_
 - aten::reshape
 - aten::resize_as_
@@ -672,6 +682,7 @@ root_operators:
 - aten::scatter_.src
 - aten::scatter_add_
 - aten::select.int
+- aten::selu
 - aten::sigmoid
 - aten::sin
 - aten::size
@@ -694,9 +705,7 @@ root_operators:
 - aten::sub
 - aten::sub.Scalar
 - aten::sub.Tensor
-- aten::sub.float
 - aten::sub.int
-- aten::sub.int_float
 - aten::sub_.Tensor
 - aten::sum
 - aten::sum.dim_IntList
@@ -772,6 +781,7 @@ root_operators:
 - quantized::conv2d_relu.new
 - quantized::conv_prepack
 - quantized::conv_transpose2d
+- quantized::embedding_4bit
 - quantized::embedding_byte
 - quantized::hardswish
 - quantized::instance_norm
@@ -901,6 +911,7 @@ traced_operators:
 - aten::div_.Scalar
 - aten::div_.Tensor
 - aten::dropout
+- aten::elu
 - aten::embedding
 - aten::embedding_backward
 - aten::embedding_bag.padding_idx
@@ -1037,6 +1048,7 @@ traced_operators:
 - aten::remainder.Scalar
 - aten::remainder.Tensor
 - aten::repeat
+- aten::replication_pad2d
 - aten::requires_grad_
 - aten::reshape
 - aten::resize_
@@ -1051,6 +1063,7 @@ traced_operators:
 - aten::scatter_add_
 - aten::select.int
 - aten::select_backward
+- aten::selu
 - aten::set_.source_Storage
 - aten::set_.source_Storage_storage_offset
 - aten::sigmoid
