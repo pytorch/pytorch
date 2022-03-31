@@ -655,10 +655,6 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
                  supports_expanded_weight=False,
-                 # whether the op supports complex32 inputs.
-                 # NOTE: This is temporary and relevant tests (like (test_dtypes))
-                 # will be updated to expect complex32 support
-                 supports_complex32=False,
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -822,7 +818,6 @@ class OpInfo(object):
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
         self.supports_expanded_weight = supports_expanded_weight
-        self.supports_complex32 = supports_complex32
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -14210,7 +14205,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
-           supports_complex32=True,
            skips=(
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
@@ -14314,7 +14308,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            backward_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           supports_complex32=True,
            skips=(
                # JIT has issue when op is passed as lambda
                # AssertionError: JIT Test does not execute any logic
