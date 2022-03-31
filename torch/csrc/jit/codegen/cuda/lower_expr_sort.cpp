@@ -710,7 +710,7 @@ struct LocalDomainSorter {
 
 std::vector<IterDomain*> getLocalDomainOrdering(
     const std::vector<Expr*>& exprs,
-    const ComputeAtMap& map,
+    const ComputeAtMap& ca_parallel_map,
     const std::unordered_set<IterDomain*> filter,
     const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
         concrete_id_dependencies) {
@@ -736,14 +736,17 @@ std::vector<IterDomain*> getLocalDomainOrdering(
                   tv_input->getComputeAtPosition(),
                   tv_input->getMaxProducerPosition()),
           std::back_inserter(domain),
-          [&map](IterDomain* id) { return map.getConcreteMappedID(id); });
+          [&ca_parallel_map](IterDomain* id) {
+            return ca_parallel_map.getConcreteMappedID(id);
+          });
 
       domain.erase(
           std::remove_if(
               domain.begin(),
               domain.end(),
-              [&filter, &map](IterDomain* id) {
-                return filter.find(map.getConcreteMappedID(id)) == filter.end();
+              [&filter, &ca_parallel_map](IterDomain* id) {
+                return filter.find(ca_parallel_map.getConcreteMappedID(id)) ==
+                    filter.end();
               }),
           domain.end());
 

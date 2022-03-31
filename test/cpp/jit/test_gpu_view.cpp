@@ -290,9 +290,8 @@ TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
   std::vector<view_example> view_before_examples = {
       {{19, 12, 7, 99}, {19, 3, 2772}},
       {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      // Incorrect Result - Broadcast Issue - Pointwise
-      // {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
-      // {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
+      {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
+      {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
       {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
       {{22, 22, 2}, {22, 11, 1, 1, 4}},
       {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
@@ -302,7 +301,6 @@ TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
       {{1, 333}, {1, 1, 1, 111, 1, 3}},
       {{22, 1, 22, 1}, {484}},
       {{1, 333, 1}, {333}},
-      // Incorrect Result - Broadcast Issue - Reduction
       {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
       {{1, 7844, 1, 7}, {1, 27454, 2}}};
 
@@ -386,9 +384,8 @@ TEST_F(NVFuserTest, FusionViewPersistentShmoo_CUDA) {
   std::vector<view_example> view_examples = {
       {{19, 12, 7, 99}, {19, 3, 2772}},
       {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
-      // Incorrect Result - Broadcast Issue - Pointwise
-      // {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
-      // {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
+      {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
+      {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
       {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
       {{22, 22, 2}, {22, 11, 1, 1, 4}},
       {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
@@ -398,7 +395,6 @@ TEST_F(NVFuserTest, FusionViewPersistentShmoo_CUDA) {
       {{1, 333}, {1, 1, 1, 111, 1, 3}},
       {{22, 1, 22, 1}, {484}},
       {{1, 333, 1}, {333}},
-      // Incorrect Result - Broadcast Issue - Reduction
       {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
       {{1, 7844, 1, 7}, {1, 27454, 2}}};
 

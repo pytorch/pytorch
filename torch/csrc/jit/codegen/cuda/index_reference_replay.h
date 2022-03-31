@@ -19,7 +19,7 @@ class IndexReferenceReplay : public OptInDispatch {
  private:
   IndexReferenceReplay(const std::vector<kir::ForLoop*>& loop_structure)
       : loop_structure_(loop_structure),
-        ca_map_(GpuLower::current()->caIndexMap()) {}
+        ca_index_map_(GpuLower::current()->caIndexMap()) {}
 
   // Generate the replay.
   TensorDomain* computeReplay();
@@ -52,7 +52,7 @@ class IndexReferenceReplay : public OptInDispatch {
   const std::vector<kir::ForLoop*>& loop_structure_;
 
   // Hold the compute at map used for the replay (index map)
-  const ComputeAtMap& ca_map_;
+  const ComputeAtMap& ca_index_map_;
 
   // Keep a vector of all iteration domains used in the reference (includes all
   // transformations)

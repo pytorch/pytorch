@@ -1031,7 +1031,7 @@ void ensureStaticIndexing(
 // operation.
 std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
     const TensorView* tv,
-    const ComputeAtMap& ca_map,
+    const ComputeAtMap& ca_index_map,
     const std::unordered_map<IterDomain*, IterDomain*>&
         reference_concrete_to_id_map,
     bool root_only = false) {
@@ -1039,7 +1039,7 @@ std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
 
   auto gen_map = [&](const auto& pids) {
     for (auto p_id : pids) {
-      auto concrete_id = ca_map.getConcreteMappedID(p_id);
+      auto concrete_id = ca_index_map.getConcreteMappedID(p_id);
       auto ref_id_it = reference_concrete_to_id_map.find(concrete_id);
       if (ref_id_it != reference_concrete_to_id_map.end()) {
         index_map_ref_to_producer[ref_id_it->second] = p_id;

@@ -1700,8 +1700,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
 
   tv0->computeAt(tv7, 1);
 
-  ComputeAtMap loop_map(ComputeAtMap::MappingMode::LOOP);
-  loop_map.build(&fusion);
+  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
 
   // The this-position of the last tensor should be zero.
   TORCH_CHECK(
@@ -2198,8 +2197,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeWith1_CUDA) {
       tv7->nDims() == 3 && tv6->getComputeAtPosition() == 0 &&
       tv6->getMaxProducerPosition() == 1);
 
-  ComputeAtMap loop_map(ComputeAtMap::MappingMode::LOOP);
-  loop_map.build(&fusion);
+  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
 
   // The position of every other tensor should be 1.
   for (auto tv : {tv1, tv2, tv3, tv4, tv5}) {
@@ -2552,8 +2550,7 @@ TEST_F(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
   TORCH_CHECK(
       tv3->getComputeAtPosition() == 0 && tv3->getMaxProducerPosition() == 1);
 
-  ComputeAtMap loop_map(ComputeAtMap::MappingMode::LOOP);
-  loop_map.build(&fusion);
+  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
 
   // Note that tv2 is also computed at tv3.
   for (auto tv : {tv1, tv2}) {

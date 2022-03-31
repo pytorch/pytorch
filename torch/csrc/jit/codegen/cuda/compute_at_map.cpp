@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
@@ -20,18 +21,21 @@ namespace {
 //! for-loops.
 class InputDomainCounter : public IterVisitor {
  public:
-  // Returns number of {non-braodcast non-reduction iteration domains, broadcast
-  // and trivial reduction domains} used to generate the iteration domains in
-  // provided target domain.
+  // Returns <number of {non-braodcast non-reduction iteration domains,
+  // broadcast and trivial reduction domains}, number of broadcast domains> used
+  // to generate the iteration domains in provided target domain.
   static std::unordered_map<IterDomain*, std::pair<int, int>> produceCounts(
-      const std::vector<IterDomain*>& domain,
-      GpuLower* gpu_lower) {
-    if (domain.empty()) {
-      return std::unordered_map<IterDomain*, std::pair<int, int>>();
+      const std::vector<TensorView*>& tvs,
+      const std::unordered_set<IterDomain*>& count_one_concrete_dims_,
+      const TrivialReductionInfo* trivial_reduction_info) {
+    InputDomainCounter counter(count_one_concrete_dims_);
+
+    for (auto tv : tvs) {
+      auto& domain = tv->domain()->domain();
+      counter.traverse(domain);
     }
 
-    InputDomainCounter counter(domain);
-
+    // Accumulate for count map
     std::unordered_map<IterDomain*, std::pair<int, int>> count_map;
     for (const auto& entry : counter.domain_set_) {
       auto id = entry.first;
@@ -40,8 +44,7 @@ class InputDomainCounter : public IterVisitor {
       int broadcast_counts = 0;
       for (auto input_id : input_id_set) {
         if (input_id->isBroadcast() ||
-            (gpu_lower &&
-             gpu_lower->trivialReductionInfo().isDerived(input_id))) {
+            trivial_reduction_info->isDerived(input_id)) {
           broadcast_counts++;
         } else {
           concrete_counts++;
@@ -50,30 +53,52 @@ class InputDomainCounter : public IterVisitor {
       count_map[id] = {concrete_counts, broadcast_counts};
     }
 
-    // Inputs may be root domains which wouldn't have any entries if no exprs
-    // were traversed, so manually insert their count
-    for (auto id : domain) {
-      if (count_map.find(id) == count_map.end()) {
-        count_map[id] =
-            (id->isBroadcast() ||
-             (gpu_lower && gpu_lower->trivialReductionInfo().isDerived(id)))
-            ? std::make_pair(0, 1)
-            : std::make_pair(1, 0);
+    for (auto tv : tvs) {
+      auto& domain = tv->domain()->domain();
+      // Inputs may be root domains which wouldn't have any entries if no exprs
+      // were traversed, so manually insert their count
+      for (auto id : domain) {
+        if (count_map.find(id) == count_map.end()) {
+          TORCH_INTERNAL_ASSERT(
+              id->definition() == nullptr,
+              "Expected id: ",
+              id->toString(),
+              " to not have transformations in its history.");
+          count_map[id] =
+              (id->isBroadcast() || trivial_reduction_info->isDerived(id))
+              ? std::make_pair(0, 1)
+              : std::make_pair(1, 0);
+        }
       }
     }
     return count_map;
   }
 
  private:
-  InputDomainCounter(const std::vector<IterDomain*>& domain_) {
-    traverseFrom(
-        domain_[0]->fusion(),
-        std::vector<Val*>(domain_.begin(), domain_.end()));
-  }
+  InputDomainCounter(
+      const std::unordered_set<IterDomain*>& count_one_concrete_dims)
+      : count_one_concrete_dims_(count_one_concrete_dims) {}
 
  private:
+  void traverse(std::vector<IterDomain*> domain) {
+    if (domain.empty()) {
+      return;
+    }
+    traverseFrom(
+        domain[0]->fusion(), std::vector<Val*>(domain.begin(), domain.end()));
+  }
+
   std::unordered_set<IterDomain*>& getEntry(IterDomain* id) {
     auto domain_set_it = domain_set_.find(id);
+
+    // If count one, enforce domain entry is self
+    bool count_one =
+        count_one_concrete_dims_.find(id) != count_one_concrete_dims_.end();
+    if (count_one && domain_set_it != domain_set_.end()) {
+      domain_set_.erase(domain_set_it);
+      domain_set_it = domain_set_.end();
+    }
+
     if (domain_set_it == domain_set_.end()) {
       domain_set_it =
           domain_set_
@@ -100,14 +125,23 @@ class InputDomainCounter : public IterVisitor {
     // Gather all non-broadcast input domains
     std::unordered_set<IterDomain*> resulting_set;
     for (auto input_id : ir_utils::filterByType<IterDomain>(expr->inputs())) {
-      auto input_entry = getEntry(input_id);
+      const auto& input_entry = getEntry(input_id);
       resulting_set.insert(input_entry.begin(), input_entry.end());
     }
+
     for (auto output_id : ir_utils::filterByType<IterDomain>(expr->outputs())) {
-      domain_set_.emplace(std::make_pair(output_id, resulting_set));
+      if (count_one_concrete_dims_.find(output_id) ==
+          count_one_concrete_dims_.end()) {
+        domain_set_.emplace(std::make_pair(output_id, resulting_set));
+      } else {
+        // If count one just call getEntry on id which will enforce it's reset
+        // to self to be count 1
+        getEntry(output_id);
+      }
     }
   }
 
+  const std::unordered_set<IterDomain*>& count_one_concrete_dims_;
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>> domain_set_;
 };
 
@@ -133,6 +167,20 @@ void assertLowered(bool lowered) {
 }
 
 } // namespace
+
+ComputeAtMap::ComputeAtMap(
+    Fusion* fusion,
+    MappingMode mapping_mode,
+    const TrivialReductionInfo* _trivial_reduction_info)
+    : mapping_mode_(mapping_mode) {
+  if (_trivial_reduction_info == nullptr) {
+    TrivialReductionInfo trivial_reduction_info;
+    trivial_reduction_info.build(fusion);
+    build(fusion, &trivial_reduction_info);
+  } else {
+    build(fusion, _trivial_reduction_info);
+  }
+}
 
 void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
   auto set_it_0 = disjoint_iter_set_maps_.find(id0);
@@ -239,19 +287,106 @@ void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
   }
 }
 
-void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
-  // Consumers can only show up once in an expression, keep track of all of them
-  std::vector<TensorView*> consumer_tvs;
+bool ComputeAtMap::pullConcreteCountResetIds(
+    const torch::jit::fuser::cuda::TrivialReductionInfo* trivial_reduction_info,
+    TensorView* tv) {
+  bool is_view_like_rfactor = false;
+  // If consumer is not used in any other expression we don't have to
+  // worry about resolving its view like rfactor in any of the maps.
+  if (tv->uses().size()) {
+    // Check if this consumer has an rfactor domain without any
+    // reductions, this would make it a view-like operation
+    if (tv->hasRFactor() &&
+        std::none_of(
+            // TODO: This should be rfactor domain, but it is breaking some
+            // tests likely because ParallelMap only maps leaf domains. Will
+            // fix in a follow up.
+            tv->domain()->domain().begin(),
+            tv->domain()->domain().end(),
+            [&trivial_reduction_info](IterDomain* id) {
+              return id->isRFactorProduct() &&
+                  // If one of the rfactor domains is a reduction we don't
+                  // have to perform special handling.
+                  (id->isReduction() && !trivial_reduction_info->isDerived(id));
+            })) {
+      // Definitely rfactor like iteration domain add rfactor iteration
+      // domains to the rfactor_concrete_count_reset_domains_ set
+
+      for (auto id : tv->domain()->domain()) {
+        if (id->isRFactorProduct()) {
+          // Add id as a domain to reset concrete count on for map propagation
+          rfactor_concrete_count_reset_domains_.emplace(id);
+          // Also make sure the id is in count_one_concrete_dims_, in case id
+          // never hits a maybePropagateConcreteCountOne
+          count_one_concrete_dims_.emplace(id);
+        }
+      }
+
+      is_view_like_rfactor = true;
+    }
+  }
+  return is_view_like_rfactor;
+}
+
+// Should be run on consumer id after producer id and consumer id are mapped
+// together, will place all id's in consumer_id's disjoint set into
+// count_one_concrete_dims if consumer_id is in
+// rfactor_concrete_count_reset_domains_
+void ComputeAtMap::maybePropagateConcreteCountOne(IterDomain* consumer_id) {
+  if (rfactor_concrete_count_reset_domains_.find(consumer_id) ==
+      rfactor_concrete_count_reset_domains_.end()) {
+    return;
+  }
+
+  // We need to add the disjoint set associated with id to
+  // count_one_concrete_dims
+  auto disjoint_set_it = disjoint_iter_set_maps_.find(consumer_id);
+  if (disjoint_set_it == disjoint_iter_set_maps_.end()) {
+    // Nothing to propagate to
+    return;
+  }
+  count_one_concrete_dims_.insert(
+      disjoint_set_it->second->begin(), disjoint_set_it->second->end());
+}
+
+void ComputeAtMap::build(
+    Fusion* fusion,
+    const TrivialReductionInfo* trivial_reduction_info) {
+  TORCH_INTERNAL_ASSERT(
+      trivial_reduction_info != nullptr,
+      "Trivial reduction info needs to be constructed and passed in to compute at map build.");
+
+  auto fusion_inputs = fusion->inputs();
+  // Pull view like rfactor id's out of inputs for later processing. This isn't
+  // needed today because rfactor domains are removed from inputs, however, we
+  // should likely support rfactor directly on inputs instead of doing that so
+  // leaving this in.
+  for (auto tv_inp : ir_utils::filterByType<TensorView>(fusion_inputs)) {
+    pullConcreteCountResetIds(trivial_reduction_info, tv_inp);
+  }
 
   for (auto expr : fusion->exprs()) {
-    if (!expr->outputs()[0]->isA<TensorView>()) {
+    if (!ir_utils::isTvOp(expr)) {
       continue;
     }
 
     auto tv_outputs = ir_utils::filterByType<TensorView>(expr->outputs());
     TensorView* first_output_tv = nullptr;
+
+    // Probably could get away with just checking if it's a view op and if any
+    // consumer is used, but to support other view-like operations and limit
+    // impact of trivial view like operations, I want to leave this detection
+    // generic. This bool just helps prevent us doing extra logic later when
+    // we're not processing a view op.
+    bool is_view_like_rfactor = false;
+
     for (auto c_tv : tv_outputs) {
-      consumer_tvs.push_back(c_tv);
+      // Pull view like rfactor id's out of c_tv for later processing
+      is_view_like_rfactor =
+          pullConcreteCountResetIds(trivial_reduction_info, c_tv);
+    }
+
+    for (auto c_tv : tv_outputs) {
 
       if (first_output_tv == nullptr) {
         first_output_tv = c_tv;
@@ -361,6 +496,7 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
               continue;
             }
             mapIds(p_id, c_id);
+            maybePropagateConcreteCountOne(c_id);
           }
         } else {
           for (auto entry : c2p_map) {
@@ -368,6 +504,7 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
             auto p_id = entry.second;
             // Map the id's together
             mapIds(p_id, c_id);
+            maybePropagateConcreteCountOne(c_id);
           }
 
           // Make sure we always get root mapping for the loop map. Because of
@@ -378,6 +515,7 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
               auto p_id = entry.second;
               // Map the id's together
               mapIds(p_id, c_id);
+              maybePropagateConcreteCountOne(c_id);
             }
           }
         }
@@ -390,93 +528,44 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
     *iter_set = deduplicateDeque(*iter_set);
   }
 
-  // For each IterDomain set we will track how many concrete root domains were
-  // used to generate the IterDomain. Used to populate conrete_id_map. Concrete
-  // ID has maximum of concrete ids, ties are decided based on n_broadcast_ids.
-  // Refer to AdvancedLowering5 for why we need to split ties with broadcast
-  // dims.
-  std::unordered_map<IterDomain*, int> n_concrete_ids_;
-  std::unordered_map<IterDomain*, int> n_broadcast_ids_;
+  // Compute the concrete id counts to resolve concrete id's in the map, in
+  // index map mode this is unnecessary as it doesn't need to resolve concrete
+  // ID's the ID's in a disjoint set are all the same extent there.
+  concrete_id_count_map_ = InputDomainCounter::produceCounts(
+      ir_utils::allTvs(fusion),
+      count_one_concrete_dims_,
+      trivial_reduction_info);
 
-  for (auto c_tv : consumer_tvs) {
-    auto counts =
-        InputDomainCounter::produceCounts(c_tv->domain()->domain(), gpu_lower);
-    std::transform(
-        counts.begin(),
-        counts.end(),
-        std::inserter(n_concrete_ids_, n_concrete_ids_.end()),
-        [](auto counts_entry) {
-          return std::make_pair(counts_entry.first, counts_entry.second.first);
-        });
-    std::transform(
-        counts.begin(),
-        counts.end(),
-        std::inserter(n_broadcast_ids_, n_broadcast_ids_.end()),
-        [](auto counts_entry) {
-          return std::make_pair(counts_entry.first, counts_entry.second.second);
-        });
-  }
-
-  for (auto inp_tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-    auto counts = InputDomainCounter::produceCounts(
-        inp_tv->domain()->domain(), gpu_lower);
-    std::transform(
-        counts.begin(),
-        counts.end(),
-        std::inserter(n_concrete_ids_, n_concrete_ids_.end()),
-        [](auto counts_entry) {
-          return std::make_pair(counts_entry.first, counts_entry.second.first);
-        });
-    std::transform(
-        counts.begin(),
-        counts.end(),
-        std::inserter(n_broadcast_ids_, n_broadcast_ids_.end()),
-        [](auto counts_entry) {
-          return std::make_pair(counts_entry.first, counts_entry.second.second);
-        });
-  }
-
-  // Populate concrete id map
   for (const auto& set : disjoint_iter_sets_) {
     int max_concrete_count = -1;
+    // I really don't know if we need to take broadcast ops into concrete id,
+    // this does make sure it's not just the largest but is likely to have the
+    // most transformations in its history. When we deal with view better in
+    // reference replay, we may find out we need to do a better job of ensuring
+    // history so we don't have to worry here.
     int max_broadcast_count = -1;
     IterDomain* concrete_id = nullptr;
 
-    // Prefer domains appearing after rfactor domains. This matters
-    // when view merges domains to create a new domain, which becomes
-    // an rfactor domain. Suppose a broadcast follows the view
-    // operation and the broadcast domain is merged with the domain
-    // matching with the rfactor domain, that domain should be chosen
-    // as the concrete domain as it has the broadcast domain and the
-    // domain matching with the rfactor domain. The concrete domain
-    // does not have a history of merge/shift further up from the
-    // rfactor domain in pre-view tensors, but that should be fine as
-    // IndexCompute with those pre-view tensors should be able to
-    // compute indices from their leaf domains.
-    // See issue #1493
-
     // Indicate if the previous ID was an rfactor domain
-    bool rf_detected = false;
     for (auto id : *set) {
       // If the previous ID is an rfactor, reset the concrete ID with
       // this ID no matter how many IDs the previous concrete ID has.
-      if (rf_detected) {
+      auto counts = mapping_mode_ == MappingMode::INDEX
+          ? std::pair<int, int>{1, 0}
+          : getConcreteIdCountOf(id);
+      int concrete_count = counts.first;
+      int broadcast_count = counts.second;
+
+      if (concrete_count > max_concrete_count) {
+        max_concrete_count = concrete_count;
+        max_broadcast_count = broadcast_count;
         concrete_id = id;
-        max_concrete_count = n_concrete_ids_.at(id);
-        max_broadcast_count = n_broadcast_ids_.at(id);
-        rf_detected = id->isRFactorProduct();
-      } else {
-        int concrete_count = n_concrete_ids_.at(id);
-        if (concrete_count >= max_concrete_count) {
-          int broadcast_count = n_broadcast_ids_.at(id);
-          if (concrete_count > max_concrete_count ||
-              broadcast_count > max_broadcast_count) {
-            max_concrete_count = concrete_count;
-            max_broadcast_count = broadcast_count;
-            concrete_id = id;
-          }
+      } else if (concrete_count == max_concrete_count) {
+        if (broadcast_count > max_broadcast_count) {
+          max_concrete_count = concrete_count;
+          max_broadcast_count = broadcast_count;
+          concrete_id = id;
         }
-        rf_detected = id->isRFactorProduct();
       }
     }
 

@@ -181,6 +181,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   std::unique_ptr<kir::Kernel> kernel_;
 
   // Some stateful information during lowering
+  // TODO: A lot of this information uses a define class then call build. It
+  // would be safer to wrap all of these in unique pointers and remove the build
+  // interface and default constructor. That way they couldn't be accessed
+  // without being initialized.
   ConcretizedBroadcastDomains concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;

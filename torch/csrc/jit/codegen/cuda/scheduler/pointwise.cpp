@@ -29,8 +29,7 @@ class DomainMap {
  public:
   DomainMap(Fusion* fusion)
       : fusion_(fusion),
-        ca_index_map_(ComputeAtMap(ComputeAtMap::MappingMode::INDEX)) {
-    ca_index_map_.build(fusion);
+        ca_index_map_(ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX)) {
     view_tvs_ = scheduler_utils::getViewTVs(fusion);
   }
 

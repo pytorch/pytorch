@@ -48,7 +48,7 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
 }
 
 IterDomain* IndexReferenceReplay::toConcrete(IterDomain* id) {
-  return ca_map_.getConcreteMappedID(id);
+  return ca_index_map_.getConcreteMappedID(id);
 }
 
 void IndexReferenceReplay::handle(Split* split) {
@@ -137,7 +137,8 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
        ++it_i) {
     for (auto it_j = it_i + 1; it_j != loop_structure_.end(); ++it_j) {
       TORCH_INTERNAL_ASSERT(
-          !ca_map_.areMapped((*it_i)->iter_domain(), (*it_j)->iter_domain()),
+          !ca_index_map_.areMapped(
+              (*it_i)->iter_domain(), (*it_j)->iter_domain()),
           "Unsupported loop structure. Two loops are mapped together.");
     }
   }

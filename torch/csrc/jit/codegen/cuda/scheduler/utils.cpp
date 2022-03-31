@@ -190,8 +190,8 @@ void parallelizeAllLike(
   FusionGuard fg(reference_tv->fusion());
 
   // Use loop map as that is the most permissive.
-  auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
-  ca_loop_map.build(FusionGuard::getCurFusion());
+  auto ca_loop_map = ComputeAtMap(
+      FusionGuard::getCurFusion(), ComputeAtMap::MappingMode::LOOP);
   for (auto id : reference_tv->domain()->domain()) {
     ca_loop_map.getConcreteMappedID(id)->parallelize(id->getParallelType());
     if (id->hasPaddingToMultipleOfWarp()) {
@@ -460,8 +460,7 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
       persistent_buffer_info.projectable_persistent_buffers);
 
   // Map unmappable dims to inputs, doesn't matter which compute at map used
-  auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
-  ca_index_map.build(fusion);
+  auto ca_index_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX);
 
   std::unordered_set<IterDomain*> unmappable_concrete_ids;
   for (auto id : persistent_buffer_info.unmappable_dims) {
@@ -890,8 +889,7 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
 
   if (!mapped_to_trivial_reduction.empty()) {
     // Use the loop map as that is the most permissive
-    auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
-    ca_loop_map.build(fusion);
+    auto ca_loop_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::LOOP);
     // Make a copy we need to check mappings of all
     auto trivial_ids = mapped_to_trivial_reduction;
     for (auto tv : all_tvs) {
@@ -1314,9 +1312,9 @@ std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
     in_out_tvs.insert(in_out_tvs.end(), out_tvs.begin(), out_tvs.end());
   }
 
-  // Shouldn't matter which compute at map we use
-  auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
-  ca_index_map.build(fusion);
+  // Shouldn't matter which compute at map we use as we're just looking at the
+  // root mappings.
+  auto ca_index_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX);
 
   auto ref_root_domain = reference_tv->getMaybeRFactorDomain();
 
