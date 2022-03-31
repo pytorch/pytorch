@@ -10,6 +10,8 @@ if(USE_CUDA)
     instance_norm.cpp
     layer_norm.cpp
     layer_norm_backward.cpp
+    rms_norm.cpp
+    rms_norm_backward.cpp
     lstm_cell.cpp
     reduction.cpp
     softmax.cpp
