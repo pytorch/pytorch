@@ -3,7 +3,7 @@ import pickle
 
 from torch.utils.data import IterDataPipe, MapDataPipe
 
-from typing import Any, Dict
+from typing import Any, Dict, Set
 
 reduce_ex_hook = None
 
@@ -52,7 +52,7 @@ def list_connected_datapipes(scan_obj, only_datapipe, cache):
 
 
 def traverse(datapipe, only_datapipe=False):
-    cache = set()
+    cache: Set[IterDataPipe] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
 
 
