@@ -168,6 +168,7 @@ Example::
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
+        std=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
@@ -232,7 +233,8 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         argmin='argmin',
         mean='mean',
         norm='norm',
-        var='variance')
+        var='variance',
+        std='standard_deviation')
 
     normalization_names = dict(
         softmax='softmax',
@@ -252,7 +254,7 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
     if func.__name__ in {'norm', 'normalize'}:
         example_args = (2.0, example_dim)
         example_input = example_input.to(dtype=torch.float32)
-    elif func.__name__ in {'var'}:
+    elif func.__name__ in {'var', 'std'}:
         example_args = (example_dim, False)
     else:
         example_args = (example_dim,)
@@ -370,7 +372,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             assert torch.is_floating_point(input), input.dtype
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
-    elif op_name == 'var':
+    elif op_name in {'var', 'std'}:
         return None
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
 
@@ -623,7 +625,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'argmax', 'argmin', 'mean', 'norm', 'var'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'argmax', 'argmin', 'mean', 'norm', 'var', 'std'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -893,26 +895,14 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
         raise ValueError(f'masked norm expects strided tensor (got {input.layout} tensor)')
 
 
-@_apply_docstring_templates
-def var(input: Tensor,
-        dim: DimOrDims = None,
-        unbiased: Optional[bool] = False,
-        *,
-        keepdim: Optional[bool] = False,
-        dtype: Optional[DType] = None,
-        mask: Optional[Tensor] = None) -> Tensor:
-    """\
-{reduction_signature}
-
-{reduction_descr}
-
-The identity value of sample variance operation is undefined.  The
-elements of output tensor with strided layout, that correspond to
-fully masked-out elements, have ``nan`` values.
-
-{reduction_args}
-
-{reduction_example}"""
+def std_var(input: Tensor,
+            dim: DimOrDims = None,
+            unbiased: Optional[bool] = False,
+            *,
+            keepdim: Optional[bool] = False,
+            dtype: Optional[DType] = None,
+            mask: Optional[Tensor] = None,
+            take_sqrt: Optional[bool] = False) -> Tensor:
     if dtype is None:
         dtype = input.dtype
         if not (dtype.is_floating_point or dtype.is_complex):
@@ -943,9 +933,66 @@ fully masked-out elements, have ``nan`` values.
         if unbiased:
             count = torch.subtract(count, 1)
             count = torch.maximum(count, count.new_zeros([]))
-        return torch.divide(total, count).to(dtype=dtype)
+        output = torch.divide(total, count).to(dtype=dtype)
+        if take_sqrt:
+            output = torch.sqrt(output)
+        return output
     else:
-        raise ValueError(f'masked var expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked std/var expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def var(input: Tensor,
+        dim: DimOrDims = None,
+        unbiased: Optional[bool] = False,
+        *,
+        keepdim: Optional[bool] = False,
+        dtype: Optional[DType] = None,
+        mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+{reduction_descr}
+The identity value of sample variance operation is undefined. The
+elements of output tensor with strided layout, that correspond to
+fully masked-out elements, have ``nan`` values.
+{reduction_args}
+{reduction_example}"""
+    return std_var(
+        input=input,
+        dim=dim,
+        unbiased=unbiased,
+        keepdim=keepdim,
+        dtype=dtype,
+        mask=mask,
+        take_sqrt=False,
+    )
+
+
+@_apply_docstring_templates
+def std(input: Tensor,
+        dim: DimOrDims = None,
+        unbiased: Optional[bool] = False,
+        *,
+        keepdim: Optional[bool] = False,
+        dtype: Optional[DType] = None,
+        mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+{reduction_descr}
+The identity value of sample standard deviation operation is undefined. The
+elements of output tensor with strided layout, that correspond to
+fully masked-out elements, have ``nan`` values.
+{reduction_args}
+{reduction_example}"""
+    return std_var(
+        input=input,
+        dim=dim,
+        unbiased=unbiased,
+        keepdim=keepdim,
+        dtype=dtype,
+        mask=mask,
+        take_sqrt=True
+    )
 
 
 @_apply_docstring_templates
