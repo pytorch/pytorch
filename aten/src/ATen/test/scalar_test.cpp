@@ -135,7 +135,6 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(float_one.item<float>(), 1);
   ASSERT_EQ(float_one.item<int32_t>(), 1);
   ASSERT_EQ(float_one.item<at::Half>(), 1);
-  ASSERT_EQ(float_one.item<c10::complex<c10::Half>>(), 1);
 }
 
 TEST(TestScalar, TestConj) {
