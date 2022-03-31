@@ -5,7 +5,7 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <iostream>
+#include <ostream>
 
 namespace at {
 namespace native {
@@ -14,7 +14,7 @@ namespace api {
 
 //
 // A Vulkan Adapter represents a logical device and all its properties. It
-// manages all relevant properties of the underlying physical device, a 
+// manages all relevant properties of the underlying physical device, a
 // handle to the logical device, and a number of compute queues available to
 // the device. It is primarily responsible for managing the VkDevice handle
 // which points to the logical device object on the GPU.

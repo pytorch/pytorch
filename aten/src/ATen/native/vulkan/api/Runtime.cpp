@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -237,7 +238,7 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
     false;
 #endif /* DEBUG */
   const bool initDefaultDevice = true;
-  const uint32_t numRequestedQueues = 1;
+  const uint32_t numRequestedQueues = 1; // TODO: raise this value
 
   const RuntimeConfiguration default_config {
     enableValidationMessages,
