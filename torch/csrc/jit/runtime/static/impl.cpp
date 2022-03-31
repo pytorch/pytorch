@@ -972,6 +972,10 @@ std::unique_ptr<MemoryPlanner> memory_planner_factory(
           manage_output_tensors_enabled,
           opts.optimize_memory);
   }
+  // Some old compilers can't figure out that control never reaches the end
+  // of this function
+  TORCH_CHECK(false);
+  return nullptr;
 }
 } // namespace
 
