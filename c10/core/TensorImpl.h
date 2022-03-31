@@ -851,9 +851,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
   virtual Layout layout_impl() const {
-    TORCH_CHECK(
-        false,
-        "layout_impl is only implemented for subclasses.");
+    TORCH_CHECK(false, "layout_impl is only implemented for subclasses.");
   }
 
  public:
@@ -999,7 +997,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
-    } else if (key_set_.has(DispatchKey::SparseCsrCPU) || key_set_.has(DispatchKey::SparseCsrCUDA)) {
+    } else if (
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA)) {
       // Typically, the tensor dispatch keys define the tensor layout
       // uniquely. This allows using non-virtual layout method for
       // better performance. However, when tensor's layout depends,
