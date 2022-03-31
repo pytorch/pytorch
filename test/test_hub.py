@@ -72,7 +72,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
-        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
+        entry_lists = hub.list('ailzhang/torchhub_example')
         self.assertObjectIn('mnist', entry_lists)
 
     @retry(Exception, tries=3)
@@ -130,4 +130,4 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     def test_load_commit_from_forked_repo(self):
         with self.assertRaisesRegex(ValueError, 'If it\'s a commit from a forked repo'):
-            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+            torch.hub.load('pytorch/vision:4e2c216', 'resnet18')
