@@ -25,16 +25,6 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
-# TODO: refactor this into its own library (but how to make
-# a binary based off of a module in a library?)
-py_binary(
-    name = "gen",
-    srcs = ["tools/setup_helpers/gen.py"],
-    deps = [
-        "//tools/codegen"
-    ],
-)
-
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
@@ -102,7 +92,7 @@ generate_aten(
         aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
         ["aten/src/ATen/Declarations.yaml"]
     ),
-    generator=":gen",
+    generator = "//tools/codegen:gen",
 )
 
 py_library(
