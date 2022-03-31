@@ -32,15 +32,20 @@ jobs:
     timeout-minutes: 300
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
         with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
           cuda-version: ${{ inputs.cuda-version }}
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
@@ -81,7 +86,8 @@ jobs:
         run: |
           .jenkins/pytorch/win-test.sh
 
-      - uses: ./.github/actions/upload-test-artifacts
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
@@ -112,6 +118,7 @@ jobs:
           export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
-      - uses: ./.github/actions/teardown-win
+      - name: Teardown Windows
+        uses: ./.github/actions/teardown-win
         if: always()
         timeout-minutes: 120
