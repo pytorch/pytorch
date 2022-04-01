@@ -67,6 +67,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_mkl(
 }
 
 void inline indices_to_mkl_compatible_inplace(const Tensor& input) {
+
 #ifdef MKL_ILP64
   // ILP64 is a 64-bit API version of MKL
   // Indices tensor must have ScalarType::Long type
@@ -76,7 +77,7 @@ void inline indices_to_mkl_compatible_inplace(const Tensor& input) {
           input.col_indices().to(kLong),
           input.values(),
           input.sizes(),
-          input.layout() == kSparseCsc);
+          input.layout());
 #else
   // LP64 is a 32-bit API version of MKL
   // Indices tensor must have ScalarType::Int type
@@ -86,7 +87,7 @@ void inline indices_to_mkl_compatible_inplace(const Tensor& input) {
           input.col_indices().to(kInt),
           input.values(),
           input.sizes(),
-          input.layout() == kSparseCsc);
+          input.layout());
 #endif
 }
 
@@ -97,7 +98,7 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
           input.col_indices().resize_({nnz}),
           input.values().resize_({nnz}),
           input.sizes(),
-          input.layout() == kSparseCsc);
+          input.layout());
 }
 
 /*

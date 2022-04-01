@@ -271,6 +271,8 @@ class TORCH_API TensorBase {
     case at::kSparse:
     case at::kSparseCsr:
     case at::kSparseCsc:
+    case at::kSparseBsr:
+    case at::kSparseBsc:
       TORCH_CHECK(false,
                   "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
                   "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
@@ -416,7 +418,7 @@ class TORCH_API TensorBase {
     return impl_->is_sparse();
   }
 
-  /// Returns is a `Tensor` has a sparse CSR backend with transpose=False.
+  /// Returns is a `Tensor` has a sparse CSR backend with is_transpose=is_block=False.
   bool is_sparse_csr() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_sparse_csr();

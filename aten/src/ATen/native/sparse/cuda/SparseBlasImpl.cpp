@@ -110,7 +110,7 @@ void inline indices_to_32_bit_inplace(const Tensor& input) {
       input.col_indices().to(kInt),
       input.values(),
       input.sizes(),
-      input.layout() == kSparseCsc);
+      input.layout());
 }
 
 void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
@@ -119,7 +119,7 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.col_indices().resize_({nnz}),
       input.values().resize_({nnz}),
       input.sizes(),
-      input.layout() == kSparseCsc);
+      input.layout());
 }
 
 void inline bsrsv2_bsrsm2_may_need_to_sync() {

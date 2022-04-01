@@ -12,6 +12,8 @@ enum class Layout : int8_t {
   SparseCsr,
   Mkldnn,
   SparseCsc,
+  SparseBsr,
+  SparseBsc,
   NumOptions
 };
 
@@ -20,6 +22,8 @@ constexpr auto kSparse = Layout::Sparse;
 constexpr auto kSparseCsr = Layout::SparseCsr;
 constexpr auto kMkldnn = Layout::Mkldnn;
 constexpr auto kSparseCsc = Layout::SparseCsc;
+constexpr auto kSparseBsr = Layout::SparseBsr;
+constexpr auto kSparseBsc = Layout::SparseBsc;
 
 inline Layout layout_from_backend(Backend backend) {
   switch (backend) {
@@ -34,7 +38,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
       TORCH_CHECK(
-          false, "Cannot map Backend SparseCsrCPU/CUDA to a unique layout.");
+          false, "Cannot map Backend SparseCsrCPU|SparseCsrCUDA to a unique layout.");
       return Layout::SparseCsr;
     default:
       return Layout::Strided;
@@ -53,6 +57,10 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "Mkldnn";
     case at::kSparseCsc:
       return stream << "SparseCsc";
+    case at::kSparseBsr:
+      return stream << "SparseBsr";
+    case at::kSparseBsc:
+      return stream << "SparseBsc";
     default:
       TORCH_CHECK(false, "Unknown layout");
   }

@@ -289,7 +289,7 @@ class TestSparseCSR(TestCase):
                 a.copy_(b)
 
             with self.assertRaisesRegex(RuntimeError, "copy between different layouts is not supported."):
-                a.copy_(torch.empty(a.shape, dtype=dtype, device=device))
+                a.copy_(torch.empty(a.shape, dtype=dtype, device=device, layout=torch.sparse_csc))
 
             b = self.genSparseCSRTensor(shape1, 1, dtype=dtype, device=device, index_dtype=index_dtype)
             with self.assertRaisesRegex(RuntimeError, "only tensors with the same number of specified elements are supported."):
@@ -325,7 +325,7 @@ class TestSparseCSR(TestCase):
             nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
-            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only 2D sparse CSR tensors are supported."):
+            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only 2D sparse CSR|CSC tensors are supported."):
                 new_shape = (4,)
                 a.resize_(new_shape)
 

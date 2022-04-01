@@ -826,7 +826,7 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   static PythonArgParser parser({
-    "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size)",
+    "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, Layout? layout)",
   });
 
   ParsedArgs<4> parsed_args;
@@ -842,7 +842,7 @@ void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
       values.options(), kInt, c10::nullopt, r.pyobject(1),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
 
-  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3));
+  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3), c10::kSparseCsr);
 }
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
