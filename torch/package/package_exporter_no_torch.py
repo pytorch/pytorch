@@ -571,11 +571,29 @@ class PackageExporter:
             pickle_protocol == 3
         ), "torch.package only supports pickle protocols 3 and 4"
 
+
+        def _persistent_id(obj):
+            ret = self.persistent_id(obj)
+            if ret is not None:
+                return ret
+
+            if hasattr(obj, "__reduce_package__"):
+                if self.serialized_reduces.get(id(obj)) is None:
+                    self.serialized_reduces[id(obj)] = (
+                        "reduce_package",
+                        id(obj),
+                        *obj.__reduce_package__(self),
+                    )
+
+                return self.serialized_reduces[id(obj)]
+
+            return None
+
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
         pickler = create_pickler(data_buf, self.importer, protocol=pickle_protocol)
-        pickler.persistent_id = self._persistent_id
+        pickler.persistent_id = _persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
         mocked_modules = defaultdict(list)
@@ -861,23 +879,6 @@ class PackageExporter:
 
     def persistent_id(self, obj):
         # This exists so a subclass can override it
-        return None
-
-    def _persistent_id(self, obj):
-        ret = self.persistent_id(obj)
-        if ret is not None:
-            return ret
-
-        if hasattr(obj, "__reduce_package__"):
-            if self.serialized_reduces.get(id(obj)) is None:
-                self.serialized_reduces[id(obj)] = (
-                    "reduce_package",
-                    id(obj),
-                    *obj.__reduce_package__(self),
-                )
-
-            return self.serialized_reduces[id(obj)]
-
         return None
 
     def __enter__(self):

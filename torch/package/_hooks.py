@@ -2,7 +2,7 @@ from collections import OrderedDict
 import weakref
 from typing import Any
 
-class RemovableHandle(object):
+class RemovableHandle:
     """A handle which provides the capability to remove a hook."""
 
     id: int
