@@ -10,7 +10,6 @@ from torch import fx
 import torch
 import itertools
 import os
-from typing import Dict, List
 
 debug = os.environ.get("debug_extract_compiled_graph") is not None
 

@@ -1,4 +1,4 @@
-# Owner(s): ["module: ltc"]
+# Owner(s): ["module: lazy"]
 
 import unittest
 
