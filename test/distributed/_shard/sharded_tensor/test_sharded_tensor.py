@@ -1468,7 +1468,16 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_sharded_tensor_to(self):
+    def test_sharded_tensor_to_cpu(self):
+        cpu_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cpu",
+                "rank:3/cpu",
+            ],
+        )
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -1479,46 +1488,37 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ],
         )
         h, w = 10, 20
-        st = sharded_tensor.zeros(spec, h, w)
-
-        # Test ability to move st to CPU
-        # first test error if not passing pg
-        with self.assertRaisesRegex(AssertionError, 'pass in process_group'):
-            st.to(device="cpu")
-
         gloo_pg = dist.new_group(backend="gloo")
-        st.to(device="cpu", process_group=gloo_pg)
-        spec = st.sharding_spec()
-        metas = st.metadata().shards_metadata
-        self.assertIsInstance(spec, ChunkShardingSpec)
-        self.assertIsInstance(st._process_group, distributed_c10d.ProcessGroupGloo)
+
+        # CPU sharded tensor should return the same instance (no copy)
+        st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
+        new_st_cpu = st_cpu.cpu()
+        self.assertEqual(st_cpu, new_st_cpu)
+
+        # GPU sharded tensor to cpu
+        st = sharded_tensor.zeros(spec, h, w)
+        # test ability to move st to CPU
+        spec_before_move = st.sharding_spec()
+        new_st = st.cpu(process_group=gloo_pg)
+        # return a copy of orginal st
+        self.assertNotEqual(st, new_st)
+        # check the spec is the same
+        spec_after_move = new_st.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # now it should be ProcessGroupGloo since it's on CPU
+        self.assertIsInstance(new_st._process_group, distributed_c10d.ProcessGroupGloo)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(spec_before_move.dim, spec_after_move.dim)
+        self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = spec_before_move.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_after.device()), "cpu")
+
+        # ensure metdata also get changed to CPU
+        metas = new_st.metadata().shards_metadata
         for meta in metas:
-            self.assertTrue(str(meta.placement.device()), "cpu")
-
-        # Test ability to move st back to GPU
-        # first test error if not passing pg
-        with self.assertRaisesRegex(AssertionError, 'pass in process_group'):
-            st.to(device="cuda:0")
-
-        default_pg = dist.distributed_c10d._get_default_group()
-        st.to(device=f"cuda:{self.rank}", process_group=default_pg)
-
-        spec = st.sharding_spec()
-        metas = st.metadata().shards_metadata
-        self.assertIsInstance(spec, ChunkShardingSpec)
-        self.assertIsInstance(st._process_group, distributed_c10d.ProcessGroupNCCL)
-        for meta in metas:
-            self.assertTrue(str(meta.placement.device()), f"cuda:{self.rank}")
-
-        # Test ability to move st to a single GPU device
-        # now we already now NCCL, so no need to pass process_group
-        st.to(device="cuda:0")
-        spec = st.sharding_spec()
-        metas = st.metadata().shards_metadata
-        self.assertIsInstance(spec, ChunkShardingSpec)
-        self.assertIsInstance(st._process_group, distributed_c10d.ProcessGroupNCCL)
-        for meta in metas:
-            self.assertTrue(str(meta.placement.device()), "cuda:0")
+            self.assertEqual(str(meta.placement.device()), "cpu")
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
