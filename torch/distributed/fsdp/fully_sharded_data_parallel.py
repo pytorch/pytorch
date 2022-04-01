@@ -2088,7 +2088,8 @@ class FullyShardedDataParallel(nn.Module):
             full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
                 state for ``model`` 's original unflattened parameters and
                 including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict`.
+                convention of :meth:`torch.optim.Optimizer.state_dict` if on
+                rank 0, and an empty :class:`dict` otherwise.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
