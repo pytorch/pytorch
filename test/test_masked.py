@@ -161,6 +161,7 @@ def apply_masked_normalization_along_dim(op, input, *args, **kwargs):
 reference_functions = dict(
     norm=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.linalg.vector_norm, *args, **dict(kwargs, dim_position=1)),
     var=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.var, *args, **dict(kwargs, dim_position=0)),
+    std=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.std, *args, **dict(kwargs, dim_position=0)),
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
@@ -284,8 +285,8 @@ class TestMasked(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            if op_name == 'var' and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
-                # torch.var does not support integer inputs
+            if op_name in {'var', 'std'} and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
+                # torch.var/torch.std does not support integer inputs
                 continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
             expected = ref_op(t_inp, *t_args, **t_kwargs)
