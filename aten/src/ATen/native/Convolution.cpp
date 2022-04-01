@@ -661,8 +661,8 @@ at::Tensor complex_convolution(
     IntArrayRef dilation,
     int64_t groups) {
   check_input_same_type_as_parameters(input, weight, bias);
-  auto w_view_as_complex = at::view_as_real(weight);
-  auto i_view_as_complex = at::view_as_real(input);
+  auto w_view_as_complex = at::view_as_real(weight.resolve_conj());
+  auto i_view_as_complex = at::view_as_real(input.resolve_conj());
 
   auto dim_i = i_view_as_complex.dim() - 1;
   auto i_r = i_view_as_complex.select(dim_i, 0);
@@ -672,7 +672,9 @@ at::Tensor complex_convolution(
   auto w_r = w_view_as_complex.select(dim_w, 0);
   auto w_i = w_view_as_complex.select(dim_w, 1);
 
+  // [NOTE] Complex Convolution
   // conv(W, x, b) = conv(Wr, xr, br) - conv(Wi, xi, 0) + i(conv(Wi, xr, bi) + conv(Wr, xi, 0))
+  // where W, x and b are all complex inputs.
   // With Gauss Trick:
   // a = conv(Wr, xr, br),
   // b = conv(Wi, xi, 0),
@@ -684,13 +686,54 @@ at::Tensor complex_convolution(
     b = at::convolution(i_i, w_i, bias, stride, padding, dilation, false, {0}, groups);
     c = at::convolution(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, false, {0}, groups);
   } else {
-    auto b_view_as_complex = at::view_as_real(bias);
+    auto b_view_as_complex = at::view_as_real(bias.resolve_conj());
     auto dim_b = b_view_as_complex.dim() - 1;
     auto b_r = b_view_as_complex.select(dim_b, 0);
     auto b_i = b_view_as_complex.select(dim_b, 1);
     a = at::convolution(i_r, w_r, b_r, stride, padding, dilation, false, {0}, groups);
     b = at::convolution(i_i, w_i, Tensor(), stride, padding, dilation, false, {0}, groups);
     c = at::convolution(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, false, {0}, groups);
+  }
+
+  auto i = c10::Scalar(c10::complex<double>(0, 1));
+  return a - b + i * (c - a - b);
+}
+
+at::Tensor complex_convolution_mode(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const c10::optional<at::Tensor>& bias_opt,
+    at::IntArrayRef stride,
+    c10::string_view padding,
+    at::IntArrayRef dilation,
+    int64_t groups) {
+  auto bias = bias_opt.value_or(Tensor());
+  check_input_same_type_as_parameters(input, weight, bias);
+  auto w_view_as_complex = at::view_as_real(weight.resolve_conj());
+  auto i_view_as_complex = at::view_as_real(input.resolve_conj());
+
+  auto dim_i = i_view_as_complex.dim() - 1;
+  auto i_r = i_view_as_complex.select(dim_i, 0);
+  auto i_i = i_view_as_complex.select(dim_i, 1);
+
+  auto dim_w = w_view_as_complex.dim() - 1;
+  auto w_r = w_view_as_complex.select(dim_w, 0);
+  auto w_i = w_view_as_complex.select(dim_w, 1);
+
+  // See [NOTE] Complex Convolution
+  Tensor a, b, c;
+  if (!bias.defined()) {
+    a = at::_convolution_mode(i_r, w_r, bias, stride, padding, dilation, groups);
+    b = at::_convolution_mode(i_i, w_i, bias, stride, padding, dilation, groups);
+    c = at::_convolution_mode(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, groups);
+  } else {
+    auto b_view_as_complex = at::view_as_real(bias.resolve_conj());
+    auto dim_b = b_view_as_complex.dim() - 1;
+    auto b_r = b_view_as_complex.select(dim_b, 0);
+    auto b_i = b_view_as_complex.select(dim_b, 1);
+    a = at::_convolution_mode(i_r, w_r, b_r, stride, padding, dilation, groups);
+    b = at::_convolution_mode(i_i, w_i, Tensor(), stride, padding, dilation, groups);
+    c = at::_convolution_mode(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, groups);
   }
 
   auto i = c10::Scalar(c10::complex<double>(0, 1));
@@ -836,8 +879,12 @@ at::Tensor conv1d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
-  auto output = at::_convolution_mode(
-      input, weight, bias, stride, std::move(padding), dilation, groups);
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution_mode(input, weight, bias, stride, padding, dilation, groups);
+  } else {
+    output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
