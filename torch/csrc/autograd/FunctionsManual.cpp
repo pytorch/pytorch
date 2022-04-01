@@ -232,7 +232,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   return self_scaled * scale_v;
 }
 
-Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
@@ -717,6 +717,22 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+) {
+  if (min_p.defined() && max_p.defined()) {
+    return where(min_p > max_p, max_t, where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
+  } else if (min_p.defined()) {
+    return where(self_p > min_p, self_t, min_t);
+  } else if (max_p.defined()) {
+    return where(self_p < max_p, self_t, max_t);
+  } else {
+    return self_t;
+  }
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
@@ -1050,7 +1066,7 @@ static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t cor
   return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> dim_opt,
+Tensor var_backward(Tensor grad, const Tensor& self, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self.dim() == 0 || !dim_opt.has_value()) {
@@ -1065,7 +1081,7 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
+Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self_p.dim() == 0 || !dim_opt.has_value()) {
@@ -1078,7 +1094,7 @@ Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result,
 
 Tensor std_backward(
     const Tensor& result, const Tensor& grad, const Tensor& self,
-    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim) {
+    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
   return var_backward(grad_var, self, dim, correction, keepdim);
 }
@@ -1093,7 +1109,7 @@ Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
 
 static Tensor mean_backward(
     const Tensor& grad, const IntArrayRef sizes, int64_t numel,
-    c10::optional<IntArrayRef> dim, bool keepdim) {
+    at::OptionalIntArrayRef dim, bool keepdim) {
   if (dim.has_value()) {
     return mean_backward(grad, sizes, *dim, keepdim);
   } else {
@@ -1103,7 +1119,7 @@ static Tensor mean_backward(
 
 Tensor var_std_mean_backward(
     const variable_list& grads, const Tensor& self, const Tensor& r1,
-    const Tensor& r2, c10::optional<IntArrayRef> dim,
+    const Tensor& r2, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
@@ -5243,41 +5259,48 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
-Tensor scatter_reduce_backward(const Tensor & grad,
-                               const Tensor& input,
-                               int dim,
-                               const Tensor & index,
-                               c10::string_view reduce,
-                               const Tensor & result){
-  Tensor grad_input;
+std::tuple<Tensor, Tensor> scatter_reduce_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& src,
+  c10::string_view reduce,
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
 
+  // FIXME: complex gradients not handled correctly
+  // For now this is ok as scatter_reduce isn't added to the whitelist
+  // in tools/autograd/gen_variable_type.py
 
-  // TODO: gather doesn't support broadcasting of input and index
-  // currently this works because scatter_reduce doesn't support broadcasting yet but
-  // this needs to be fixed when scatter_reduce is upgraded to support broadcasting
-  // by broadcasting index here too.
+  if (!grad.defined()) {
+    return std::make_tuple(grad_self, grad_src);
+  }
 
   if (reduce == "sum") {
-    grad_input = grad.gather(dim, index);
+    grad_self = grad;
+    grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_input = (grad * result).gather(dim, index) / input;
-    // handle nans in above computation when input = 0, we know result = 0 (0 / 0 -> nan)
-    // so just replace with 0
-    grad_input.masked_fill_(input == 0, 0);
+    grad_self = (grad * result) / self;
+    grad_self.masked_fill_(self == 0, 0);
+    grad_src = (grad * result).gather(dim, index) / src;
+    grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = zeros_like(grad);
-    N.scatter_add_(dim, index, ones_like(input));
-    Tensor N_input = N.gather(dim, index);
-    grad_input = grad.gather(dim, index) / N_input;
-    grad_input.masked_fill_(N_input == 0, 0);
+    Tensor N = ones_like(grad);
+    N = N.scatter_add(dim, index, ones_like(src));
+    N.masked_fill_(N == 0, 1);
+    grad_self = grad / N;
+    Tensor N_src = N.gather(dim, index);
+    grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
+    grad_self = (self == result) * grad;
     Tensor value = result.gather(dim, index);
-    grad_input = (input == value) * grad.gather(dim, index);
+    grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
 
-  return grad_input;
+  return std::make_tuple(grad_self, grad_src);
 
 }
 

@@ -656,12 +656,14 @@ void backportAllVersionCheck(
 
     // Check backport model version
     auto backport_version = _get_model_bytecode_version(oss);
+    backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
         oss, input_data, expect_result_list, current_to_version);
+    oss.seekg(0, oss.beg);
     runAndCheckTorchScriptModel(
         oss, input_data, expect_result_list, current_to_version);
 
@@ -991,7 +993,6 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   module->_save_for_mobile(oss, extra_files);
 
   std::istringstream iss(oss.str());
-  caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
@@ -1006,7 +1007,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
       loaded_extra_files[file_name.substr(6)] = "";
     }
   }
-
+  iss.seekg(0, iss.beg);
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
