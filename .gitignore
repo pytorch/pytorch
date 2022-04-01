@@ -140,6 +140,7 @@ scripts/release_notes/*.json
 compile_commands.json
 *.egg-info/
 docs/source/scripts/activation_images/
+docs/source/scripts/quantization_configs/
 
 ## General
 

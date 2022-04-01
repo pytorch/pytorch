@@ -1,0 +1,26 @@
+Quantization Backend Configuration
+----------------------------------
+
+FX Graph Mode Quantization allows the user to configure various
+quantization behaviors of an op in order to match the expectation
+of their backend.
+
+In the future, this document will contain a detailed spec of
+these configurations.
+
+
+Default values for native configurations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Below is the output of the configuration for quantization of ops
+in fbgemm and qnnpack (PyTorch's default quantized backends).
+
+Code to generate results::
+
+  from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
+  from pprint import pprint
+  pprint(get_native_backend_config_dict())
+
+Results:
+
+.. literalinclude:: scripts/quantization_configs/default_config.txt

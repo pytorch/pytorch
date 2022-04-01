@@ -15,6 +15,7 @@ help:
 
 figures:
 	@$(PYCMD) source/scripts/build_activation_images.py
+	@$(PYCMD) source/scripts/build_quantization_configs.py
 
 docset: html
 	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url https://pytorch.org/docs/ --force $(BUILDDIR)/html/
