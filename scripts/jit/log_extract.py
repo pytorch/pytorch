@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from torch.testing import make_tensor
 from typing import Any, List, Tuple, Callable, Optional
 import argparse
 import random
@@ -100,7 +99,7 @@ def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
         if isinstance(input, torch.Tensor):
             is_cpu = input.device.type == "cpu"
             break
-    assert is_cpu != None
+    assert is_cpu is not None
 
     out = time_cpu(graph, inputs, test_runs) if is_cpu else time_cuda(graph, inputs, test_runs)
     return out
