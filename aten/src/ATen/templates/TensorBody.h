@@ -32,7 +32,9 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <ATen/core/SymInt.h>
 #include <ATen/core/TensorBase.h>
+
 
 #include <ATen/MethodOperators.h>
 
@@ -338,6 +340,10 @@ class TORCH_API Tensor: public TensorBase {
 
   Tensor metal() const {
     return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor meta() const {
+    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // ~~~~~ Autograd API ~~~~~

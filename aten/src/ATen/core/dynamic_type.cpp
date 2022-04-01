@@ -227,6 +227,8 @@ TypePtr DynamicType::fallback() const {
       return BoolType::get();
     case Tag::Int:
       return IntType::get();
+    case Tag::SymInt:
+      return SymIntType::get();
     case Tag::Float:
       return FloatType::get();
     case Tag::Complex:
@@ -320,6 +322,8 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
       return DynamicTypeTrait<ComplexType>::getBaseType();
     case Tag::Int:
       return DynamicTypeTrait<IntType>::getBaseType();
+    case Tag::SymInt:
+      return DynamicTypeTrait<SymIntType>::getBaseType();
     case Tag::Bool:
       return DynamicTypeTrait<BoolType>::getBaseType();
     case Tag::String:

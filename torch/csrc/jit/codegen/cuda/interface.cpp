@@ -90,6 +90,11 @@ bool profileNode(const Node* node) {
       getFuserInterface()->fn_profile_n(node);
 }
 
+bool skipNode(const std::string& symbol_str, bool flip) {
+  return getFuserInterface()->fn_skip_n != nullptr &&
+      getFuserInterface()->fn_skip_n(symbol_str, flip);
+}
+
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!
 //! CudaFusionGuard is used to Guard input tensor to `CudaFusionGroup` so that
@@ -117,11 +122,15 @@ bool profileNode(const Node* node) {
 //!             extra attention should be paid to contiguity across size-1
 //!             dimensions.
 //!   c. size check:
+//!        c.1 broadcast check:
 //!        making sure that broadcast semantics are identical. So we want to
 //!        make sure a given dimension either are both size-1 for `tensor` &
 //!        `guard_tensor_type`, or are both non-size-1.
 //!        This is due to the fact that we specialize size-1 dimension as
 //!        broadcasted dimension while translating PyTorch tensor to Fusion IR.
+//!        c.1 size-0 check:
+//!        we don't specialize this on codegen, but we do specialize fusion
+//!        logic for size-0 on reductoins, hence the check
 //!
 bool complyWith(
     const at::Tensor& tensor,
@@ -133,13 +142,18 @@ bool complyWith(
   // check a. if num_dimension check fails or scalar type check fails
   if (*guard_tensor_type->dim() != static_cast<size_t>(tensor.ndimension()) ||
       (guard_tensor_type->scalarType().has_value() &&
-       (guard_tensor_type->scalarType().value() != tensor.scalar_type()))) {
+       (guard_tensor_type->scalarType().value() != tensor.scalar_type())) ||
+      (guard_tensor_type->device().has_value() &&
+       (guard_tensor_type->device().value() != tensor.device())) ||
+      (guard_tensor_type->requiresGrad().has_value() &&
+       guard_tensor_type->requiresGrad().value() != tensor.requires_grad())) {
     return false;
   }
 
   // TODO: should we get symbolic_size instead and check for size
   // consistency across tensors as well?
   const auto& sizes = guard_tensor_type->sizes();
+  // see [ Note -- stirde_properties in tensor type ]
   const auto& stride_properties = guard_tensor_type->stride_properties();
 
   const auto& t_sizes = tensor.sizes();
@@ -207,10 +221,16 @@ bool complyWith(
       }
     }
 
-    // check c, we go along semantic ordered dimensions
+    // check c.1, we go along semantic ordered dimensions
     // check broadcast / size-1:
     bool guard_bcast = sizes[j].has_value() && sizes[j].value() == 1;
     if (guard_bcast != (t_sizes[j] == 1)) {
+      return false;
+    }
+
+    // check c.2, check for size-0
+    bool guard_size_0 = sizes[j].has_value() && sizes[j].value() == 0;
+    if (guard_size_0 != (t_sizes[j] == 0)) {
       return false;
     }
   }
@@ -675,7 +695,7 @@ RegisterOperators reg_infer_unsqueeze_size({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_infer_squeeze_dim_size({
     Operator(
-        "prim::infer_squeeze_size(int[] a, int dim) -> int[]",
+        "prim::infer_squeeze_size.dim(int[] a, int dim) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto dim = pop(stack).toInt();
@@ -696,7 +716,7 @@ RegisterOperators reg_infer_squeeze_dim_size({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_infer_squeeze_size({
     Operator(
-        "prim::infer_squeeze_size.dim(int[] a) -> int[]",
+        "prim::infer_squeeze_size(int[] a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto size = pop(stack).toIntVector();
