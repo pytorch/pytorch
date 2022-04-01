@@ -2223,10 +2223,12 @@
   variants: function, method
 
 # NOTE [ grid_sampler Native Functions ]
-# `grid_sampler` does all the shape checking and then dispatches to one of
-# `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of which
-# has the corresponding backward defined as native functions as well. Therefore,
-# in these functions and their backwards, no more shape checking is done.
+# `grid_sampler` is _supposed to_ do all the shape checking and then dispatch to
+# one of `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of
+# which has the corresponding backward defined as native functions as well.
+# However, we do shape checking everywhere for now since each of the mentioned
+# functions can be called directly, which will lead to crashes otherwise.
+# See https://github.com/pytorch/pytorch/issues/73187 for more information.
 #
 # There is also _grid_sampler_2d_backward_cpu_fallback which is an
 # implementation detail of grid_sampler_2d and is only exposed here for testing
@@ -6088,10 +6090,19 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+  structured_delegate: scatter_reduce.two_out
   variants: function, method
+
+- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce) -> Tensor(a!)
+  structured_delegate: scatter_reduce.two_out
+  variants: method
+
+- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
   dispatch:
-    CPU: scatter_reduce_two_cpu
+    CPU: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
