@@ -5330,7 +5330,6 @@ class SpectralFuncInfo(OpInfo):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
-            skipCUDAIfRocm,
         ]
 
         super().__init__(name=name,
@@ -6954,25 +6953,30 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
-    def _index(shape, max_index):
-        return torch.from_numpy(np.random.choice(max_index, size=shape)).to(dtype=torch.int64, device=device)
+    def _gather(shape, index_dim, max_indices):
+        return gather_variable(shape, index_dim, max_indices, device=device)
 
-    reduces = ["sum", "prod", "mean", "amax", "amin"]
-    shapes_and_dims = [((M,), 1), ((M, S), 2), ((M, M, S), 3), ((1, M, M, S), 4)]
+    zero = torch.tensor(0, dtype=torch.long, device=device)
+    test_cases = (
+        ((M, S), 0, _gather((S, S), 1, M), (S, S)),
+        ((M, S), 1, _gather((S, S), 0, S), (S, S)),
+        ((M, S), -1, _gather((S, S), 0, S), (S, S)),
+        ((M, S), 0, _gather((M, S // 2), 1, M), (M, S // 2)),
+        ((M, S), 1, _gather((M, S // 2), 0, S), (M, S // 2)),
+        ((M, S), -1, _gather((M, S // 2), 0, S), (M, S // 2)),
+        ((), 0, zero.clone().detach(), ()),
+    )
 
+    reduce = op_info.variant_test_name
     sample_inputs = []
-
-    for ((shape, dim), reduce) in itertools.product(shapes_and_dims, reduces):
-        for d in range(dim):
-            # Generate a random maximum integer that can appear in index array
-            max_index = np.random.randint(1, shape[d] * 2)
-            index = _index(shape, max_index)
-            sample_inputs.append(
-                SampleInput(
-                    _tensor(shape),
-                    args=(d, index, reduce),
-                )
+    for args in test_cases:
+        inp_shape, dim, index, src_shape = args
+        sample_inputs.append(
+            SampleInput(
+                _tensor(inp_shape),
+                args=(dim, index, _tensor(src_shape), reduce)
             )
+        )
 
     return sample_inputs
 
@@ -8873,6 +8877,8 @@ op_db: List[OpInfo] = [
                     aliases=('arctan2',),
                     dtypes=all_types_and(torch.bool),
                     dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
                     promotes_int_to_float=True,
                     supports_rhs_python_scalar=False,
                     skips=(
@@ -11234,7 +11240,8 @@ op_db: List[OpInfo] = [
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
            ],
-           sample_inputs_func=sample_inputs_group_norm,),
+           sample_inputs_func=sample_inputs_group_norm,
+           supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
            dtypes=floating_types(),
@@ -11264,7 +11271,8 @@ op_db: List[OpInfo] = [
                    'TestCommon', 'test_reference_testing'
                )
            ],
-           sample_inputs_func=sample_inputs_layer_norm,),
+           sample_inputs_func=sample_inputs_layer_norm,
+           supports_expanded_weight=True,),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64),
            dtypesIfCPU=floating_types_and(torch.int64, torch.bfloat16),
@@ -15962,17 +15970,49 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'scatter_reduce',
+        variant_test_name='sum',
+        # complex not added to dtypes as complex gradients are not properly handled
+        # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        sample_inputs_func=sample_inputs_scatter_reduce,
+        supports_out=False,
+        decorators=(onlyCPU,),
+    ),
+    OpInfo(
+        'scatter_reduce',
+        variant_test_name='prod',
+        # complex not added to dtypes as complex gradients are not properly handled
+        # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        sample_inputs_func=sample_inputs_scatter_reduce,
+        supports_out=False,
+        decorators=(onlyCPU,),
+    ),
+    OpInfo(
+        'scatter_reduce',
+        variant_test_name='mean',
+        # complex not added to dtypes as complex gradients are not properly handled
+        # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
         decorators=(onlyCPU,),
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive',
-                         active_if=IS_WINDOWS),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive',
-                         active_if=IS_WINDOWS),
-        ),
+    ),
+    OpInfo(
+        'scatter_reduce',
+        variant_test_name='amin',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        sample_inputs_func=sample_inputs_scatter_reduce,
+        supports_out=False,
+        decorators=(onlyCPU,),
+    ),
+    OpInfo(
+        'scatter_reduce',
+        variant_test_name='amax',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        sample_inputs_func=sample_inputs_scatter_reduce,
+        supports_out=False,
+        decorators=(onlyCPU,),
     ),
 ]
 
