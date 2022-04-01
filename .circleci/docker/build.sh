@@ -111,9 +111,9 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.5.0
-    CUDNN_VERSION=8
+  pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.7
     CMAKE_VERSION=3.10.3
     GCC_VERSION=7
@@ -122,8 +122,20 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.6.0
+  pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
+    CUDNN_VERSION=8
+    TENSORRT_VERSION=8.0.1.6
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.10.3
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.5.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     CMAKE_VERSION=3.10.3
@@ -157,6 +169,17 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
+    ANACONDA_PYTHON_VERSION=3.7
+    CLANG_VERSION=5.0
+    CMAKE_VERSION=3.13.5
+    LLVMDEV=yes
+    PROTOBUF=yes
+    ANDROID=yes
+    ANDROID_NDK_VERSION=r19c
+    GRADLE_VERSION=6.8.3
+    NINJA_VERSION=1.9.0
+    ;;
   pytorch-linux-xenial-py3.7-clang7)
     ANACONDA_PYTHON_VERSION=3.7
     CMAKE_VERSION=3.10.3
@@ -180,6 +203,40 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.7
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-rocm4.5-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.5.2
+    ;;
+  pytorch-linux-bionic-rocm5.0-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.0
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
