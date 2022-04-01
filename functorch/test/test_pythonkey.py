@@ -200,6 +200,12 @@ make_fx_failures = {
     skip('new_empty'),  # nondeterministic
     skip('empty_like'),  # nondeterministic
     skip('linalg.lstsq', 'grad_oriented'),  # flaky
+    xfail('normal', '', device_type='cpu'),
+    xfail('normal', 'number_mean', device_type='cpu'),
+    xfail('multinomial', device_type='cpu'),
+    xfail('nn.functional.feature_alpha_dropout', 'with_train', device_type='cpu'),
+    xfail('bernoulli', device_type='cpu'),
+    xfail('nn.functional.dropout2d', device_type='cpu'),
 }
 
 
