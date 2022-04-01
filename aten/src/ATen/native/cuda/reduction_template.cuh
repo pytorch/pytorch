@@ -654,8 +654,11 @@ __global__ void reduction_${name}_kernel(ReduceJitOp r){
 }
 )ESCAPE";
 
+const std::string reduction_template = reduction_template_0 + reduction_template_1;
+
+
 const std::string &get_reduction_template() {
-  return reduction_template_0 + reduction_template_1;
+  return reduction_template;
 }
 
 }}
