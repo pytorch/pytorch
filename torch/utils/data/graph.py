@@ -57,7 +57,7 @@ def traverse(datapipe, only_datapipe=False):
 
 
 # Add cache here to prevent infinite recursion on DataPipe
-def _traverse_helper(datapipe, only_datapipe=False, cache=None):
+def _traverse_helper(datapipe, only_datapipe, cache):
     if not isinstance(datapipe, IterDataPipe):
         raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
 
@@ -65,5 +65,7 @@ def _traverse_helper(datapipe, only_datapipe=False, cache=None):
     items = list_connected_datapipes(datapipe, only_datapipe, cache)
     d: Dict[IterDataPipe, Any] = {datapipe: {}}
     for item in items:
+        # Using cache.copy() here is to prevent recursion on a single path rather than global graph
+        # Single DataPipe can present multiple times in different paths in graph
         d[datapipe].update(_traverse_helper(item, only_datapipe, cache.copy()))
     return d
