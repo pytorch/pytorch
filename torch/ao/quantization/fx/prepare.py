@@ -1411,7 +1411,7 @@ def prepare(
     equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
-    propagate_qconfig_(model, flattened_qconfig_dict)
+    propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
