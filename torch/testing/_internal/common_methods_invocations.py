@@ -3003,7 +3003,7 @@ def clone_sample(sample, **kwargs):
 
     def clone_tensor(t):
         if isinstance(t, torch.Tensor):
-            return t.clone().requires_grad_(t.requires_grad)
+            return t.detach().clone().requires_grad_(t.requires_grad)
         else:
             return t
 
@@ -5468,21 +5468,30 @@ class ForeachFuncInfo(OpInfo):
 
 
 def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False, **kwargs):
-    # Generate Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
-    from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+    from torch.testing._internal.common_utils import random_well_conditioned_matrix
+
+    # Cholesky factorization is for positive-definite matrices
+    single_well_conditioned_matrix = random_well_conditioned_matrix(S, S, dtype=dtype, device=device)
+    batch_well_conditioned_matrices = random_well_conditioned_matrix(2, S, S, dtype=dtype, device=device)
+    single_pd = single_well_conditioned_matrix @ single_well_conditioned_matrix.mH
+    batch_pd = batch_well_conditioned_matrices @ batch_well_conditioned_matrices.mH
+
     inputs = (
         torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
         torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
-        random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
-        random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        single_pd,
+        batch_pd
     )
-    test_cases = (torch.linalg.cholesky(a) for a in inputs)
-    out = []
-    for a in test_cases:
-        a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-        out.append(SampleInput(a.clone().requires_grad_(requires_grad), kwargs=dict(upper=True)))
-    return out
+    test_cases = (torch.linalg.cholesky(a, upper=False) for a in inputs)
+    for l in test_cases:
+        # generated lower-triangular samples
+        l.requires_grad = requires_grad
+        yield SampleInput(l)  # upper=False by default
+        yield SampleInput(l.detach().clone().requires_grad_(requires_grad), kwargs=dict(upper=False))
+
+        # generate upper-triangular inputs
+        u = l.detach().clone().mT.contiguous().requires_grad_(requires_grad)
+        yield SampleInput(u, kwargs=dict(upper=True))
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
@@ -5762,16 +5771,15 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
 
 
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    out = sample_inputs_linalg_cholesky_inverse(
+    cholesky_inverse_samples = sample_inputs_linalg_cholesky_inverse(
         op_info, device, dtype, requires_grad=False
     )
 
-    for sample in out:
+    for sample in cholesky_inverse_samples:
         psd_matrix = sample.input
         sample.input = make_tensor(psd_matrix.shape, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
         sample.args = (psd_matrix.requires_grad_(requires_grad),)
-
-    return out
+        yield sample
 
 
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -8336,7 +8344,7 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
 
 
 def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
-    """Gradcheck wrpper for functions that take lower or upper triangular matrices as input.
+    """Gradcheck wrapper for functions that take lower or upper triangular matrices as input.
 
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input.
@@ -8344,6 +8352,23 @@ def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     """
     triangular_arg = args[idx].triu() if upper else args[idx].tril()
     return op(*args[:idx], triangular_arg, *args[idx + 1:], upper, **kwargs)
+
+
+def gradcheck_wrapper_triangular_input_real_positive_diagonal(op, *args, upper=False, idx=0, **kwargs):
+    """Gradcheck wrapper for functions that take lower/upper triangular matrices
+    with real and positive diagonals, for example, cholesky-like operations.
+    """
+    arg = args[idx]
+    arg_diag = arg.diagonal(0, -2, -1)
+    arg_diag_embed = torch.diag_embed(arg_diag)
+    id_diag_tensor = torch.ones_like(arg_diag)
+    id_tensor = torch.diag_embed(id_diag_tensor)
+    # new_arg = arg - diag(arg) + I
+    new_arg = arg - arg_diag_embed + id_tensor
+    return gradcheck_wrapper_triangular_input(
+        op, *args[:idx], new_arg, *args[idx + 1:],
+        upper=upper, idx=idx, **kwargs
+    )
 
 
 def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
@@ -9037,17 +9062,14 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
-           backward_dtypes=floating_types(),
-           # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
-           # with complex dtype.
-           check_batched_gradgrad=False,
+           backward_dtypes=floating_and_complex_types(),
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           check_batched_gradgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
-           gradcheck_wrapper=gradcheck_wrapper_triangular_input,
+           gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               # TODO: FIXME: cholesky_inverse throws an error in forward when requires_grad=True
-               #   for complex tensors
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # cholesky_inverse does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),)),
     OpInfo('cholesky_solve',
