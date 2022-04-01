@@ -295,9 +295,25 @@ Module import_ir_module(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(&in);
-  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  auto format = getFileFormat(in);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_stream(in, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+    }
+    case FileFormat::ZipFileFormat: {
+      auto reader = torch::make_unique<PyTorchStreamReader>(&in);
+      ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+      return deserializer.deserialize(device, extra_files);
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 // For reading unified serialization format from torch.Package.
@@ -330,9 +346,25 @@ Module import_ir_module(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(filename);
-  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_file(filename, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+    }
+    case FileFormat::ZipFileFormat: {
+      auto reader = torch::make_unique<PyTorchStreamReader>(filename);
+      ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+      return deserializer.deserialize(device, extra_files);
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 Module import_ir_module(

@@ -189,10 +189,10 @@ table Module {
   // denotes the bytecode version of the mobile Module
   // this starts from 9 for a flatbuffer file
   // versions 8 and below are reserved pickle
-  // To read more:
-  // https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L96
   // Version is bumped when changes in model serialization/execution
   // can no longer work in current version
+  // To read more:
+  // https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L96
   bytecode_version:uint;
 
   extra_files:[ExtraFile];
