@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 namespace torch {
@@ -221,6 +222,9 @@ void computeAtInputs(TensorView* consumer, int pos, ComputeAtMode mode) {
 
 void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
   for (auto out_tv : ir_utils::outputTvsOf(producer)) {
+    if (out_tv == producer) {
+      continue;
+    }
     producer->computeWith(out_tv, pos, mode);
   }
 }
@@ -287,6 +291,15 @@ class PersistentBufferResolution : public IterVisitor {
     }
 
     if (tv->hasReduction()) {
+      if (std::any_of(
+              resolution_points_.begin(),
+              resolution_points_.end(),
+              [&tv](TensorView* resolution_point) {
+                return DependencyCheck::isDependencyOf(resolution_point, tv);
+              })) {
+        // If already resolved, don't start a new reduction path.
+        return;
+      }
       on_reduction_path_.emplace(tv);
     }
   }
@@ -425,7 +438,7 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   }
 
   // Find projectable persistent buffers
-  auto reduction_tvs = getReductionTvs(fusion);
+  auto reduction_tvs = getReductionTvs(fusion /*, ignore_trivial=true */);
   for (auto persistent_buffer : persistent_buffer_info.persistent_buffers) {
     // Inputs marked as persistent buffers can't be projected any further back
     if (persistent_buffer->isFusionInput()) {
@@ -587,7 +600,7 @@ void computeAtBetween(
               return mapped_to_trivial_reduction.count(id);
             });
 
-        pos = pos_it == consumer->domain()->domain().end()
+        auto consumer_pos = pos_it == consumer->domain()->domain().end()
             ? pos
             : std::min(
                   (int)std::distance(
@@ -596,7 +609,7 @@ void computeAtBetween(
                   (pos < 0 ? pos + (int)consumer->nDims() : pos));
         // Assume we don't want to reset computeAt on tensors that have already
         // performed it.
-        producer->computeAt(consumer, pos, mode);
+        producer->computeAt(consumer, consumer_pos, mode);
       }
     }
   }
@@ -923,7 +936,7 @@ std::pair<bool, bool> canonicalDimReduction(
   }
 }
 
-std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
+std::vector<TensorView*> getReductionTvs(Fusion* fusion, bool ignore_trivial) {
   auto all_tvs = ir_utils::allTvs(fusion);
   std::vector<TensorView*> reduction_tvs;
   for (auto tv : all_tvs) {
@@ -931,8 +944,9 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
         std::any_of(
             tv->domain()->domain().begin(),
             tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       reduction_tvs.emplace_back(tv);
     }
@@ -957,25 +971,13 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
   return reduction_tvs;
 }
 
-bool isViewDefinition(TensorView* tv) {
-  auto def_expr = tv->definition();
-  if (def_expr != nullptr) {
-    auto def_expr_type = def_expr->getExprType();
-    if (def_expr_type.has_value() &&
-        def_expr_type.value() == ExprType::ViewOp) {
-      return true;
-    }
-  }
-  return false;
-}
-
 std::vector<TensorView*> getViewTVs(Fusion* fusion) {
   std::vector<TensorView*> view_tvs;
   auto fusion_vals = fusion->usedMathVals();
   for (auto producer_tv : ir_utils::filterByType<TensorView>(fusion_vals)) {
     auto consumer_tvs = ir_utils::consumerTvsOf(producer_tv);
     for (auto consumer_tv : consumer_tvs) {
-      if (isViewDefinition(consumer_tv)) {
+      if (consumer_tv->isDefinitionType(ExprType::ViewOp)) {
         view_tvs.push_back(consumer_tv);
       }
     }
@@ -1005,7 +1007,7 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll) {
   // If we're going to unroll, make a cache of the inputs
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
   for (auto tv : in_tvs) {
-    if (tv->uses().empty()) {
+    if (tv->uses().empty() || tv->isFusionOutput()) {
       continue;
     }
     auto cached_tv = tv->cache_after();
@@ -1038,15 +1040,22 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
 }
 
 namespace {
+// If this is an rfactored reduction domain, actually check the root domain,
+// this is because the rfactored reduction tensorview has the vectorized
+// dimension, but that means the rfactor domain could have reordered what we
+// consider the "inner most" allocated position on it if we consider the rfactor
+// dimension.
 IterDomain* innerMostRootDim(TensorView* tv) {
   if (tv->nDims() == 0) {
     return nullptr;
   }
 
   IterDomain* inner_most_id = nullptr;
-  for (auto it = tv->getMaybeRFactorDomain().rbegin();
-       it != tv->getMaybeRFactorDomain().rend();
-       it++) {
+  auto root_domain = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
+  for (auto it = root_domain.rbegin(); it != root_domain.rend(); it++) {
     if ((*it)->isReduction() && tv->isFusionInput()) {
       continue;
     }
@@ -1084,7 +1093,7 @@ IterDomain* projectIdToRoot(
     return reference_id;
   }
 
-  auto replay_exprs = ExprSort::getExprs(tv->fusion(), {reference_id});
+  auto replay_exprs = StmtSort::getExprs(tv->fusion(), {reference_id}, false);
   if (replay_exprs.empty()) {
     return reference_id;
   }
@@ -1193,12 +1202,16 @@ std::unordered_set<IterDomain*> FindAllMappedDims::from(
     TensorView* tv,
     IterDomain* id,
     bool vectorize_pass) {
+  auto root_domain = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
   TORCH_INTERNAL_ASSERT(
       std::find_if(
-          tv->getMaybeRFactorDomain().begin(),
-          tv->getMaybeRFactorDomain().end(),
+          root_domain.begin(),
+          root_domain.end(),
           [&id](IterDomain* root_id) { return root_id == id; }) !=
-          tv->getMaybeRFactorDomain().end(),
+          root_domain.end(),
       "Tried to map out ",
       id,
       " from TV ",
@@ -1369,6 +1382,97 @@ std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
 
   return multiples;
 }
+
+namespace matmul_utils {
+
+void scheduleWarpTileWithReduction(TensorView* tv, MatMulTileOptions tile) {
+  // Assumes
+  // [M, N, K]
+  auto cta_tile = tile.cta_tile;
+  auto warp_tile = tile.warp_tile;
+  auto instruction_tile = tile.instruction_tile;
+
+  TORCH_CHECK(
+      warp_tile.k == cta_tile.k,
+      "schedule warp tile: currently no support for splitting k dimension to different warps");
+
+  mma_util::checkDimSize(
+      tv, {-3, -2, -1}, {cta_tile.m, cta_tile.n, cta_tile.k});
+
+  //       -3   -2  -1
+  //[...    M,   N,  K]
+
+  // Distribute warp tile:
+  tv->split(-3, warp_tile.m);
+  tv->split(-2, warp_tile.n);
+
+  //  -5   -4   -3   -2   -1
+  // [Mwo  Mw  Nwo   Nw   K]
+  tv->split(-4, instruction_tile.m);
+  tv->split(-2, instruction_tile.n);
+  tv->split(-1, instruction_tile.k);
+
+  //   -8  -7 -6 -5 -4 -3 -2 -1
+  // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
+
+  tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+
+  //   -8  -7  -6 -5 -4 -3 -2 -1
+  // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+}
+
+void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
+  // Assumes
+  // [M, N, K]
+  auto cta_tile = tile.cta_tile;
+  auto warp_tile = tile.warp_tile;
+  auto instruction_tile = tile.instruction_tile;
+
+  mma_util::checkDimSize(tv, {-2, -1}, {cta_tile.m, cta_tile.n});
+
+  //        -2  -1
+  //[...    M,   N]
+
+  // Distribute warp tile:
+  tv->split(-2, warp_tile.m);
+  tv->split(-1, warp_tile.n);
+
+  //  -4   -3   -2   -1
+  // [Mwo  Mw  Nwo   Nw ]
+  tv->split(-3, instruction_tile.m);
+  tv->split(-1, instruction_tile.n);
+
+  //  -6 -5  -4 -3 -2 -1
+  // [Mwo Mw Mi Nwo Nw Ni]
+
+  tv->reorder({{-5, -4}, {-4, -2}, {-3, -5}, {-2, -3}});
+
+  //  -6   -5  -4 -3 -2 -1
+  // [Mwo  Nwo Mw Nw Mi Ni]
+}
+
+//! Split the innermost dim to a vectorized load
+void scheduleContiguousVectorLoad(
+    TensorView* tv,
+    MatMulTileOptions tile,
+    int vector_word) {
+  auto warp_dims = tile.cta_tile / tile.warp_tile;
+  int num_of_thread = warp_dims.m * warp_dims.n * warp_dims.k * 32;
+
+  tv->split(-1, num_of_thread * vector_word);
+  tv->split(-1, vector_word);
+  // [..., thread, vec]
+  // distribute to warp:
+  tv->split(-2, 32);
+  tv->split(-3, warp_dims.n * warp_dims.k);
+
+  tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv->axis(-2)->parallelize(ParallelType::TIDx);
+  tv->axis(-3)->parallelize(ParallelType::TIDy);
+  tv->axis(-4)->parallelize(ParallelType::TIDz);
+}
+
+} // namespace matmul_utils
 
 } // namespace scheduler_utils
 } // namespace cuda

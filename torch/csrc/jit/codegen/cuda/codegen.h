@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 #include <string>

@@ -190,8 +190,8 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
-  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
-    return false;
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16)  {
+    return at::native::cudnnv8_enabled_check_debug();
   }
   if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
     // bypass dilation checks for channels_last convolution
@@ -267,7 +267,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) c
 auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
-    const c10::optional<IntArrayRef> bias_sizes_opt) const -> bool {
+    const at::OptionalIntArrayRef bias_sizes_opt) const -> bool {
 #if defined(C10_MOBILE)
   if (!transposed) {
     return (input.size(1) == groups) &&
@@ -506,8 +506,8 @@ static void check_shape_forward(const at::Tensor& input,
   int64_t k = input.ndimension();
   int64_t weight_dim = weight_sizes.size();
   int64_t groups = params.groups;
-  auto padding = params.padding;
-  auto dilation = params.dilation;
+  const auto& padding = params.padding;
+  const auto& dilation = params.dilation;
   bool transposed = params.transposed;
 
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
@@ -933,7 +933,7 @@ ConvBackend select_conv_backend(
 ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
     const ConvParams& params) {
 
@@ -1565,7 +1565,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
 //   output_mask: 3-dim boolean array specifying which gradients to compute in input, weight, bias order
 std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
-    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
     int64_t groups, std::array<bool, 3> output_mask) {
   auto grad_output = grad_output_;

@@ -22,6 +22,8 @@ from torch.testing import FileCheck
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
+    QConfig,
+    MinMaxObserver,
 )
 from torch.quantization.quantize_fx import (
     prepare_fx,
@@ -33,6 +35,9 @@ import torch.ao.quantization._quantize_dbr as _quantize_dbr
 import torch.ao.ns._numeric_suite_dbr as ns
 # TODO(future PR): move these utils out of the FX folder
 import torch.ao.ns._numeric_suite_fx as ns_fx
+from torch.ao.quantization._dbr.torchscript_utils import (
+    remove_redundant_aliases,
+)
 
 def _allclose(a, b):
     if isinstance(a, tuple):
@@ -56,13 +61,17 @@ class QuantizeDBRTestCase(QuantizationTestCase):
         fuse_modules=True,
         do_fx_comparison=True,
         do_torchscript_checks=True,
+        # there are some keys in DBR prepare_custom_config_dict which
+        # are not supported in FX, this argument is for DBR only
+        dbr_prepare_custom_config_dict=None,
     ):
         m_copy = copy.deepcopy(m)
 
         qconfig_dict = {'': qconfig}
 
         mp = _quantize_dbr.prepare(
-            m, qconfig_dict, example_args, fuse_modules=fuse_modules)
+            m, qconfig_dict, example_args, fuse_modules=fuse_modules,
+            prepare_custom_config_dict=dbr_prepare_custom_config_dict)
         out_p = mp(*example_args)
         # print(mp)
         mq = _quantize_dbr.convert(mp)
@@ -118,40 +127,57 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
     Tests that DBR quantization covers individual ops
     """
     def test_conv(self):
+        convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
+
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.conv = convs[dim](3, 3, 3)
 
             def forward(self, x):
                 x1 = self.conv(x)
                 return x1
 
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        data = {
+            1: torch.randn(1, 3, 10),
+            2: torch.randn(1, 3, 10, 10),
+            3: torch.randn(1, 3, 5, 5, 5)
+        }
+        for dim in range(1, 4):
+            m = M(dim).eval()
+            qconfig = torch.quantization.default_qconfig
+            self._test_auto_tracing(m, qconfig, (data[dim],))
 
     def test_conv_functional(self):
+        convs = {1: F.conv1d, 2: F.conv2d, 3: F.conv3d}
 
         class M(torch.nn.Module):
-            def __init__(self, weight2d, bias2d):
+            def __init__(self, dim, weight, bias):
                 super().__init__()
-                self.weight2d = torch.nn.Parameter(weight2d)
-                self.bias2d = torch.nn.Parameter(bias2d)
-                self.stride2d = (1, 1)
-                self.padding2d = (0, 0)
-                self.dilation2d = (1, 1)
+                self.conv_func = convs[dim]
+                self.weight = torch.nn.Parameter(weight)
+                self.bias = torch.nn.Parameter(bias)
+                self.stride = (1,) * dim
+                self.padding = (0,) * dim
+                self.dilation = (1,) * dim
                 self.groups = 1
 
             def forward(self, x):
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
+                x = self.conv_func(
+                    x, self.weight, self.bias, self.stride, self.padding,
+                    self.dilation, self.groups)
                 return x
 
-        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+        data = {
+            1: torch.randn(1, 3, 10),
+            2: torch.randn(1, 3, 10, 10),
+            3: torch.randn(1, 3, 5, 5, 5)
+        }
+        bias = torch.randn(1)
+        for dim in range(1, 4):
+            model_fp32 = M(dim, data[dim], bias).eval()
+            qconfig = torch.quantization.default_qconfig
+            self._test_auto_tracing(model_fp32, qconfig, (data[dim],))
 
     def test_linear_dynamic(self):
         class M(torch.nn.Module):
@@ -227,9 +253,9 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
                 x = torch.cat([x, x], dim=1)
                 return x
 
-        m = M().eval()
         qconfig = torch.quantization.default_qconfig
         for dtype in (torch.int32, torch.int64):
+            m = M().eval()
             self._test_auto_tracing(
                 m, qconfig, (torch.zeros(1, 1, 1, 1, dtype=dtype),),
                 # FX graph mode quant does not support this yet
@@ -401,6 +427,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         """
         Tests that fusion works if the modules to fuse get called multiple
         times in the same forward.
+
+        Currently, observers are not shared between successive calls of
+        the same module.
+        TODO(future PR): make them shared (this is easy to detect)
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -416,7 +446,44 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        # fx graph mode quant doesn't support using a single module multiple times
+        # right now, so this would crash, we can handle this case later
+        # if it is needed
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),), do_fx_comparison=False)
+
+    def test_fusion_functions(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = torch.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
+
+        self.assertTrue(
+            mp._auto_quant_state.idx_to_seen_q_op_infos[0].fusion_info is not None)
+        self.assertTrue(
+            mp._auto_quant_state.idx_to_seen_q_op_infos[1].fusion_info is not None)
+
+        # verify that the add relu is not observed
+        self.assertTrue(
+            '1' not in mp._auto_quant_state.tensor_id_to_observer)
+        # verify that the relu is observed
+        self.assertTrue(
+            '2' in mp._auto_quant_state.tensor_id_to_observer)
+
+        mp(torch.randn(1, 1, 1, 1))
+        mq = _quantize_dbr.convert(mp)
+
+        # verify that the add-relu got fused
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+        FileCheck().check_count("quantized::add_relu", 1, exactly=True).run(
+            mqt.graph)
+
+        # TODO(future PR): use information about non-quantizeable ops during
+        #   matching fusion patterns
 
     def test_observers_not_touched_by_tracing(self):
         """
@@ -498,6 +565,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         # test backprop does not crash
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
+        m = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
         mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
@@ -798,9 +866,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip('this depends on unsupported syntax detection, currently disabled')
     def test_vovnet_sequential(self):
-
+        # We cannot quantize SequentialAppendList directly because
+        # AutoQuantizationStateModuleDict would appear in self.items.
+        # However, we can wrap it and quantize the wrapper.
         class SequentialAppendList(nn.Sequential):
             def __init__(self, *args):
                 super(SequentialAppendList, self).__init__(*args)
@@ -815,7 +884,16 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 x = torch.cat(concat_list, dim=1)
                 return x
 
-        m = SequentialAppendList(torch.nn.Conv2d(1, 1, 1)).eval()
+        class Wrapper(nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.append_list = SequentialAppendList(*args)
+
+            def forward(self, x):
+                x = self.append_list(x)
+                return x
+
+        m = Wrapper(torch.nn.Conv2d(1, 1, 1)).eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
 
@@ -850,9 +928,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         m = M().eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
-        expected = set([nn.Softshrink, F.tanhshrink])
-        self.assertTrue(
-            mp._auto_quant_state.seen_op_types_without_op_hooks == expected)
+        self.assertTrue(len(mp._auto_quant_state.seen_nonq_op_infos) == 2)
+        self.assertTrue(mp._auto_quant_state.seen_nonq_op_infos[0].type == nn.Softshrink)
+        self.assertTrue(mp._auto_quant_state.seen_nonq_op_infos[1].type == F.tanhshrink)
 
     def test_unknown_op_after_quantized(self):
         class M(torch.nn.Module):
@@ -867,10 +945,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
             fuse_modules=False)
 
-    # this is broken because AutoQuantizationState appears in self.items
-    @unittest.skip('TODO fix this')
     def test_module_calls_items(self):
-        class M(torch.nn.ModuleDict):
+        # We cannot quantize M1 directly because
+        # AutoQuantizationStateModuleDict would appear in self.items.
+        # However, we can wrap it and quantize the wrapper.
+        class M1(torch.nn.ModuleDict):
             def __init__(self):
                 super().__init__()
                 for i in range(2):
@@ -883,10 +962,22 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                     layers.append(layer(x))
                 return torch.cat(layers, dim=1)
 
-        model_fp32 = M().eval()
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                x = self.m1(x)
+                return x
+
+        model_fp32 = M2().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(
-            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
+            # TODO(future PR): implement observer sharing for torch.cat
+            # in DBR quant, to ensure that numerical behavior matches
+            do_fx_comparison=False)
 
     def test_subclass_of_quantizeable_module(self):
         """
@@ -1225,6 +1316,52 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         input_shape = (1, 1, 1, 1)
         self._test_serialization(M, input_shape)
 
+    def test_jit_tracing_removes_aliases(self):
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+            ),
+        )
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mq = _quantize_dbr.convert(mp)
+        mqs = torch.jit.trace(mq, example_args)
+        FileCheck().check_count("aten::alias", 5, exactly=True).run(
+            mqs.inlined_graph)
+        res1 = mqs(*example_args)
+        mqs = remove_redundant_aliases(mqs)
+        res2 = mqs(*example_args)
+        self.assertTrue(torch.allclose(res1, res2))
+        # TODO(future PR): figure out why aliasing still appears in the inlined
+        # graph, and if that is fixed then just check the inlined graph.
+        for graph in (
+            mqs.graph,
+            getattr(mqs, '1').graph,
+            getattr(getattr(mqs, '1'), '0').graph,
+        ):
+            FileCheck().check_count("aten::alias", 0, exactly=True).run(graph)
+
+    def test_conv_int32_reference_model(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        int32_obs_ctr = MinMaxObserver.with_args(dtype=torch.qint32)
+        int32_qconfig = QConfig(weight=int32_obs_ctr, activation=int32_obs_ctr)
+        qconfig_dict = {'': int32_qconfig}
+        mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
+        mp(torch.randn(1, 1, 1, 1))
+        mq = _quantize_dbr.convert(mp)
+        res = mq(torch.randn(1, 1, 1, 1))
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+        # verify the right ops are present:
+        # x0 -> quant -> (dequant -> conv_ref -> quant) -> dequant -> x1
+        FileCheck()\
+            .check_count("aten::quantize_per_tensor", 2, exactly=True)\
+            .run(mqt.graph)
+        FileCheck()\
+            .check_count("aten::dequantize", 2, exactly=True)\
+            .run(mqt.graph)
+
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
     """
@@ -1422,9 +1559,13 @@ class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
 
         model_fp32 = M().eval()
         qconfig = torch.quantization.default_qconfig
+        prepare_custom_config_dict = {
+            'output_dtypes': (torch.int64,),
+        }
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.LongTensor([[0]]),),
-            fuse_modules=False)
+            fuse_modules=False,
+            dbr_prepare_custom_config_dict=prepare_custom_config_dict)
 
     def test_lstm(self):
         # building block of torchbenchmark/tts_angular
@@ -1461,3 +1602,18 @@ class TestQuantizeDBRModels(QuantizeDBRTestCase):
             m, qconfig, (torch.randn(1, 3, 224, 224),),
             # TODO fix this (reason TBD)
             do_torchscript_checks=False)
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v2_removes_aliases(self):
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False)\
+            .eval().float()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 3, 224, 224),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mq = _quantize_dbr.convert(mp)
+        mqs = torch.jit.trace(mq, example_args)
+        res1 = mqs(*example_args)
+        mqs = remove_redundant_aliases(mqs)
+        res2 = mqs(*example_args)
+        self.assertTrue(torch.allclose(res1, res2))

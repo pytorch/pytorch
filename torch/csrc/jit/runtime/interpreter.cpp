@@ -175,7 +175,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
+      c10::optional<size_t> bailOut = c10::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -716,10 +716,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto& forked_fn =
                 toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn.get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
+                forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -1059,12 +1056,14 @@ MobileCode::MobileCode(
     std::string function_name,
     bool emit_default_input_instructions,
     bool support_default_args_before_out,
+    bool emit_promoted_ops,
     size_t remaining_bailout_depth)
     : Code(new interpreter::MobileCodeImpl(
           graph,
           std::move(function_name),
           emit_default_input_instructions,
           support_default_args_before_out,
+          emit_promoted_ops,
           remaining_bailout_depth)) {}
 
 MobileCode::~MobileCode() = default;

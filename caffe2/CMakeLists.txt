@@ -350,6 +350,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     )
+    if(BUILD_LAZY_TS_BACKEND)
+      list(APPEND GENERATED_CXX_TORCH
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
+      )
+    endif()
   endif()
 
   set(GENERATED_H_TORCH
@@ -360,6 +367,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
   endif()
 
@@ -397,18 +406,31 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_TESTING_PYTHON}
     )
 
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
+  endif()
+
   add_custom_command(
     OUTPUT
     ${TORCH_GENERATED_CODE}
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
-      --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
+      --gen_lazy_ts_backend
+      ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
+    "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
+    "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
@@ -436,6 +458,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
+    "${TOOLS_PATH}/codegen/gen_backend_stubs.py"
+    "${TOOLS_PATH}/codegen/gen_lazy_tensor.py"
+    "${TOOLS_PATH}/codegen/api/lazy.py"
+    "${TOOLS_PATH}/codegen/dest/lazy_ir.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -475,7 +501,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
-
+    if(BUILD_LAZY_TS_BACKEND)
+      append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
+    endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
       set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
@@ -765,6 +793,9 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+set_property(SOURCE ${ATen_CORE_SRCS} APPEND
+    PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
@@ -898,6 +929,33 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+  if(BUILD_LAZY_CUDA_LINALG)
+    add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
+    target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
+    # Library order is important during static linking
+    # `torch::magma` should be mentioned before other CUDA
+    # to transitively include all symbols present in torch_cuda/torch_cpu
+    if(USE_MAGMA)
+      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+      # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
+      get_target_property(HOOKS_INCLUDE_DIRECTORIES torch_cuda INCLUDE_DIRECTORIES)
+      if(NOT "${MAGMA_INCLUDE_DIR}" IN_LIST HOOKS_INCLUDE_DIRECTORIES)
+        set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
+      endif()
+    endif()
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        torch_cpu
+        torch_cuda
+        ${CUDA_cusolver_LIBRARY}
+    )
+    # NS: TODO, is this really necessary?
+    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    endif()
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
+    install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
 
   if(USE_PRECOMPILED_HEADERS)
     if(BUILD_SPLIT_CUDA)
@@ -911,59 +969,7 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_CUDA OR USE_ROCM)
-  if(BUILD_SPLIT_CUDA)
-    set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cpp
-  elseif(USE_CUDA)
-    set(TORCHLIB_FLAVOR torch_cuda)
-  elseif(USE_ROCM)
-    set(TORCHLIB_FLAVOR torch_hip)
-  endif()
-
-  # The list of NVFUSER runtime files
-  list(APPEND NVFUSER_RUNTIME_FILES
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_sync.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/index_utils.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
-    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
-  )
-
-  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
-
-  # "stringify" NVFUSER runtime sources
-  # (generate C++ header files embedding the original input as a string literal)
-  set(NVFUSER_STRINGIFY_TOOL "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tools/stringify_file.py")
-  foreach(src ${NVFUSER_RUNTIME_FILES})
-    get_filename_component(filename ${src} NAME_WE)
-    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_resources/${filename}.h")
-    add_custom_command(
-      COMMENT "Stringify NVFUSER runtime source file"
-      OUTPUT ${dst}
-      DEPENDS ${src}
-      COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
-    )
-    add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
-    add_dependencies(${TORCHLIB_FLAVOR} nvfuser_rt_${filename})
-
-    # also generate the resource headers during the configuration step
-    # (so tools like clang-tidy can run w/o requiring a real build)
-    execute_process(COMMAND
-      ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst})
-  endforeach()
-
-  target_include_directories(${TORCHLIB_FLAVOR} PRIVATE "${CMAKE_BINARY_DIR}/include")
+  include(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/nvfuser.cmake)
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
@@ -1052,14 +1058,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     ${CMAKE_BINARY_DIR}/aten/src)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
       set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
       set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
 
 if(USE_TBB)
@@ -1089,10 +1094,10 @@ endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-    FILES_MATCHING PATTERN "*.h")
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
-    FILES_MATCHING PATTERN "*.hpp")
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   install(FILES
     "${TORCH_SRC_DIR}/script.h"
     "${TORCH_SRC_DIR}/extension.h"
@@ -1106,12 +1111,15 @@ endif()
       DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
   endif()
 
-
   if(BUILD_TEST)
     if(BUILD_LITE_INTERPRETER)
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/lightweight_dispatch
+        ${CMAKE_BINARY_DIR}/test_codegen_unboxing
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
@@ -1142,7 +1150,7 @@ endif()
   endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
-  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(DEFINED GLIBCXX_USE_CXX11_ABI)
       message(STATUS "_GLIBCXX_USE_CXX11_ABI is already defined as a cmake variable")
     else()
@@ -1294,8 +1302,14 @@ if(USE_DISTRIBUTED)
     else()
       if(BUILD_SPLIT_CUDA)
         target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda_cpp PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       else()
         target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       endif()
     endif()
   endif()
@@ -1926,6 +1940,7 @@ if(BUILD_PYTHON)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+    target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)
   endif()
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -1937,11 +1952,10 @@ if(BUILD_PYTHON)
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
-  target_link_libraries(
-      caffe2_pybind11_state torch_library)
+  target_link_libraries(caffe2_pybind11_state PRIVATE
+      torch_library python::python pybind::pybind11)
   if(WIN32)
-    target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
-    target_link_libraries(caffe2_pybind11_state onnx_proto)
+    target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
@@ -1959,6 +1973,7 @@ if(BUILD_PYTHON)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
     if(USE_NUMPY)
       target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE numpy::numpy)
     endif()
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -1969,10 +1984,10 @@ if(BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_gpu torch_library)
+    target_link_libraries(caffe2_pybind11_state_gpu PRIVATE
+        torch_library python::python pybind::pybind11)
     if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
-      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
+      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state
@@ -1990,6 +2005,7 @@ if(BUILD_PYTHON)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
     if(USE_NUMPY)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+      target_link_libraries(caffe2_pybind11_state_hip PRIVATE numpy::numpy)
     endif()
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
@@ -2000,10 +2016,8 @@ if(BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_hip torch_library)
-    if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
-    endif(WIN32)
+    target_link_libraries(caffe2_pybind11_state_hip PRIVATE
+        torch_library python::python pybind::pybind11)
 
     # Install with same rpath as non-hip caffe2_pybind11_state
     set_target_properties(

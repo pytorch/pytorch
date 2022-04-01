@@ -132,10 +132,6 @@ For example:
 - Install local PyTorch in `develop` mode
 - modify your Python file `torch/__init__.py` (for example)
 - test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
 
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
@@ -516,7 +512,7 @@ missing file warnings but will still complete. For example, to work on `jit.rst`
 
 ```bash
 cd docs/source
-ls | grep rst | grep -v index | grep -v jit | xargs rm
+find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
 
 # Make your changes, build the docs, etc.
 

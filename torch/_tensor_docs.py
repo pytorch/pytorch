@@ -3374,6 +3374,12 @@ Example::
 
 """.format(**reproducibility_notes))
 
+add_docstr_all('scatter_reduce', r"""
+scatter_reduce(input, dim, index, src, reduce) -> Tensor
+
+See :func:`torch.scatter_reduce`
+""")
+
 add_docstr_all('select',
                r"""
 select(dim, index) -> Tensor
@@ -4138,6 +4144,20 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
+""")
+
+add_docstr_all('to_sparse_csr',
+               r"""
+to_sparse_csr() -> Tensor
+Convert a tensor to compressed row storage format. Only works with 2D tensors.
+
+Example::
+
+    >>> dense = torch.randn(5, 5)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse._nnz()
+    25
+
 """)
 
 add_docstr_all('to_mkldnn',

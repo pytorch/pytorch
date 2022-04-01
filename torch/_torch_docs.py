@@ -219,6 +219,12 @@ index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
 See :meth:`~Tensor.index_add_` for function description.
 """)
 
+add_docstr(torch.index_copy, r"""
+index_copy(input, dim, index, source, *, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
@@ -993,60 +999,68 @@ add_docstr(torch.asarray,
            r"""
 asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
 
-Converts :attr:`obj` into a tensor, sharing data and preserving autograd history
-if possible.
+Converts :attr:`obj` to a tensor.
 
 :attr:`obj` can be one of:
 
 1. a tensor
 2. a NumPy array
 3. a DLPack capsule
-4. a Python object that implements the buffer protocol
-5. a Python sequence
+4. an object that implements Python's buffer protocol
+5. a scalar
+6. a sequence of scalars
 
-For each of the mentioned options, in order, this functions will assume :attr:`obj`
-is of that type and try, first, sharing memory. Only then, it will make a copy (if
-necessary).
+When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
+by default, not require a gradient, have the same datatype as :attr:`obj`, be on the
+same device, and share memory with it. These properties can be controlled with the
+:attr:`dtype`, :attr:`device`, :attr:`copy`, and :attr:`requires_grad` keyword arguments.
+If the returned tensor is of a different datatype, on a different device, or a copy is
+requested then it will not share its memory with :attr:`obj`. If :attr:`requires_grad`
+is ``True`` then the returned tensor will require a gradient, and if :attr:`obj` is
+also a tensor with an autograd history then the returned tensor will have the same history.
 
-The dtype of the result tensor is inferred from the input object, except when
-object is (4): an object that implements the buffer protocol (see :func:`torch.frombuffer`).
-In that case, the buffer is interpreted as an array of bytes, which are grouped
-according to the size of the given :attr:`dtype` or the global default
-(see :func:`torch.set_default_tensor_type`) if `None` is given.
+When :attr:`obj` is not a tensor, NumPy Array, or DLPack capsule but implements Python's
+buffer protocol then the buffer is interpreted as an array of bytes grouped according to
+the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
+passed then the default floating point datatype is used, instead.) The returned tensor
+will have the specified datatype (or default floating point datatype if none is specified)
+and, by default, be on the CPU device and share memory with the buffer.
 
-For example: NumPy arrays also implement the buffer protocol. However, since NumPy
-arrays have higher priority than objects implementing the buffer protocol, this function
-will handle them as NumPy arrays. In other words, it will infer its dtype as if using
-``torch.from_numpy`` (instead of ``torch.frombuffer``).
+When :attr:`obj` is none of the above but a scalar or sequence of scalars then the
+returned tensor will, by default, infer its datatype from the scalar values, be on the
+CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` tries to avoid copies for tensors and NumPy arrays.
-    :func:`torch.tensor` always copies the data from the input object.
-    :func:`torch.from_numpy` creates a tensor that shares its memory with a NumPy array.
-    :func:`torch.frombuffer` creates a tensor that shares its memory with an object
-    that implements the buffer protocol.
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that shares its memory
-    with the object represented in the dlpack.
+    :func:`torch.tensor` creates a tensor that always copies the data from the input object.
+
+    :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
+
+    :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
+           implement the buffer protocol.
+
+    :func:`torch.from_dlpack` creates a tensor that always shares memory from
+           DLPack capsules.
 
 Args:
-    obj (object): a Python object that satisfies, at least, one of the five options
-           mentioned above.
+    obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
+           buffer protocol, scalar, or sequence of scalars.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-           Default: if ``None``, it will be inferred from :attr:`obj`.
-    copy (bool, optional): flags whether the object memory should be copied or not.
-           If ``None``, then the result tensor shares memory with the Python object
-           whenever possible. If ``True``, then the object memory is copied. If ``False``,
-           then the object memory is shared. If the object memory cannot be shared
-           and this flag is ``False``, then an error is thrown.
-    device (:class:`torch.device`, optional): the device of the constructed tensor.
-           If `None`, then the device of :attr:`obj` is used. Else, it either copies
-           the data, if :attr:`obj` lives in a different device, or it shares the
-           memory, if :attr:`obj` lives in the same device.
-    requires_grad (bool, optional): If autograd should record operations on the
-           returned tensor. However, if this flag is ``False`` and the input object
-           is a non-leaf :class:`Tensor`, this function will call :func:`torch.Tensor.detach`.
+    dtype (:class:`torch.dtype`, optional): the datatype of the returned tensor.
+           Default: ``None``, which causes the datatype of the returned tensor to be
+           inferred from :attr:`obj`.
+    copy (bool, optional): controls whether the returned tensor shares memory with :attr:`obj`.
+           Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
+           whenever possible. If ``True`` then the returned tensor does not share its memory.
+           If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
+           error is thrown if it cannot.
+    device (:class:`torch.device`, optional): the device of the returned tensor.
+           Default: ``None``, which causes the device of :attr:`obj` to be used.
+    requires_grad (bool, optional): whether the returned tensor requires grad.
+           Default: ``False``, which causes the returned tensor not to require a gradient.
+           If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
+           is also a tensor with an autograd history then the returned tensor will have
+           the same history.
 
 Example::
 
@@ -5139,13 +5153,7 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \text{end})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -5475,13 +5483,8 @@ with base :attr:`base`. That is, the values are:
     \text{base}^{\text{end}})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+
+From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -8541,6 +8544,57 @@ scatter_add(input, dim, index, src) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
+add_docstr(torch.scatter_reduce, r"""
+scatter_reduce(input, dim, index, src, reduce) -> Tensor
+
+Reduces all values from the :attr:`input` tensor to the indices specified in
+the :attr:`index` tensor. For each value in :attr:`input`, its output index is
+specified by its index in :attr:`input` for ``dimension != dim`` and by the
+corresponding value in :attr:`index` for ``dimension = dim``.
+The applied reduction for non-unique indices is defined via the :attr:`reduce`
+argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
+For non-existing indices, the output will be filled with the identity of the
+applied reduction (1 for :obj:`"prod"` and 0 otherwise).
+
+It is also required that ``index.size(d) == input.size(d)`` for all dimensions ``d``.
+Moreover, if :attr:`output_size` is defined the the values of :attr:`index` must be
+between ``0`` and ``output_size - 1`` inclusive.
+
+
+For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
+
+    out[index[i][j][k]][j][k] += input[i][j][k]  # if dim == 0
+    out[i][index[i][j][k]][k] += input[i][j][k]  # if dim == 1
+    out[i][j][index[i][j][k]] += input[i][j][k]  # if dim == 2
+
+Note:
+    This out-of-place operation is similar to the in-place versions of
+    :meth:`~torch.Tensor.scatter_` and :meth:`~torch.Tensor.scatter_add_`,
+    in which the output tensor is automatically created according to the
+    maximum values in :attr:`index` and filled based on the identity of the
+    applied reduction.
+
+Note:
+    {forward_reproducibility_note}
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter and reduce.
+    src (Tensor): the source elements to scatter and reduce
+    reduce (str): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+
+Example::
+
+    >>> src = torch.tensor([1, 2, 3, 4, 5, 6])
+    >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
+    >>> input = torch.zeros(3)
+    >>> torch.scatter_reduce(input, 0, index, src, reduce="sum")
+    tensor([4, 12, 5])
+
+""".format(**reproducibility_notes))
+
 add_docstr(torch.select,
            r"""
 select(input, dim, index) -> Tensor
@@ -9741,10 +9795,10 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension(s). Elements that are shifted beyond the
-last position are re-introduced at the first position. If a dimension is not
-specified, the tensor will be flattened before rolling and then restored
-to the original shape.
+Roll the tensor :attr:`input` along the given dimension(s). Elements that are
+shifted beyond the last position are re-introduced at the first position. If
+:attr:`dims` is `None`, the tensor will be flattened before rolling and then
+restored to the original shape.
 
 Args:
     {input}
@@ -9762,6 +9816,11 @@ Example::
             [3, 4],
             [5, 6],
             [7, 8]])
+    >>> torch.roll(x, 1)
+    tensor([[8, 1],
+            [2, 3],
+            [4, 5],
+            [6, 7]])
     >>> torch.roll(x, 1, 0)
     tensor([[7, 8],
             [1, 2],
@@ -11507,6 +11566,34 @@ Example::
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
     tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
        quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
+""")
+
+add_docstr(torch.quantize_per_tensor_dynamic,
+           r"""
+quantize_per_tensor_dynamic(input, dtype, reduce_range) -> Tensor
+
+Converts a float tensor to a quantized tensor with scale and zero_point calculated
+dynamically based on the input.
+
+Arguments:
+    input (Tensor): float tensor or list of tensors to quantize
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``
+    reduce_range (bool): a flag to indicate whether to reduce the range of quantized
+    data by 1 bit, it's required to avoid instruction overflow for some hardwares
+
+Returns:
+    Tensor: A newly (dynamically) quantized tensor
+
+Example::
+
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> print(t)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
+           zero_point=85)
+    >>> t.int_repr()
+    tensor([  0,  85, 170, 255], dtype=torch.uint8)
 """)
 
 add_docstr(torch.quantize_per_channel,

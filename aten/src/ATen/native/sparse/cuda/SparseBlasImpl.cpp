@@ -1,4 +1,7 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
@@ -7,6 +10,14 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
@@ -107,6 +118,15 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.col_indices().resize_({nnz}),
       input.values().resize_({nnz}),
       input.sizes());
+}
+
+void inline bsrsv2_bsrsm2_may_need_to_sync() {
+#if defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11703
+  // cusparse bsrsv2 and bsrsm2 have a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
+  // See https://github.com/pytorch/pytorch/issues/71297
+  ::c10::cuda::device_synchronize();
+#endif
+  // else: do nothing!
 }
 
 void block_sparse_triangular_solve_vec(
@@ -219,6 +239,8 @@ void block_sparse_triangular_solve_vec(
             X_->data_ptr<scalar_t>(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
+
+        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -349,6 +371,8 @@ void block_sparse_triangular_solve_mat(
             ldx,
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
+
+        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -583,9 +607,10 @@ void spmm(
       result.scalar_type(),
       "spmm",
       [&] {
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
-        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto beta_ = beta.to<opmath_t>();
+        auto alpha_ = alpha.to<opmath_t>();
+        cudaDataType compute_type = at::cuda::getCudaDataType<opmath_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
 
         size_t buffer_size;
@@ -791,7 +816,8 @@ void addmm_out_sparse_csr(
   } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "Received unexpected tensor layouts as input.");
+    TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
+                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
 }
 

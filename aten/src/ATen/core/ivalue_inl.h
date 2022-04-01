@@ -1235,7 +1235,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // We need devices to be sorted in order to use ensureIsSubsetOfDevices.
   static std::vector<c10::Device> sortAndDeduplicateDevices(
-      const c10::impl::VirtualGuardImpl& impl,
+      const c10::impl::VirtualGuardImpl& /*impl*/,
       std::vector<c10::Device> devices) {
     std::sort(
       devices.begin(), devices.end(),
@@ -1584,6 +1584,7 @@ DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
+DEFINE_TO(c10::SymInt, toSymInt)
 
 template <class T>
 struct _fake_type {};
@@ -1981,6 +1982,13 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
+  if (v.has_value()) {
+    *this = IValue(std::move(*v));
+  }
+}
+
 template <class T, size_t N>
 inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -2192,7 +2200,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T&& x, std::false_type) {
+IValue from_(T&& /*x*/, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");

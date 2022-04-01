@@ -28,8 +28,10 @@ SECONDARY_LABELS = {
     "topic: performance",
     "topic: documentation",
     "topic: developer feature",
-    "topic: non-user visible",
+    "topic: not user facing",
 }
+# This secondary does not require a primary
+ALLOWED_ONLY_SECONDARY = {"topic: not user facing"}
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 REQUEST_HEADERS = {'Accept': 'application/vnd.github.v3+json', 'Authorization': f'token {GITHUB_TOKEN}'}
@@ -66,14 +68,19 @@ def get_repo_labels() -> List[str]:
         page_labels = list(map(lambda x: str(x["name"]), response))
         if not page_labels:
             break
-            collected_labels += page_labels
+        collected_labels += page_labels
     return collected_labels
 
 def post_pytorch_comment(pr_number: int, merger: str) -> Any:
-    message = {'body' : f"Hey {merger}. \
-    You merged this PR, but no release notes category and topic labels were added. \
-    The list of valid release and topic labels is available \
-    https://github.com/pytorch/pytorch/labels?q=release+notes+or+topic"}
+    message = {'body' : f"Hey @{merger}." + """
+You've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. \
+Please add one of each to the PR. The 'release notes: ...' label should represent the part of \
+PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should \
+represent the kind of PR it is (not user facing, new feature, bug fix, perf improvement, etc). \
+The list of valid labels can be found [here](https://github.com/pytorch/pytorch/labels?q=release+notes) \
+for the 'release notes: ...' and [here](https://github.com/pytorch/pytorch/labels?q=topic) for the \
+'topics: ...'.
+For changes that are 'topic: not user facing' there is no need for a release notes label."""}
 
     response = requests.post(
         f"{PYTORCH_REPO}/issues/{pr_number}/comments",
@@ -92,7 +99,8 @@ if __name__ == "__main__":
     repo_labels = get_repo_labels()
 
     primary_labels = set(filter(lambda x: x.startswith(PRIMARY_LABEL_FILTER), repo_labels))
-    is_properly_labeled = bool(primary_labels.intersection(labels) and SECONDARY_LABELS.intersection(labels))
+    has_both_labels = bool(primary_labels.intersection(labels) and SECONDARY_LABELS.intersection(labels))
+    is_properly_labeled = has_both_labels or bool(ALLOWED_ONLY_SECONDARY.intersection(labels))
 
     if not is_properly_labeled:
         post_pytorch_comment(pr_number, user)

@@ -16,6 +16,7 @@ from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
 )
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
@@ -872,13 +873,12 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
-            result_prepared = copy.deepcopy(prepared)
-            qgraph = convert_fx(prepared)
-            qgraph_reference = convert_fx(prepared_copy, is_reference=True)
+            qgraph = convert_fx(copy.deepcopy(prepared))
+            qgraph_reference = convert_fx(copy.deepcopy(prepared), is_reference=True)
             result = qgraph(*inputs)
-            result_quantized = copy.deepcopy(qgraph)
             result_reference = qgraph_reference(*inputs)
-            result_quantized_reference = copy.deepcopy(qgraph_reference)
+            qgraph_copy = copy.deepcopy(qgraph)
+            qgraph_reference_copy = copy.deepcopy(qgraph_reference)
 
             qgraph_to_check = qgraph_reference if is_reference else qgraph
             if print_debug_info:
@@ -888,10 +888,11 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
-            return {"prepared": result_prepared,
-                    "quantized": result_quantized,
-                    "quantized_reference": result_quantized_reference,
-                    "result": result}
+            return {"prepared": prepared_copy,
+                    "quantized": qgraph_copy,
+                    "quantized_reference": qgraph_reference_copy,
+                    "quantized_output": result,
+                    "quantized_reference_output": result_reference}
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
@@ -1694,9 +1695,9 @@ class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
     and contains both linear and conv modules
     """
-    def __init__(self):
+    def __init__(self, qconfig=None):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
+        self.qconfig = qconfig if qconfig else torch.quantization.get_default_qat_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
@@ -1710,6 +1711,13 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
+
+class ManualConvLinearSymmQATModel(ManualConvLinearQATModel):
+    r"""Same as ManualConvLinearQATModule but with Symmetric Quantization.
+    Supported only with qnnpack.
+    """
+    def __init__(self):
+        super().__init__(default_symmetric_qnnpack_qat_qconfig)
 
 class ManualEmbeddingBagLinear(nn.Module):
     def __init__(self):

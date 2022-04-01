@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -230,10 +231,17 @@ static Value* tryMatchArgument(
 
 c10::optional<size_t> findInputWithName(
     const std::string& name,
-    at::ArrayRef<NamedValue> kwargs) {
+    at::ArrayRef<NamedValue> kwargs,
+    bool is_aten) {
   for (const auto i : c10::irange(kwargs.size())) {
-    if (kwargs[i].name() == name)
+    // TS doesn't understand that the self argument in function
+    // scheams is renamed to input for the functional variant
+    if (is_aten && name == "self" && kwargs[i].name() == "input") {
       return i;
+    }
+    if (kwargs[i].name() == name) {
+      return i;
+    }
   }
   return c10::nullopt;
 }
@@ -342,6 +350,13 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   std::vector<Value*> positional_inputs;
   std::vector<bool> used_kwarg(kwargs.size(), false);
 
+  auto schema_namespace = schema.operator_name().getNamespace();
+  bool is_aten = false;
+  if (schema_namespace.has_value()) {
+    if (schema_namespace.value() == "aten") {
+      is_aten = true;
+    }
+  }
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
   for (const auto schema_i : c10::irange(schema.arguments().size())) {
@@ -386,7 +401,8 @@ static c10::optional<MatchedSchema> tryMatchSchema(
       // used
       actual_named_value = args[used_args];
       used_args++;
-    } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
+    } else if (
+        auto kwarg_idx = findInputWithName(arg.name(), kwargs, is_aten)) {
       const NamedValue& nv = kwargs[*kwarg_idx];
       if (used_kwarg[*kwarg_idx]) {
         if (failure_messages) {

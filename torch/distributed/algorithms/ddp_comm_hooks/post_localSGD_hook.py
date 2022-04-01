@@ -5,6 +5,8 @@ import torch.distributed as dist
 
 from . import default_hooks as default
 
+logger = logging.getLogger(__name__)
+
 
 class PostLocalSGDState(object):
     r"""
@@ -28,7 +30,7 @@ class PostLocalSGDState(object):
         subgroup,
         start_localSGD_iter,
     ):
-        logging.info(
+        logger.info(
             "Local SGD will be started after {} iterations".format(start_localSGD_iter)
         )
 
@@ -47,7 +49,7 @@ class PostLocalSGDState(object):
             self.iter += 1
 
         if self.iter == self.start_localSGD_iter:
-            logging.info(
+            logger.info(
                 "Start to apply local SGD after {} iterations.".format(self.iter)
             )
 
@@ -81,7 +83,6 @@ def post_localSGD_hook(
     global_group_to_use = (
         state.process_group if state.process_group is not None else dist.group.WORLD
     )
-    world_size = global_group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.buffer()

@@ -15,6 +15,8 @@
 namespace torch {
 namespace jit {
 
+using ExtraFilesMap = std::unordered_map<std::string, std::string>;
+
 // On high level, to produce a Module from a file on disk, we need to go
 // through the follow steps:
 // 1. Read: Read the file from disk -> memory
@@ -50,7 +52,17 @@ TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
 
-class FlatbufferLoader {
+TORCH_API void parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files);
+
+TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_file_content(
+    const char* filename);
+
+TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
+    std::istream& in);
+
+class TORCH_API FlatbufferLoader {
  public:
   FlatbufferLoader();
 
@@ -60,6 +72,16 @@ class FlatbufferLoader {
       mobile::serialization::IValueUnion ivalue_type,
       IValueParser parser);
   mobile::Module parseModule(mobile::serialization::Module* module);
+
+  void extractJitSourceAndConstants(
+      ExtraFilesMap* jit_sources,
+      std::vector<IValue>* constants);
+
+  typedef TypePtr (*TypeResolver)(
+      const std::string& type_str,
+      std::shared_ptr<CompilationUnit> cu);
+
+  void internal_registerTypeResolver(TypeResolver type_resolver);
 
   IValue& getIValue(uint32_t pos) {
     TORCH_CHECK(pos < all_ivalues_.size());
@@ -103,7 +125,9 @@ class FlatbufferLoader {
       IValueParser,
       static_cast<uint8_t>(mobile::serialization::IValueUnion::MAX) + 1>
       ivalue_parsers_;
+  TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;
+  bool module_parsed_ = false;
 };
 
 } // namespace jit

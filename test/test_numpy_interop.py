@@ -8,8 +8,8 @@ from itertools import product
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes)
-from torch.testing._internal.common_dtype import get_all_dtypes
+    (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -228,6 +228,7 @@ class TestNumPyInterop(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
+    @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
         warning_msg = r"Creating a tensor from a list of non-contiguous numpy.ndarrays is extremely slow"
         with self.assertWarnsOnceRegex(UserWarning, warning_msg):
@@ -421,7 +422,7 @@ class TestNumPyInterop(TestCase):
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.long).storage())
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.uint8).storage())
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
             tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),

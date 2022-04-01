@@ -344,7 +344,6 @@ int convex_hull_graham(
     Eigen::Vector2f* q,
     bool shift_to_zero = false) {
   CAFFE_ENFORCE(num_in >= 2);
-  std::vector<int> order;
 
   // Step 1:
   // Find point with minimum y
