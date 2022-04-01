@@ -654,7 +654,8 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
     }
     if (type->cast<ListType>() &&
         type->cast<ListType>()->getElementType()->cast<IntType>()) {
-      if (node_->input(node_index)->node()->kind() == prim::ListConstruct &&
+      auto input_src_node = node_->input(node_index)->node();
+      if (input_src_node->kind() == prim::ListConstruct &&
           !db.hasWriters(node_->input(node_index))) {
         // it is a very common in graphs to see patterns like:
         // z = x.view(y.size())
@@ -693,13 +694,13 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
         input_shapes.emplace_back(ShapeArguments(shape));
         continue;
       }
-    }
-    if (node_->input(node_index)->node()->kind() == aten::size &&
-        !db.hasWriters(node_->input(node_index))) {
-      auto ten_inp = node_->input(node_index)->node()->input();
-      auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
-      input_shapes.emplace_back(ss);
-      continue;
+      if (input_src_node->kind() == aten::size &&
+          !db.hasWriters(node_->input(node_index))) {
+        auto ten_inp = input_src_node->input();
+        auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
+        input_shapes.emplace_back(ss);
+        continue;
+      }
     }
     GRAPH_DEBUG(
         "Unhandled input: ",
