@@ -1221,6 +1221,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qreduction.cpp",
     "aten/src/ATen/native/quantized/cpu/qrelu.cpp",
     "aten/src/ATen/native/quantized/cpu/qsigmoid.cpp",
+    "aten/src/ATen/native/quantized/cpu/qsoftmax.cpp",
     "aten/src/ATen/native/quantized/cpu/qsort.cpp",
     "aten/src/ATen/native/quantized/cpu/qtanh.cpp",
     "aten/src/ATen/native/quantized/cpu/qthreshold.cpp",
