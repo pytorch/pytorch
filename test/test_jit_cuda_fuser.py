@@ -11,10 +11,14 @@ import operator
 import torch
 from torch.nn import functional
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
+from torch.testing._internal.common_jit import JitCommonTestCase
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS, slowTest
+from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
+from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
 
 from jit.test_fuser_common import TestFuserCommon  # noqa: F401
@@ -72,6 +76,28 @@ def is_pre_volta():
     return prop.major < 7
 
 TEST_BF16 = RUN_NVFUSER and torch.cuda.is_bf16_supported()
+
+class CudaFuserTestOptions():
+    def __init__(self):
+        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
+        torch._C._debug_set_autodiff_subgraph_inlining(False)
+        self.old_value = torch._C._jit_set_autocast_mode(True)
+
+        if(RUN_CUDA):
+            self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(True)
+
+    def restore(self):
+        if(RUN_CUDA):
+            torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
+        torch._C._jit_set_nvfuser_guard_mode(self.old_guard)
+        torch._C._debug_set_autodiff_subgraph_inlining(True)
+        torch._C._jit_set_autocast_mode(self.old_value)
 
 class TestCudaFuser(JitTestCase):
     def _getSubgraphInFusion(self, graph):
@@ -131,15 +157,11 @@ class TestCudaFuser(JitTestCase):
 
         if(RUN_NVFUSER):
             self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(True)
+            self.cuda_fuser_options = CudaFuserTestOptions()
 
     def tearDown(self):
         if(RUN_NVFUSER):
-            torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
-        torch._C._jit_set_nvfuser_guard_mode(self.old_guard)
-        torch._C._debug_set_autodiff_subgraph_inlining(True)
-        torch._C._jit_set_autocast_mode(self.old_value)
+            self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
 
     def _run_helper(self, jit_op, op, *args):
@@ -4413,6 +4435,43 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
+
+
+class TestCudaFuserOpInfo(JitCommonTestCase):
+    def setUp(self):
+        if RUN_NVFUSER:
+            self.cuda_fuser_options = CudaFuserTestOptions()
+        self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
+
+    def tearDown(self):
+        if RUN_NVFUSER:
+            self.cuda_fuser_options.restore()
+        torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
+
+    @slowTest
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @ops(op_db, dtypes=OpDTypes.supported)
+    def test_nvfuser_correctness(self, device, dtype, op):
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
+
+        for variant, sample in variant_sample_pairs:
+            trace = create_traced_fn(self, variant)
+            ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            self.assertEqual(ref, val)
+
+        # https://github.com/pytorch/pytorch/issues/35600
+        # each torch.jit.trace adds state to the _python_cu compilation unit
+        # since this test traces a lot of functions, out-of-memory can occur
+        # if the CU is not cleared.
+        torch.jit._state._python_cu.drop_all_functions()
+
+instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
+
 
 if __name__ == '__main__':
     run_tests()
