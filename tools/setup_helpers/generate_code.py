@@ -27,7 +27,6 @@ def all_generator_source() -> List[str]:
 
 
 def generate_code(ninja_global: Optional[str] = None,
-                  nn_path: Optional[str] = None,
                   native_functions_path: Optional[str] = None,
                   install_dir: Optional[str] = None,
                   subset: Optional[str] = None,
@@ -135,7 +134,6 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--native-functions-path')
-    parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
     parser.add_argument(
@@ -176,7 +174,6 @@ def main() -> None:
 
     generate_code(
         options.ninja_global,
-        options.nn_path,
         options.native_functions_path,
         options.install_dir,
         options.subset,
@@ -202,6 +199,7 @@ def main() -> None:
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
+                            backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
                             impl_path=ts_native_functions,
