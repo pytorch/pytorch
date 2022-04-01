@@ -428,26 +428,28 @@ class TestForeach(TestCase):
         op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         ref_output = ref(inputs, ord=ord, is_foreach_norm=opinfo.name == "_foreach_norm")
         actual_output = op(inputs, self.is_cuda, is_fastpath, ord=ord)
-        print(f"{ref_output, actual_output}")
+        print(f"{ord, ref_output, actual_output}")
         self.assertEqual(ref_output, actual_output)
 
     @ops(foreach_reduce_op_db)
     def test_reduce_fastpath(self, device, dtype, op):
         # for N, ord in itertools.product(N_values, (0, 1, 2, -1, -2)):
-        for N, ord in itertools.product(N_values, (2,)):
+        for N, ord in itertools.product(N_values, (-1, 0, 1, 2)):
+        # for N, ord in itertools.product(N_values, (1,)):
             # TODO (mkozuki): Fix `n_expected_cudaLaunchKernels`
             if ord in (1, 2) and dtype in torch.testing.get_all_fp_dtypes():
                 n_expected_cudaLaunchKernels = 3
             else:
                 n_expected_cudaLaunchKernels = N * 2 + 1 + int(dtype in (torch.complex32, torch.complex64, torch.complex128))
-            inputs = op.sample_inputs(device, dtype, N, noncontiguous=False),
+            inputs = op.sample_inputs(device, dtype, N // 2, noncontiguous=False, low=0, high=0.1),
             self._reduce_test(op, inputs, ord, True, n_expected_cudaLaunchKernels)
 
     @ops(foreach_reduce_op_db)
     def test_reduce_slowpath(self, device, dtype, op):
         # for N, ord in itertools.product(N_values, (0, 1, 2, -1, -2)):
-        for N, ord in itertools.product(N_values, (2,)):
-            inputs = op.sample_inputs(device, dtype, N, noncontiguous=True),
+        for N, ord in itertools.product(N_values, (-1, 0, 1, 2)):
+        # for N, ord in itertools.product(N_values, (2,)):
+            inputs = op.sample_inputs(device, dtype, N // 2, noncontiguous=True, low=0, high=0.1),
             self._reduce_test(op, inputs, ord, False, 1)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))

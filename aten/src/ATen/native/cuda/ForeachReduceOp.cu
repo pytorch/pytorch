@@ -92,7 +92,7 @@ struct LpNormFunctor {
     for (int i = 0; i < kILP; i++) {
       val += vals[i];
     }
-    auto final = at::native::cuda_utils::BlockReduceSum(val, s_vals);
+    const auto final = at::native::cuda_utils::BlockReduceSum(val, s_vals);
 
     if (threadIdx.x == 0) {
       if (per_tensor) {
@@ -218,65 +218,6 @@ std::vector<Tensor> foreach_tensor_norm_per_tensor_cuda(TensorList tensors, cons
   return result;
 }
 
-Tensor global_norm_cuda_impl(TensorList tensors, const Scalar& ord) {
-  TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm supports int and float ord");
-  double p;
-  if (ord.isIntegral(false)) {
-    p = ord.to<int64_t>();
-  }
-  if (ord.isFloatingPoint()) {
-    p = ord.to<double>();
-  }
-  check_foreach_api_restrictions(tensors);
-  const bool has_int_or_complex = std::any_of(tensors.begin(), tensors.end(), [](const auto & t) {
-      const auto scalar_type = t.scalar_type();
-      return at::isIntegralType(scalar_type, /*includeBool*/true) || at::isComplexType(scalar_type);
-  });
-  if (!can_use_fast_route(tensors) ||
-      has_int_or_complex ||
-      !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
-    return foreach_tensor_norm_slow(tensors, ord);
-  }
-
-  const int num_tensors = tensors.size();
-  int max_chunks_per_tensor = -1;
-
-  for (const int & t : c10::irange(num_tensors)) {
-    const int max_chunks_this_tensor = (tensors[0][t].numel() + kChunkSize - 1) / kChunkSize;
-    if (max_chunks_this_tensor > max_chunks_per_tensor) {
-      max_chunks_per_tensor = max_chunks_this_tensor;
-    }
-  }
-  const auto options = tensors[0].options();
-  auto output = at::zeros({320}, options.dtype(toOpMathType(tensors[0].scalar_type())));
-  auto ret = at::empty({}, options);
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
-  if (p == static_cast<double>(1)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, tensor_lists[0][0].scalar_type(), "global_norm_cuda_impl",
-      [&]() {
-        using opmath_t = typename at::opmath_type<scalar_t>;
-        multi_tensor_apply<1>(
-          tensor_lists,
-          LpNormFunctor<scalar_t, 1>(),
-          output.data_ptr<opmath_t>(),
-          max_chunks_per_tensor,
-          false);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-        const at::cuda::OptionalCUDAGuard device_guard(device_of(output));
-        auto stream = at::cuda::getCurrentCUDAStream();
-        lpnorm_cleanup<scalar_t, 1><<<num_tensors, 512, 0, stream>>>(
-          output.data_ptr<scalar_t>(),
-          ret.data_ptr<scalar_t>(),
-          max_chunks_per_tensor,
-          false);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    );
-  }
-  return ret;
-}
-
 Tensor foreach_tensor_norm_cuda(TensorList tensors, const Scalar& ord) {
   const auto p = convert_ord_to_double(ord);
   check_foreach_api_restrictions(tensors);
@@ -304,7 +245,7 @@ Tensor foreach_tensor_norm_cuda(TensorList tensors, const Scalar& ord) {
   const auto output_scalar_type = tensors[0].scalar_type();
   const auto options = tensors[0].options();
   auto output = at::zeros({320}, options.dtype(toOpMathType(output_scalar_type)));
-  auto ret = at::empty({0}, options);
+  auto ret = at::empty({}, options);
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
   constexpr bool per_tensor = false;
 

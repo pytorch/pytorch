@@ -6658,20 +6658,7 @@ class ForeachFuncInfo(OpInfo):
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
 
-        if name == "norm_per_tensor":
-            self.ref = torch.linalg.vector_norm
-        if name == "norm":
-
-            # def _ref_foreach_norm(tensor, ord):
-            #     dtype = torch.float32 if tensor.dtype in (torch.bfloat16, torch.float16) else tensor.dtype
-            #     norm = torch.linalg.vector_norm(tensor, ord, dtype=dtype)
-            #     if norm == 0:
-            #         return norm
-            #     else:
-            #         return torch.pow(norm, ord)
-
-            # self.ref = _ref_foreach_norm
-
+        if name in ("norm_per_tensor", "norm"):
             self.ref = torch.linalg.vector_norm
 
 
