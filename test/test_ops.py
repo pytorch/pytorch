@@ -218,6 +218,15 @@ class TestCommon(TestCase):
         finally:
             torch.set_default_dtype(cur_default)
 
+    # Tests Python reference implementations
+    _python_ref_ops = tuple(filter(lambda op: op.python_ref not in (None, _NOTHING), op_db))
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(_python_ref_ops)
+    def test_python_references(self, device, dtype, op):
+        for sample_input in op.reference_inputs(device, dtype):
+            self.compare_with_python_reference(op, op.python_ref, sample_input)
+
     @skipMeta
     @onlyNativeDeviceTypes
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)

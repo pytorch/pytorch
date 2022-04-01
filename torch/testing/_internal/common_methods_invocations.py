@@ -13,6 +13,7 @@ import torch
 import numpy as np
 from torch._six import inf
 import collections.abc
+from torch import _refs as python_refs
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -518,6 +519,8 @@ class OpInfo(object):
                  *,
                  ref=None,  # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
                             # If given, the op will be compared with its reference on each of its sample inputs.
+                 python_ref=None,  # An optional Python reference function
+                                   # If given, the reference will be compared with the op on each sample input
                  # the following metadata describes the operator, its variants,
                  #   and its aliases, if any
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
@@ -632,6 +635,7 @@ class OpInfo(object):
 
         self.name = name
         self.ref = ref
+        self.python_ref = python_ref
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
 
@@ -8406,6 +8410,7 @@ op_db: List[OpInfo] = [
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
                     else np.add(input, np.multiply(alpha, other)),
+                    python_ref=python_refs.add,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     assert_autodiffed=True,
                     sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
