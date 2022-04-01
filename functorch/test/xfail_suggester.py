@@ -28,14 +28,16 @@ base_names = {
     'test_vmapvjp_',
     'test_vmapvjp_has_batch_rule_',
     'test_vjpvmap_',
-    'test_vmap_exhaustive_',
-    'test_op_has_batch_rule_',
     'test_jvp_',
     'test_vmapjvp_',
+    'test_vmapjvpall_has_batch_rule',
     'test_vmapjvpall_',
     'test_jvpvjp_',
+    'test_vjpvjp_',
     'test_decomposition_',
     'test_make_fx_',
+    'test_vmap_exhaustive_',
+    'test_op_has_batch_rule_',
 }
 
 failed_tests = [get_failed_test(line) for line in lines]
