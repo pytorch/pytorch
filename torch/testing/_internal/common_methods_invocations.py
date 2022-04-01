@@ -5490,7 +5490,7 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
         yield SampleInput(l.detach().clone().requires_grad_(requires_grad), kwargs=dict(upper=False))
 
         # generate upper-triangular inputs
-        u = l.detach().mT.contiguous().requires_grad_(requires_grad)
+        u = l.detach().clone().mT.contiguous().requires_grad_(requires_grad)
         yield SampleInput(u, kwargs=dict(upper=True))
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
