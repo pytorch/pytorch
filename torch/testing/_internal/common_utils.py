@@ -2063,7 +2063,6 @@ class TestCase(expecttest.TestCase):
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
         self.assertEqual(actual, expected, exact_device=False, **kwargs)
-<<<<<<< HEAD
 
     def compare_with_python_reference(self, torch_fn, python_ref_fn, sample_input, **kwargs):
         inp, args, kwargs = sample_input.input, sample_input.args, sample_input.kwargs
@@ -2071,9 +2070,14 @@ class TestCase(expecttest.TestCase):
         actual = python_ref_fn(inp, *args, **kwargs)
         expected = torch_fn(inp, *args, **kwargs)
 
-        torch.testing.assert_close(actual, expected)
-=======
->>>>>>> e1ac97030a872a20fef2568e37b69684fc166c11
+        self.assertEqual(
+            actual,
+            expected,
+            equal_nan=True,
+            exact_device=True,
+            exact_layout=True,
+            exact_stride=True,
+            exact_is_coalesced=True)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single

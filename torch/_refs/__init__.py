@@ -128,9 +128,9 @@ def type_promote_elementwise(*_args, int_to_float=False):
   # Determines datatypes for each category
   scalar_args = filter(lambda x: isinstance(x, Number), args)
   scalar_type_kind = reduce(
-    lambda acc, x: _higher_type_kind(type(acc), type(x)),
+    lambda acc, x: _higher_type_kind(acc, type(x)),
     scalar_args,
-    False)
+    bool)
 
   scalar_tensors = filter(lambda t: isinstance(t, Tensor) and t.ndim == 0, args)
   scalar_tensor_dtype = reduce(
@@ -213,7 +213,6 @@ def _broadcast_shapes(*_shapes):
 def broadcast(*args):
   # Computes common shape
   common_shape = _broadcast_shapes(*map(lambda t: t.shape if isinstance(t, Tensor) else None, args))
-  common_rank = len(common_shape) + 1
 
   def _maybe_broadcast(x, shape):
     if x is None:
@@ -221,6 +220,7 @@ def broadcast(*args):
     elif isinstance(x, Number):
       return x
     elif isinstance(x, Tensor):
+      common_rank = len(common_shape) + 1
       start = common_rank - (len(x.shape) + 1)
       dims = tuple(range(start, len(x.shape) + start))
 
@@ -239,7 +239,7 @@ def add(a, b, *, alpha=None, out=None):
   a, b, alpha = broadcast(a, b, alpha)
 
   if alpha is not None:
-    result = prims.mul(b, alpha)
+    b = prims.mul(b, alpha)
 
   result = prims.add(a, b)
 
