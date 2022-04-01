@@ -153,16 +153,30 @@ TEST(FlatbufferTest, ExtraFiles) {
   extra_files["metadata.json"] = "abc";
   extra_files["mobile_info.json"] = "{\"key\": 23}";
 
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+#if defined ENABLE_FLATBUFFER
+  std::stringstream ss;
+  module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
+
+  loaded_extra_files["metadata.json"] = "";
+  auto mobile_module = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  // load it twice using the same stream
+  auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+#else
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(*module, options);
   auto buff = save_mobile_module_to_bytes(bc, extra_files);
 
-  std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
   auto* flatbuffer_module =
       mobile::serialization::GetMutableModule(buff.data());
 
   parseExtraFiles(flatbuffer_module, loaded_extra_files);
+#endif
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -234,6 +248,23 @@ TEST(FlatbufferTest, Inline) {
   output = bc2.get_method("foo3")(inputs2);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
+
+#if defined ENABLE_FLATBUFFER
+TEST(FlatbufferTest, GetByteCodeVersion) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor):
+      return input + 1
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, /*use_flatbuffer=*/true);
+  auto version = _get_model_bytecode_version(ss);
+  AT_ASSERT(version == caffe2::serialize::kProducedBytecodeVersion);
+  ss.seekg(0, ss.beg);
+  auto version_again = _get_model_bytecode_version(ss);
+  AT_ASSERT(version == version_again);
+}
+#endif
 
 TEST(FlatbufferTest, Tuple) {
   Module m("m");

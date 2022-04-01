@@ -54,7 +54,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@master
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
           use-gha: true
@@ -77,11 +77,13 @@ jobs:
 
       - name: Test
         run: |
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          export COMMIT_MESSAGES
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@master
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           use-gha: true

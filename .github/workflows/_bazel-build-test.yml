@@ -28,18 +28,21 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
+        uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -109,6 +112,8 @@ jobs:
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          export COMMIT_MESSAGES
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
@@ -138,11 +143,11 @@ jobs:
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
 
       - name: Chown workspace
-        uses: pytorch/pytorch/.github/actions/chown-workspace@master
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@master
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           file-suffix: bazel-${{ github.job }}
@@ -170,5 +175,5 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: pytorch/pytorch/.github/actions/teardown-linux@master
+        uses: ./.github/actions/teardown-linux
         if: always()
