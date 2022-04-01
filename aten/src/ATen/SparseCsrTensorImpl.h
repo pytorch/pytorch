@@ -43,7 +43,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& crow_indices() const { return crow_indices_; }
   const Tensor& col_indices() const { return col_indices_; }
   const Tensor& values() const { return values_; }
-  int nnz() { return col_indices_.size(-1); }
+  int nnz() { return values_.size(0); }
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.

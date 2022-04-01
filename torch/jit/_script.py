@@ -543,7 +543,6 @@ if _enabled:
             Pickler's ``persistent_load`` function.
             """
             assert isinstance(exporter.zip_file, TorchScriptPackageZipFileWriter)
-
             script_module_serializer = exporter.zip_file.script_module_serializer
             script_module_id = exporter.get_unique_id()
             script_module_serializer.serialize(self._c, int(script_module_id))
