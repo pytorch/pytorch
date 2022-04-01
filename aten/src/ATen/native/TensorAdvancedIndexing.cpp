@@ -74,13 +74,29 @@
 namespace at {
 namespace meta {
 
-native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
-  if (reduce == "add") {
-    return native::SCATTER_GATHER_OP::REDUCE_ADD;
-  } else if (reduce == "multiply") {
-    return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce, bool use_new_options = false) {
+  if (use_new_options) {
+    if (reduce == "sum") {
+      return native::SCATTER_GATHER_OP::REDUCE_ADD;
+    } else if (reduce == "prod") {
+      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+    } else if (reduce == "mean") {
+      return native::SCATTER_GATHER_OP::REDUCE_MEAN;
+    } else if (reduce == "amax") {
+      return native::SCATTER_GATHER_OP::REDUCE_MAXIMUM;
+    } else if (reduce == "amin") {
+    return native::SCATTER_GATHER_OP::REDUCE_MINIMUM;
+    } else {
+      TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin.");
+    }
   } else {
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
+    if (reduce == "add") {
+      return native::SCATTER_GATHER_OP::REDUCE_ADD;
+    } else if (reduce == "multiply") {
+      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+    } else {
+      TORCH_CHECK(false, "reduce argument must be either add or multiply.")
+    }
   }
 }
 
@@ -113,7 +129,7 @@ TORCH_META_FUNC(gather)
   at::native::gather_shape_check(self, wrapped_dim, index);
 }
 
-template <typename Meta>
+template <bool use_new_options = false, typename Meta>
 void scatter_meta_impl(
     Meta& meta,
     const Tensor& self,
@@ -137,7 +153,7 @@ void scatter_meta_impl(
   meta.set_output(self.sizes(), self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
-    get_operator_enum(reduce.value());
+    get_operator_enum(reduce.value(), use_new_options);
   }
 }
 
@@ -172,6 +188,15 @@ TORCH_META_FUNC2(scatter, value_reduce)
 TORCH_META_FUNC(scatter_add)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   scatter_meta_impl(*this, self, dim, index, src, "add");
+}
+
+TORCH_META_FUNC2(scatter_reduce, two)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const c10::string_view reduce) {
+  scatter_meta_impl</*use_new_options=*/true>(*this, self, dim, index, src, reduce);
 }
 
 TORCH_PRECOMPUTE_META_FUNC(index_copy)
@@ -296,6 +321,7 @@ DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 DEFINE_DISPATCH(scatter_reduce_stub);
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
+DEFINE_DISPATCH(scatter_reduce_two_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -880,9 +906,6 @@ Tensor & index_select_out_cpu_dim1_(
 
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
             dst_floats[i] = src_floats[idx];
           }
         }
@@ -892,10 +915,6 @@ Tensor & index_select_out_cpu_dim1_(
         for (const auto batch : c10::irange(outer_dims_product)) {
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
-
             auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
             auto dst = out + batch * gathered_batch_bytesize + i * block_bytesize;
             memcpy(dst, src, block_bytesize);
@@ -1176,7 +1195,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
 }
 
-template <typename T, typename ReduceStub, typename FillStub>
+template <bool use_new_options = false, typename T, typename ReduceStub, typename FillStub>
 void scatter_impl(
     const Tensor& self,
     int64_t dim,
@@ -1197,7 +1216,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   if (reduce.has_value()) {
-    auto op = meta::get_operator_enum(reduce.value());
+    auto op = meta::get_operator_enum(reduce.value(), use_new_options);
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
     fill_stub(self.device().type(), mut_out, dim, index, src);
@@ -1282,113 +1301,31 @@ TORCH_IMPL_FUNC(scatter_add)
   }
 }
 
-Tensor scatter_reduce_two_cpu(const Tensor& self,
-                              int64_t dim,
-                              const Tensor& index,
-                              const c10::string_view reduce,
-                              const c10::optional<int64_t> output_size) {
+TORCH_IMPL_FUNC(scatter_reduce_two)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const c10::string_view reduce,
+ const Tensor& out) {
+  // See issue https://github.com/pytorch/pytorch/issues/74770
+  TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.");
 
-  // TODO: Add documentation.
+  scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
+                                         scatter_reduce_two_stub,
+                                         scatter_stub,
+                                         reduce);
 
-
-  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
-      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
-
-  dim = dim < 0 ? dim + self.dim() : dim;
-
-  auto sizes = self.sizes().vec();
-  if (output_size.has_value()) {
-    sizes[dim] = output_size.value();
-  } else {
-    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
-  }
-  Tensor out = at::empty(sizes, self.options());
-
-  TORCH_CHECK(self.dim() == index.dim(),
-      "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
-  for (const auto i : c10::irange(self.dim())) {
-    TORCH_CHECK(self.size(i) == index.size(i),
-        "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
-  }
-
-  TORCH_CHECK(reduce == "sum" || reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce =="amin",
-              "`reduce` argument must be one of ('sum', 'prod', 'mean', 'amax', 'amin'");
-
-  if (self.numel() == 0) {
-    return out.zero_();
-  }
-
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
-    if (reduce == "prod") {
-      out.fill_((scalar_t)1);
-    } else if (reduce == "amax") {
-      out.fill_(std::numeric_limits<scalar_t>::lowest());
-    } else if (reduce == "amin") {
-      out.fill_(std::numeric_limits<scalar_t>::max());
+  if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
+    auto ones = at::ones_like(src);
+    auto count = at::ones_like(out);
+    count.scatter_add_(dim, index, ones);
+    if (out.is_floating_point() || out.is_complex()) {
+      out.div_(count);
     } else {
-      out.fill_((scalar_t)0);
+      out.div_(count, "floor");
     }
-
-
-    auto self_cont = self.contiguous();
-    auto index_cont = index.contiguous();
-    auto self_data = self_cont.data_ptr<scalar_t>();
-    auto index_data = index_cont.data_ptr<int64_t>();
-    bool out_is_contiguous = out.is_contiguous();
-    auto out_cont = out.contiguous();
-    auto out_cont_data = out_cont.data_ptr<scalar_t>();
-
-    auto counts = at::zeros_like(out_cont);
-    auto counts_data = counts.data_ptr<scalar_t>();
-
-
-    int64_t offset1 = 1, offset2 = 1;
-    for (const auto d : c10::irange(dim)) {
-      offset1 *= self.size(d);
-    }
-    for (int64_t d = dim + 1; d < self.dim(); d++) {
-      offset2 *= self.size(d);
-    }
-
-    scalar_t value;
-    int64_t dim_index;
-    for (const auto i : c10::irange(offset1)) {
-      for (const auto j : c10::irange(self.size(dim))) {
-        for (const auto k : c10::irange(offset2)) {
-          value = self_data[i * self_cont.stride(dim) * self_cont.size(dim) + j * self_cont.stride(dim) + k];
-          dim_index = index_data[i * index_cont.stride(dim) * index_cont.size(dim) + j * index_cont.stride(dim) + k];
-          TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
-              "Expected `index` values to be in range ", 0, " to ", out.size(dim), " (got ", dim_index, ")");
-          int64_t ind = i * out_cont.stride(dim) * out_cont.size(dim) + dim_index * out_cont.stride(dim) + k;
-          if (reduce == "sum") {
-            out_cont_data[ind] += value;
-          } else if (reduce == "prod") {
-            out_cont_data[ind] *= value;
-          } else if (reduce == "mean") {
-            auto n = counts_data[ind];
-            out_cont_data[ind] = (out_cont_data[ind] * n + value) / (n + 1);
-            counts_data[ind] += 1;
-          } else if (reduce == "amax") {
-            out_cont_data[ind] = std::max(out_cont_data[ind], value);
-          } else {
-            out_cont_data[ind] = std::min(out_cont_data[ind], value);
-          }
-        }
-      }
-    }
-
-    if (reduce == "amin" || reduce == "amax") {
-      auto val = (reduce == "amin") ? std::numeric_limits<scalar_t>::max() : std::numeric_limits<scalar_t>::lowest();
-      out_cont.masked_fill_(out_cont == val, (scalar_t)0);
-    }
-
-    if (!out_is_contiguous) {
-      out.copy_(out_cont);
-    }
-
-  });
-
-  return out;
+  }
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {

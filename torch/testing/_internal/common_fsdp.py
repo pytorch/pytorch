@@ -18,6 +18,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
+from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -242,6 +243,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
+        sharding_strategy=None,
         **kwargs
     ):
         super().__init__(
@@ -251,6 +253,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                sharding_strategy=sharding_strategy,
             ),
             **kwargs
         )
@@ -480,6 +483,7 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
+        sharding_strategy=None,
         save_model=True,
         clip_norm=0.3,
         norm_type=None,
@@ -509,13 +513,19 @@ class FSDPTest(MultiProcessTestCase):
                 wrap_fsdp=True,
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
-                backward_prefetch=backward_prefetch
+                backward_prefetch=backward_prefetch,
+                sharding_strategy=sharding_strategy,
             )
         except Exception as e:
             raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
 
         cpu_offload = cpu_offload or CPUOffload()  # disabled if not specified.
-        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload, backward_prefetch=backward_prefetch)
+        model = FullyShardedDataParallel(
+            model,
+            cpu_offload=cpu_offload,
+            backward_prefetch=backward_prefetch,
+            sharding_strategy=sharding_strategy,
+        )
         # Call model.cuda() after init FSDP if specified.
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             model = model.cuda()
@@ -567,7 +577,7 @@ class FSDPTest(MultiProcessTestCase):
         )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs
+        self, group, cuda_first=False, config=None, **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
@@ -588,6 +598,49 @@ class FSDPTest(MultiProcessTestCase):
             if move_to_cuda:
                 model = model.cuda()
         return model
+
+    def _get_nonwrapped_model(
+        self, group, **model_kwargs,
+    ) -> torch.nn.Module:
+        """Returns the non-wrapped model that is wrapped in
+        :meth:`_get_wrapped_model`. The model used in these two methods should
+        be kept in sync for tests that use both for parity comparisons."""
+        return TransformerWithSharedParams(group, **model_kwargs).cuda()
+
+
+class SkipModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = nn.Linear(10, 10, bias=False)
+
+    def forward(self, x):
+        return self.lin(x)
+
+
+class NestedLinear(nn.Module):
+    def __init__(self, fsdp_wrap):
+        super().__init__()
+        if fsdp_wrap:
+            self.nested_linear = wrap(nn.Linear(10, 10, bias=False).cuda())
+        else:
+            self.nested_linear = nn.Linear(10, 10, bias=False).cuda()
+
+    def forward(self, x):
+        return self.nested_linear(x)
+
+
+class SkipModel(nn.Module):
+    def __init__(self, double_nest):
+        super().__init__()
+        self.linear = nn.Linear(10, 10, bias=False).cuda()
+        self.linear_skip = SkipModule().cuda()
+        self.nested_linear = wrap(NestedLinear(fsdp_wrap=double_nest))
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.linear_skip(x)
+        x = self.nested_linear(x)
+        return x
 
 
 def _collect_total_grad_norm_fsdp(model, norm_type, rank):

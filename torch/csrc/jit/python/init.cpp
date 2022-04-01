@@ -77,6 +77,7 @@
 #include <torch/csrc/jit/python/script_init.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
@@ -159,6 +160,28 @@ void initJITBindings(PyObject* module) {
               return c10::nullopt;
             }
             return shapeComputeGraphForSchema(n->schema());
+          })
+      .def(
+          "_jit_decomposition_graph_for_node",
+          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+            if (!n->maybeSchema()) {
+              return c10::nullopt;
+            }
+            return DecompositionGraphForSchema(n->schema());
+          })
+      .def("_jit_pass_run_decompositions", RunDecompositions)
+      // using Node* here instead of Schema because looking up the schema
+      // and passing it in from Python will have a different pointer than the
+      // schema that is globally used for caching
+      .def(
+          "_jit_register_shape_compute_graph_for_node",
+          [](Node* n, std::shared_ptr<Graph>& graph) {
+            if (n->maybeSchema()) {
+              const FunctionSchema& schema = n->schema();
+              RegisterShapeComputeGraphForSchema(schema, graph);
+            } else {
+              TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
+            }
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
@@ -600,6 +623,18 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+      .def(
+          "_jit_set_nvfuser_skip_node_kind",
+          // Args:
+          //     `op_name`: Symbol of op;
+          //     `flip`: flag indicating whether to flip the given op in the
+          //             skip list.
+          // Returns:
+          //     a bool flag indicating if `op_name` was already in the skip
+          //     list.
+          [](const std::string& op_name, bool flip = true) {
+            return fuser::cuda::skipNode(op_name, flip);
+          })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_nvfuser_single_node_mode",
@@ -672,6 +707,7 @@ void initJITBindings(PyObject* module) {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
                 TORCH_INTERNAL_ASSERT(
+                    false,
                     "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
@@ -1563,6 +1599,12 @@ void initJITBindings(PyObject* module) {
       throw std::runtime_error(e.what());
     }
   });
+
+  // On exit we need to reset the print handler to default one,
+  // because otherwise prim::Print() instruction won't work for JIT modules.
+  auto atexit = py::module_::import("atexit");
+  atexit.attr("register")(
+      py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
 } // namespace jit
 } // namespace torch
