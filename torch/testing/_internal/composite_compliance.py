@@ -24,7 +24,7 @@ def check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor):
     if metadata_wrapper_tensor == metadata_elem:
         return
     raise RuntimeError(
-        f"This operator is not CompositeImplicitAutograd compliant: the "
+        f"This operator is not Composite Compliant: the "
         f"{metadata_name} of the tensor was modified directly without "
         f"going through the PyTorch dispatcher.")
 
@@ -113,7 +113,7 @@ class CompositeCompliantTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
         # The storage of CompositeCompliantTensor should never be used directly
-        # by a CompositeImplicitAutograd operation; if the CompositeImplicitAutograd
+        # by a Composite operation; if the Composite
         # operator attempts to read from the storage without dispatching then it'll
         # raise a RuntimeError due to it being a meta storage.
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -121,7 +121,13 @@ class CompositeCompliantTensor(torch.Tensor):
             dtype=elem.dtype, layout=elem.layout,
             device=elem.device, requires_grad=elem.requires_grad,
             strides=elem.stride(), storage_offset=elem.storage_offset())
-        r.elem = elem
+
+        # CompositeCompliantTensor steals the "requires_grad"-ness.
+        if elem.requires_grad:
+            # Why clone? Because sometimes OpInfo shares inputs between tests...
+            r.elem = elem.detach().clone()
+        else:
+            r.elem = elem
         return r
 
     def __repr__(self):
@@ -138,7 +144,7 @@ class CompositeCompliantTensor(torch.Tensor):
         if func.overloadpacket.__name__ in ('set_', 'resize_'):
             raise RuntimeError(
                 f"{func.__name__} is not allowed to be called inside of "
-                f"CompositeImplicitAutograd operators.")
+                f"Composite operators.")
 
         if is_inplace(func):
             # NB: We are making an assumption that if the function is in-place,
@@ -262,14 +268,14 @@ def generate_subclass_choices_args_kwargs(args, kwargs):
 
 def raise_composite_compliance_error(err, additional_info=''):
     raise RuntimeError(
-        "CompositeImplicitAutograd compilance check failed with "
+        "Composite compilance check failed with "
         "the above error.\n"
         f"{additional_info}"
         "If you are adding an OpInfo of an "
         "existing operator, please feel free to skip this test "
         "because the problem was pre-existing and file an issue. "
         "Otherwise, if you added a new operator, please read "
-        "through the CompositeImplicitAutograd Compliance section in "
+        "through the Composite Compliance section in "
         "aten/src/ATen/native/README.md for how to resolve this. "
     ) from err
 
@@ -321,7 +327,7 @@ def check_all_permutations(op, args, kwargs):
 #
 # The general strategy is to wrap all Tensor args and kwargs in
 # CompositeCompliantTensor wrappers. If an operator that is
-# CompositeImplicitAutograd does any non-compliant behavior,
+# Composite does any non-compliant behavior,
 # CompositeCompliantTensor will raise an error.
 def check_with_mode(op, args, kwargs):
     def wrap(e):
@@ -335,3 +341,62 @@ def check_with_mode(op, args, kwargs):
     # see NOTE: [What errors are Composite Compiance trying to catch?]
     except RuntimeError as err:
         raise_composite_compliance_error(err)
+
+def gather_leaf_tensors(args, kwargs):
+    leaf_tensors = []
+    args, args_spec = tree_flatten(args)
+    kwargs, kwargs_spec = tree_flatten(kwargs)
+    args = args + kwargs
+    for arg in args:
+        if not isinstance(arg, torch.Tensor):
+            continue
+        if arg.requires_grad:
+            leaf_tensors.append(arg)
+    return leaf_tensors
+
+
+# Checks if the backward formula is composite compliant by testing
+# all possible permutations of {inputs, grad_outputs} being
+# CompositeCompliantTensor or regular Tensors.
+def check_backward_formula(op, args, kwargs):
+    assert op.supports_autograd
+
+    for choice in generate_subclass_choices_args_kwargs(args, kwargs):
+        new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
+        leaf_tensors = gather_leaf_tensors(new_args, new_kwargs)
+        assert len(leaf_tensors) > 0
+
+        try:
+            results = op(*new_args, **new_kwargs)
+        # see NOTE: [What errors are Composite Compiance trying to catch?]
+        except RuntimeError as err:
+            raise_composite_compliance_error(
+                err,
+                f"- wrapped_args: {which_args_are_wrapped}\n"
+                f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
+            )
+
+        # Hack: tree_flatten doesn't handle torch.return_types yet,
+        # so we're gonna convert them to tuple.
+        # TODO: https://github.com/pytorch/pytorch/issues/74624
+        if isinstance(results, tuple):
+            results = tuple(results)
+        flat_results, _ = tree_flatten(results)
+        flat_diff_results = [r for r in flat_results if r.requires_grad]
+        assert len(flat_diff_results) > 0
+
+        # NB: ones, not ones_like, so we get a regular Tensor here
+        grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
+                 for r in flat_diff_results]
+        for flat_new_grads, which_grad_is_batched in generate_subclass_choices(grads):
+            try:
+                torch.autograd.grad(flat_diff_results, leaf_tensors, flat_new_grads,
+                                    allow_unused=True, retain_graph=True)
+            # see NOTE: [What errors are Composite Compiance trying to catch?]
+            except RuntimeError as err:
+                raise_composite_compliance_error(
+                    err,
+                    f"- wrapped_args: {which_args_are_wrapped}\n"
+                    f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
+                    f"- wrapped_grads: {which_grad_is_batched}\n"
+                )
