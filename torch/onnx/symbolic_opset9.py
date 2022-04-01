@@ -1285,7 +1285,7 @@ def log_softmax(g, input, dim, dtype=None):
 
 @parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i")
 def _convolution(g, input, weight, bias, stride, padding, dilation,
-                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32):
+                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32=None):
     weight_size = sym_help._get_tensor_sizes(weight)
     try:
         kernel_shape = weight_size[2:]
