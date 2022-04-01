@@ -1,9 +1,6 @@
 import torch
 import torch.nn.qat as nnqat
 import operator
-from torch.fx import Node
-from typing import Dict
-
 from .observation_type import ObservationType
 
 def _get_default_op_backend_config(op, dtype_configs):
