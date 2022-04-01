@@ -369,9 +369,9 @@ class ProfilingMode(Enum):
 
 def cppProfilingFlagsToProfilingMode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     torch._C._jit_set_profiling_executor(old_prof_exec_state)
-    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+    torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
     if old_prof_exec_state:
         if old_prof_mode_state:
@@ -385,23 +385,23 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+        old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+            torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def enable_profiling_mode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         torch._C._jit_set_profiling_executor(old_prof_exec_state)
-        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+        torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def num_profiled_runs(num_runs):
@@ -646,6 +646,29 @@ def run_tests(argv=UNITTEST_ARGS):
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
+        from xmlrunner.result import _XMLTestResult  # type: ignore[import]
+
+        class XMLTestResultVerbose(_XMLTestResult):
+            """
+            Adding verbosity to test outputs:
+            by default test summary prints 'skip',
+            but we want to also print the skip reason.
+            GH issue: https://github.com/pytorch/pytorch/issues/69014
+
+            This works with unittest_xml_reporting<=3.2.0,>=2.0.0
+            (3.2.0 is latest at the moment)
+            """
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def addSkip(self, test, reason):
+                super().addSkip(test, reason)
+                for c in self.callback.__closure__:
+                    if isinstance(c.cell_contents, str) and c.cell_contents == 'skip':
+                        # this message is printed in test summary;
+                        # it stands for `verbose_str` captured in the closure
+                        c.cell_contents = f"skip: {reason}"
+
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
@@ -653,7 +676,10 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+            output=test_report_path,
+            verbosity=2 if verbose else 1,
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -2022,7 +2048,10 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        return t.coalesce().to_dense()
+        # coalesce is only implemented for COO
+        if t.layout == torch.sparse_coo:
+            t = t.coalesce()
+        return t.to_dense()
 
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
@@ -2034,6 +2063,7 @@ class TestCase(expecttest.TestCase):
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
         self.assertEqual(actual, expected, exact_device=False, **kwargs)
+<<<<<<< HEAD
 
     def compare_with_python_reference(self, torch_fn, python_ref_fn, sample_input, **kwargs):
         inp, args, kwargs = sample_input.input, sample_input.args, sample_input.kwargs
@@ -2042,6 +2072,8 @@ class TestCase(expecttest.TestCase):
         expected = torch_fn(inp, *args, **kwargs)
 
         torch.testing.assert_close(actual, expected)
+=======
+>>>>>>> e1ac97030a872a20fef2568e37b69684fc166c11
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -3091,20 +3123,17 @@ def sandcastle_skip_if(condition, reason):
     skipping continuously.
     """
     def decorator(func):
-
-        if not IS_SANDCASTLE and condition:
-            func.__unittest_skip__ = True
-            func.__unittest_skip_why__ = reason
-            return func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if condition and IS_SANDCASTLE:
-                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
-                return
+        if condition:
+            if IS_SANDCASTLE:
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return wrapper
             else:
-                return func(*args, **kwargs)
-        return wrapper
+                func.__unittest_skip__ = True
+                func.__unittest_skip_why__ = reason
+
+        return func
 
     return decorator
 
