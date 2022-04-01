@@ -6087,10 +6087,19 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+  structured_delegate: scatter_reduce.two_out
   variants: function, method
+
+- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce) -> Tensor(a!)
+  structured_delegate: scatter_reduce.two_out
+  variants: method
+
+- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
   dispatch:
-    CPU: scatter_reduce_two_cpu
+    CPU: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
