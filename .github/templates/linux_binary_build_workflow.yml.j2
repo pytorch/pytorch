@@ -185,7 +185,11 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+{%- if config["gpu_arch_type"] == "rocm" %}
+      !{{ common.teardown_rocm_linux() }}
+{%- else %}
       !{{ common.teardown_ec2_linux("pytorch/") }}
+{%- endif %}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
   {%- endif %}
