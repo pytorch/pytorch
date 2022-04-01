@@ -71,8 +71,7 @@ class TORCH_API Function : public torch::jit::Function {
 
 c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
     c10::OperatorName opname,
-    c10::optional<int> num_specified_args,
-    int64_t model_version);
+    c10::optional<int> num_specified_args);
 
 } // namespace mobile
 } // namespace jit

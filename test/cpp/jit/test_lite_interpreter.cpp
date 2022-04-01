@@ -2086,10 +2086,7 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
     if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.name, op.overload_name, op.num_specified_args);
       }
     }
     upgrader_functions.push_back(byteCodeFunctionWithOperator.function);

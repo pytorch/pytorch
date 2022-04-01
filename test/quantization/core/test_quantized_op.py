@@ -829,6 +829,44 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                              msg="AddReLU.out failed")
 
+    """Tests the correctness of the cudnn add and add_relu op
+    (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qadd_relu_cudnn(self):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        # NB: This is a strange size so that we exercise both the vectorized
+        # implementation (64-element chunks at at time) as well as the scalar
+        # implementation
+        A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
@@ -1062,6 +1100,40 @@ class TestQuantizedOps(TestCase):
                                        qB,
                                        scale_C,
                                        zero_point_C)
+
+    """Tests the correctness of the quantized softmax op."""
+    @given(num_dims=st.integers(2, 4),
+           dims=st.lists(st.integers(2, 5), min_size=5, max_size=5))
+    def test_qsoftmax(self, num_dims, dims):
+        size = dims[:num_dims]
+        torch_dtype = torch.quint8
+        np_dtype = np.uint8
+        dim = num_dims - 1
+
+        scale_X = 1.3
+        zero_point_X = 0
+        X = torch.rand(size=size, dtype=torch.float32) * 8 + zero_point_X
+
+        scale_Y = 1 / 256
+        zero_point_Y = 0
+
+        qX = torch.quantize_per_tensor(X,
+                                       scale=scale_X,
+                                       zero_point=zero_point_X,
+                                       dtype=torch_dtype)
+
+
+        # softmax ground truth
+        Y = torch.softmax(qX.dequantize(), dim=dim).numpy()
+        qY = _quantize(Y, scale_Y, zero_point_Y, dtype=np_dtype)
+        qY_hat = torch.ops.quantized.softmax(qX,
+                                             dim=dim,
+                                             output_scale=scale_Y,
+                                             output_zero_point=zero_point_Y)
+
+        np.testing.assert_equal(qY, qY_hat.int_repr(),
+                                "Quantized softmax failed.")
+
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):
