@@ -433,9 +433,7 @@ class TestForeach(TestCase):
 
     @ops(foreach_reduce_op_db)
     def test_reduce_fastpath(self, device, dtype, op):
-        # for N, ord in itertools.product(N_values, (0, 1, 2, -1, -2)):
-        for N, ord in itertools.product(N_values, (-1, 0, 1, 2)):
-        # for N, ord in itertools.product(N_values, (1,)):
+        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
             # TODO (mkozuki): Fix `n_expected_cudaLaunchKernels`
             if ord in (1, 2) and dtype in torch.testing.get_all_fp_dtypes():
                 n_expected_cudaLaunchKernels = 3
@@ -446,9 +444,7 @@ class TestForeach(TestCase):
 
     @ops(foreach_reduce_op_db)
     def test_reduce_slowpath(self, device, dtype, op):
-        # for N, ord in itertools.product(N_values, (0, 1, 2, -1, -2)):
-        for N, ord in itertools.product(N_values, (-1, 0, 1, 2)):
-        # for N, ord in itertools.product(N_values, (2,)):
+        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
             inputs = op.sample_inputs(device, dtype, N // 2, noncontiguous=True, low=0, high=0.1),
             self._reduce_test(op, inputs, ord, False, 1)
 
