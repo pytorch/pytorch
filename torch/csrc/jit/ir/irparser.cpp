@@ -140,6 +140,8 @@ std::string IRParser::parseVar() {
     if (L.nextIf('.')) {
       continue_parsing = true;
       name += '.';
+    } else if (L.cur().kind == TK_NUMBER && L.cur().text()[0] == '.') {
+      continue_parsing = true;
     }
   } while (continue_parsing);
   return name;

@@ -8262,6 +8262,44 @@ dedent """
         """
         FileCheck().run(graph_str, parse_ir(graph_str))
 
+    def test_parse_tensor_constants(self):
+        def foo():
+            return torch.zeros([4, 4])
+
+        foo_s = torch.jit.script(foo)
+        torch._C._jit_pass_constant_propagation(foo_s.graph)
+
+        g = str(foo_s.graph)
+        g_parsed = parse_ir(g, parse_tensor_constants=True)
+        self.assertEqual(str(canonical(g_parsed)), str(canonical(foo_s.graph)))
+        func = torch._C._create_function_from_graph("forward", g_parsed)
+
+        out_parsed = func()
+        out_func = foo()
+        # not checking data, just dtype, size etc
+        out_parsed[:] = 0
+        out_func[:] = 0
+        self.assertEqual(out_func, out_parsed)
+
+        with self.assertRaises(RuntimeError):
+            parse_ir(g, parse_tensor_constants=False)
+
+    def test_parse_nested_names(self):
+        g_str = """
+    graph(%x.1 : Tensor):
+        %3 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        %hi.submod.value.5 : Tensor = aten::add(%x.1, %2, %3)
+        return (%hi.submod.value.5)
+        """
+        g = parse_ir(g_str)
+        round_trip_g = parse_ir(str(g))
+        self.assertEqual(canonical(g), canonical(round_trip_g))
+
+        func1 = torch._C._create_function_from_graph("forward", g)
+        func2 = torch._C._create_function_from_graph("forward", round_trip_g)
+        self.assertEqual(func1(torch.ones([2])), func2(torch.ones([2])))
+
     def test_is_after_use(self):
         def sorted_input_use(g):
             uses = list(next(g.inputs()).uses())
