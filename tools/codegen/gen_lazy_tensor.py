@@ -69,6 +69,7 @@ class default_args:
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     lazy_ir_cls: Type[LazyIR] = TSLazyIR
+    backend_name: str = "TorchScript"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate Lazy Tensor backend files')
@@ -100,6 +101,9 @@ def main() -> None:
     parser.add_argument(
         '--tensor_class_hdr', type=str, default=default_args.tensor_class_hdr,
         help='Path to header file defining custom Lazy Tensor class')
+    parser.add_argument(
+        '--backend_name', type=str, default=default_args.backend_name,
+        help='Name of the backend to generate')
     options = parser.parse_args()
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
@@ -109,7 +113,7 @@ def main() -> None:
     run_gen_lazy_tensor(aten_path, options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
                         options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
                         options.tensor_class, options.tensor_class_hdr, options.shape_inference_hdr,
-                        default_args.lazy_ir_cls)
+                        default_args.lazy_ir_cls, options.backend_name)
 
 
 def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
@@ -125,7 +129,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         build_in_tree: bool = False,
                         # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
                         # it must match how ATen was built
-                        per_operator_headers: bool = False) -> None:
+                        per_operator_headers: bool = False,
+                        backend_name: str = default_args.backend_name) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
 
@@ -223,15 +228,21 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
     assert class_name is not None
 
     # Generate nativefunction declarations
+    # Note, eager registrations is set to False for the lazy TS backend as another LTC backend
+    # may want to register their own lazy kernels instead of registering the TS ones.
+    # The registration will lazily happen when init_ts_backend is called.
     gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
-                                       grouped_native_functions, backend_key, autograd_key)
+                                       grouped_native_functions, backend_key, autograd_key,
+                                       backend_name)
 
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
         gen_dispatcher_registrations(fm, output_dir, class_name, cpp_namespace, backend_indices, grouped_native_functions,
                                      backend_key, dispatch_key, selector,
                                      build_in_tree=build_in_tree,
-                                     per_operator_headers=per_operator_headers)
+                                     per_operator_headers=per_operator_headers,
+                                     backend_name=backend_name,
+                                     eager_registration=False)
 
     # Generate native function impls that build IR nodes
     ns_helper = NamespaceHelper(cpp_namespace)
