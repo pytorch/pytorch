@@ -4248,11 +4248,12 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-# The signature is designed to be consistent with librosa except that it is
-# missing the `pad_mode` and `center` arguments, which are taken care of at
-# `torch.functional.py`. They shall be moved here once we have mapping between
-# Python strings and C++ Enum in codegen.
+# Overload without center & pad mode, needed for forward-compatibility
 - func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+  variants: function, method
+  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
+
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -6087,10 +6088,19 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+  structured_delegate: scatter_reduce.two_out
   variants: function, method
+
+- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce) -> Tensor(a!)
+  structured_delegate: scatter_reduce.two_out
+  variants: method
+
+- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
   dispatch:
-    CPU: scatter_reduce_two_cpu
+    CPU, CUDA: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
@@ -9587,6 +9597,12 @@
     CUDA: replication_pad3d_backward_cuda
 
 - func: _pad_circular(Tensor self, int[] pad) -> Tensor
+  python_module: nn
+
+- func: _pad_enum(Tensor self, int[] pad, int mode, float? value=None) -> Tensor
+  python_module: nn
+
+- func: pad(Tensor self, int[] pad, str mode="constant", float? value=None) -> Tensor
   python_module: nn
 
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor

@@ -67,8 +67,13 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
+        # Check complex32 support only if the op claims.
+        # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
+        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device) else ())
+
         # dtypes to try to backward in
-        allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
+        allowed_backward_dtypes = floating_and_complex_types_and(
+            *((torch.half, torch.bfloat16) + include_complex32))
 
         # lists for (un)supported dtypes
         supported_dtypes = []
@@ -81,7 +86,8 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
+        for dtype in all_types_and_complex_and(
+                *((torch.half, torch.bfloat16, torch.bool) + include_complex32)):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
@@ -704,6 +710,18 @@ class TestCommon(TestCase):
             for arg in sample.kwargs.values():
                 check_tensor_floating_is_differentiable(arg)
 
+    # Reference testing for operations in complex32 against complex64.
+    # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
+    @ops(op_db, allowed_dtypes=(torch.complex32,))
+    def test_complex_half_reference_testing(self, device, dtype, op):
+        if not op.supports_dtype(torch.complex32, device):
+            unittest.skip("Does not support complex32")
+
+        for sample in op.sample_inputs(device, dtype):
+            actual = op(sample.input, *sample.args, **sample.kwargs)
+            (inp, args, kwargs) = sample.transform(lambda x: x.to(torch.complex64))
+            expected = op(inp, *args, **kwargs)
+            self.assertEqual(actual, expected, exact_dtype=False)
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most

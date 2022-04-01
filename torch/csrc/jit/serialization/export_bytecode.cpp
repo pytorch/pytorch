@@ -376,6 +376,8 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
+
+  m.set_bytecode_version(options.model_version);
   return m;
 }
 

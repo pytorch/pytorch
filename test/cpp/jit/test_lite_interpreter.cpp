@@ -656,12 +656,14 @@ void backportAllVersionCheck(
 
     // Check backport model version
     auto backport_version = _get_model_bytecode_version(oss);
+    backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
         oss, input_data, expect_result_list, current_to_version);
+    oss.seekg(0, oss.beg);
     runAndCheckTorchScriptModel(
         oss, input_data, expect_result_list, current_to_version);
 
