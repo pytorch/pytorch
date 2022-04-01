@@ -315,7 +315,7 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
 #endif
-    return cudaMalloc(p, size);
+    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
@@ -323,7 +323,7 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
     // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
     // but is ignored (won't leakily allocate new memory) in replays.
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    return cudaMalloc(p, size);
+    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
   }
 #endif
 }
@@ -756,9 +756,9 @@ class DeviceCachingAllocator {
     if (*largest ==
         0) { // make an initial guess if a zero *largest is passed in
       size_t tmp_bytes;
-      cudaMemGetInfo(
+      C10_CUDA_CHECK(cudaMemGetInfo(
           largest, // Use free memory as an optimistic initial guess of *largest
-          &tmp_bytes);
+          &tmp_bytes));
     }
     cache_info_aux(large_blocks, total, largest);
     cache_info_aux(small_blocks, total, largest);
@@ -1458,7 +1458,7 @@ class DeviceCachingAllocator {
         cudaEvent_t event = e.first;
         Block* block = e.second;
 
-        cudaError_t err = cudaEventQuery(event);
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(event));
         if (err == cudaErrorNotReady) {
           // ignore and clear the error if not ready
           cudaGetLastError();
@@ -1576,9 +1576,9 @@ class THCCachingAllocator {
         fraction,
         ". Please set within (0, 1).");
     int activated_device;
-    cudaGetDevice(&activated_device);
+    C10_CUDA_CHECK(cudaGetDevice(&activated_device));
     if (activated_device != device) {
-      cudaSetDevice(device);
+      C10_CUDA_CHECK(cudaSetDevice(device));
     }
     device_allocator[device]->setMemoryFraction(fraction);
   }

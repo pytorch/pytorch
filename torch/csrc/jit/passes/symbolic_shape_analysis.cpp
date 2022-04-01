@@ -150,7 +150,7 @@ struct ShapeArguments {
 
 std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
   if (!sa.has_dim()) {
-    os << "(*)";
+    os << "(UNKNOWN DIM)";
     return os;
   }
 
@@ -737,11 +737,11 @@ std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
   if (!func_schema) {
     return nullptr;
   }
-  auto input_shapes = getNodeInputShapes(n, db);
   auto op_analyzer = SymbolicShapeOpAnalyzer(func_schema);
   if (!op_analyzer.getShapeComputeGraph()) {
     return nullptr;
   }
+  auto input_shapes = getNodeInputShapes(n, db);
   op_analyzer.substituteOptionalTypes(n);
 
   if (auto output_shapes = op_analyzer.run(input_shapes)) {

@@ -435,31 +435,6 @@ struct TORCH_API SymbolicShape {
     return dims_;
   }
 
-  std::shared_ptr<std::vector<bool>> concreteDims() const {
-    if (!dims_) {
-      return nullptr;
-    }
-    std::shared_ptr<std::vector<bool>> concrete_dims =
-        std::make_shared<std::vector<bool>>();
-    for (const ShapeSymbol& s : *dims_) {
-      concrete_dims->push_back(s.is_static());
-    }
-    return concrete_dims;
-  }
-
-  // Returns concrete sizes, or nullptr if the shape is not complete.
-  std::shared_ptr<std::vector<int64_t>> concreteSizes() const {
-    if (!isComplete()) {
-      return nullptr;
-    }
-    std::shared_ptr<std::vector<int64_t>> concrete_sizes =
-        std::make_shared<std::vector<int64_t>>();
-    for (const ShapeSymbol& s : *dims_) {
-      concrete_sizes->push_back(s.static_size());
-    }
-    return concrete_sizes;
-  }
-
   // Checks whether the shape is fully defined/complete, ie. rank and sizes
   // of every dimension are known.
   bool isComplete() const {
