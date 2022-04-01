@@ -654,6 +654,14 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 namespace {
 
+std::pair<Tensor, Tensor> complex_to_real(const Tensor& inp) {
+  auto inp_view_as_complex = at::view_as_real(inp);
+  auto dim_i = inp_view_as_complex.dim() - 1;
+  auto i_r = inp_view_as_complex.select(dim_i, 0);
+  auto i_i = inp_view_as_complex.select(dim_i, 1);
+  return std::make_pair(i_r, i_i);
+}
+
 at::Tensor complex_convolution(
     const Tensor& input,
     const Tensor& weight,
@@ -664,16 +672,9 @@ at::Tensor complex_convolution(
     IntArrayRef output_padding,
     int64_t groups) {
   check_input_same_type_as_parameters(input, weight, bias);
-  auto w_view_as_complex = at::view_as_real(weight.resolve_conj());
-  auto i_view_as_complex = at::view_as_real(input.resolve_conj());
-
-  auto dim_i = i_view_as_complex.dim() - 1;
-  auto i_r = i_view_as_complex.select(dim_i, 0);
-  auto i_i = i_view_as_complex.select(dim_i, 1);
-
-  auto dim_w = w_view_as_complex.dim() - 1;
-  auto w_r = w_view_as_complex.select(dim_w, 0);
-  auto w_i = w_view_as_complex.select(dim_w, 1);
+  Tensor i_r, i_i, w_r, w_i;
+  std::tie(i_r, i_i) = complex_to_real(input.resolve_conj());
+  std::tie(w_r, w_i) = complex_to_real(weight.resolve_conj());
 
   // [NOTE] Complex Convolution
   // conv(W, x, b) = conv(Wr, xr, br) - conv(Wi, xi, 0) + i(conv(Wi, xr, bi) + conv(Wr, xi, 0))
@@ -689,10 +690,8 @@ at::Tensor complex_convolution(
     b = at::convolution(i_i, w_i, bias, stride, padding, dilation, false, output_padding, groups);
     c = at::convolution(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, false, output_padding, groups);
   } else {
-    auto b_view_as_complex = at::view_as_real(bias.resolve_conj());
-    auto dim_b = b_view_as_complex.dim() - 1;
-    auto b_r = b_view_as_complex.select(dim_b, 0);
-    auto b_i = b_view_as_complex.select(dim_b, 1);
+    Tensor b_r, b_i;
+    std::tie(b_r, b_i) = complex_to_real(bias.resolve_conj());
     a = at::convolution(i_r, w_r, b_r, stride, padding, dilation, false, output_padding, groups);
     b = at::convolution(i_i, w_i, Tensor(), stride, padding, dilation, false, output_padding, groups);
     c = at::convolution(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, false, output_padding, groups);
@@ -712,16 +711,9 @@ at::Tensor complex_convolution_mode(
     int64_t groups) {
   auto bias = bias_opt.value_or(Tensor());
   check_input_same_type_as_parameters(input, weight, bias);
-  auto w_view_as_complex = at::view_as_real(weight.resolve_conj());
-  auto i_view_as_complex = at::view_as_real(input.resolve_conj());
-
-  auto dim_i = i_view_as_complex.dim() - 1;
-  auto i_r = i_view_as_complex.select(dim_i, 0);
-  auto i_i = i_view_as_complex.select(dim_i, 1);
-
-  auto dim_w = w_view_as_complex.dim() - 1;
-  auto w_r = w_view_as_complex.select(dim_w, 0);
-  auto w_i = w_view_as_complex.select(dim_w, 1);
+  Tensor i_r, i_i, w_r, w_i;
+  std::tie(i_r, i_i) = complex_to_real(input.resolve_conj());
+  std::tie(w_r, w_i) = complex_to_real(weight.resolve_conj());
 
   // See [NOTE] Complex Convolution
   Tensor a, b, c;
@@ -730,10 +722,8 @@ at::Tensor complex_convolution_mode(
     b = at::_convolution_mode(i_i, w_i, bias, stride, padding, dilation, groups);
     c = at::_convolution_mode(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, groups);
   } else {
-    auto b_view_as_complex = at::view_as_real(bias.resolve_conj());
-    auto dim_b = b_view_as_complex.dim() - 1;
-    auto b_r = b_view_as_complex.select(dim_b, 0);
-    auto b_i = b_view_as_complex.select(dim_b, 1);
+    Tensor b_r, b_i;
+    std::tie(b_r, b_i) = complex_to_real(bias.resolve_conj());
     a = at::_convolution_mode(i_r, w_r, b_r, stride, padding, dilation, groups);
     b = at::_convolution_mode(i_i, w_i, Tensor(), stride, padding, dilation, groups);
     c = at::_convolution_mode(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, groups);
