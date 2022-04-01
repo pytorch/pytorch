@@ -19,8 +19,6 @@
 #include <cstdlib>
 #include <string>
 
-#include <iostream>
-
 // TODO: C++17 has the fileystem header, which may replace these
 #ifdef _WIN32
   // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.

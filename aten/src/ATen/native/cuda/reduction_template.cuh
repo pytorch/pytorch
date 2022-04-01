@@ -1,6 +1,7 @@
 namespace at {
 namespace cuda {
-const std::string reduction_template = R"ESCAPE(
+//windows doesn't like large string literals, so split in two
+const std::string reduction_template_0 = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
   #define C10_DEVICE __device__
 
@@ -478,6 +479,9 @@ struct ReduceJitOp {
     }
     return value;
   }
+  )ESCAPE";
+
+  const std::string reduction_template_1 = R"ESCAPE(
 
   C10_DEVICE bool mark_block_finished() const {
     __shared__ bool is_last_block_done_shared;
@@ -651,7 +655,7 @@ __global__ void reduction_${name}_kernel(ReduceJitOp r){
 )ESCAPE";
 
 const std::string &get_reduction_template() {
-  return reduction_template;
+  return reduction_template_0 + reduction_template_1;
 }
 
 }}
