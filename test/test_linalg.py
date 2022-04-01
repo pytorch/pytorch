@@ -3241,7 +3241,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.solve(a, b, out=out)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_solve_batched_broadcasting(self, device, dtype):
