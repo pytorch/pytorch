@@ -275,7 +275,7 @@ void unpackQuantizedWeightsHelper(
 
         const int64_t kSpatialDim = config_vals.at(0);
         // skip kSpatialDim
-        int idx = 1;
+        unsigned idx = 1;
         for (const auto i : c10::irange(kSpatialDim)) {
           (void)i; // Suppress unused variable warning
           stride_int.emplace_back(config_vals.at(idx));
