@@ -613,10 +613,27 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
 }
 
 bool SocketConnectOp::tryConnect(int family) {
-  ::addrinfo hints{};
+  ::addrinfo hints{}, *naked_result = nullptr;
+
   hints.ai_flags = AI_V4MAPPED | AI_ALL | AI_NUMERICSERV;
   hints.ai_family = family;
   hints.ai_socktype = SOCK_STREAM;
+
+  int r = ::getaddrinfo(host_, port_.c_str(), &hints, &naked_result);
+  if (r != 0) {
+    const char* gai_err = ::gai_strerror(r);
+
+    recordError("The {}network addresses of ({}, {}) cannot be retrieved (gai error: {} - {}).",
+                family == AF_INET ? "IPv4 " : family == AF_INET6 ? "IPv6 " : "",
+                host_,
+                port_,
+                r,
+                gai_err);
+
+    return false;
+  }
+
+  addrinfo_ptr result{naked_result};
 
   deadline_ = Clock::now() + opts_->connect_timeout();
 
@@ -628,33 +645,16 @@ bool SocketConnectOp::tryConnect(int family) {
 
     errors_.clear();
 
-    ::addrinfo *naked_result = nullptr;
-    // patternlint-disable cpp-dns-deps
-    int r = ::getaddrinfo(host_, port_.c_str(), &hints, &naked_result);
-    if (r != 0) {
-      const char* gai_err = ::gai_strerror(r);
+    for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
+      C10D_TRACE("The client socket is attempting to connect to {}.", *addr);
 
-      recordError("The {}network addresses of ({}, {}) cannot be retrieved (gai error: {} - {}).",
-                  family == AF_INET ? "IPv4 " : family == AF_INET6 ? "IPv6 " : "",
-                  host_,
-                  port_,
-                  r,
-                  gai_err);
-      retry = true;
-    } else {
-      addrinfo_ptr result{naked_result};
+      ConnectResult cr = tryConnect(*addr);
+      if (cr == ConnectResult::Success) {
+        return true;
+      }
 
-      for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-        C10D_TRACE("The client socket is attempting to connect to {}.", *addr);
-
-        ConnectResult cr = tryConnect(*addr);
-        if (cr == ConnectResult::Success) {
-          return true;
-        }
-
-        if (cr == ConnectResult::Retry) {
-          retry = true;
-        }
+      if (cr == ConnectResult::Retry) {
+        retry = true;
       }
     }
 

@@ -342,15 +342,9 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::prepareNames(bool isStaticGroup) {
-  std::unordered_map<std::string, worker_id_t> nameToId;
-  if (isStaticGroup) {
-    nameToId = collectNames(
-        rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
-  } else {
-    nameToId = collectCurrentNames(
-        rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
-  }
+void TensorPipeAgent::prepareNames() {
+  auto nameToId = collectNames(
+      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
 
   for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
@@ -360,35 +354,11 @@ void TensorPipeAgent::prepareNames(bool isStaticGroup) {
   }
 }
 
-void TensorPipeAgent::checkAndSetStaticGroup(
-    const c10::intrusive_ptr<::c10d::Store>& store) {
-  std::string isStaticGroupKey("rpcIsStaticGroup");
-
-  std::string isStaticGroupStr = isStaticGroup_ ? "true" : "false";
-  std::vector<uint8_t> isStaticGroupVec(
-      (uint8_t*)isStaticGroupStr.c_str(),
-      (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
-  std::vector<uint8_t> returnedVec;
-  returnedVec = store->compareSet(
-      isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
-  std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
-  // In both cases, the returned value should be the value of isStaticGroupStr,
-  // otherwise there is a discrepency with initialization among one of the
-  // members
-  TORCH_CHECK(
-      returnedVal == isStaticGroupStr,
-      fmt::format(
-          "RPC group mixes statically and dynamically initialized members which is not supported. ",
-          "Static group property is initialized as {} and is trying to be set as {} ",
-          isStaticGroup_,
-          returnedVal));
-}
-
 TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    optional<int> worldSize,
+    int worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -407,16 +377,9 @@ TensorPipeAgent::TensorPipeAgent(
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
       shutdownStore_("shutdown", store),
-      isStaticGroup_(worldSize.has_value()) {
-  if (isStaticGroup_) {
-    worldSize_ = worldSize.value();
-  }
-
-  // check the static group attribute against store
-  checkAndSetStaticGroup(store);
-
+      worldSize_(worldSize) {
   // collect worker names
-  prepareNames(isStaticGroup_);
+  prepareNames();
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());

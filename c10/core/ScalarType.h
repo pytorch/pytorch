@@ -4,7 +4,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/Optional.h>
-#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/complex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
@@ -62,21 +61,6 @@ namespace c10 {
   _(c10::complex<float>, ComplexFloat)                             \
   _(c10::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
-  _(at::BFloat16, BFloat16)
-
-#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
-  _(uint8_t, Byte)                             \
-  _(int8_t, Char)                              \
-  _(int16_t, Short)                            \
-  _(int, Int)                                  \
-  _(int64_t, Long)                             \
-  _(at::Half, Half)                            \
-  _(float, Float)                              \
-  _(double, Double)                            \
-  _(c10::complex<c10::Half>, ComplexHalf)      \
-  _(c10::complex<float>, ComplexFloat)         \
-  _(c10::complex<double>, ComplexDouble)       \
-  _(bool, Bool)                                \
   _(at::BFloat16, BFloat16)
 
 enum class ScalarType : int8_t {

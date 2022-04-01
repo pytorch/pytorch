@@ -146,7 +146,6 @@ void OptimizeGraph(
   UseVariadicCat(graph);
   UseVariadicStack(graph);
   EliminateTrivialEquallySplit(graph);
-  EliminateExtraPermuteOps(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(
@@ -175,7 +174,6 @@ void OptimizeGraph(
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
-  UseSplitAndSqueeze(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 

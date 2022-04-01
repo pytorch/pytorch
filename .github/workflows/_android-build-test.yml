@@ -28,22 +28,19 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-
-      - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/pytorch/.github/actions/setup-linux@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -142,9 +139,9 @@ jobs:
           python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
 
       - name: Chown workspace
-        uses: ./.github/actions/chown-workspace
+        uses: pytorch/pytorch/.github/actions/chown-workspace@master
         if: always()
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/pytorch/.github/actions/teardown-linux@master
         if: always()

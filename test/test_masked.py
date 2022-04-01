@@ -113,10 +113,7 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
     output = input.new_full(shape, float('nan') if dtype.is_floating_point else 0, dtype=dtype)
 
     # apply op to all elementary slices:
-    if mask is None:
-        inpmask = input.new_ones([], dtype=torch.bool).expand(input.shape)
-    else:
-        inpmask = torch._masked._input_mask(input, mask=mask)
+    inpmask = torch._masked._input_mask(input, mask=mask)
     for s in itertools.product(*ranges):
         # data of an elementary slice is 1D sequence and has only
         # masked-in elements:
@@ -145,10 +142,7 @@ def apply_masked_normalization_along_dim(op, input, *args, **kwargs):
     dim = args[dim_pos]
     args0 = args[:dim_pos] + (0,) + args[dim_pos + 1:]
     output = torch.zeros_like(input, dtype=dtype)
-    if mask is None:
-        inpmask = input.new_ones([], dtype=torch.bool).expand(input.shape)
-    else:
-        inpmask = torch._masked._input_mask(input, mask=mask)
+    inpmask = torch._masked._input_mask(input, mask=mask)
     dim_ = dim % input.ndim
     left_ranges = tuple(map(range, input.shape[:dim_]))
     right_ranges = tuple(map(range, input.shape[dim_ + 1:]))
@@ -161,7 +155,6 @@ def apply_masked_normalization_along_dim(op, input, *args, **kwargs):
 reference_functions = dict(
     norm=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.linalg.vector_norm, *args, **dict(kwargs, dim_position=1)),
     var=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.var, *args, **dict(kwargs, dim_position=0)),
-    std=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.std, *args, **dict(kwargs, dim_position=0)),
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
@@ -271,9 +264,8 @@ class TestMasked(TestCase):
 
     def assertEqualMasked(self, actual, expected, mask):
         strided = to_strided(actual)
-        if mask is not None:
-            strided = torch.where(mask, strided, strided.new_zeros([]))
-            expected = torch.where(mask, expected, expected.new_zeros([]))
+        strided = torch.where(mask, strided, strided.new_zeros([]))
+        expected = torch.where(mask, expected, expected.new_zeros([]))
         self.assertEqual(strided, expected, exact_device=False)
 
     @onlyNativeDeviceTypes
@@ -285,15 +277,12 @@ class TestMasked(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            if op_name in {'var', 'std'} and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
-                # torch.var/torch.std does not support integer inputs
+            if op_name == 'var' and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
+                # torch.var does not support integer inputs
                 continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
             expected = ref_op(t_inp, *t_args, **t_kwargs)
-            if t_kwargs.get('mask') is None:
-                outmask = None
-            else:
-                outmask = torch._masked._output_mask(op.op, t_inp, *t_args, **t_kwargs)
+            outmask = torch._masked._output_mask(op.op, t_inp, *t_args, **t_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
 
     @mask_layouts()
@@ -311,10 +300,7 @@ class TestMasked(TestCase):
             #  op(inp, mask).to_dense() == op(inp.to_dense(), mask.to_dense()) at outmask
             #
             r_inp, r_args, r_kwargs = to_strided((t_inp, t_args, t_kwargs))
-            if r_kwargs.get('mask') is None:
-                outmask = None
-            else:
-                outmask = torch._masked._output_mask(op.op, r_inp, *r_args, **r_kwargs)
+            outmask = torch._masked._output_mask(op.op, r_inp, *r_args, **r_kwargs)
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
 

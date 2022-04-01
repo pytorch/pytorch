@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["high priority"]
 
 from collections.abc import Sequence
 from functools import partial
@@ -8,7 +8,7 @@ import itertools
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import floating_and_complex_types_and, all_types_and_complex_and
+from torch.testing._internal.common_dtype import floating_and_complex_types_and, get_all_dtypes
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      IS_IN_CI, suppress_warnings, noncontiguous_like,
@@ -21,9 +21,7 @@ from torch.testing._internal.common_device_type import \
 
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal import composite_compliance
-
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
+from torch.testing._internal.composite_compliance import _check_composite_compliance
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -81,7 +79,7 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
+        for dtype in get_all_dtypes():
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
@@ -680,6 +678,24 @@ class TestCommon(TestCase):
             inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
             _test_inplace_preserve_storage(inplace_samples, inplace_variants)
 
+    # Checks if the operator (if it is composite) is written to support most
+    # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
+    # in aten/src/ATen/native/README.md for more details
+    #
+    # NB: onlyCPU because CompositeImplicitAutograd ops go through the same
+    # codepath on all devices. Ideally we'd use a meta device here but coverage
+    # for that is not good yet.
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_composite_compliance(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            _check_composite_compliance(op, args, kwargs)
+
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_floating_inputs_are_differentiable(self, device, dtype, op):
@@ -703,37 +719,6 @@ class TestCommon(TestCase):
                 check_tensor_floating_is_differentiable(arg)
             for arg in sample.kwargs.values():
                 check_tensor_floating_is_differentiable(arg)
-
-
-class TestCompositeCompliance(TestCase):
-    # Checks if the operator (if it is composite) is written to support most
-    # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
-    # in aten/src/ATen/native/README.md for more details
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
-    @ops(op_db, allowed_dtypes=(torch.float,))
-    def test_operator(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
-
-        for sample in samples:
-            args = [sample.input] + list(sample.args)
-            kwargs = sample.kwargs
-            composite_compliance.check_with_mode(op, args, kwargs)
-            composite_compliance.check_all_permutations(op, args, kwargs)
-
-    # There are some weird unexpected successe here that imply rocm goes down
-    # a different path than CUDA sometimes. There's not an easy way to describe
-    # this in OpInfo so we're just going to skip all ROCM tests...
-    @unittest.skipIf(TEST_ROCM, "The CUDA tests give sufficient signal")
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
-    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    def test_backward(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        for sample in samples:
-            args = [sample.input] + list(sample.args)
-            kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs)
-
 
 class TestMathBits(TestCase):
     # Tests that
@@ -866,7 +851,6 @@ class TestMathBits(TestCase):
 
 
 instantiate_device_type_tests(TestCommon, globals())
-instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 
 if __name__ == '__main__':

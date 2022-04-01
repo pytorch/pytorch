@@ -1,5 +1,4 @@
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <c10d/UCCForNCCL.hpp>
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -283,8 +282,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs,
-    bool desyncDebug)
+    const c10::optional<std::vector<at::Tensor>>& inputs)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
@@ -292,10 +290,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  if (desyncDebug) {
-    ncclStartEvents_ =
-        std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
-  }
+  ncclStartEvents_ =
+      std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclEndEvents_ =
       std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclComms_.resize(devices.size());
@@ -550,7 +546,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
-  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG);
+  // Infer desync debug from whether TORCH_DISTRIBUTED_DEBUG >= INFO
+  // Provide backward support of NCCL_DESYNC_DEBUG
+  desyncDebug_ = dist_debug_level_ >= DebugLevel::Info || parseEnvVarFlag(NCCL_DESYNC_DEBUG);
 
   if (blockingWait_) {
     if (asyncErrorHandling_ || desyncDebug_) {
@@ -593,21 +591,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream;
-
-#ifdef USE_NCCL_WITH_UCC
-  static std::once_flag initialize_ucc_lib_flag;
-  std::call_once(initialize_ucc_lib_flag, [&]{
-    uccLib_ = loadTorchUCC();
-    if (uccLib_ != nullptr) {
-      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
-    }
-  });
-#endif
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -1360,8 +1347,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       opType,
       seq_,
       profilingTitle,
-      inputs,
-      desyncDebug_);
+      inputs);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -2427,10 +2413,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base");
 }
-
-#ifdef USE_NCCL_WITH_UCC
-std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
-#endif
 
 } // namespace c10d
 

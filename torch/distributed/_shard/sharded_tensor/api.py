@@ -149,7 +149,7 @@ class ShardedTensor(object):
         dims = _flatten_tensor_size(size)
 
         if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
+            raise ValueError(f'Expecting ShardingSpec but got: {type(self._sharding_spec)}')
 
         self._sharding_spec = sharding_spec
 

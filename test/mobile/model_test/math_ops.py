@@ -29,11 +29,6 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.arccos(a),
             torch.acosh(a.uniform_(1.0, 2.0)),
             torch.add(a, 20),
-            torch.add(a, b, out=a),
-            b.add(a),
-            b.add(a, out=b),
-            b.add_(a),
-            b.add(1),
             torch.add(a, torch.randn(4, 1), alpha=10),
             torch.addcdiv(
                 torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1
@@ -56,8 +51,6 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.bitwise_or(t, torch.tensor([1, 0, 3], dtype=torch.int8)),
             torch.bitwise_xor(t, torch.tensor([1, 0, 3], dtype=torch.int8)),
             torch.ceil(a),
-            torch.ceil(float(torch.tensor(0.5))),
-            torch.ceil(torch.tensor(0.5).item()),
             torch.clamp(a, min=-0.5, max=0.5),
             torch.clamp(a, min=0.5),
             torch.clamp(a, max=0.5),
@@ -71,9 +64,6 @@ class PointwiseOpsModule(torch.nn.Module):
                 torch.tensor([[180.0, -180.0], [360.0, -360.0], [90.0, -90.0]])
             ),
             torch.div(a, b),
-            a.div(b),
-            a.div(1),
-            a.div_(b),
             torch.divide(a, b, rounding_mode="trunc"),
             torch.divide(a, b, rounding_mode="floor"),
             torch.digamma(torch.tensor([1.0, 0.5])),
@@ -81,7 +71,6 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.erfc(torch.tensor([0.0, -1.0, 10.0])),
             torch.erfinv(torch.tensor([0.0, 0.5, -1.0])),
             torch.exp(torch.tensor([0.0, math.log(2.0)])),
-            torch.exp(float(torch.tensor(1))),
             torch.exp2(torch.tensor([0.0, math.log(2.0), 3.0, 4.0])),
             torch.expm1(torch.tensor([0.0, math.log(2.0)])),
             torch.fake_quantize_per_channel_affine(
@@ -96,9 +85,8 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.float_power(torch.randint(10, (4,)), 2),
             torch.float_power(torch.arange(1, 5), torch.tensor([2, -3, 4, -5])),
             torch.floor(a),
-            torch.floor(float(torch.tensor(1))),
-            torch.floor_divide(torch.tensor([4.0, 3.0]), torch.tensor([2.0, 2.0])),
-            torch.floor_divide(torch.tensor([4.0, 3.0]), 1.4),
+            # torch.floor_divide(torch.tensor([4.0, 3.0]), torch.tensor([2.0, 2.0])),
+            # torch.floor_divide(torch.tensor([4.0, 3.0]), 1.4),
             torch.fmod(torch.tensor([-3, -2, -1, 1, 2, 3]), 2),
             torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5),
             torch.frac(torch.tensor([1.0, 2.5, -3.2])),
@@ -154,16 +142,10 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.igamma(a, b),
             torch.igammac(a, b),
             torch.mul(torch.randn(3), 100),
-            b.mul(a),
-            b.mul(5),
-            b.mul(a, out=b),
-            b.mul_(a),
-            b.mul_(5),
             torch.multiply(torch.randn(4, 1), torch.randn(1, 4)),
             torch.mvlgamma(torch.empty(2, 3).uniform_(1.0, 2.0), 2),
             torch.tensor([float("nan"), float("inf"), -float("inf"), 3.14]),
             torch.nan_to_num(w),
-            torch.nan_to_num_(w),
             torch.nan_to_num(w, nan=2.0),
             torch.nan_to_num(w, nan=2.0, posinf=1.0),
             torch.neg(torch.randn(5)),
@@ -173,7 +155,6 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.polygamma(3, torch.tensor([1.0, 0.5])),
             torch.polygamma(4, torch.tensor([1.0, 0.5])),
             torch.pow(a, 2),
-            torch.pow(2, float(torch.tensor(0.5))),
             torch.pow(torch.arange(1.0, 5.0), torch.arange(1.0, 5.0)),
             torch.rad2deg(
                 torch.tensor([[3.142, -3.142], [6.283, -6.283], [1.570, -1.570]])
@@ -183,7 +164,6 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.remainder(torch.tensor([-3.0, -2.0]), 2),
             torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5),
             torch.round(a),
-            torch.round(torch.tensor(0.5).item()),
             torch.rsqrt(a),
             torch.sigmoid(a),
             torch.sign(torch.tensor([0.7, -1.2, 0.0, 2.3])),
@@ -195,15 +175,9 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.sqrt(a),
             torch.square(a),
             torch.sub(torch.tensor((1, 2)), torch.tensor((0, 1)), alpha=2),
-            b.sub(a),
-            b.sub_(a),
-            b.sub(5),
-            torch.sum(5),
             torch.tan(a),
             torch.tanh(a),
-            torch.true_divide(a, a),
             torch.trunc(a),
-            torch.trunc_(a),
             torch.xlogy(f, g),
             torch.xlogy(f, g),
             torch.xlogy(f, 4),
@@ -221,7 +195,6 @@ class ReductionOpsModule(torch.nn.Module):
     def reduction_ops(self):
         a = torch.randn(4)
         b = torch.randn(4)
-        c = torch.tensor(0.5)
         return (
             torch.argmax(a),
             torch.argmin(a),
@@ -231,27 +204,18 @@ class ReductionOpsModule(torch.nn.Module):
             torch.all(a),
             torch.any(a),
             torch.max(a),
-            a.max(a),
-            torch.max(a, 0),
             torch.min(a),
-            a.min(a),
-            torch.min(a, 0),
             torch.dist(a, b),
             torch.logsumexp(a, 0),
             torch.mean(a),
-            torch.mean(a, 0),
             torch.nanmean(a),
             torch.median(a),
             torch.nanmedian(a),
             torch.mode(a),
             torch.norm(a),
-            a.norm(2),
-            torch.norm(a, dim=0),
-            torch.norm(c, torch.tensor(2)),
             torch.nansum(a),
             torch.prod(a),
             torch.quantile(a, torch.tensor([0.25, 0.5, 0.75])),
-            torch.quantile(a, 0.5),
             torch.nanquantile(a, torch.tensor([0.25, 0.5, 0.75])),
             torch.std(a),
             torch.std_mean(a),
@@ -269,20 +233,19 @@ class ComparisonOpsModule(torch.nn.Module):
         super(ComparisonOpsModule, self).__init__()
 
     def forward(self):
-        a = torch.tensor(0)
-        b = torch.tensor(1)
+        return self.comparison_ops()
+
+    def comparison_ops(self):
+        a = torch.randn(4)
+        b = torch.randn(4)
         return (
             torch.allclose(a, b),
             torch.argsort(a),
             torch.eq(a, b),
-            torch.eq(a, 1),
             torch.equal(a, b),
             torch.ge(a, b),
-            torch.ge(a, 1),
             torch.greater_equal(a, b),
-            torch.greater_equal(a, 1),
             torch.gt(a, b),
-            torch.gt(a, 1),
             torch.greater(a, b),
             torch.isclose(a, b),
             torch.isfinite(a),
@@ -294,30 +257,19 @@ class ComparisonOpsModule(torch.nn.Module):
             torch.isreal(a),
             torch.kthvalue(a, 1),
             torch.le(a, b),
-            torch.le(a, 1),
             torch.less_equal(a, b),
             torch.lt(a, b),
-            torch.lt(a, 1),
             torch.less(a, b),
             torch.maximum(a, b),
             torch.minimum(a, b),
             torch.fmax(a, b),
             torch.fmin(a, b),
             torch.ne(a, b),
-            torch.ne(a, 1),
             torch.not_equal(a, b),
             torch.sort(a),
             torch.topk(a, 1),
             torch.msort(a),
         )
-
-
-class OtherMathOpsModule(torch.nn.Module):
-    def __init__(self):
-        super(OtherMathOpsModule, self).__init__()
-
-    def forward(self):
-        return self.other_ops()
 
     def other_ops(self):
         a = torch.randn(4)
@@ -364,7 +316,6 @@ class OtherMathOpsModule(torch.nn.Module):
             torch.histc(a),
             torch.histogram(a),
             torch.meshgrid(a),
-            torch.meshgrid(a, indexing="xy"),
             torch.lcm(c, c),
             torch.logcumsumexp(a, 0),
             torch.ravel(a),
@@ -398,7 +349,6 @@ class SpectralOpsModule(torch.nn.Module):
         b = torch.randn(10, 8, 4, 2)
         return (
             torch.stft(a, 8),
-            torch.stft(a, torch.tensor(8)),
             torch.istft(b, 8),
             torch.bartlett_window(2, dtype=torch.float),
             torch.blackman_window(2, dtype=torch.float),
@@ -429,21 +379,21 @@ class BlasLapackOpsModule(torch.nn.Module):
             torch.bmm(a, b),
             torch.chain_matmul(torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
             # torch.cholesky(a), # deprecated
-            # torch.cholesky_inverse(torch.randn(3, 3)), # had some error
-            # torch.cholesky_solve(torch.randn(3, 3), torch.randn(3, 3)),
+            torch.cholesky_inverse(torch.randn(3, 3)),
+            torch.cholesky_solve(torch.randn(3, 3), torch.randn(3, 3)),
             torch.dot(v, v),
-            # torch.linalg.eig(m), # not build with lapack
-            # torch.geqrf(a),
+            torch.eig(m),
+            torch.geqrf(a),
             torch.ger(v, v),
             torch.inner(m, m),
-            # torch.inverse(m),
-            # torch.det(m),
-            # torch.logdet(m),
-            # torch.slogdet(m),
-            # torch.lstsq(m, m),
-            # torch.lu(m),
-            # torch.lu_solve(m, *torch.lu(m)),
-            # torch.lu_unpack(*torch.lu(m)),
+            torch.inverse(m),
+            torch.det(m),
+            torch.logdet(m),
+            torch.slogdet(m),
+            torch.lstsq(m, m),
+            torch.lu(m),
+            torch.lu_solve(m, *torch.lu(m)),
+            torch.lu_unpack(*torch.lu(m)),
             torch.matmul(m, m),
             torch.matrix_power(m, 2),
             # torch.matrix_rank(m),
@@ -453,10 +403,10 @@ class BlasLapackOpsModule(torch.nn.Module):
             # torch.orgqr(a, m),
             # torch.ormqr(a, m, v),
             torch.outer(v, v),
-            # torch.pinverse(m),
+            torch.pinverse(m),
             # torch.qr(a),
-            # torch.solve(m, m),
-            # torch.svd(a),
+            torch.solve(m, m),
+            torch.svd(a),
             # torch.svd_lowrank(a),
             # torch.pca_lowrank(a),
             # torch.symeig(a), # deprecated

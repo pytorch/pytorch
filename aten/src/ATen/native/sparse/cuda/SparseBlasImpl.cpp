@@ -120,15 +120,6 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.sizes());
 }
 
-void inline bsrsv2_bsrsm2_may_need_to_sync() {
-#if defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11703
-  // cusparse bsrsv2 and bsrsm2 have a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
-  // See https://github.com/pytorch/pytorch/issues/71297
-  ::c10::cuda::device_synchronize();
-#endif
-  // else: do nothing!
-}
-
 void block_sparse_triangular_solve_vec(
     const at::sparse_csr::SparseCsrTensor& A,
     const Tensor& B,
@@ -239,8 +230,6 @@ void block_sparse_triangular_solve_vec(
             X_->data_ptr<scalar_t>(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
-
-        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -371,8 +360,6 @@ void block_sparse_triangular_solve_mat(
             ldx,
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
-
-        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -978,18 +965,6 @@ void add_out_sparse_csr(
   auto B_col_indices_ptr = B_col_indices.data_ptr<int>();
   auto C_col_indices_ptr = C_col_indices.data_ptr<int>();
 
-  // Windows compilers don't support nested macros
-  // so we need this lambda outside of the AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES
-  auto fix_nnz = [&C_crow_indices, &m](int nnz) -> int {
-    // For some reason POINTER_MODE_HOST is not working here
-    // Let's extract manually the nnz from the C_crow_indices
-    #if AT_ROCM_ENABLED()
-    return std::max({nnz, C_crow_indices.narrow(-1, m, 1).item<int>()});
-    #else
-    return nnz;
-    #endif
-  };
-
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       C.scalar_type(), "add_out_sparse_csr_cuda_impl", [&] {
         auto beta_ = beta.to<scalar_t>();
@@ -1049,8 +1024,6 @@ void add_out_sparse_csr(
             C_crow_indices_ptr,
             &nnzC,
             work_data.get());
-
-        nnzC = fix_nnz(nnzC);
 
         // Resize result using nnz information from cusparse
         col_indices_and_values_resize_(C, nnzC);

@@ -1,6 +1,7 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
+from collections import namedtuple
 import itertools
 
 import torch
@@ -101,7 +102,7 @@ def broadcast_shapes(*shapes):
         RuntimeError: If shapes are incompatible.
     """
     # This wrapper exists to support variadic args.
-    # TODO Move this to C++ once the jit has better support for torch.Size.
+    # TODO Movie this to C++ once the jit has better support for torch.Size.
     if not torch.jit.is_tracing():
         max_len = 0
         for shape in shapes:
@@ -442,20 +443,18 @@ else:
         Example::
             >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
             ...                   weight=torch.tensor([1., 2., 4., 8.]))
-                torch.return_types.histogramdd(
-                    hist=tensor([[0., 1., 0.],
-                                 [2., 0., 0.],
-                                 [4., 0., 8.]]),
-                    bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
-                               tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+                histogramdd_return_type(hist=tensor([[0., 1., 0.],
+                                                     [2., 0., 0.],
+                                                     [4., 0., 8.]]),
+                                        bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                                                   tensor([0.0000, 0.6667, 1.3333, 2.0000])))
 
             >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=[2, 2],
             ...                   range=[0., 1., 0., 1.], density=True)
-                torch.return_types.histogramdd(
-                    hist=tensor([[2., 0.],
-                                 [0., 2.]]),
-                    bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
-                               tensor([0.0000, 0.5000, 1.0000])))
+                histogramdd_return_type(hist=tensor([[2., 0.],
+                                                     [0., 2.]]),
+                                        bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                                                   tensor([0.0000, 0.5000, 1.0000])))
 
         """
         if isinstance(bins, int):
@@ -478,7 +477,9 @@ else:
             bin_edges = bins
             hist = _VF._histogramdd_from_bin_tensors(input, bin_edges, weight=weight, density=density)
 
-        return torch.return_types.histogramdd((hist, bin_edges))
+        # TODO: figure out how to return torch.return_types.histogramdd
+        histogramdd_return_type = namedtuple('histogramdd_return_type', 'hist bin_edges')
+        return histogramdd_return_type(hist, bin_edges)
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:

@@ -482,42 +482,6 @@ TEST(TorchpyTest, TestPyYAML) {
 }
 #endif
 
-TEST(TorchpyTest, PrintInstruction) {
-  const auto jit_script_with_print = R"JIT(
-  def forward(self, a):
-    print(a)
-    return a + a
-  )JIT";
-
-  auto input = torch::autograd::make_variable(at::randn({2, 3}));
-  auto expected_forward = input + input;
-
-  auto module = std::make_shared<torch::jit::Module>(
-      "Module", std::make_shared<at::CompilationUnit>());
-  module->define(jit_script_with_print);
-
-  std::vector<at::IValue> inputs{at::IValue(input)};
-
-  // Checking that a module containing prim::Print() works fine.
-  auto result1 = (*module)(inputs);
-  EXPECT_TRUE(result1.toTensor().equal(expected_forward));
-
-  {
-    auto interpreterManager =
-        std::make_shared<torch::deploy::InterpreterManager>(1);
-
-    // Checking that a module containing prim::Print() still works fine
-    // after Python environment was created.
-    auto result2 = (*module)(inputs);
-    EXPECT_TRUE(result2.toTensor().equal(expected_forward));
-  }
-
-  // Checking that a module containing prim::Print() still works fine
-  // after Python environment was created and then destroyed.
-  auto result3 = (*module)(inputs);
-  EXPECT_TRUE(result3.toTensor().equal(expected_forward));
-}
-
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();

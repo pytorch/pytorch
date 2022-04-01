@@ -1,4 +1,4 @@
-# Owner(s): ["module: __torch_function__"]
+# Owner(s): ["high priority"]
 
 import torch
 import numpy as np

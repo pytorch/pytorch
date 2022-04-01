@@ -264,7 +264,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_bicubic2d(
     const Tensor& input,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
@@ -275,7 +275,7 @@ Tensor upsample_bicubic2d(
 
 Tensor upsample_bicubic2d_backward(
     const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -287,7 +287,7 @@ Tensor upsample_bicubic2d_backward(
 
 Tensor _upsample_bicubic2d_aa(
     const Tensor& input,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
@@ -298,7 +298,7 @@ Tensor _upsample_bicubic2d_aa(
 
 Tensor _upsample_bicubic2d_aa_backward(
     const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {

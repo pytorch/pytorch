@@ -90,7 +90,7 @@ struct AutogradZeroSpecializer {
     if (!isBackwardGraph()) {
       return;
     }
-    if (getExecutorMode()) {
+    if (getProfilingMode()) {
       if (auto versioning_if = guardSpecializations()) {
         specializeAutogradOps(versioning_if->blocks()[0]);
         GRAPH_DUMP("After versioning graph", graph_);

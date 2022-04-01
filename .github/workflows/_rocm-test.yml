@@ -29,7 +29,6 @@ jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    timeout-minutes: 270
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -42,15 +41,15 @@ jobs:
           no-sudo: true
 
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: pytorch/pytorch/.github/actions/setup-rocm@master
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
         with:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@master
         with:
           name: ${{ inputs.build-environment }}
 
@@ -131,7 +130,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@master
         if: always()
         with:
           use-gha: true
@@ -160,7 +159,7 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/pytorch/.github/actions/teardown-linux@master
         if: always()
         with:
-          skip-wait-ssh: true
+          wait-ssh: false

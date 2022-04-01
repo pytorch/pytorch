@@ -39,7 +39,6 @@ __all__ = [
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
-    '_TypedStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
@@ -595,7 +594,7 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage, _LegacyStorage
+from .storage import _StorageBase, _TypedStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage._TypedStorage directly.
@@ -603,87 +602,87 @@ from .storage import _StorageBase, _TypedStorage, _LegacyStorage
 class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
-class ByteStorage(_LegacyStorage):
+class ByteStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(_LegacyStorage):
+class DoubleStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(_LegacyStorage):
+class FloatStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(_LegacyStorage):
+class HalfStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(_LegacyStorage):
+class LongStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(_LegacyStorage):
+class IntStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(_LegacyStorage):
+class ShortStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(_LegacyStorage):
+class CharStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(_LegacyStorage):
+class BoolStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(_LegacyStorage):
+class BFloat16Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(_LegacyStorage):
+class ComplexDoubleStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(_LegacyStorage):
+class ComplexFloatStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-class QUInt8Storage(_LegacyStorage):
+class QUInt8Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint8
 
-class QInt8Storage(_LegacyStorage):
+class QInt8Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint8
 
-class QInt32Storage(_LegacyStorage):
+class QInt32Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint32
 
-class QUInt4x2Storage(_LegacyStorage):
+class QUInt4x2Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint4x2
 
-class QUInt2x4Storage(_LegacyStorage):
+class QUInt2x4Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint2x4
@@ -693,7 +692,6 @@ _storage_classes = {
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
-    _TypedStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -820,6 +818,9 @@ import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
+
+from torch.nested._nestedtensor import NestedTensor
+from torch.nested._nestedtensor import nested_tensor
 
 _C._init_names(list(torch._storage_classes))
 

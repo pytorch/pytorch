@@ -37,7 +37,6 @@ Functions
 .. autofunction:: multigammaln
 .. autofunction:: ndtr
 .. autofunction:: ndtri
-.. autofunction:: log_ndtr
 .. autofunction:: round
 .. autofunction:: sinc
 .. autofunction:: softmax

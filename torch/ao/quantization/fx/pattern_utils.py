@@ -8,7 +8,7 @@ from ..qconfig import QConfigAny
 from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
 from ..observer import ObserverBase
-import copy
+
 
 # TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
 QuantizeHandler = Any
@@ -25,7 +25,7 @@ def register_fusion_pattern(pattern):
     return insert
 
 def get_default_fusion_patterns() -> Dict[Pattern, QuantizeHandler]:
-    return copy.copy(DEFAULT_FUSION_PATTERNS)
+    return DEFAULT_FUSION_PATTERNS
 
 DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
 
@@ -47,15 +47,15 @@ def register_quant_pattern(pattern, fixed_qparams_observer=None):
 
 # Get patterns for both static quantization and qat
 def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
-    return copy.copy(DEFAULT_QUANTIZATION_PATTERNS)
+    return DEFAULT_QUANTIZATION_PATTERNS
 
 # a map from pattern to output activation post process constructor
 # e.g. torch.sigmoid -> default_affine_fixed_qparam_fake_quant
 def get_default_output_activation_post_process_map(is_training) -> Dict[Pattern, ObserverBase]:
     if is_training:
-        return copy.copy(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP)
+        return DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP
     else:
-        return copy.copy(DEFAULT_OUTPUT_OBSERVER_MAP)
+        return DEFAULT_OUTPUT_OBSERVER_MAP
 
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))

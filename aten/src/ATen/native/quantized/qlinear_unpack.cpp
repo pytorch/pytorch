@@ -7,6 +7,7 @@ The implementations for the unpack functions can be found in /cpu/qlinear_unpack
 and /cudnn/linear_unpack_impl.cpp, for cudnn.
 */
 #include <ATen/ATen.h>
+#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -44,10 +45,13 @@ class QLinearUnpackWeightInt8Legacy final {
  public:
   static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
-    TORCH_CHECK(false,
-        "quantized.linear_unpack(Tensor) is unsupported! Please "
+    TORCH_WARN_ONCE(
+        "quantized.linear_unpack(Tensor) is deprecated! Please "
         "upgrade your model to use the newer quantized.linear_"
         "unpack(LinearPackedParamsBase) overload");
+    return cpp_custom_type_hack::cast<
+               c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)
+        ->unpack();
   }
 };
 
@@ -55,10 +59,20 @@ class QLinearUnpackWeightFp16Legacy final {
  public:
   static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
-    TORCH_CHECK(false,
-        "quantized.linear_unpack(Tensor) is unsupported! Please "
+    TORCH_WARN_ONCE(
+        "quantized.linear_unpack(Tensor) is deprecated! Please "
         "upgrade your model to use the newer quantized.linear_"
         "unpack(LinearPackedParamsBase) overload");
+    auto& ctx = at::globalContext();
+
+    TORCH_CHECK(
+        ctx.qEngine() != at::QEngine::QNNPACK,
+        "quantized::linear_unpack_fp16 is currently "
+        "not supported by QNNPACK");
+
+    return cpp_custom_type_hack::cast<
+               c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)
+        ->unpack();
   }
 };
 

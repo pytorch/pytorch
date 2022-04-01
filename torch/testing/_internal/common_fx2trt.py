@@ -1,19 +1,18 @@
 import unittest
 from typing import Callable, List, Tuple
 
-import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
 import torch
 import torch.fx
+import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
 from fx2trt_oss.fx import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
 )
 from fx2trt_oss.fx.passes.pass_utils import chain_passes
-from fx2trt_oss.fx.utils import LowerPrecision
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
-from torch.testing._internal.common_utils import TestCase
 
 
 def fetch_attr(mod, target):
@@ -55,7 +54,7 @@ class TRTTestCase(TestCase):
             if unexpected_ops:
                 self.assert_unexpected_op(mod, unexpected_ops)
 
-            interpreter_result = interpreter.run(lower_precision=LowerPrecision.FP32)
+            interpreter_result = interpreter.run(fp16_mode=False)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -102,7 +101,7 @@ class TRTTestCase(TestCase):
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
 
-            interpreter_result = interpreter.run(lower_precision=LowerPrecision.FP16 if fp16_mode else LowerPrecision.FP32)
+            interpreter_result = interpreter.run(fp16_mode=fp16_mode)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -127,7 +126,7 @@ class TRTTestCase(TestCase):
                     cuda_inputs.append(i.cuda())
 
                 mod.eval()
-                interpreter.run(lower_precision=LowerPrecision.FP32)
+                interpreter.run(fp16_mode=False)
 
     def assert_has_op(self, mod, ops):
         ops_in_mod = set()

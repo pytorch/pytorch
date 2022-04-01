@@ -1284,13 +1284,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph = onnx.load(io.BytesIO(f.getvalue()))
         self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
 
-        model.train()
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f, training=TrainingMode.PRESERVE,
-                          opset_version=self.opset_version)
-        graph = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
-
         # Test eval mode.
         model.eval()
         f = io.BytesIO()

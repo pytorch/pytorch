@@ -758,17 +758,6 @@ class TestFakeQuantize(TestCase):
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
 
-    def test_quant_min_max_override(self):
-        observer = default_per_channel_weight_observer
-        # test no override
-        fq_module = FakeQuantize(observer)
-        self.assertEqual(fq_module.activation_post_process.quant_min, -128)
-        self.assertEqual(fq_module.activation_post_process.quant_max, 127)
-        # test quant_min/quant_max override
-        fq_module = FakeQuantize(observer, quant_min=0, quant_max=127)
-        self.assertEqual(fq_module.activation_post_process.quant_min, -64)
-        self.assertEqual(fq_module.activation_post_process.quant_max, 63)
-
 def _get_buffer_ids(module):
     """
     Object addresses stay constant if and only if all modifications are in-place

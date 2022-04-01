@@ -27,12 +27,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
-          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          set -ex
-          if [ -n "${COMMENT_ID}" ]; then
-            python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"
-          else
-            python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
-          fi
+          python3 .github/scripts/trymerge.py --revert "${PR_NUM}"

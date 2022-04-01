@@ -27,8 +27,8 @@ jobs:
           - docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
           - docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-py3.7-clang9
+          - docker-image-name: pytorch-linux-bionic-rocm4.3.1-py3.7
           - docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
-          - docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
           - docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
@@ -56,24 +56,26 @@ jobs:
           submodules: recursive
 
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build docker image
         id: build-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
       - name: Chown workspace
-        uses: ./.github/actions/chown-workspace
+        uses: pytorch/pytorch/.github/actions/chown-workspace@master
         if: always()
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/pytorch/.github/actions/teardown-linux@master
         if: always()

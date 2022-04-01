@@ -1494,8 +1494,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
   if (common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::Lazy ||
-      common_device_.type() == DeviceType::ORT  ||
-      common_device_.type() == DeviceType::HPU) return;
+      common_device_.type() == DeviceType::ORT) return;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());

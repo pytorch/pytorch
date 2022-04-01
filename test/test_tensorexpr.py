@@ -13,13 +13,11 @@ from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        super(BaseTestClass, self).setUp()
         self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
     def tearDown(self):
         self.tensorexpr_options.restore()
-        super(BaseTestClass, self).tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())

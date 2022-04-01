@@ -240,54 +240,16 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
-  }
-  if (input_.layout() == c10::kMkldnn) {
+  } else if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn(input_.scalar_type());
+  } else {
+    AT_ERROR("Unsupported input layout: ", input_.layout());
   }
-  if (input_.layout() == c10::kStrided) {
-    return grad.to_dense();
-  }
-  AT_ERROR("Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
   return grad.to_dense(input_.scalar_type());
-}
-
-Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
-  if (tensor.layout() == c10::kSparse) {
-    return tensor._to_dense(dtype);
-  }
-  if (tensor.layout() == c10::kSparseCsr) {
-    return tensor._to_dense(dtype);
-  }
-  if (tensor.layout() == c10::kMkldnn) {
-    return tensor._to_dense(dtype);
-  }
-  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
-  if (dtype) {
-    return tensor.to(*dtype);
-  }
-  return tensor;
-}
-
-Tensor sparse_to_dense(
-    const Tensor& self,
-    c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
-}
-
-Tensor sparse_csr_to_dense(
-    const Tensor& self,
-    c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
 }
 
 // Computes the strides for view_dtype output when the view dtype is
@@ -407,34 +369,6 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   }
 
   return new_tensor;
-}
-
-Tensor dense_to_sparse_csr(const Tensor& self) {
-  return self.to_sparse().to_sparse_csr();
-}
-
-Tensor csr_to_sparse_csr(const Tensor& self) {
-  return self;
-}
-
-Tensor coo_to_sparse_csr(const Tensor& self) {
-  TORCH_CHECK(
-      self.dim() == 2,
-      "Only 2D tensors can be converted to the CSR format but got shape: ",
-      self.sizes());
-  auto coalesced_self = self.coalesce();
-  auto row_indices = coalesced_self.indices()[0];
-  bool out_int32 = (row_indices.scalar_type() == at::kInt);
-  auto crow_indices = at::_convert_indices_from_coo_to_csr(
-      row_indices, self.size(0), out_int32);
-  return at::native::_sparse_csr_tensor_unsafe(
-      crow_indices,
-      coalesced_self.indices()[1].contiguous(),
-      coalesced_self.values(),
-      coalesced_self.sizes(),
-      coalesced_self.scalar_type(),
-      c10::kSparseCsr,
-      coalesced_self.device());
 }
 
 }} // namespace at::native

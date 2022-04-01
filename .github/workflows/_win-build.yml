@@ -38,14 +38,10 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
-        uses: ./.github/actions/setup-win
-        with:
-          cuda-version: ${{ inputs.cuda-version }}
-
-      - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/pytorch/.github/actions/setup-win@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          cuda-version: ${{ inputs.cuda-version }}
 
       - name: Parse ref
         id: parse-ref
@@ -87,7 +83,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
 
       - name: Teardown Windows
-        uses: ./.github/actions/teardown-win
+        uses: pytorch/pytorch/.github/actions/teardown-win@master
         if: always()
         timeout-minutes: 120
         with:

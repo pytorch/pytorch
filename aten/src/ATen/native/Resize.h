@@ -62,9 +62,9 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
-    at::OptionalIntArrayRef stride,
+    c10::optional<IntArrayRef> stride,
     bool resize_storage = true) {
-  if (self->sizes() == size && (!stride || self->strides() == stride.value())) {
+  if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
 

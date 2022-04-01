@@ -267,7 +267,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) c
 auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
-    const at::OptionalIntArrayRef bias_sizes_opt) const -> bool {
+    const c10::optional<IntArrayRef> bias_sizes_opt) const -> bool {
 #if defined(C10_MOBILE)
   if (!transposed) {
     return (input.size(1) == groups) &&
@@ -933,7 +933,7 @@ ConvBackend select_conv_backend(
 ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const at::OptionalIntArrayRef bias_sizes_opt,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     const bool need_backward,
     const ConvParams& params) {
 
@@ -1565,7 +1565,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
 //   output_mask: 3-dim boolean array specifying which gradients to compute in input, weight, bias order
 std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
-    const at::OptionalIntArrayRef bias_sizes_opt,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
     int64_t groups, std::array<bool, 3> output_mask) {
   auto grad_output = grad_output_;

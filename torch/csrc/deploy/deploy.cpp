@@ -217,11 +217,6 @@ using dlopen_t = void* (*)(const char*, int);
 // function.
 static dlopen_t find_real_dlopen() {
   void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
-  // libdl is gone on some newer systems.
-  if (!libc) {
-    // libc.so won't open with dlopen because it's a linker script.
-    libc = dlopen("libc.so.6", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
-  }
   TORCH_INTERNAL_ASSERT(libc);
   auto dlopen_ = (dlopen_t)dlsym(libc, "dlopen");
   TORCH_INTERNAL_ASSERT(dlopen_);

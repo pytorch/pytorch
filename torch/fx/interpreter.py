@@ -89,7 +89,7 @@ class Interpreter:
                 map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
     @compatibility(is_backward_compatible=True)
-    def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing : bool = True) -> Any:
+    def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None) -> Any:
         """
         Run `module` via interpretation and return the result.
 
@@ -99,8 +99,6 @@ class Interpreter:
                 This is a dict mapping `Node` to any value. This can be used, for example, to
                 pre-populate results for certain `Nodes` so as to do only partial evaluation within
                 the interpreter.
-            enable_io_processing (bool): If true, we process the inputs and outputs with graph's process_inputs and
-                process_outputs function first before using them.
 
         Returns:
             Any: The value returned from executing the Module
@@ -110,8 +108,6 @@ class Interpreter:
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of
         # position and extract those values.
-        if enable_io_processing:
-            args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
 
         for node in self.module.graph.nodes:
@@ -130,7 +126,7 @@ class Interpreter:
 
             if node.op == 'output':
                 output_val = self.env[node]
-                return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
+                return output_val
 
     @compatibility(is_backward_compatible=True)
     def run_node(self, n : Node) -> Any:
@@ -451,7 +447,7 @@ class Transformer(Interpreter):
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
         """
-        result = super().run(enable_io_processing=False)
+        result = super().run()
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a

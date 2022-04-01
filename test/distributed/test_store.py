@@ -404,14 +404,6 @@ class RendezvousTCPTest(TestCase):
             gen = dist.rendezvous("tcp://127.0.0.1:23456?rank=0")
             next(gen)
 
-    def test_dns_timeout(self):
-        with self.assertRaisesRegex(TimeoutError, "client socket has timed out after.*dnsnotexist"):
-            gen = dist.rendezvous(
-                "tcp://dnsnotexist:23456?world_size=2&rank=0",
-                timeout=timedelta(seconds=1),
-            )
-            next(gen)
-
     @retry_on_connect_failures
     def test_nominal(self):
         url = self.create_tcp_url()

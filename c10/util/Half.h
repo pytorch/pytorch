@@ -392,31 +392,27 @@ struct alignas(2) Half {
 #endif
 };
 
-// TODO : move to complex.h
+// This is just a placeholder for whatever complex representation we
+// end up deciding to use for half-precision complex numbers.
 template <>
 struct alignas(4) complex<Half> {
+  using value_type = Half;
   Half real_;
   Half imag_;
-
-  // Constructors
   complex() = default;
-  // Half constructor is not constexpr so the following constructor can't
-  // be constexpr
-  C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
-      : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE explicit inline complex(const c10::complex<float>& value)
-      : real_(value.real()), imag_(value.imag()) {}
-
-  // Conversion operator
-  inline C10_HOST_DEVICE operator c10::complex<float>() const {
-    return {real_, imag_};
-  }
-
-  constexpr C10_HOST_DEVICE Half real() const {
+  Half real() const {
     return real_;
   }
-  constexpr C10_HOST_DEVICE Half imag() const {
+  Half imag() const {
     return imag_;
+  }
+  explicit inline complex(c10::complex<float> value)
+      : real_(value.real()), imag_(value.imag()) {}
+  explicit inline complex(c10::complex<double> value)
+      : real_(static_cast<float>(value.real())),
+        imag_(static_cast<float>(value.imag())) {}
+  inline operator c10::complex<float>() const {
+    return {real_, imag_};
   }
 };
 

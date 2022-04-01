@@ -12,7 +12,7 @@ namespace native {
 namespace {
 
 void complex_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.input_dtype(0), "complex_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(0), "complex_cuda", [&]() {
     gpu_kernel(
       iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
         return c10::complex<scalar_t>(a, b);

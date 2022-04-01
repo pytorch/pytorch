@@ -41,13 +41,14 @@ class TensorOpsModule(torch.nn.Module):
             x.dim(),
             c.real,
             c.imag,
+            x.add(1),
+            x.add(x),
+            x.add_(x),
             # x.backward(),
             x.clone(),
             w.contiguous(),
             w.contiguous(memory_format=torch.channels_last),
             w.copy_(v),
-            w.copy_(1),
-            w.copy_(0.5),
             x.cpu(),
             # x.cuda(),
             # x.data_ptr(),
@@ -57,9 +58,6 @@ class TensorOpsModule(torch.nn.Module):
             w.exponential_(),
             w.fill_(0),
             w.geometric_(0.5),
-            a.index_fill(0, torch.tensor([0, 2]), 1),
-            a.index_put_([torch.argmax(a)], torch.tensor(1.0)),
-            a.index_put([torch.argmax(a)], torch.tensor(1.0)),
             w.is_contiguous(),
             c.is_complex(),
             w.is_conj(),
@@ -79,23 +77,6 @@ class TensorOpsModule(torch.nn.Module):
             # w.pin_memory(),
             # w.put_(0, torch.tensor([0, 1], w)),
             x.repeat(4, 2),
-            a.clamp_(0),
-            a.clamp(0),
-            a.clamp_min(0),
-            a.hardsigmoid_(),
-            a.hardsigmoid(),
-            a.hardswish_(),
-            a.hardswish(),
-            a.hardtanh_(),
-            a.hardtanh(),
-            a.leaky_relu_(),
-            a.leaky_relu(),
-            a.relu_(),
-            a.relu(),
-            a.resize_as_(a),
-            a.type_as(a),
-            a._shape_as_tensor(),
-            a.requires_grad_(False),
         )
 
 
@@ -122,12 +103,12 @@ class TensorCreationOpsModule(torch.nn.Module):
         )
         return (
             torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]]),
-            # torch.sparse_coo_tensor(i, v, [2, 3]), # not work for iOS
+            # torch.sparse_coo_tensor(i, v, [2, 4]), # not work for iOS
             torch.as_tensor([1, 2, 3]),
             torch.as_strided(torch.randn(3, 3), (2, 2), (1, 2)),
             torch.zeros(2, 3),
             torch.zeros((2, 3)),
-            torch.zeros([2, 3], out=i),
+            torch.zeros([2, 3]),
             torch.zeros(5),
             torch.zeros_like(torch.empty(2, 3)),
             torch.ones(2, 3),
@@ -140,8 +121,8 @@ class TensorCreationOpsModule(torch.nn.Module):
             torch.arange(1, 2.5, 0.5),
             torch.range(1, 4),
             torch.range(1, 4, 0.5),
-            torch.linspace(3.0, 3.0, steps=1),
-            torch.logspace(start=2, end=2, steps=1, base=2.0),
+            # torch.linspace(3., 3., steps=1), # TODO need to fix
+            # torch.logspace(start=2, end=2, steps=1, base=2.0), # TODO need to fix
             torch.eye(3),
             torch.empty(2, 3),
             torch.empty_like(torch.empty(2, 3), dtype=torch.int64),
@@ -167,7 +148,7 @@ class TensorIndexingOpsModule(torch.nn.Module):
 
     def tensor_indexing_ops(self):
         x = torch.randn(2, 4)
-        y = torch.randn(4, 4)
+        y = torch.randn(2, 4, 2)
         t = torch.tensor([[0, 0], [1, 0]])
         mask = x.ge(0.5)
         i = [0, 1]
@@ -176,14 +157,13 @@ class TensorIndexingOpsModule(torch.nn.Module):
             torch.concat((x, x, x), 0),
             torch.conj(x),
             torch.chunk(x, 2),
-            torch.dsplit(torch.randn(2, 2, 4), i),
+            torch.dsplit(y, i),
             torch.column_stack((x, x)),
             torch.dstack((x, x)),
             torch.gather(x, 0, t),
             torch.hsplit(x, i),
             torch.hstack((x, x)),
             torch.index_select(x, 0, torch.tensor([0, 1])),
-            x.index(t),
             torch.masked_select(x, mask),
             torch.movedim(x, 1, 0),
             torch.moveaxis(x, 1, 0),
@@ -191,36 +171,6 @@ class TensorIndexingOpsModule(torch.nn.Module):
             torch.nonzero(x),
             torch.permute(x, (0, 1)),
             torch.reshape(x, (-1,)),
-            torch.row_stack((x, x)),
-            torch.select(x, 0, 0),
-            torch.scatter(x, 0, t, x),
-            x.scatter(0, t, x.clone()),
-            torch.diagonal_scatter(y, torch.ones(4)),
-            torch.select_scatter(y, torch.ones(4), 0, 0),
-            torch.slice_scatter(x, x),
-            torch.scatter_add(x, 0, t, x),
-            x.scatter_(0, t, y),
-            x.scatter_add_(0, t, y),
-            # torch.scatter_reduce(x, 0, t, reduce="sum"),
-            torch.split(x, 1),
-            torch.squeeze(x, 0),
-            torch.stack([x, x]),
-            torch.swapaxes(x, 0, 1),
-            torch.swapdims(x, 0, 1),
-            torch.t(x),
-            torch.take(x, t),
-            torch.take_along_dim(x, torch.argmax(x)),
-            torch.tensor_split(x, 1),
-            torch.tensor_split(x, [0, 1]),
-            torch.tile(x, (2, 2)),
-            torch.transpose(x, 0, 1),
-            torch.unbind(x),
-            torch.unsqueeze(x, -1),
-            torch.vsplit(x, i),
-            torch.vstack((x, x)),
-            torch.where(x),
-            torch.where(t > 0, t, 0),
-            torch.where(t > 0, t, t),
         )
 
 
@@ -232,7 +182,7 @@ class TensorTypingOpsModule(torch.nn.Module):
         return self.tensor_typing_ops()
 
     def tensor_typing_ops(self):
-        x = torch.randn(1, 3, 4, 4)
+        x = torch.randn(2, 2)
         return (
             x.to(torch.float),
             x.to(torch.double),
@@ -246,9 +196,6 @@ class TensorTypingOpsModule(torch.nn.Module):
             x.to(torch.int),
             x.to(torch.long),
             x.to(torch.bool),
-            x.to(torch.device("cpu")),
-            x.to(device="cpu", dtype=torch.float),
-            x.to(memory_format=torch.channels_last),
         )
 
 

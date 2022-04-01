@@ -1030,8 +1030,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
-        """ Tests fusion and quantization for "Conv - Bn" and "Conv - Bn - ReLU"
-        """
         convs = {
             1: nn.Conv1d,
             2: nn.Conv2d,
@@ -1072,7 +1070,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        options = itertools.product([1, 2, 3], [True, False], self.static_quant_types)
+        # TODO: add 1d support
+        options = itertools.product([2, 3], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
@@ -2245,88 +2244,6 @@ class TestQuantizeFx(QuantizationTestCase):
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(data)
             self.assertEqual(res, ref_res)
-
-    @skipIfNoFBGEMM
-    def test_custom_module_class_input_has_multiple_users(self):
-        """ Tests that the flow still works when the input of custom module
-        has multiple users
-        """
-        class CustomModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        class ObservedCustomModule(torch.nn.Module):
-            def __init__(self, linear):
-                super().__init__()
-                self.linear = linear
-
-            def forward(self, x):
-                return self.linear(x)
-
-            @classmethod
-            def from_float(cls, float_module):
-                assert hasattr(float_module, 'qconfig')
-                observed = cls(float_module.linear)
-                observed.qconfig = float_module.qconfig
-                return observed
-
-        class StaticQuantCustomModule(torch.nn.Module):
-            def __init__(self, linear):
-                super().__init__()
-                self.linear = linear
-
-            def forward(self, x):
-                return self.linear(x)
-
-            @classmethod
-            def from_observed(cls, observed_module):
-                assert hasattr(observed_module, 'qconfig')
-                assert hasattr(observed_module, 'activation_post_process')
-                observed_module.linear.activation_post_process = \
-                    observed_module.activation_post_process
-                quantized = cls(nnq.Linear.from_float(observed_module.linear))
-                return quantized
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-                self.custom = CustomModule()
-
-            def forward(self, x0):
-                x1 = self.custom(x0)
-                x2 = self.linear(x0)
-                return x1 + x2
-
-        prepare_custom_config_dict = {
-            "float_to_observed_custom_module_class": {
-                "static": {
-                    CustomModule: ObservedCustomModule
-                }
-            }
-        }
-        convert_custom_config_dict = {
-            "observed_to_quantized_custom_module_class": {
-                "static": {
-                    ObservedCustomModule: StaticQuantCustomModule
-                }
-            }
-        }
-        m = M().eval()
-        m = prepare_fx(
-            m,
-            {"": default_qconfig},
-            prepare_custom_config_dict=prepare_custom_config_dict)
-        # make sure it works
-        m = convert_fx(
-            m,
-            convert_custom_config_dict=convert_custom_config_dict)
-        # make sure it runs
-        m(torch.randn(3, 3))
 
     @skipIfNoFBGEMM
     def test_non_traceable_module(self):
@@ -4073,13 +3990,10 @@ class TestQuantizeFx(QuantizationTestCase):
                                                   default_affine_fixed_qparams_fake_quant)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"],
                                                   default_symmetric_fixed_qparams_fake_quant)
-        output_fake_quantize_map = get_default_output_activation_post_process_map(is_training=True)
-        output_observer_map = get_default_output_activation_post_process_map(is_training=False)
-        self.assertEqual(output_observer_map.get("dummy_quant3"), default_symmetric_fixed_qparams_observer)
-        self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
-                                                  default_symmetric_fixed_qparams_fake_quant)
-
-
+        self.assertTrue(get_default_output_activation_post_process_map(is_training=True) is
+                        DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP)
+        self.assertTrue(get_default_output_activation_post_process_map(is_training=False) is
+                        DEFAULT_OUTPUT_OBSERVER_MAP)
 
     def test_reuse_input_qconfig(self):
         class M1(torch.nn.Module):
@@ -4168,63 +4082,22 @@ class TestQuantizeFx(QuantizationTestCase):
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
 
-    def test_qat_skip_untraced(self):
-        class UnTraceableModuleClass(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        class UnTraceableModuleName(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
+    def test_stack_trace_preserved_subgraph_rewriter(self):
+        # a functional relu is taking the subgraph rewriter code path
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.untraceable_module_class = UnTraceableModuleClass()
-                self.untraceable_module_name = UnTraceableModuleClass()
-
             def forward(self, x):
-                x = self.untraceable_module_class(x)
-                x = self.untraceable_module_name(x)
+                x = F.relu(x)
                 return x
 
-        mod = M()
-
-        qconfig_dict = {"": torch.quantization.get_default_qat_qconfig()}
-        prepare_custom_config_dict = {
-            "non_traceable_module_class": [UnTraceableModuleClass],
-            "non_traceable_module_name": ["untraceable_module_name"],
-        }
-        mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
-            mod.train(), qconfig_dict, prepare_custom_config_dict
-        )
-        mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
-            mod.train(), qconfig_dict, prepare_custom_config_dict
-        )
-        self.assertTrue(
-            isinstance(mod_prep.untraceable_module_class.linear, torch.nn.Linear)
-        )
-        self.assertTrue(
-            isinstance(mod_prep.untraceable_module_name.linear, torch.nn.Linear)
-        )
-        self.assertTrue(
-            type(mod_prep.untraceable_module_class.linear)
-            is not torch.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside untraced module classes",
-        )
-        self.assertTrue(
-            type(mod_prep.untraceable_module_name.linear)
-            is not torch.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
-        )
+        m = M().eval()
+        mp = prepare_fx(m, get_default_qconfig_dict())
+        mq = convert_fx(copy.deepcopy(mp), is_reference=False)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_function' and n.target == F.relu:
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
 
     def test_qconfig_dict_setup(self):
         class M(torch.nn.Module):
@@ -5456,7 +5329,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method('dequantize')
         ]
-        # TODO: change these to use backend_config_dict
         additional_patterns = {torch.nn.GELU: DefaultNodeQuantizeHandler,
                                torch.nn.functional.gelu: DefaultNodeQuantizeHandler}
         self._test_default_node_quant_handler_ops(

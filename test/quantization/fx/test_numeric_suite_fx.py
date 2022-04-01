@@ -71,8 +71,6 @@ from torch.ao.ns._numeric_suite_fx import (
     extract_shadow_logger_info,
     extend_logger_results_with_comparison,
 )
-from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
-from torch.ao.quantization.fx.backend_config.utils import get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
@@ -276,19 +274,7 @@ def _wrapped_sigmoid(x):
 def _wrapped_linear(x, w, b):
     return F.linear(x, w, b)
 
-def get_all_quant_patterns():
-    """ we are in the process to migrate the frontend of fx graph mode quant
-    to use backend_config_dict, so some of the patterns are moved to backend_config_dict
-    this function will include these patterns so that we can still have all the patterns
-    """
-    # TODO: we can remove this call, and get all patterns from backend_config_dict in
-    # the future when the frontend refactor is done in fx graph mode quantization
-    all_quant_patterns = get_default_quant_patterns()
-    # some of the patterns are moved to (native) backend_config_dict so we need to
-    # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
-        all_quant_patterns[pattern] = quantize_handler
-    return all_quant_patterns
+
 
 class TestFXGraphMatcher(QuantizationTestCase):
 
@@ -556,6 +542,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1p, m2p)
 
+
     def test_op_relationship_mapping(self):
         """
         Tests that the mapping of op relationships is complete.
@@ -633,7 +620,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 op in METHS_UNMATCHABLE
             )
 
-        default_quant_patterns = get_all_quant_patterns()
+        default_quant_patterns = get_default_quant_patterns()
         for pattern, qhandler_cls in default_quant_patterns.items():
             base_op = None
             if isinstance(pattern, tuple):
@@ -677,6 +664,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # RNNDynamicQuantizeHandler
                 pass
             elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+                # torch.sum does not have quantized equivalents
+                if base_op == torch.sum:
+                    continue
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
@@ -692,14 +682,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
             else:
-                # torch.sum does not have quantized equivalents
-                if base_op == torch.sum:
-                    continue
-                # didn't match explicit quantize handler class, we can check if the
-                # operator is in the related op set directly
-                if not _op_in_base_sets_of_related_ops(base_op):
-                    raise AssertionError(
-                        f"handing for {qhandler_cls} for op {base_op} not implemented")
+                raise AssertionError(
+                    f"handing for {qhandler_cls} not implemented")
 
     @skipIfNoFBGEMM
     def test_user_defined_function(self):
@@ -1550,7 +1534,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         # 4. go through the ops mapped to each QuantizeHandler type, and verify
         # correctness.
-        default_quant_patterns = get_all_quant_patterns()
+        default_quant_patterns = get_default_quant_patterns()
         for pattern, qhandler_cls in default_quant_patterns.items():
             base_op = None
             if isinstance(pattern, tuple):
@@ -1607,16 +1591,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # embedding shadowing is not implemented, for now
                 continue
             else:
-                if qhandler_cls(None, {}).is_general_tensor_value_op():
-                    self.assertTrue(
-                        (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
-                        (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
-                        (base_op in METHS_IO_TYPE_FP32_OR_INT8),
-                        f"missing IO type handling for {base_op} using {qhandler_cls}")
-                else:
-                    self.assertTrue(
-                        (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
-                        f"missing IO type handling for {base_op} using {qhandler_cls}")
+                raise AssertionError(
+                    f"handing for {qhandler_cls} not implemented")
 
     @skipIfNoFBGEMM
     def test_user_defined_function(self):

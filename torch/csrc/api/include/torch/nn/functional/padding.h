@@ -6,6 +6,28 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+inline Tensor _narrow_with_range(const Tensor& input, int64_t dim, int64_t start, int64_t end) {
+  return input.narrow(dim, start, end - start);
+}
+
+inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
+  int padding_size = padding.size();
+  input = torch::cat({input, _narrow_with_range(input, 2, 0, padding[-1 + padding_size])}, /*dim=*/2);
+  input = torch::cat({_narrow_with_range(input, 2, -(padding[-1 + padding_size] + padding[-2 + padding_size]), -padding[-1 + padding_size]), input}, /*dim=*/2);
+
+  if (padding_size > 2) {
+    input = torch::cat({input, _narrow_with_range(input, 3, 0, padding[-3 + padding_size])}, /*dim=*/3);
+    input = torch::cat({_narrow_with_range(input, 3, -(padding[-3 + padding_size] + padding[-4 + padding_size]), -padding[-3 + padding_size]), input}, /*dim=*/3);
+  }
+
+  if (padding_size > 4) {
+    input = torch::cat({input, _narrow_with_range(input, 4, 0, padding[-5 + padding_size])}, /*dim=*/4);
+    input = torch::cat({_narrow_with_range(input, 4, -(padding[-5 + padding_size] + padding[-6 + padding_size]), -padding[-5 + padding_size]), input}, /*dim=*/4);
+  }
+
+  return input;
+}
+
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor pad(const Tensor& input,
@@ -28,7 +50,7 @@ inline Tensor pad(const Tensor& input,
       } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
         return torch::replication_pad1d(input, pad);
       } else if (c10::get_if<enumtype::kCircular>(&mode)) {
-        return torch::_pad_circular(input, pad);
+        return _pad_circular(input, pad);
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
@@ -38,7 +60,7 @@ inline Tensor pad(const Tensor& input,
       } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
         return torch::replication_pad2d(input, pad);
       } else if (c10::get_if<enumtype::kCircular>(&mode)) {
-        return torch::_pad_circular(input, pad);
+        return _pad_circular(input, pad);
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
@@ -48,7 +70,7 @@ inline Tensor pad(const Tensor& input,
       } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
         return torch::replication_pad3d(input, pad);
       } else if (c10::get_if<enumtype::kCircular>(&mode)) {
-        return torch::_pad_circular(input, pad);
+        return _pad_circular(input, pad);
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }

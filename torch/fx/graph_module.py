@@ -627,9 +627,7 @@ class {module_name}(torch.nn.Module):
                 if "eval_with_key" in topmost_framesummary.filename:
                     print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)
-                    raise e.with_traceback(None)
-                else:
-                    raise e
+                raise e.with_traceback(None)
 
         cls.__call__ = wrapped_call
 

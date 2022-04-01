@@ -3,7 +3,6 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
-import platform
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -1030,10 +1029,6 @@ class PackageExporter:
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
 
-    def _write_python_version(self):
-        """Writes the python version that the package was created with to .data/python_version"""
-        self._write(".data/python_version", platform.python_version())
-
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
         It is preferable to use resource guard syntax instead::
@@ -1042,7 +1037,6 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
-        self._write_python_version()
 
         self.script_module_serializer.write_files()
         self._finalize_zip()
