@@ -137,6 +137,9 @@ std::vector<Expr*> replaceInputsInExpr(
     const std::vector<Expr*>& exprs,
     const std::unordered_map<Val*, Val*>& replacement_map);
 
+// True if an IterDomain does not materialize a loop
+bool isTrivialIterDomain(IterDomain* id);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
