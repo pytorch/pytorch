@@ -19,7 +19,7 @@ void check_exact_values(
     auto layerParameters = parameters[i];
     auto expectedLayerParameters = expected_parameters[i];
 
-    if (layerParameters.size(0) != expectedLayerParameters.size()) {
+    if (static_cast<size_t>(layerParameters.size(0)) != expectedLayerParameters.size()) {
       std::cout << "layer #" << i
                 << " layerParameters size: " << layerParameters.size(0)
                 << " != "
