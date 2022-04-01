@@ -8,4 +8,3 @@ C10_DECLARE_int(torch_lazy_tensors_shape_cache_size);
 C10_DECLARE_bool(torch_lazy_tensors_tensor_update_sync);
 
 C10_DECLARE_bool(torch_lazy_tensors_cuda);
-

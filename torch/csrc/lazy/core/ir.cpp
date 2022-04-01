@@ -104,7 +104,7 @@ Node::Node(OpKind op, OpList operands, std::vector<Shape>&& shapes,
            ) {
   shapes_.insert(
     shapes_.end(),
-    std::make_move_iterator(shapes.begin()), 
+    std::make_move_iterator(shapes.begin()),
     std::make_move_iterator(shapes.end()));
   for (auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
