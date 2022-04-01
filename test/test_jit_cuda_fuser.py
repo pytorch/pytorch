@@ -4274,7 +4274,7 @@ class TestCudaFuser(JitTestCase):
         reduce_scalar(res).backward()
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_cuda_fusion_guard_backward(self):
