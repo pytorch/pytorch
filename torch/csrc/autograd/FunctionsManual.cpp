@@ -223,6 +223,9 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else if (p < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
+    if (p < 1.0) {
+      self_scaled.masked_fill_(self == 0, 0);
+    }
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
@@ -273,7 +276,6 @@ Tensor norm_jvp(
     }
     return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
   } else if (p < 2.0) {
-    // TODO: norm_jvp and norm_backward both compute NaN at zero when p < 1
     auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
     auto out = sumpow_t / norm.pow(p - 1);
     return out.masked_fill_(norm == 0, 0);
