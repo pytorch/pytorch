@@ -52,7 +52,8 @@ from torch.testing._internal.common_device_type import (
 from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import (
+    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types,
@@ -1395,6 +1396,56 @@ else:
             res.backward(grad)
 
         backward_func(self, device)
+
+    def test_invalid_shapes_grid_sampler(self, device):
+        make_arg = partial(
+            make_tensor, device=device, dtype=torch.float64, requires_grad=True)
+
+        inputs = (
+            # input, grid
+            ((5, 5, 5, 5, 5,), (1, 1, 1, 4, 4,)),  # 3d
+            ((5, 5, 5, 5,), (1, 1, 4, 4,)),  # 2d
+        )
+
+        interpolation_mode = 0
+        padding_mode = 0
+        align_corners = True
+
+        err = "expected grid and input to have same batch size"
+
+        for input, grid in inputs:
+            input = make_arg(input)
+            grid = make_arg(grid, low=-1, high=1)
+
+            # Wrapper for the 2d, 3d, and cuDNN functions listed below.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler_2d(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 3d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler_3d(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch._grid_sampler_2d_cpu_fallback(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input, on CUDA.
+            # Doesn't work on CPU and ROCm.
+            if device != 'cpu' and TEST_CUDNN:
+                with self.assertRaisesRegex(RuntimeError, err):
+                    torch.cudnn_grid_sampler(input, grid)
 
     def test_dist(self, device):
         def run_test(x, y):
@@ -5621,69 +5672,6 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
-
-    # FIXME: move to test_scatter_gather_ops.py
-    def test_scatter_reduce(self):
-        dtype = device = None
-        output_size = 10
-        shape = [5, 10, 20]
-        reduces = ["sum", "prod", "mean", "amax", "amin"]
-        fills = {"sum": 0, "prod": 1, "mean": 0, "amax": -(2 ** 31), "amin": 2 ** 31 - 1}
-        fns = {"sum": lambda t, v: t.add_(v),
-               "prod": lambda t, v: t.mul_(v),
-               "mean": lambda t, v, n: t.mul_(n).add_(v).div_(n + 1),
-               "amax": lambda t, v: torch.max(t, v, out=t),
-               "amin": lambda t, v: torch.min(t, v, out=t)}
-
-        index = torch.randint(0, output_size, shape, dtype=torch.long, device=device)
-        input = torch.randn(shape, dtype=dtype, device=device)
-
-        for reduce in reduces:
-            for dim in range(len(shape)):
-                output = input.scatter_reduce(dim, index, reduce, output_size=output_size)
-
-                # Check that output is of the correct size
-                output_shape = copy.copy(shape)
-                output_shape[dim] = output_size
-                self.assertEqual(output.shape, output_shape)
-
-                expected = torch.zeros(output_shape, dtype=dtype, device=device)
-                expected.fill_(fills[reduce])
-                counts = torch.zeros(output_shape, dtype=dtype, device=device)
-                for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
-                    v = input[i, j, k]
-                    m = index[i, j, k]
-
-                    if dim == 0:
-                        i = m
-                    elif dim == 1:
-                        j = m
-                    else:
-                        k = m
-
-                    op = fns[reduce]
-                    if (reduce == "mean"):
-                        op(expected[i, j, k], v, counts[i, j, k])
-                    else:
-                        op(expected[i, j, k], v)
-                    counts[i, j, k] += 1
-
-                if (reduce == "amin" or reduce == "amax"):
-                    expected.masked_fill_(counts == 0, 0)
-
-                self.assertTrue(torch.allclose(output, expected))
-
-        with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
-            torch.scatter_reduce(input, 4, index, "sum")
-
-        with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
-            index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
-            torch.scatter_reduce(input, 0, index2, "sum")
-
-        with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
-            input2 = torch.randn(10, dtype=dtype, device=device)
-            index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
-            torch.scatter_reduce(input2, 0, index2, "sum", output_size=2)
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
