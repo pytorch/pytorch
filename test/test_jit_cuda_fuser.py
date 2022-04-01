@@ -4273,6 +4273,83 @@ class TestCudaFuser(JitTestCase):
         reduce_scalar(res).backward()
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_nvfuser_comparison_callbacks_with_fallback(self):
+        try:
+            fused_result = None
+            unfused_result = None
+            graph_ir = None
+
+            def callback(fused_outputs, unfused_outputs, graph_str):
+                nonlocal unfused_result
+                nonlocal fused_result
+                nonlocal graph_ir
+                unfused_result = unfused_outputs[-1]
+                fused_result = fused_outputs[-1]
+                graph_ir = graph_str
+            torch._C._jit_nvfuser_set_comparison_callback(True, callback)
+
+            def fn(x, y):
+                z = torch.add(x, y)
+                return torch.relu(z)
+
+            x = torch.rand((4, 4)).cuda() - 0.5
+            y = torch.rand((4, 4)).cuda() - 0.5
+
+            fn_s = torch.jit.script(fn)
+            fn_s(x, y)
+            fn_s(x, y)
+            fn_s(x, y)
+
+            expected = fn(x, y)
+
+            self.assertEqual(expected, fused_result)
+            self.assertEqual(expected, unfused_result)
+            FileCheck().check("aten::add").run(graph_ir)
+        finally:
+            torch._C._jit_nvfuser_clear_comparison_callback()
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_nvfuser_comparison_callbacks_without_fallback(self):
+        try:
+            fused_result = None
+            unfused_result = None
+            graph_ir = None
+
+            def callback(fused_outputs, unfused_outputs, graph_str):
+                nonlocal unfused_result
+                nonlocal fused_result
+                nonlocal graph_ir
+                if len(unfused_outputs) > 0:
+                    unfused_result = unfused_outputs[-1]
+                fused_result = fused_outputs[-1]
+                graph_ir = graph_str
+            torch._C._jit_nvfuser_set_comparison_callback(False, callback)
+
+            def fn(x, y):
+                z = torch.add(x, y)
+                return torch.relu(z)
+
+            x = torch.rand((4, 4)).cuda() - 0.5
+            y = torch.rand((4, 4)).cuda() - 0.5
+
+            fn_s = torch.jit.script(fn)
+            fn_s(x, y)
+            fn_s(x, y)
+            fn_s(x, y)
+
+            expected = fn(x, y)
+
+            self.assertEqual(expected, fused_result)
+            self.assertEqual(None, unfused_result)
+            FileCheck().check("aten::add").run(graph_ir)
+        finally:
+            torch._C._jit_nvfuser_clear_comparison_callback()
 
 class TestPassManagerCudaFuser(JitTestCase):
 
