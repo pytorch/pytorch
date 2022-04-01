@@ -146,3 +146,33 @@ class Sigmoid(torch.nn.Sigmoid):
     def from_float(cls, mod):
         output_scale, output_zero_point = mod.activation_post_process.calculate_qparams()
         return cls(float(output_scale), int(output_zero_point))
+
+class Softmax(torch.nn.Softmax):
+    r"""This is the quantized version of :class:`~torch.nn.Softmax`.
+
+    Args:
+        dim: A dimension along which Softmax will be computed (so every slice along dim will sum to 1).
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+    """
+    def __init__(self, dim=None, scale=1.0, zero_point=0):
+        super().__init__()
+        self.dim = dim
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.softmax(
+            input, dim=self.dim, scale=self.scale, zero_point=self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedSoftmax'
+
+    @staticmethod
+    def from_float(mod):
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return Softmax(mod.dim, float(scale), int(zero_point))
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(mod.dim, float(scale), int(zero_point))

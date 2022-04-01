@@ -169,6 +169,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
+        print(name, child, _has_special_act_post_process(child))
         # TODO remove Dropout special after codebase stable
         if type(child) in [nn.Dropout]:
             continue

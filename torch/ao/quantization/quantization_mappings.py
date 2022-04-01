@@ -69,6 +69,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
+    nn.Softmax: nnq.Softmax,
     nn.Dropout: nnq.Dropout,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
@@ -157,6 +158,7 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callab
 DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Hardsigmoid: default_affine_fixed_qparams_fake_quant,
     nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
+    nn.Softmax: default_affine_fixed_qparams_fake_quant,
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
