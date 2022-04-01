@@ -134,7 +134,7 @@ constexpr uint64_t kProducedBytecodeVersion = 0x8L;
 // kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion
 // (in loader), we should support this model_version. For example, we provide a
 // wrapper to handle an updated operator.
-constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
+constexpr uint64_t kMinSupportedBytecodeVersion = 0x4L;
 constexpr uint64_t kMaxSupportedBytecodeVersion = 0x8L;
 
 } // namespace serialize
