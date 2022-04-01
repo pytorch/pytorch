@@ -3,6 +3,7 @@
 // ${generated_comment}
 
 #include <c10/core/QScheme.h>
+#include <ATen/core/jit_type_base.h>
 #include <tuple>
 #include <vector>
 
