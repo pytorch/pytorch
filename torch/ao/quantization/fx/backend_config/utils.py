@@ -16,11 +16,11 @@ def get_pattern_to_quantize_handlers(
     pattern_to_quantize_handlers = dict()
     for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
-        observation_type = config["observation_type"]
+        observation_type = config.get("observation_type", None)
         dtype_configs = config["dtype_configs"]
-        _is_binary_op_with_binary_scalar_op_variant = config.get("_is_binary_op_with_binary_scalar_op_variant", False)
+        num_tensor_args_to_observation_type = config.get("num_tensor_args_to_observation_type", {})
         pattern_to_quantize_handlers[pattern] = \
-            get_quantize_handler_cls(observation_type, dtype_configs, _is_binary_op_with_binary_scalar_op_variant)
+            get_quantize_handler_cls(observation_type, dtype_configs, num_tensor_args_to_observation_type)
 
     return pattern_to_quantize_handlers
 

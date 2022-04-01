@@ -80,8 +80,12 @@ _DEFAULT_OP_INT8_CONFIGS = [
 
 _ADD_CONFIG = {
     "pattern": operator.add,
-    "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-    "_is_binary_op_with_binary_scalar_op_variant": True,
+    "num_tensor_args_to_observation_type": {
+        # TODO: maybe change this to NO_OBSERVER
+        0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+        2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+    },
     "dtype_configs": [
         weighted_op_int8_dtype_config,
     ],

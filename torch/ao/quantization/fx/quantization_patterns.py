@@ -53,16 +53,20 @@ class QuantizeHandler(ABC):
         """
         self.node_pattern = node_pattern
         self.modules = modules
-        # this is an indicator of whether all the inputs are Node or not
-        # since some op might be quantized differently depending on whether
-        # all inputs are tensors or not, e.g. add/mul
         if root_node_getter is None:
             root_node_getter = _default_root_node_getter
         self.root_node = root_node_getter(node_pattern)
+        self.num_tensor_args = 0
+        # determine how many of the first two args are Tensors (versus scalars)
+        # this distinguishes things like "x + y" from "x + 2" or "2 + x"
         if isinstance(self.root_node, Node):
-            self.num_tensor_args = len(self.root_node.args)
-        else:
-            self.num_tensor_args = 0
+            cache_for_no_tensor_check: Dict[Node, bool] = dict()
+            for arg_idx in range(len(self.root_node.args)):
+                arg = self.root_node.args[arg_idx]
+                if isinstance(arg, Node) and (
+                        not all_node_args_have_no_tensors(
+                            arg, self.modules, cache_for_no_tensor_check)):
+                    self.num_tensor_args += 1
 
     # TODO: can remove after the is_dynamic flag is defined, so that we can
     # move embedding op to backend_config_dict
