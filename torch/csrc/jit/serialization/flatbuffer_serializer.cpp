@@ -770,7 +770,10 @@ Module parse_and_initialize_jit_module(
   std::vector<IValue> constants;
   loader.extractJitSourceAndConstants(&files, &constants);
   Module m = jitModuleFromSourceAndConstants(
-      mobilem._ivalue(), files, constants, flatbuffer_module->version());
+      mobilem._ivalue(),
+      files,
+      constants,
+      flatbuffer_module->bytecode_version());
   m.set_delete_memory(data);
   return m;
 }

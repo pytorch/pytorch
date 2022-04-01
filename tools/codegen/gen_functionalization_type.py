@@ -10,7 +10,6 @@ from tools.codegen.model import (
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
-from tools.codegen.utils import mapMaybe
 
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
