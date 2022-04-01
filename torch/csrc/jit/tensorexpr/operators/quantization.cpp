@@ -740,6 +740,7 @@ Tensor computeUpsampleNearest2d(
 Tensor computeUpsampleNearest2dExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
