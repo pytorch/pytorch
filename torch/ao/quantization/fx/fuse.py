@@ -136,5 +136,6 @@ def _find_matches(
                 matched_node_pattern: List[Node] = []
                 if is_match(modules, node, pattern):
                     apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
+                    break
 
     return match_map
