@@ -1,3 +1,6 @@
+namespace at {
+namespace cuda {
+const std::string reduction_template = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
   #define C10_DEVICE __device__
 
@@ -645,3 +648,10 @@ __launch_bounds__(${max_threads_lb}, 4)
 __global__ void reduction_${name}_kernel(ReduceJitOp r){
   r.run();
 }
+)ESCAPE";
+
+const std::string &get_reduction_template() {
+  return reduction_template;
+}
+
+}}
