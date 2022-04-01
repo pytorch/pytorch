@@ -19,7 +19,12 @@ namespace lazy {
 
 namespace {
   // This registers the torchscript backend, without which lazy device won't work
-  torch::lazy::BackendRegistrar g_registrar(GetTSBackendImpl());
+static bool inline init_backend(){
+  torch::lazy::InitTorchScriptBackend();
+  return true;
+}
+static const bool backend_initialized = init_backend();
+
 }
 
 class LazyTsTest : public ::testing::Test {
@@ -50,6 +55,7 @@ class LazyOpsTestBase : public LazyTsTest {
 };
 
 void LazyTsTest::SetUp() {
+  (void)backend_initialized;  // avoid unused parameter warning
   at::manual_seed(42);
   torch::lazy::LazyGraphExecutor::Get()->SetRngSeed(torch::lazy::BackendDevice(), 42);
 }

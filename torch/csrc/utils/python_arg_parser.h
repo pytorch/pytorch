@@ -77,7 +77,7 @@
 namespace torch {
 
 enum class ParameterType {
-  TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
+  TENSOR, SCALAR, INT64, SYM_INT, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
   DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
 };
@@ -203,6 +203,7 @@ struct PythonArgs {
   inline c10::optional<c10::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
+  inline c10::SymInt toSymInt(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
@@ -625,6 +626,16 @@ inline int64_t PythonArgs::toInt64(int i) {
         signature.params[i].name, idx, var, c10::IntType::get());
   }
   return THPUtils_unpackLong(args[i]);
+}
+
+inline c10::SymInt PythonArgs::toSymInt(int i) {
+  if (!args[i]) return signature.params[i].default_int;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto & var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, c10::IntType::get());
+  }
+  return c10::SymInt(THPUtils_unpackLong(args[i]));
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {

@@ -149,7 +149,13 @@ void ltc_eager_fallback(
       op, stack, torch::lazy::getBackend()->EagerFallbackDeviceType());
 }
 
-TORCH_LIBRARY_IMPL(_, Lazy, m) {
+void register_ts_ltc_eager_fallback() {
+  static auto m = MAKE_TORCH_LIBRARY_IMPL(_, Lazy);
+  // Most backends use TORCH_LIBRARY_* macros which perform their dispatcher
+  // registrations at static library init time, but the lazy Torchscript backend
+  // does not since it is built in the main torch lib but not always used.
+  // In particular, if another external backend wants to register itself to the
+  // same key (Lazy), Torchscript backend must not be initialized.
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
 }
 
