@@ -179,7 +179,7 @@ genrule(
         "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src --gen_lazy_ts_backend",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --gen_lazy_ts_backend",
     tools = [":generate_code"],
 )
 
