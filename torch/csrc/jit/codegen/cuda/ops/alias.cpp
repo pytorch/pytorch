@@ -101,6 +101,34 @@ TensorView* view(
       : view;
 }
 
+TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
+  if (start_dim < 0) {
+    start_dim += x->nDims();
+  }
+  if (end_dim < 0) {
+    end_dim += x->nDims();
+  }
+  TORCH_CHECK(
+      start_dim >= 0 && start_dim < x->nDims(),
+      "Invalid start_dim ",
+      start_dim);
+  TORCH_CHECK(
+      end_dim >= 0 && end_dim < x->nDims(), "Invalid end_dim ", end_dim);
+  TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
+
+  if (start_dim == end_dim) {
+    return x;
+  }
+
+  auto out = IrBuilder::create<TensorView>(
+      x->container(),
+      x->domain()->flatten(start_dim, end_dim),
+      x->getDataType().value());
+
+  IrBuilder::create<ViewOp>(out, x);
+  return out;
+}
+
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
   TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
 

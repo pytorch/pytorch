@@ -982,6 +982,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   TensorDomain* view(
       const std::vector<std::shared_ptr<ViewTransform>>& transforms);
 
+  TensorDomain* flatten(int64_t start_dim, int64_t end_dim);
+
   static std::vector<IterDomain*> orderedAs(
       const std::vector<IterDomain*>& td,
       const std::unordered_map<int, int>& old2new);

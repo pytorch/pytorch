@@ -186,6 +186,53 @@ TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionFlattenOutput_CUDA) {
+  std::vector<int64_t> input_shape{2, 3, 4, 5};
+
+  auto run_test = [&](int64_t start_dim, int64_t end_dim) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = makeSymbolicTensor(input_shape.size());
+    TensorView* bias = makeSymbolicTensor(input_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_add_bias = add(x, bias);
+    auto x_view = flatten(x_add_bias, start_dim, end_dim);
+    fusion.addOutput(x_view);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(input_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, aten_inputs, lparams);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_add_bias = at_x + at_bias;
+    auto at_x_view = at::native::flatten(at_x_add_bias, start_dim, end_dim);
+
+    testValidate(
+        &fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+  };
+
+  for (int64_t start_dim = 0; start_dim < input_shape.size(); start_dim++) {
+    for (int64_t end_dim = start_dim; end_dim < input_shape.size(); end_dim++) {
+      run_test(start_dim, end_dim);
+    }
+  }
+
+  for (int64_t start_dim = -input_shape.size(); start_dim < 0; start_dim++) {
+    for (int64_t end_dim = start_dim; end_dim < 0; end_dim++) {
+      run_test(start_dim, end_dim);
+    }
+  }
+}
+
 TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

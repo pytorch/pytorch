@@ -1596,6 +1596,52 @@ TensorDomain* TensorDomain::view(
   return transformView(this, transforms);
 }
 
+TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
+  if (start_dim < 0) {
+    start_dim += nDims();
+  }
+  if (end_dim < 0) {
+    end_dim += nDims();
+  }
+
+  std::vector<IterDomain*> new_root_domain;
+  auto inp_domain = noReductions(getMaybeRFactorDomain());
+  new_root_domain.reserve(inp_domain.size());
+  for (auto id : inp_domain) {
+    new_root_domain.push_back(id->cloneWithoutRFactor());
+  }
+
+  std::vector<IterDomain*> rfactor_domain;
+  rfactor_domain.reserve(new_root_domain.size() - (end_dim - start_dim));
+  for (auto i : c10::irange(start_dim)) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  IterDomain* merged_id = new_root_domain[start_dim];
+  for (auto i : c10::irange(start_dim + 1, end_dim + 1)) {
+    IterDomain* new_merged_id = IrBuilder::create<IterDomain>(
+        merged_id->container(),
+        merged_id->container()->zeroVal(),
+        mul(merged_id->extent(), new_root_domain[i]->extent()),
+        ParallelType::Serial,
+        IterType::Iteration,
+        true);
+    IrBuilder::create<Merge>(new_merged_id, merged_id, new_root_domain[i]);
+    merged_id = new_merged_id;
+  }
+  rfactor_domain.push_back(merged_id);
+
+  for (auto i : c10::irange(end_dim + 1, nDims())) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  return IrBuilder::create<TensorDomain>(
+      new_root_domain,
+      rfactor_domain,
+      rfactor_domain,
+      std::vector<bool>(rfactor_domain.size(), true));
+}
+
 // TODO: Rfactor a Welford
 
 // pair is in order where second is the consumer of first
