@@ -80,6 +80,7 @@ class ForeachFuncWrapper:
 
     def __init__(self, func, n_expected_cudaLaunchKernels):
         self.func = func
+        # if `n_expected_cudaLaunchKernels` == 0, skip the check.
         self.n_expected_cudaLaunchKernels = n_expected_cudaLaunchKernels
         # Some foreach functions don't have in-place implementations.
         self._is_inplace = False if func is None else func.__name__.endswith('_')
@@ -93,12 +94,13 @@ class ForeachFuncWrapper:
         ):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 actual = self.func(*inputs, **kwargs)
-            # for e in p.key_averages():
-            #     if e.key == 'cudaLaunchKernel':
-            #         if is_fastpath:
-            #             assert e.count == self.n_expected_cudaLaunchKernels
-            #         else:
-            #             assert e.count > self.n_expected_cudaLaunchKernels
+            if self.n_expected_cudaLaunchKernels > 0:
+                for e in p.key_averages():
+                    if e.key == 'cudaLaunchKernel':
+                        if is_fastpath:
+                            assert e.count == self.n_expected_cudaLaunchKernels
+                        else:
+                            assert e.count > self.n_expected_cudaLaunchKernels
         else:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.
@@ -424,29 +426,42 @@ class TestForeach(TestCase):
         )
         self._minmax_test(op, inputs, True, 1)
 
-    def _reduce_test(self, opinfo, inputs, ord, is_fastpath, n_expected_cudaLaunchKernels):
-        op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        ref_output = ref(inputs, ord=ord, is_foreach_norm=opinfo.name == "_foreach_norm")
-        actual_output = op(inputs, self.is_cuda, is_fastpath, ord=ord)
-        print(f"{ord, ref_output, actual_output}")
-        self.assertEqual(ref_output, actual_output)
+    def _reduce_test(self, device, dtype, opinfo, is_fastpath):
+        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
+            if is_fastpath:
+                # note (mkozuki): Currently, only `ord` of 1 & 2 can go to the fast path, a.k.a. multi tensor apply
+                if ord in (1, 2) and dtype in (torch.bfloat16, torch.float16, torch.float32, torch.float64):
+                    # The number of cuda kernel launches by fast path.
+                    # 1 for tensor to store intermediate results, another for multi_tensor_apply, and the other for clean up kernel.
+                    n_expected_cudaLaunchKernels = 3
+                else:
+                    # TODO (mkozuki): Enable test  `n_expected_cudaLaunchKernels`.
+                    if opinfo.name == "_foreach_norm":
+                        n_expected_cudaLaunchKernels = 0
+                    else:
+                        n_expected_cudaLaunchKernels = N
+            else:
+                n_expected_cudaLaunchKernels = 0
+            low, high = (1.0, 2.0) if ord == -2 else (0, 0.1)
+            inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath, low=low, high=high),
+            if dtype == torch.float16:
+                if ord == 0:
+                    inputs = [[(t > high - 1e-2).to(dtype) for t in tensors] for tensors in inputs]
+                if ord == -2:
+                    inputs = [tensors[:N//2] for tensors in inputs]
+                    n_expected_cudaLaunchKernels //= 2
+            op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
+            ref_output = ref(inputs, ord=ord, is_foreach_norm=opinfo.name == "_foreach_norm")
+            actual_output = op(inputs, self.is_cuda, is_fastpath, ord=ord)
+            self.assertEqual(ref_output, actual_output)
 
     @ops(foreach_reduce_op_db)
     def test_reduce_fastpath(self, device, dtype, op):
-        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
-            # TODO (mkozuki): Fix `n_expected_cudaLaunchKernels`
-            if ord in (1, 2) and dtype in torch.testing.get_all_fp_dtypes():
-                n_expected_cudaLaunchKernels = 3
-            else:
-                n_expected_cudaLaunchKernels = N * 2 + 1 + int(dtype in (torch.complex32, torch.complex64, torch.complex128))
-            inputs = op.sample_inputs(device, dtype, N // 2, noncontiguous=False, low=0, high=0.1),
-            self._reduce_test(op, inputs, ord, True, n_expected_cudaLaunchKernels)
+        self._reduce_test(device, dtype, op, True)
 
     @ops(foreach_reduce_op_db)
     def test_reduce_slowpath(self, device, dtype, op):
-        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
-            inputs = op.sample_inputs(device, dtype, N // 2, noncontiguous=True, low=0, high=0.1),
-            self._reduce_test(op, inputs, ord, False, 1)
+        self._reduce_test(device, dtype, op, False)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):

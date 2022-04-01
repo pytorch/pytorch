@@ -246,7 +246,7 @@ Tensor foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
   }
   check_foreach_api_restrictions(tensors);
   const auto result_scalar_type = toRealValueType(result_type(tensors));
-  auto result = std::accumulate(
+  const auto result = std::accumulate(
     tensors.begin(), tensors.end(),
     at::zeros({}, tensors[0].options().dtype(toOpMathType(result_scalar_type))),
     [&](const Tensor &cumulative_sum, const Tensor &t) {
