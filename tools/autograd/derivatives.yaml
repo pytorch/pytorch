@@ -315,6 +315,7 @@
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
+  result: (-self_p * other_t + other_p * self_t) / (self_p.pow(2) + other_p.pow(2))
 
 - name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -365,6 +366,7 @@
 
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   self: cholesky_inverse_backward(grad, self, upper, result)
+  result: cholesky_inverse_jvp(self_p, self_t, result, upper)
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
@@ -2632,6 +2634,6 @@
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
 
-- name: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
-  self: scatter_reduce_backward(grad, self, dim, index, reduce, result)
+- name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+  self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, result)
   index: non_differentiable

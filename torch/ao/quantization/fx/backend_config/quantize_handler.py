@@ -6,7 +6,6 @@ from ..quantization_types import Pattern, NodePattern
 from ...utils import (
     activation_dtype,
 )
-from torch.fx import Node
 
 def get_quantize_handler_cls(
         observation_type,
