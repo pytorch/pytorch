@@ -379,7 +379,7 @@ const SparseCsrTensor& resize_as_sparse_csr_(
                 " for src");
     break;
   default:
-    TORCH_CHECK(false, "resize_as_sparse_csr_: layout ", self.layout(), " is not supported");    
+    TORCH_CHECK(false, "resize_as_sparse_csr_: layout ", self.layout(), " is not supported");
   }
   if (!_is_same_size_as_sparse_csr(self, src)) {
     get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
