@@ -386,9 +386,12 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
   }
 
+  const uint32_t bytecode_version =
+      static_cast<uint32_t>(module.bytecode_version());
+
   auto mod = CreateModule(
       fbb,
-      0, /* version */
+      /*bytecode_version=*/bytecode_version,
       extra_files_offset, /* extra_files */
       functions_offset,
       ivalue_index,
