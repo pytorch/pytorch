@@ -2633,6 +2633,6 @@
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
 
-- name: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
-  self: scatter_reduce_backward(grad, self, dim, index, reduce, result)
+- name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+  self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, result)
   index: non_differentiable
