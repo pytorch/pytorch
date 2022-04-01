@@ -806,34 +806,101 @@ class CommonDistributedDataParallelTest(object):
 
         return fut.then(fut_then)
 
+    def _test_not_nan(self, model, x):
+        y = model(x)
+        self.assertFalse(y.isnan().any().item())
+        y.sum().backward()
+        for p in model.parameters():
+            self.assertFalse(p.grad.isnan().any().item())
+
     @skip_if_lt_x_gpu(2)
-    def test_sync_batch_norm_empty_input(self):
+    def test_sync_batch_norm_only_empty_input(self):
         pg = self._get_process_group()
 
         model = torch.nn.Sequential(
-            torch.nn.BatchNorm2d(2),
+            nn.BatchNorm2d(2),
         ).to(device=self.rank)
         model = DistributedDataParallel(
             model,
             device_ids=[self.rank],
             process_group=pg,
         )
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(
             model,
             process_group=pg,
         )
 
         model.train()
-        x = torch.zeros((1 if self.rank != 0 else 0, 2, 11, 13), dtype=torch.float32, device=self.rank)
-        #x = torch.zeros((2, 2, 11, 13), dtype=torch.float32, device=self.rank)
+
+        # only rank 0 receives empty inputs
+        x = torch.zeros(
+            (1 if self.rank != 0 else 0, 2, 11, 13),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        # input requires grad, this will trigger the collective communication
+        # in the backward pass
         x.requires_grad = True
-        y = model(x)
-        y.sum().backward()
+        self._test_not_nan(model, x)
 
+        # input does not requires grad
         x.requires_grad = False
-        y = model(x)
-        y.sum().backward()
+        self._test_not_nan(model, x)
 
+        # all ranks receive empty inputs
+        x = torch.zeros(
+            (0, 2, 11, 13),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        # input requires grad, this will trigger the collective communication
+        # in the backward pass
+        x.requires_grad = True
+        self._test_not_nan(model, x)
+
+        # input does not requires grad
+        x.requires_grad = False
+        self._test_not_nan(model, x)
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_batch_norm_empty_input(self):
+        pg = self._get_process_group()
+
+        model = torch.nn.Sequential(
+            nn.Conv2d(2, 2, 3),
+            nn.BatchNorm2d(2),
+            nn.Linear(28, 2),
+        ).to(device=self.rank)
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+        )
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(
+            model,
+            process_group=pg,
+        )
+
+        model.train()
+        # only rank 0 receives empty inputs
+        x = torch.zeros(
+            (3 if self.rank != 0 else 0, 2, 30, 30),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        self._test_not_nan(model, x)
+
+        # all ranks receive empty inputs
+        x = torch.zeros(
+            (0, 2, 30, 30),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        self._test_not_nan(model, x)
 
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):

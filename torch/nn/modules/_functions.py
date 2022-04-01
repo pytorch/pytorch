@@ -1,4 +1,3 @@
-from hamcrest import none
 import torch
 import torch.distributed as dist
 
@@ -29,7 +28,10 @@ class SyncBatchNorm(Function):
             # C, C, 1 -> (2C + 1)
             combined = torch.cat([mean, invstd, count], dim=0)
         else:
-            # for empty input, directly set all stats to 0
+            # for empty input, set stats and the count to zero. The stats with
+            # zero count will be filtered out later when computing global mean
+            # & invstd, but they still needs to participate the all_gather
+            # collective communication to unblock other peer processes.
             combined = torch.zeros(
                 2 * num_channels + 1,
                 dtype=input.dtype,
@@ -55,7 +57,7 @@ class SyncBatchNorm(Function):
         else:
             # world_size * (2C + 1)
             combined_list = [
-                torch.empty_like(combined) for k in range(world_size)
+                torch.empty_like(combined) for _ in range(world_size)
             ]
             dist.all_gather(combined_list, combined, process_group, async_op=False)
             combined = torch.stack(combined_list, dim=0)
@@ -137,6 +139,11 @@ class SyncBatchNorm(Function):
             if weight is None or not self.needs_input_grad[2]:
                 grad_bias = None
         else:
+            # This process got an empty input tensor in the forward pass.
+            # Although this process can directly set grad_input as an empty
+            # tensor of zeros, it still needs to participate in the collective
+            # communication to unblock its peers, as other processes might
+            # recieved non-empty inputs.
             num_channels = saved_input.shape[1]
             if self.needs_input_grad[0]:
                 # launch all_reduce to unblock other peer processes
@@ -150,20 +157,9 @@ class SyncBatchNorm(Function):
 
                 # input is empty, we can skip batch_norm_backward_elemt
                 grad_input = torch.zeros_like(saved_input)
-            else:
-                grad_input = None
 
-            grad_weight = torch.zeros(
-                num_channels,
-                dtype=saved_input.dtype,
-                device=saved_input.device
-            ) if weight is not None and self.needs_input_grad[1] else None
-
-            grad_bias= torch.zeros(
-                num_channels,
-                dtype=saved_input.dtype,
-                device=saved_input.device
-            ) if weight is not None and self.needs_input_grad[2] else None
+            # Leave grad_weight and grad_bias as None, which will be interpreted
+            # by the autograd engine as Tensors full of zeros.
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
