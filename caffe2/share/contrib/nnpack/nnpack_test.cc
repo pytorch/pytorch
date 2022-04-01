@@ -236,7 +236,7 @@ void runConv(
 
 } // unnamed namespace
 
-constexpr size_t kIters = 20;
+constexpr int  kIters = 20;
 
 TEST(NNPACK, Conv_3x3s1) {
   for (int i = 0; i < kIters; ++i) {
