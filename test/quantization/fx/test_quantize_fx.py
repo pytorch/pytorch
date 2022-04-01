@@ -6042,7 +6042,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # not runnable
             quantized = convert_fx(prepared)
             quantized_reference = convert_fx(prepared_copy, is_reference=True)
-            # print(quantized_reference)
 
             # This checks that the dequantize from the output of first conv
             # is being propagated to the end, so that we don't insert extra
