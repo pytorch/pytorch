@@ -14884,6 +14884,12 @@ dedent """
         with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
             a = torch.jit.script(W2())
 
+    def test_narrow_copy(self):
+        def foo(a):
+            return a.narrow_copy(0, 0, 5)
+
+        self.checkScript(foo, [torch.rand(10)])
+
     def test_select_after_chunk(self):
         def foo(x):
             chunked = torch.chunk(x, 1)
