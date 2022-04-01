@@ -69,6 +69,12 @@ def is_pre_volta():
 
 TEST_BF16 = torch.cuda.is_bf16_supported()
 
+# TODO: remove this - just to avoid conflicts with 73322 and 75016
+try:
+    RUN_NVFUSER
+except NameError:
+    RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
+
 class TestCudaFuser(JitTestCase):
 
     special_values = torch.tensor(
