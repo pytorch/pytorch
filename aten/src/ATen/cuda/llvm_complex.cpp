@@ -482,7 +482,7 @@ inline constexpr
 bool
 operator&&(const _Tp& __x, const complex<_Tp>& __y)
 {
-    return __x && __y; 
+    return __x && __y;
 }
 
 // 26.3.7 values:
