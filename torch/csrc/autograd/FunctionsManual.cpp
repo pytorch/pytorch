@@ -1192,17 +1192,33 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
   at::NoTF32Guard disable_tf32;
   Tensor grad_L;
   if (grad.defined()) {
-    Tensor common_term = grad + grad.mT();
+    Tensor common_term = grad + grad.mH();
     common_term = at::matmul(inverse, at::matmul(common_term, inverse));
     if (upper) {
       grad_L = -at::matmul(L, common_term);
     } else {
       grad_L = -at::matmul(common_term, L);
     }
-  } else {
-    grad_L = at::zeros({1}, L.options()).expand_as(L);
   }
+
   return grad_L;
+}
+
+// If X = (L L^H)^{-1} with L lower-triangular with a real positive diagonal,
+// then dX = K^H + K, where
+// K =  L^{-H} dL^{-1} [dL^{-1} = -L^{-1} dL L^{-1}]
+//   = -L^{-H} L^{-1} dL L^{-1} [L^{-H} L^{-1} = X]
+//   = -X dL L^{-1} [X = X^H = L^{-H} L^{-1} = L^{-1} L^{-H}]
+//   = -X dL X L^{H}.
+// If X = (U^H U)^{-1} with U upper-triangular with a real positive diagonal,
+// then K becomes
+// K = -X dU^H X U
+Tensor cholesky_inverse_jvp(const Tensor& F, const Tensor& dF, const Tensor& X, bool upper) {
+  at::NoTF32Guard disable_tf32;
+  const auto CF = upper ? F : F.mH();
+  const auto dCF = upper ? dF.mH() : dF;
+  const auto partial_dX = -X.matmul(dCF).matmul(X).matmul(CF);
+  return partial_dX + partial_dX.mH();
 }
 
 // The formula for forward AD is adapted from
