@@ -8,3 +8,9 @@ def define_targets(rules):
         ],
         visibility = ["//visibility:public"],
     )
+
+    rules.py_binary(
+        name = "gen",
+        srcs = [":codegen"],
+        visibility = ["//visibility:public"],
+    )
