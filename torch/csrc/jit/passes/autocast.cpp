@@ -148,12 +148,21 @@ void castTensorInputs(
   const auto graph = node->owningGraph();
 
   std::unordered_set<Value*> casted_inputs;
+  std::unordered_set<Value*> casted_optional;
   // need to also keep the inputs in order, otherwise tracing fails
   // sanity checks because casting ops are inserted in random order
   std::vector<Value*> casted_inputs_ordered;
   for (auto input : node->inputs()) {
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
+
+    // retrieve tensor type from optional tensor;
+    if (auto opt_input_type = input->type()->cast<OptionalType>()) {
+      input_tensor_type = opt_input_type->getElementType()->cast<TensorType>();
+      casted_optional.insert(input);
+    }
+
+    // casting on tensor;
     if (input_tensor_type && input->node()->kind() != cast_op) {
       auto has_inserted = casted_inputs.insert(input);
       if (has_inserted.second) {
@@ -171,6 +180,9 @@ void castTensorInputs(
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled))});
+      if (casted_optional.count(input)) {
+        new_input->setType(OptionalType::create(TensorType::get()));
+      }
       node->replaceInputWith(input, new_input);
     } else if (cast_op == aten::_autocast_to_reduced_precision) {
       const auto new_input = graph->insert(
@@ -180,6 +192,9 @@ void castTensorInputs(
            graph->insertConstant(IValue(context.cpu_enabled)),
            graph->insertConstant(IValue(context.gpu_scalar_type)),
            graph->insertConstant(IValue(context.cpu_scalar_type))});
+      if (casted_optional.count(input)) {
+        new_input->setType(OptionalType::create(TensorType::get()));
+      }
       node->replaceInputWith(input, new_input);
     } else {
       TORCH_INTERNAL_ASSERT(

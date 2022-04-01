@@ -479,19 +479,19 @@ const std::vector<std::string> functions = {
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
 
-        def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
-            self_dtype = self.dtype
+        def _autocast_to_full_precision(self : Optional[Tensor], cuda_enabled : bool, cpu_enabled : bool):
+            self_dtype = self->dtype
             def backward(grad_output):
                 return grad_output.to(self_dtype), None, None
 
             return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
 
-        def _autocast_to_reduced_precision(self,
+        def _autocast_to_reduced_precision(self : Optional[Tensor],
                                           cuda_enabled : bool,
                                           cpu_enabled : bool,
                                           cuda_dtype : int,
                                           cpu_dtype : int):
-            self_dtype = self.dtype
+            self_dtype = self->dtype
             def backward(grad_output):
                 return grad_output.to(self_dtype), None, None, None, None
 

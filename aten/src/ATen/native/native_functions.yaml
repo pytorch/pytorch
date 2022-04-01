@@ -5674,12 +5674,12 @@
 - func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   variants: function
 
-- func: _autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)
-  variants: method
+- func: _autocast_to_reduced_precision(Tensor? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor
+  variants: function 
   device_guard: False
 
-- func: _autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)
-  variants: method
+- func: _autocast_to_full_precision(Tensor? self, bool cuda_enabled, bool cpu_enabled) -> Tensor
+  variants: function 
   device_guard: False
 
 - func: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor

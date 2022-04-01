@@ -2332,8 +2332,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumAutocastOps> AutocastOps = {
-          "aten::_autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)",
-          "aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)"};
+          "aten::_autocast_to_reduced_precision(Tensor? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor",
+          "aten::_autocast_to_full_precision(Tensor? self, bool cuda_enabled, bool cpu_enabled) -> Tensor"};
       for (auto signature : AutocastOps) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
