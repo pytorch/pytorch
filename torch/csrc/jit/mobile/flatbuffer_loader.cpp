@@ -663,5 +663,27 @@ mobile::Module load_mobile_module_from_file(
   return parse_and_initialize_mobile_module(std::move(data), size, device);
 }
 
+uint64_t get_bytecode_version(std::istream& in) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  return flatbuffer_module->bytecode_version();
+}
+
+uint64_t get_bytecode_version(const std::string& filename) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  return flatbuffer_module->bytecode_version();
+}
+
 } // namespace jit
 } // namespace torch
