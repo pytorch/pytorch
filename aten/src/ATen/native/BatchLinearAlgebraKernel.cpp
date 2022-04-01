@@ -1027,6 +1027,9 @@ void svd_kernel(const Tensor& A,
 }
 
 void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
+  if (iter.numel() == 0) {
+    return;
+  }
   auto loop = [&](char* const* const  data, const int64_t* const strides, const int64_t nelems) {
     auto* perm_ptr = data[0];
     const auto* pivots_ptr = data[1];

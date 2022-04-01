@@ -3011,13 +3011,10 @@ static void lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const 
   });
 }
 
-namespace {
-
 c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
   if (batchCount(b) != batchCount(lu)) {
-    IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    DimVector expand_size(b_batch_size);
-    expand_size.insert(expand_size.end(), {lu.size(-2), lu.size(-1)});
+    auto expand_size = DimVector((size_t *) b.sizes().begin(), (size_t *) b.sizes().end() - 2);
+    expand_size.append({lu.size(-2), lu.size(-1)});
     return c10::MaybeOwned<Tensor>::owned(
         cloneBatchedColumnMajor(lu.expand(expand_size)));
   } else {
@@ -3027,17 +3024,13 @@ c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
 
 c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots) {
   if (batchCount(b) != batchCount(pivots.unsqueeze(-1))) {
-    IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    DimVector expand_size(b_batch_size);
-    expand_size.insert(expand_size.end(), {pivots.size(-1)});
-    return c10::MaybeOwned<Tensor>::owned(
-        pivots.expand(expand_size).clone(at::MemoryFormat::Contiguous));
+    auto expand_size = DimVector((size_t *) b.sizes().begin(), (size_t *) b.sizes().end() - 2);
+    expand_size.push_back(pivots.size(-1));
+    return c10::MaybeOwned<Tensor>::owned(pivots.expand(expand_size).contiguous());
   } else {
     return c10::MaybeOwned<Tensor>::borrowed(pivots);
   }
 }
-
-}  // anonymous namespace
 
 static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   auto batch_size = batchCount(B);
@@ -3051,37 +3044,30 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
   // Helps mitigating the bugs in magma
   auto lu_solve_triangular = [m](const Tensor& LU, const Tensor& pivots, const Tensor& B, const TransposeType trans) {
-    // Computes B = op(P) @ B in place where op(P) = P or P^T
-    auto P_matmul = [m](const Tensor& B, const Tensor& pivots, const bool P_trans) {
-      auto perm = at::arange(m, pivots.options().dtype(kLong)).expand(pivots.sizes()).contiguous();
-      auto iter = TensorIteratorConfig()
-        .set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .resize_outputs(false)
-        .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
-        .add_output(perm)
-        .add_input(pivots)
-        .build();
-      unpack_pivots_stub(pivots.device().type(), iter, m);
-
-      if (P_trans) {
-        // Get the inverse permutation
-        // This is an insertion sort, and it's equivalent to
-        // perm = at::argsort(perm);
-        // but more parallelisable and O(n), exploiting that perm is a permutation
-        auto id_perm = at::arange(m, perm.options()).expand(perm.sizes());
-        auto inv_perm = at::empty_like(perm);
-        inv_perm.scatter_(-1, perm, id_perm);
-        perm = std::move(inv_perm);
-      }
-      B.scatter_(-2, perm.unsqueeze(-1).expand_as(B), B.clone());
-    };
+    // LAPACK / cublas / etc returns the permutaiton in an odd format
+    // Here we transform it to a vector representing a permutation, i.e. a (batch of) vectors st. P(i) = j
+    auto perm = at::arange(m, pivots.options().dtype(kLong)).expand(pivots.sizes()).contiguous();
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .add_output(perm)
+      .add_input(pivots)
+      .build();
+    unpack_pivots_stub(pivots.device().type(), iter, m);
 
     if (trans == TransposeType::NoTranspose) {
-      // B = P^T @ B
-      P_matmul(B, pivots, /*P_trans=*/true);
-      // B = L^{-1} @ B
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, B, /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
+      // Get the inverse permutation
+      // This is an insertion sort, and it's equivalent to
+      // perm = at::argsort(perm);
+      // but more parallelisable and O(n), exploiting that perm is a permutation
+      auto id_perm = at::arange(m, perm.options()).expand(perm.sizes());
+      auto inv_perm = perm.scatter(-1, perm, id_perm);
+      // B1 = P^T @ B  (must be done out-of-place as B is both source and target)
+      auto B1 = B.scatter(-2, inv_perm.unsqueeze(-1).expand_as(B), B);
+      // B = L^{-1} @ B1
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
       // B = U^{-1} @ B
       at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, B, /*upper=*/true);
     } else {
@@ -3091,7 +3077,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       // B = L^{-H} @ B
       at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU_H, B, /*upper=*/true, /*left=*/true, /*unitriangular=*/true);
       // B = P @ B
-      P_matmul(B, pivots, /*P_trans=*/false);
+      B.scatter_(-2, perm.unsqueeze(-1).expand_as(B), B.clone());
     }
   };
 
