@@ -230,25 +230,22 @@ class TestNumPyInterop(TestCase):
 
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
-        warning_msg = r"Creating a tensor from a list of non-contiguous numpy.ndarrays is extremely slow"
+        warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
         with self.assertWarnsOnceRegex(UserWarning, warning_msg):
             torch.tensor([np.random.random(size=(3, 3)).T, np.random.random(size=(3, 3)).T], device=device)
 
     def test_ctor_with_invalid_numpy_array_sequence(self, device):
         # Invalid list of numpy array
-        with self.assertRaisesRegex(RuntimeError, "Expected NumPy array of shape"):
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([np.random.random(size=(3, 3)), np.random.random(size=(3, 0))], device=device)
 
         # Invalid list of list of numpy array
-        with self.assertRaisesRegex(RuntimeError, "Expected NumPy array of shape"):
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected NumPy array of shape"):
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 3))],
                           [np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "Expected NumPy array to be 0-D but found 1-D"):
-            torch.tensor([[np.random.random(), np.random.random(size=(3,))]], device=device)
 
         # expected shape is `[1, 2, 3]`, hence we try to iterate over 0-D array
         # leading to type error : not a sequence.
@@ -256,7 +253,7 @@ class TestNumPyInterop(TestCase):
             torch.tensor([[np.random.random(size=(3)), np.random.random()]], device=device)
 
         # list of list or numpy array.
-        with self.assertRaisesRegex(RuntimeError, "Expected NumPy array of shape"):
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([[1, 2, 3], np.random.random(size=(2,)), ], device=device)
 
     @onlyCPU
