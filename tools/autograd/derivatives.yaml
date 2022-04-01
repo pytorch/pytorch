@@ -513,7 +513,6 @@
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
-  result: norm_jvp(self_p - other_p, self_t - other_t, p, result, {}, false)
 
 # The backward formula is done in this order to improve numerical stability
 # of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
@@ -1126,23 +1125,18 @@
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
-  result: norm_jvp(self_p, self_t, p, result)
 
 - name: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   self: norm_backward(grad, self, p, result, dim, keepdim)
-  result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result)
-  result: norm_jvp(self_p, self_t, p, result)
 
 - name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
-  result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
-  result: linalg_vector_norm_jvp(self_p, self_t, ord, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)

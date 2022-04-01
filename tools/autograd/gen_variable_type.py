@@ -955,7 +955,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 msg = "because it is an out= function"
             else:
                 msg = ("because it has not been implemented yet.\\nPlease file an issue "
-                       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
+                       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
                        "so that we can prioritize its implementation.")
             return msg
         res = ""
