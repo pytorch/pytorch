@@ -23,7 +23,8 @@ def _to_device_map(
 ) -> Dict[torch.device, torch.device]:
     full_device_map: Dict[torch.device, torch.device] = {}
     reverse_map: Dict[torch.device, torch.device] = {}
-    for k, v in device_map.items():
+    for k in device_map:
+        v = device_map[k]
         k, v = torch.device(k), torch.device(v)
         if v in reverse_map:
             raise ValueError(

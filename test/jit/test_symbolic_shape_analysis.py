@@ -12,7 +12,6 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
-from typing import List, Any
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -499,37 +498,3 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         m2_shape = [20, 10]
         res = torch.jit._shapes.matmul(m1_shape, m2_shape)
         self.assertEqual(res, [10, 10])
-
-    def test_register_function_error_checking(self):
-        # this will error before registering on global map, so
-        # no issue in overwriting schema mappings
-        @torch.jit.script
-        def foo(x, y):
-            return x + y
-
-        node = foo.graph.findNode("aten::add")
-
-        @torch.jit.script
-        def wrong_input_types(x, y):
-            x: List[int] = []
-            return x
-        with self.assertRaisesRegex(RuntimeError, "Expected supertype of int"):
-            torch._C._jit_register_shape_compute_graph_for_node(node, wrong_input_types.graph)
-
-        @torch.jit.script
-        def wrong_output_types(x: List[int], y: List[int]):
-            x: List[Tensor] = []
-            return x
-
-        with self.assertRaisesRegex(RuntimeError, "but got graph_type"):
-            torch._C._jit_register_shape_compute_graph_for_node(node, wrong_output_types.graph)
-
-        @torch.jit.script
-        def too_many_inputs(x: List[int], y: List[int], z: Any, z2: Any):
-            x: List[int] = []
-            return x
-
-        with self.assertRaises(RuntimeError) as error:
-            torch._C._jit_register_shape_compute_graph_for_node(node, too_many_inputs.graph)
-
-        self.assertTrue("fewer arguments than schema" in str(error.exception))

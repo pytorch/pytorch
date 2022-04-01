@@ -13,7 +13,7 @@ namespace native {
 /// Else, return a new tensor containing the elementwise sums.
 Tensor _test_optional_intlist(
     const Tensor& values,
-    at::OptionalIntArrayRef addends) {
+    c10::optional<IntArrayRef> addends) {
   if (!addends) {
     return values;
   }

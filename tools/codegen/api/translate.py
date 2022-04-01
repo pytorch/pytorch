@@ -6,7 +6,7 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      boolT, deviceT, layoutT, optionalTensorRefT,
                                      scalarT, optionalScalarRefT,
                                      VectorCType, longT, intArrayRefT,
-                                     scalar_t, opmath_t, optionalIntArrayRefT)
+                                     scalar_t, opmath_t)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -39,7 +39,6 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
 options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
 longVec_ctype = VectorCType(BaseCType(longT))
-optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
 optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
 
@@ -236,8 +235,6 @@ Check this module for more information.
         # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
         elif goal.type == BaseCType(intArrayRefT):
             return direct_solve(NamedCType(goal.name, longVec_ctype))
-        elif goal.type == BaseCType(optionalIntArrayRefT):
-            return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):
@@ -257,10 +254,6 @@ Check this module for more information.
                 intArrayRef_ctype = NamedCType(goal.name, BaseCType(intArrayRefT))
                 argname = direct_solve(intArrayRef_ctype)
                 return f'{argname}.vec()'
-            elif goal.type == OptionalCType(VectorCType(BaseCType(longT))):
-                optionalIntArrayRef_ctype = NamedCType(goal.name, BaseCType(optionalIntArrayRefT))
-                argname = direct_solve(optionalIntArrayRef_ctype)
-                return f'{argname}.has_value() ? c10::make_optional({argname}->vec()) : c10::nullopt'
             elif goal.type == OptionalCType(BaseCType(scalarT)):
                 optionalScalarRef_ctype = NamedCType(goal.name, BaseCType(optionalScalarRefT))
                 argname = direct_solve(optionalScalarRef_ctype)

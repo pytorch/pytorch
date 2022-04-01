@@ -27,7 +27,7 @@ namespace {
 // TODO: Decouple and improve error handling and messages.
 bool available(
     const Tensor& weight,
-    const at::OptionalIntArrayRef bias_sizes_opt,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -189,7 +189,7 @@ ContextConv2D create(
   TORCH_CHECK(
       available(
           weight_nhwc,
-          (bias.has_value() && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt,
+          (bias.has_value() && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
           padding_expanded,
           stride_expanded,
           dilation_expanded,
@@ -433,7 +433,7 @@ unpack_prepacked_sizes_conv2d(const IValue& ivalue) {
   const auto& bias = std::get<1>(tuple);
   return IValue(std::make_tuple(
       std::get<0>(tuple).sizes(),
-      (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt,
+      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
       std::get<2>(tuple),
       std::get<3>(tuple),
       std::get<4>(tuple),
@@ -452,7 +452,7 @@ Tensor conv2d_transpose_clamp_run(
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const at::OptionalIntArrayRef bias_sizes_opt,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,

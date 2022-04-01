@@ -166,9 +166,6 @@ def build_constructor_arg_db():
         torch.nn.UpsamplingBilinear2d: ((), {}),
         torch.nn.UpsamplingNearest2d: ((), {}),
         torch.nn.ZeroPad2d: ((0,), {}),
-        torch.nn.qat.Conv1d: ((3, 3, 3), {
-            'qconfig': torch.ao.quantization.default_qconfig,
-        }),
         torch.nn.qat.Conv2d: ((3, 3, 3), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),

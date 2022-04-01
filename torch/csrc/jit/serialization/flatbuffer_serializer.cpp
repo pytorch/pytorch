@@ -33,25 +33,6 @@ namespace {
 // We will store IValue NONE in index 0 in flatbuffer.
 constexpr int kNoneIndex = 0;
 
-static TypePtr realType(TypePtr type) {
-  if (auto dyn = type->castRaw<c10::DynamicType>()) {
-    return dyn->fallback();
-  } else {
-    return type;
-  }
-}
-
-auto print_type(const c10::Type& t) -> c10::optional<std::string> {
-  auto namedType = t.cast<c10::NamedType>();
-  if (namedType && namedType->name()) {
-    return namedType->name().value().qualifiedName();
-  }
-  if (auto dyn = t.castRaw<c10::DynamicType>()) {
-    return dyn->fallback()->annotation_str();
-  }
-  return c10::nullopt;
-}
-
 class FlatbufferSerializer {
  public:
   FlatbufferSerializer() = default;
@@ -176,21 +157,21 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
   return_vec.reserve(returns.size());
   for (const auto& arg : args) {
     int index = storeIValueAndGetIndex(fbb, arg.default_value());
+    TORCH_INTERNAL_ASSERT(arg.type()->kind() != c10::DynamicType::Kind);
     arg_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(arg.name()),
-        fbb.CreateSharedString(
-            realType(arg.type())->annotation_str(type_printer)),
+        fbb.CreateSharedString(arg.type()->annotation_str(type_printer)),
         index));
   }
 
   for (const auto& ret : returns) {
     int index = storeIValueAndGetIndex(fbb, ret.default_value());
+    TORCH_INTERNAL_ASSERT(ret.type()->kind() != c10::DynamicType::Kind);
     return_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(ret.name()),
-        fbb.CreateSharedString(
-            realType(ret.type())->annotation_str(type_printer)),
+        fbb.CreateSharedString(ret.type()->annotation_str(type_printer)),
         index));
   }
   return CreateSchema(
@@ -238,7 +219,8 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<flatbuffers::String>> type_offsets;
 
   for (const TypePtr& t : code.types_) {
-    auto type_str = realType(t)->annotation_str();
+    auto type_str = t->annotation_str();
+    TORCH_INTERNAL_ASSERT(t->kind() != c10::DynamicType::Kind);
     if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
@@ -260,9 +242,6 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return namedType->name().value().qualifiedName();
-    }
-    if (auto dyn = t.castRaw<c10::DynamicType>()) {
-      return dyn->fallback()->annotation_str();
     }
     return c10::nullopt;
   };
@@ -419,8 +398,7 @@ flatbuffers::Offset<mobile::serialization::List> FlatbufferSerializer::listToFB(
   return CreateList(
       fbb,
       fbb.CreateVector(items),
-      fbb.CreateSharedString(
-          realType(list.type<c10::Type>())->annotation_str(print_type)));
+      fbb.CreateSharedString(list.type<c10::Type>()->annotation_str()));
 }
 
 flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
@@ -437,13 +415,11 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
     int value_index = storeIValueAndGetIndex(fbb, entry.value());
     values.push_back(value_index);
   }
-
   return CreateDict(
       fbb,
       fbb.CreateVector(keys),
       fbb.CreateVector(values),
-      fbb.CreateSharedString(
-          realType(ivalue.type<c10::Type>())->annotation_str(print_type)));
+      fbb.CreateSharedString(ivalue.type<c10::Type>()->annotation_str()));
 }
 
 flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::

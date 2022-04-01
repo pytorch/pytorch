@@ -83,6 +83,7 @@ def post_localSGD_hook(
     global_group_to_use = (
         state.process_group if state.process_group is not None else dist.group.WORLD
     )
+    world_size = global_group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.buffer()

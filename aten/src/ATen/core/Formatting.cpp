@@ -12,28 +12,6 @@ namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
 }
-
-std::ostream& operator<<(std::ostream & out, Scalar s) {
-  if (s.isFloatingPoint()) {
-    return out << s.toDouble();
-  }
-  if (s.isComplex()) {
-    return out << s.toComplexDouble();
-  }
-  if (s.isBoolean()) {
-    return out << (s.toBool() ? "true" : "false");
-  }
-  if (s.isIntegral(false)) {
-    return out << s.toLong();
-  }
-  throw std::logic_error("Unknown type in Scalar");
-}
-
-std::string toString(Scalar s) {
-  std::stringstream out;
-  out << s;
-  return out.str();
-}
 }
 namespace at {
 

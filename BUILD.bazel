@@ -3,7 +3,7 @@ load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
-load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
+load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
@@ -155,11 +155,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/lazy/generated/LazyIr.h",
-        "torch/csrc/lazy/generated/LazyNativeFunctions.h",
-        "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
-        "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
-        "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ]
 
 libtorch_python_generated_sources = [
@@ -185,16 +180,9 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/ts_native_functions.yaml",
-        "torch/csrc/lazy/core/shape_inference.h",
-        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
-        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
-        "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src --gen_lazy_ts_backend",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
@@ -1744,7 +1732,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources +[
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
         ":cpp_generated_code",
         "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
         "torch/csrc/jit/mobile/flatbuffer_loader.cpp"

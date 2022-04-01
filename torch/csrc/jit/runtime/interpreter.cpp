@@ -175,7 +175,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      c10::optional<size_t> bailOut = c10::nullopt,
+      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -716,7 +716,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto& forked_fn =
                 toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
+                forked_fn.get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code,
+                taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),

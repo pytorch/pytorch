@@ -35,7 +35,6 @@ class _SplitterSettingBase:
         parser.add_argument(
             "--min_acc_module_size",
             default=1,
-            type=int,
             help="Minimum size limit of an accelerator subgraph.",
         )
         parser.add_argument(

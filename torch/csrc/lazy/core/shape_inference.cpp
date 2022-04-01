@@ -191,7 +191,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(const at::Tensor & self, at::In
   return {Shape(self.scalar_type(), new_shape)};
 }
 
-std::vector<Shape> compute_shape_convolution_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & weight, at::OptionalIntArrayRef bias_sizes, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups, ::std::array<bool,3> output_mask) {
+std::vector<Shape> compute_shape_convolution_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & weight, c10::optional<at::IntArrayRef> bias_sizes, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups, ::std::array<bool,3> output_mask) {
   if (bias_sizes.has_value()) {
     return {Shape(input.scalar_type(), input.sizes().vec()),
             Shape(weight.scalar_type(), weight.sizes().vec()),
@@ -257,7 +257,7 @@ std::vector<Shape> compute_shape_std(const at::Tensor & self, bool unbiased){
 std::vector<Shape> compute_shape_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim){
   return compute_shape_std(self, dim, c10::nullopt, keepdim);
 }
-std::vector<Shape> compute_shape_std(const at::Tensor & self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim){
+std::vector<Shape> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim){
   if (dim.has_value()) {
     auto shape = at::native::shape_from_dim_mask(self, at::native::make_dim_mask(dim.value(), self.dim()), keepdim);
     return {Shape(self.scalar_type(), std::vector<int64_t>(shape.begin(), shape.end()))};

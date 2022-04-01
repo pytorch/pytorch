@@ -1,16 +1,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <c10/util/Exception.h>
 #include <ATen/Utils.h>
-
-namespace c10 {
-
-class DynamicLibraryError : public Error {
-  using Error::Error;
-};
-
-} // namespace c10
 
 namespace at {
 

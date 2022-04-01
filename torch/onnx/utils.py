@@ -818,8 +818,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
-            params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(
-                graph, params_dict, getattr(model, "training", False))
+            params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(graph, params_dict,
+                                                                           training == TrainingMode.TRAINING)
             if export_params:
                 proto, export_map, val_use_external_data_format, node_names = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,

@@ -814,29 +814,6 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
-    def test_split_module_kwargs_expansion(self):
-        class ModuleWithKwargsExpansion(torch.nn.Module):
-            def forward(self, x, **kwargs):
-                return x + kwargs['foo']
-
-        mod = ModuleWithKwargsExpansion()
-        traced = torch.fx.symbolic_trace(mod)
-
-        seen_getitem = False
-
-        def split_callback(n):
-            nonlocal seen_getitem
-            split_idx = int(seen_getitem)
-            if n.target == operator.getitem:
-                seen_getitem = True
-            return split_idx
-
-        split = split_module(traced, mod, split_callback)
-
-        x = torch.randn(5, 3)
-        foo = torch.randn(5, 3)
-        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
-
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
         # Smoke test trivially splitting resnet into 1 partition works
@@ -1539,7 +1516,6 @@ class TestNormalizeOperators(JitTestCase):
             "igamma",
             "igammac",
             "index_put",
-            "linalg_pinv_singular",  # Implemented with a lambda (only the singular variant)
             "nn.functional.conv2d",
             "nn.functional.dropout",
             "nn.functional.dropout2d",
@@ -1609,9 +1585,6 @@ class TestNormalizeOperators(JitTestCase):
 
         # Unsupported input types
         if op.name in op_skip:
-            return
-
-        if op.formatted_name in op_skip:
             return
 
         if op.name.startswith('_masked.'):

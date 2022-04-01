@@ -219,7 +219,7 @@ struct ShapeAndDims {
 // Wraps dimensions and applies defaulting behavior.
 // Also checks transform dims are unique and transform shape is non-empty.
 ShapeAndDims canonicalize_fft_shape_and_dim_args(
-    Tensor input, at::OptionalIntArrayRef shape, at::OptionalIntArrayRef dim) {
+    Tensor input, c10::optional<IntArrayRef> shape, c10::optional<IntArrayRef> dim) {
   const int64_t input_dim = input.dim();
   const IntArrayRef input_sizes = input.sizes();
   ShapeAndDims ret;
@@ -372,8 +372,8 @@ Tensor& fft_ihfft_out(const Tensor& self, c10::optional<int64_t> n,
   return out;
 }
 
-Tensor fft_fftn(const Tensor& self, at::OptionalIntArrayRef s,
-                at::OptionalIntArrayRef dim,
+Tensor fft_fftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
                 c10::optional<c10::string_view> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   // TODO: For real input, perform rfftn then mirror with conjugate symmetry
@@ -382,8 +382,8 @@ Tensor fft_fftn(const Tensor& self, at::OptionalIntArrayRef s,
 }
 
 Tensor& fft_fftn_out(const Tensor& self,
-                     at::OptionalIntArrayRef s,
-                     at::OptionalIntArrayRef dim,
+                     c10::optional<IntArrayRef> s,
+                     c10::optional<IntArrayRef> dim,
                      c10::optional<c10::string_view> norm, Tensor& out) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   // TODO: For real input, perform rfftn then mirror with conjugate symmetry
@@ -392,8 +392,8 @@ Tensor& fft_fftn_out(const Tensor& self,
   return out;
 }
 
-Tensor fft_ifftn(const Tensor& self, at::OptionalIntArrayRef s,
-                at::OptionalIntArrayRef dim,
+Tensor fft_ifftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
                 c10::optional<c10::string_view> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
@@ -401,8 +401,8 @@ Tensor fft_ifftn(const Tensor& self, at::OptionalIntArrayRef s,
 }
 
 Tensor& fft_ifftn_out(const Tensor& self,
-                      at::OptionalIntArrayRef s,
-                      at::OptionalIntArrayRef dim,
+                      c10::optional<IntArrayRef> s,
+                      c10::optional<IntArrayRef> dim,
                       c10::optional<c10::string_view> norm, Tensor& out) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
@@ -411,8 +411,8 @@ Tensor& fft_ifftn_out(const Tensor& self,
 }
 
 static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
-                             at::OptionalIntArrayRef s,
-                             at::OptionalIntArrayRef dim,
+                             c10::optional<IntArrayRef> s,
+                             c10::optional<IntArrayRef> dim,
                              const c10::optional<c10::string_view>& norm_str) {
   TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
@@ -424,15 +424,15 @@ static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
   return fft_r2c_maybe_out(fname, out, x, desc.dim, norm, /*onesided=*/true);
 }
 
-Tensor fft_rfftn(const Tensor& self, at::OptionalIntArrayRef s,
-                at::OptionalIntArrayRef dim,
+Tensor fft_rfftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
                 c10::optional<c10::string_view> norm_str) {
   return fft_rfftn_impl({}, self, s, dim, norm_str);
 }
 
 Tensor& fft_rfftn_out(const Tensor& self,
-                      at::OptionalIntArrayRef s,
-                      at::OptionalIntArrayRef dim,
+                      c10::optional<IntArrayRef> s,
+                      c10::optional<IntArrayRef> dim,
                       c10::optional<c10::string_view> norm_str, Tensor& out) {
   fft_rfftn_impl(out, self, s, dim, norm_str);
   return out;
@@ -440,8 +440,8 @@ Tensor& fft_rfftn_out(const Tensor& self,
 
 ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     c10::string_view fname, const Tensor& self,
-    const at::OptionalIntArrayRef& s,
-    const at::OptionalIntArrayRef& dims,
+    const c10::optional<IntArrayRef>& s,
+    const c10::optional<IntArrayRef>& dims,
     int64_t& last_dim_size) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dims);
   TORCH_CHECK(desc.shape.size() > 0, fname, " must transform at least one axis");
@@ -463,8 +463,8 @@ ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
 }
 
 static Tensor fft_irfftn_impl(Tensor out, const Tensor& self,
-                              at::OptionalIntArrayRef s,
-                              at::OptionalIntArrayRef dim,
+                              c10::optional<IntArrayRef> s,
+                              c10::optional<IntArrayRef> dim,
                               const c10::optional<c10::string_view>& norm_str) {
   int64_t last_dim_size = 0;
   auto desc = canonicalize_fft_c2r_shape_and_dim_args(
@@ -477,15 +477,15 @@ static Tensor fft_irfftn_impl(Tensor out, const Tensor& self,
 }
 
 Tensor fft_irfftn(const Tensor& self,
-                  at::OptionalIntArrayRef s,
-                  at::OptionalIntArrayRef dim,
+                  c10::optional<IntArrayRef> s,
+                  c10::optional<IntArrayRef> dim,
                   c10::optional<c10::string_view> norm_str) {
   return fft_irfftn_impl({}, self, s, dim, norm_str);
 }
 
 Tensor& fft_irfftn_out(const Tensor& self,
-                       at::OptionalIntArrayRef s,
-                       at::OptionalIntArrayRef dim,
+                       c10::optional<IntArrayRef> s,
+                       c10::optional<IntArrayRef> dim,
                        c10::optional<c10::string_view> norm_str, Tensor& out) {
   fft_irfftn_impl(out, self, s, dim, norm_str);
   return out;
@@ -493,8 +493,8 @@ Tensor& fft_irfftn_out(const Tensor& self,
 
 static Tensor fft_hfftn_impl(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
-    at::OptionalIntArrayRef dim,
+    c10::optional<IntArrayRef> s,
+    c10::optional<IntArrayRef> dim,
     c10::optional<c10::string_view> norm_str,
     const Tensor& out) {
   constexpr c10::string_view fname = "hfftn";
@@ -521,16 +521,16 @@ static Tensor fft_hfftn_impl(
 
 Tensor fft_hfftn(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
-    at::OptionalIntArrayRef dim,
+    c10::optional<IntArrayRef> s,
+    c10::optional<IntArrayRef> dim,
     c10::optional<c10::string_view> norm) {
   return fft_hfftn_impl(self, s, dim, norm, {});
 }
 
 const Tensor& fft_hfftn_out(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
-    at::OptionalIntArrayRef dim, c10::optional<c10::string_view> norm,
+    c10::optional<IntArrayRef> s,
+    c10::optional<IntArrayRef> dim, c10::optional<c10::string_view> norm,
     const Tensor& out) {
   fft_hfftn_impl(self, s, dim, norm, out);
   return out;
@@ -538,8 +538,8 @@ const Tensor& fft_hfftn_out(
 
 static Tensor fft_ihfftn_impl(
     const Tensor& self,
-    const at::OptionalIntArrayRef& s,
-    const at::OptionalIntArrayRef& dim,
+    const c10::optional<IntArrayRef>& s,
+    const c10::optional<IntArrayRef>& dim,
     const c10::optional<c10::string_view>& norm_str,
     const Tensor& out) {
   constexpr c10::string_view fname = "ihfftn";
@@ -563,80 +563,80 @@ static Tensor fft_ihfftn_impl(
 
 Tensor fft_ihfftn(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
-    at::OptionalIntArrayRef dim,
+    c10::optional<IntArrayRef> s,
+    c10::optional<IntArrayRef> dim,
     c10::optional<c10::string_view> norm) {
   return fft_ihfftn_impl(self, s, dim, norm, {});
 }
 
 const Tensor& fft_ihfftn_out(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
-    at::OptionalIntArrayRef dim,
+    c10::optional<IntArrayRef> s,
+    c10::optional<IntArrayRef> dim,
     c10::optional<c10::string_view> norm,
     const Tensor& out) {
   fft_ihfftn_impl(self, s, dim, norm, out);
   return out;
 }
 
-Tensor fft_fft2(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_fft2(const Tensor& self, c10::optional<IntArrayRef> s,
                 IntArrayRef dim, c10::optional<c10::string_view> norm) {
   return native::fft_fftn(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_fft2_out(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor& fft_fft2_out(const Tensor& self, c10::optional<IntArrayRef> s,
                      IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
   return native::fft_fftn_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_ifft2(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_ifft2(const Tensor& self, c10::optional<IntArrayRef> s,
                 IntArrayRef dim, c10::optional<c10::string_view> norm) {
   return native::fft_ifftn(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_ifft2_out(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor& fft_ifft2_out(const Tensor& self, c10::optional<IntArrayRef> s,
                       IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
   return native::fft_ifftn_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_rfft2(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_rfft2(const Tensor& self, c10::optional<IntArrayRef> s,
                 IntArrayRef dim, c10::optional<c10::string_view> norm) {
   return native::fft_rfftn(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_rfft2_out(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor& fft_rfft2_out(const Tensor& self, c10::optional<IntArrayRef> s,
                       IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
   return native::fft_rfftn_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_irfft2(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_irfft2(const Tensor& self, c10::optional<IntArrayRef> s,
                   IntArrayRef dim, c10::optional<c10::string_view> norm) {
   return native::fft_irfftn(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_irfft2_out(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor& fft_irfft2_out(const Tensor& self, c10::optional<IntArrayRef> s,
                        IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
   return native::fft_irfftn_out(self, s, dim, std::move(norm), out);
 }
 
 const Tensor& fft_hfft2_out(
-    const Tensor& self, at::OptionalIntArrayRef s, IntArrayRef dim,
+    const Tensor& self, c10::optional<IntArrayRef> s, IntArrayRef dim,
     c10::optional<c10::string_view> norm, const Tensor& out) {
   return native::fft_hfftn_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_hfft2(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_hfft2(const Tensor& self, c10::optional<IntArrayRef> s,
                  IntArrayRef dim, c10::optional<c10::string_view> norm) {
   return native::fft_hfftn(self, s, dim, std::move(norm));
 }
 
 const Tensor& fft_ihfft2_out(
-    const Tensor& self, at::OptionalIntArrayRef s, IntArrayRef dim,
+    const Tensor& self, c10::optional<IntArrayRef> s, IntArrayRef dim,
     c10::optional<c10::string_view> norm, const Tensor& out) {
   return native::fft_ihfftn_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_ihfft2(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_ihfft2(const Tensor& self, c10::optional<IntArrayRef> s,
                   IntArrayRef dim, c10::optional<c10::string_view> norm) {
   return native::fft_ihfftn(self, s, dim, std::move(norm));
 }
@@ -687,7 +687,7 @@ Tensor fft_rfftfreq(int64_t n, double d,
 
 // If an array dim is specified, wraps them according to self.dim().
 // Otherwise returns a vector of all dims.
-DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
+DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt) {
   DimVector dim;
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
@@ -702,7 +702,7 @@ DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
   return dim;
 }
 
-Tensor fft_fftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
+Tensor fft_fftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
   auto dim = default_alldims(x, dim_opt);
 
   IntArrayRef x_sizes = x.sizes();
@@ -714,7 +714,7 @@ Tensor fft_fftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
   return at::roll(x, shift, dim);
 }
 
-Tensor fft_ifftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
+Tensor fft_ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
   auto dim = default_alldims(x, dim_opt);
 
   IntArrayRef x_sizes = x.sizes();

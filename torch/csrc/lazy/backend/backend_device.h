@@ -18,11 +18,7 @@ namespace lazy {
 
 // Backend should extend it and define their own supported hardware types.
 struct TORCH_API BackendDeviceType {
-  int8_t type {(int8_t)at::kCPU};
-  // Note: previous default value was '0', which actually maps to at::kCPU, at least now it is explicit,
-  // we may want to make default/undefined semantics more clear though
-  BackendDeviceType() :type((int8_t)at::kCPU) {}
-  BackendDeviceType(int8_t type) :type(type) {}
+  int8_t type {0};
 
   virtual ~BackendDeviceType() = default;
   virtual std::string toString() const { return "Unknown"; }

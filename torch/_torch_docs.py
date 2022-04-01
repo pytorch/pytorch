@@ -1031,6 +1031,9 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
+    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
+           tensor or a NumPy array, copying otherwise.
+
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
 
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
@@ -9797,10 +9800,10 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor :attr:`input` along the given dimension(s). Elements that are
-shifted beyond the last position are re-introduced at the first position. If
-:attr:`dims` is `None`, the tensor will be flattened before rolling and then
-restored to the original shape.
+Roll the tensor along the given dimension(s). Elements that are shifted beyond the
+last position are re-introduced at the first position. If a dimension is not
+specified, the tensor will be flattened before rolling and then restored
+to the original shape.
 
 Args:
     {input}
@@ -9818,11 +9821,6 @@ Example::
             [3, 4],
             [5, 6],
             [7, 8]])
-    >>> torch.roll(x, 1)
-    tensor([[8, 1],
-            [2, 3],
-            [4, 5],
-            [6, 7]])
     >>> torch.roll(x, 1, 0)
     tensor([[7, 8],
             [1, 2],

@@ -149,7 +149,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_nearest3d_cpu(
     const Tensor& input,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
@@ -160,7 +160,7 @@ Tensor upsample_nearest3d_cpu(
 
 Tensor _upsample_nearest_exact3d_cpu(
     const Tensor& input,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
@@ -172,7 +172,7 @@ Tensor _upsample_nearest_exact3d_cpu(
 // when structured kernels can handle QuantizedCPU, update these overloads to be CompositeExplicitAutograd
 Tensor upsample_nearest3d_backward_cpu(
     const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);
@@ -184,7 +184,7 @@ Tensor upsample_nearest3d_backward_cpu(
 
 Tensor _upsample_nearest_exact3d_backward_cpu(
     const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
+    c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);

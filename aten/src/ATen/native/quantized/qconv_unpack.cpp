@@ -164,7 +164,7 @@ unpack_quantized_prepacked_sizes_conv2d(const IValue& ivalue) {
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
   std::tie(weight, bias) = params->unpack();
-  at::OptionalIntArrayRef bias_sizes = c10::nullopt;
+  c10::optional<IntArrayRef> bias_sizes = c10::nullopt;
   if (bias && bias->defined()) {
     bias_sizes = bias->sizes();
   }

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/api/include/torch/jit.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/api/include/torch/jit.h>
 
 namespace torch {
 namespace lazy {
@@ -22,8 +22,7 @@ class TORCH_API TSNodeLoweringInterface {
 
   virtual bool Lower(const Node* node) = 0;
 
-  static std::unique_ptr<TSNodeLoweringInterface> Create(
-      LoweringContext* loctx);
+  static std::unique_ptr<TSNodeLoweringInterface> Create(LoweringContext* loctx);
 };
 
 class TORCH_API TSComputation : public Computation {
@@ -35,9 +34,7 @@ class TORCH_API TSComputation : public Computation {
     }
   }
 
-  int parameters_size() const override {
-    return parameter_names_.size();
-  }
+  int parameters_size() const override { return parameter_names_.size(); }
 
   const std::vector<Shape>& parameter_shapes() const override {
     throw std::runtime_error(
@@ -55,13 +52,9 @@ class TORCH_API TSComputation : public Computation {
     return result_shape_;
   }
 
-  std::shared_ptr<torch::jit::Graph> graph() const {
-    return graph_;
-  }
+  std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
 
-  torch::jit::GraphExecutor& graph_executor() {
-    return graph_executor_;
-  }
+  torch::jit::GraphExecutor& graph_executor() { return graph_executor_; }
 
  private:
   std::shared_ptr<torch::jit::Graph> graph_;
@@ -75,15 +68,12 @@ class TORCH_API TSLoweringContext : public LoweringContext {
  public:
   TSLoweringContext(const std::string& name, const BackendDevice device);
 
-  TSLoweringContext(
-      const std::string& name,
-      BackendDevice device,
-      c10::ArrayRef<Node*> post_order,
-      Util::EmissionMap emit_status);
+  TSLoweringContext(const std::string& name, BackendDevice device,
+                    c10::ArrayRef<Node*> post_order,
+                    Util::EmissionMap emit_status);
 
   // TODO(whc) replace these when real impl lands;
-  // I am just landing the interface in this diff, but MSVC won't allow
-  // undefined virtual funcs
+  // I am just landing the interface in this diff, but MSVC won't allow undefined virtual funcs
   Shape GetResultShape(size_t index) const override {
     TORCH_INTERNAL_ASSERT(false, "not implemented");
   }
@@ -139,9 +129,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   // held in data.
   torch::jit::Value* GetParameter(BackendDataPtr data);
 
-  std::shared_ptr<torch::jit::Graph> graph() const {
-    return graph_;
-  }
+  std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
 
  private:
   struct Parameter {
@@ -161,5 +149,5 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   std::unique_ptr<TSNodeLoweringInterface> lowering_;
 };
 
-} // namespace lazy
-} // namespace torch
+}  // namespace lazy
+}  // namespace torch

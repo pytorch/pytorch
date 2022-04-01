@@ -135,8 +135,6 @@ TORCH_API void addMetadataJson(
     const std::string& key,
     const std::string& value);
 
-TORCH_API void profilerStep();
-
 } // namespace profiler
 } // namespace autograd
 } // namespace torch

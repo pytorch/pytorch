@@ -41,7 +41,7 @@ torch.fx.interpreter.Interpreter.get_attr(self, target: 'Target', args: Tuple[to
 torch.fx.interpreter.Interpreter.map_nodes_to_values(self, args: torch.fx.node.Argument, n: torch.fx.node.Node) -> torch.fx.node.Argument
 torch.fx.interpreter.Interpreter.output(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.placeholder(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
-torch.fx.interpreter.Interpreter.run(self, *args, initial_env: Optional[Dict[torch.fx.node.Node, Any]] = None, enable_io_processing: bool = True) -> Any
+torch.fx.interpreter.Interpreter.run(self, *args, initial_env: Optional[Dict[torch.fx.node.Node, Any]] = None) -> Any
 torch.fx.interpreter.Interpreter.run_node(self, n: torch.fx.node.Node) -> Any
 torch.fx.interpreter.Transformer.__init__(self, module)
 torch.fx.interpreter.Transformer.call_function(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any

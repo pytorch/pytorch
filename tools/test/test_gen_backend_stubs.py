@@ -208,7 +208,7 @@ supported:
 - abs
 invalid_key: invalid_val'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, ''' contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen''')  # noqa: B950
+        self.assertExpectedInline(output_error, ''' contains unexpected keys: invalid_key. Only the following keys are supported: backend, cpp_namespace, extra_headers, supported, autograd, full_codegen''')  # noqa: B950
 
     # if use_out_as_primary is provided, it must be a bool
     def test_use_out_as_primary_non_bool(self) -> None:

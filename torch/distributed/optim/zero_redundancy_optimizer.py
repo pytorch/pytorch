@@ -1325,8 +1325,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         try:
             all_params = list(params)
         except TypeError:
-            raise TypeError("`params` argument should be an iterable of Tensors"
-                            f" or dicts, but got {torch.typename(params)}")
+            raise TypeError("`params` argument should be an iterable of "
+                            f"Tensors, but got {torch.typename(params)}")
         if len(all_params) == 0:
             raise ValueError("ZeroRedundancyOptimizer got an empty parameter "
                              "list")

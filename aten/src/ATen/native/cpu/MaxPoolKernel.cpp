@@ -25,9 +25,8 @@ void cpu_max_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
   auto indices = indices_.contiguous();
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
+  auto input_data = input.is_quantized() ? reinterpret_cast<scalar_t*>(input.data_ptr()) : input.data_ptr<scalar_t>();
+  auto output_data = output.is_quantized() ? reinterpret_cast<scalar_t*>(output.data_ptr()) : output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t numel = output.numel();
@@ -56,10 +55,11 @@ void cpu_max_pool(
 
       // local pointers
       scalar_t* input_ptr = input_data + c * input_height * input_width;
-
       // compute local max
       int64_t maxindex = ih0 * input_width + iw0;
-      accscalar_t maxval = -std::numeric_limits<accscalar_t>::infinity();
+      accscalar_t maxval = input.is_quantized() ? std::numeric_limits<accscalar_t>::min()
+                                                : -std::numeric_limits<accscalar_t>::infinity();
+
       for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
         for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
           int64_t index = ih * input_width + iw;
@@ -104,8 +104,8 @@ void cpu_max_pool_channels_last(
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
+  auto input_data = input.is_quantized() ? reinterpret_cast<scalar_t*>(input.data_ptr()) : input.data_ptr<scalar_t>();
+  auto output_data = output.is_quantized() ? reinterpret_cast<scalar_t*>(output.data_ptr()) : output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t nbatch = input.size(0);
@@ -149,7 +149,7 @@ void cpu_max_pool_channels_last(
 
       // Pass I: init out lane
       iVec index0_vec = iVec(ih0 * input_width + iw0);
-      Vec out_vec = Vec(-std::numeric_limits<scalar_t>::infinity());
+      Vec out_vec = Vec(input.is_quantized() ? std::numeric_limits<scalar_t>::min() : -std::numeric_limits<scalar_t>::infinity());
       int64_t d1 = 0;
       for (; d1 < len; d1 += Vec::size()) {
         index0_vec.store(index_buffer.get() + d1);
@@ -157,7 +157,7 @@ void cpu_max_pool_channels_last(
       }
       for (; d1 < size; d1++) {
         ind[d1] = ih0 * input_width + iw0;
-        out[d1] = -std::numeric_limits<scalar_t>::infinity();
+        out[d1] = input.is_quantized() ? std::numeric_limits<scalar_t>::min() : -std::numeric_limits<scalar_t>::infinity();
       }
       // Pass II: compute local max
       for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
@@ -460,19 +460,31 @@ void max_pool2d_kernel_impl(
     int dilationW, int dilationH) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
-        if (input.scalar_type() == ScalarType::BFloat16) {
-          cpu_max_pool<BFloat16, /*accscalar_t*/float>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-        } else {
-          cpu_max_pool<scalar_t, scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-        }
-      });
+      if (input.is_quantized()) {
+        AT_DISPATCH_QINT_TYPES(input.scalar_type(), "max_pool2d", [&] {
+          cpu_max_pool<scalar_t::underlying, scalar_t::underlying>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        });
+      } else {
+        AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
+          if (input.scalar_type() == ScalarType::BFloat16) {
+            cpu_max_pool<BFloat16, /*accscalar_t*/float>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+          } else {
+            cpu_max_pool<scalar_t, scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+          }
+        });
+      }
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
-        cpu_max_pool_channels_last<scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-      });
+      if (input.is_quantized()) {
+        AT_DISPATCH_QINT_TYPES(input.scalar_type(), "max_pool2d_channels_last", [&] {
+          cpu_max_pool_channels_last<scalar_t::underlying>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        });
+      } else {
+        AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
+          cpu_max_pool_channels_last<scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        });
+      }
       break;
     }
     default:

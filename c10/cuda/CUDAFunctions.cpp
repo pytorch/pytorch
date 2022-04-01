@@ -10,13 +10,16 @@ namespace {
 // returns -1 on failure
 int32_t driver_version() {
   int driver_version = -1;
-  C10_CUDA_IGNORE_ERROR(cudaDriverGetVersion(&driver_version));
+  cudaError_t err = cudaDriverGetVersion(&driver_version);
+  if (err != cudaSuccess) {
+    cudaError_t last_err C10_UNUSED = cudaGetLastError();
+  }
   return driver_version;
 }
 
 int device_count_impl(bool fail_if_no_driver) {
   int count;
-  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
+  auto err = cudaGetDeviceCount(&count);
   if (err == cudaSuccess) {
     return count;
   }

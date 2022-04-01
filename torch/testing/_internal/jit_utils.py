@@ -767,7 +767,7 @@ def _get_py3_code(code, fn_name):
 class TensorExprTestOptions():
     def __init__(self):
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
 
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -782,7 +782,7 @@ class TensorExprTestOptions():
 
     def restore(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._get_graph_executor_optimize(self.old_profiling_mode)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)

@@ -79,10 +79,6 @@ class AppendOnlyList {
     // End iterator.
     Iterator() = default;
 
-    bool exhausted() const {
-      return current_ >= size_;
-    }
-
     reference operator*() const { return *current_ptr(/*checked=*/true); }
     pointer operator->() { return current_ptr(/*checked=*/true); }
 

@@ -3231,20 +3231,27 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
         "Please rebuild with cuSOLVER.");
 #endif
   } else { // m >= n
-#if !AT_ROCM_ENABLED()
-    // On CUDA platform we use either cuBLAS or cuSOLVER here
+#if !AT_MAGMA_ENABLED()
+    // MAGMA is not available we can either use cuBLAS or cuSOLVER here
     // the batched vs looped dispatch is implemented based on the following performance results
     // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
     if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
+      // if CUDART_VERSION is defined then cuBLAS is available
+      #ifdef CUDART_VERSION
       gels_batched_cublas(a, b, infos);
+      #else
+      // this would either call cuSOLVER or MAGMA,
+      // if MAGMA is called a runtime error is thrown about not finding MAGMA in compilation
+      gels_looped(a, b, infos);
+      #endif // CUDART_VERSION
     } else {
       gels_looped(a, b, infos);
     }
 #else
-    // On ROCm platform we can only use MAGMA here
-    // If MAGMA is not available, an error will be thrown
-    gels_magma(a, b, infos);
-#endif // !AT_ROCM_ENABLED()
+    // if both MAGMA and cuSOLVER are available this would call cuSOLVER
+    // MAGMA is called if cuSOLVER is not available
+    gels_looped(a, b, infos);
+#endif // AT_MAGMA_ENABLED()
   }
 }
 

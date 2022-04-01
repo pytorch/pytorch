@@ -67,8 +67,7 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 # TODO there is duplicated and inconsistent test-python-env setup across this
 #   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
 #   conda build scripts themselves. These should really be consolidated
-# Pick only one package of multiple available (which happens as result of workflow re-runs)
-pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
+pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
     # For some reason conda likes to re-activate the conda environment when attempting this install

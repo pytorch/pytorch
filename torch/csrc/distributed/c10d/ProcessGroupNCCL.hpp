@@ -12,9 +12,7 @@
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
-#include <c10d/UCCForNCCL.hpp>
 
-#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
@@ -91,8 +89,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
         OpType opType,
         uint64_t seq,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
-        bool desyncDebug = false);
+        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -625,11 +622,6 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Counting for the sequential number of NCCL collective call.
   uint64_t seq_{0};
-
-#ifdef USE_NCCL_WITH_UCC
-  // ProcessGroupUCC shared library handle
-  static std::shared_ptr<at::DynamicLibrary> uccLib_;
-#endif
 };
 
 } // namespace c10d

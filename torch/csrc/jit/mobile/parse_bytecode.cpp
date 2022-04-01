@@ -69,16 +69,16 @@ class OpCodeCache {
 } // namespace
 
 void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
-  Code& code = function->get_code();
+  const Code& code = function->get_code();
   auto& operator_version_map = getOperatorVersionMapForMobile();
-  for (size_t i = 0; i < code.instructions_.size(); i++) {
-    Instruction& inst = code.instructions_[i];
+  for (size_t i = 0; i < function->get_code().instructions_.size(); i++) {
+    Instruction& inst = function->get_code().instructions_[i];
     if (inst.op == OpCode::OP) {
-      std::string op_name = code.op_names_[inst.X].name;
-      std::string operator_name = code.op_names_[inst.X].name +
-          (code.op_names_[inst.X].overload_name.empty()
+      std::string op_name = function->get_code().op_names_[inst.X].name;
+      std::string operator_name = function->get_code().op_names_[inst.X].name +
+          (function->get_code().op_names_[inst.X].overload_name.empty()
                ? ""
-               : "." + code.op_names_[inst.X].overload_name);
+               : "." + function->get_code().op_names_[inst.X].overload_name);
 
       auto it = operator_version_map.find(operator_name);
       // Find out if there is an upgrader for this operator
@@ -102,11 +102,11 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
             // new_inst.X = upgrader.index;
             // code->instructions_[i] = new_inst;
             TORCH_CHECK(
-                upgrader.index < code.functions_.size(),
+                upgrader.index < function->get_code().functions_.size(),
                 "upgrader index is, ",
                 upgrader.index,
                 " and it's larger than the upgrader function list length ",
-                code.functions_.size());
+                function->get_code().functions_.size());
             inst.op = OpCode::CALL;
             inst.X = upgrader.index;
           }

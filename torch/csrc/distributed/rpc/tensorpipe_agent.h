@@ -165,7 +165,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
-      optional<int> worldSize,
+      int worldSize,
       TensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,
@@ -233,10 +233,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void prepareNames(bool isStaticGroup);
-
-  // Check the static group attribute with the value set in store
-  void checkAndSetStaticGroup(const c10::intrusive_ptr<::c10d::Store>& store);
+  void prepareNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
@@ -334,8 +331,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // Store keys that will used to count joined processes and active calls during
   // the shutdown process
   ::c10d::PrefixStore shutdownStore_;
-  int worldSize_ = 0;
-  const bool isStaticGroup_;
+  const int worldSize_;
 
   std::atomic<uint64_t> nextMessageID_{0};
 

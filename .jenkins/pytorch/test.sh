@@ -277,7 +277,7 @@ test_libtorch() {
     fi
 
     # Run Lazy Tensor cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       LTC_TS_CUDA=1 "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     else
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml

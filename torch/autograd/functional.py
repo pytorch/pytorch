@@ -416,12 +416,11 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
     total_numel = sum(tensor_numels)
+    diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
     chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
                    for tensor, tensor_numel in zip(tensors, tensor_numels))
-    diag_start_idx = 0
-    for chunk, numel in zip(chunks, tensor_numels):
+    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
         chunk.diagonal(diag_start_idx).fill_(1)
-        diag_start_idx -= numel
     return chunks
 
 

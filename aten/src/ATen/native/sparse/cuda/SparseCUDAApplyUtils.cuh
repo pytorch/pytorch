@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/native/cuda/thread_constants.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -305,7 +304,7 @@ __global__ void indexSparseIntersectionKernel(
 // }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS_1(num_threads())
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
@@ -329,6 +328,7 @@ __global__ void coalesceValuesKernel(
     for (int row = begin; row < end; row++) {
       const int valueRow = ((int) value_indices[row]) * stride;
 
+
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
@@ -346,56 +346,6 @@ __global__ void coalesceValuesKernel(
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
-      }
-    }
-  }
-}
-
-// coalesceValuesKernel when Dtype/Acctype is bool. Can be eliminated using
-// `if constexpr` when CUDA codes will be compiled under C++-17, see
-// gh-56055 for blockers.
-template<typename Dtype>
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
-__global__ void coalesceValuesKernel(
-  int64_t *segment_offsets, int64_t *value_indices,
-  bool *values, bool *newValues,
-  int64_t nnz, int64_t newNnz, int64_t stride) {
-
-  int seg = blockIdx.x * 4 + threadIdx.y;
-
-  // Number of values processed by each thread (grain size)
-  const int SZ = 4;
-
-  if (seg < newNnz) {
-    const int newValueRow = seg * stride;
-    const int begin = segment_offsets[seg];
-    const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
-    const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-    bool tmp[SZ];
-    #pragma unroll
-    for (int ii = 0; ii < SZ; ii++) {
-      tmp[ii] = 0;
-    }
-    for (int row = begin; row < end; row++) {
-      const int valueRow = ((int) value_indices[row]) * stride;
-
-      #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
-      {
-        int featureDim = startFeature + ii * C10_WARP_SIZE;
-        if (featureDim < stride)
-        {
-          tmp[ii] |= values[valueRow + featureDim];
-        }
-      }
-    }
-    #pragma unroll
-    for (int ii = 0; ii < SZ; ii++)
-    {
-      int featureDim = startFeature + ii * C10_WARP_SIZE;
-      if (featureDim < stride)
-      {
-        newValues[newValueRow + featureDim] = tmp[ii];
       }
     }
   }

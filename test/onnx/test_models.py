@@ -245,12 +245,12 @@ class TestModels(TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_fcn(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(fcn_resnet101(pretrained=False, pretrained_backbone=False)), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(toC(fcn_resnet101()), toC(x), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_deeplab(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(deeplabv3_resnet101(pretrained=False, pretrained_backbone=False)), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(toC(deeplabv3_resnet101()), toC(x), rtol=1e-3, atol=1e-5)
 
     def test_r3d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))

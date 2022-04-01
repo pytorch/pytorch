@@ -1090,8 +1090,7 @@ def gen_aggregated_headers(
                         selector,
                         rocm=rocm,
                         cpp_namespace='at::native',
-                        class_method_name=None,
-                        skip_dispatcher_op_registration=False),
+                        class_method_name=None),
                     grouped_native_functions
                 )),
             })
@@ -1199,8 +1198,7 @@ def gen_per_operator_headers(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None,
-                    skip_dispatcher_op_registration=False),
+                    class_method_name=None),
                 grouped_functions
             ))
 
@@ -1436,8 +1434,7 @@ def gen_source_files(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None,
-                    skip_dispatcher_op_registration=skip_dispatcher_op_registration),
+                    class_method_name=None),
                 grouped_native_functions
             )),
             'dispatch_anonymous_definitions': list(concatMap(
@@ -1447,8 +1444,7 @@ def gen_source_files(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None,
-                    skip_dispatcher_op_registration=skip_dispatcher_op_registration),
+                    class_method_name=None),
                 grouped_native_functions
             )),
             'dispatch_registrations': [] if skip_dispatcher_op_registration else list(concatMap(
@@ -1458,8 +1454,7 @@ def gen_source_files(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None,
-                    skip_dispatcher_op_registration=skip_dispatcher_op_registration),
+                    class_method_name=None),
                 grouped_native_functions
             )),
         })
