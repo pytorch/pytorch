@@ -3260,6 +3260,11 @@
     CompositeExplicitAutograd: narrow_copy_dense
   tags: view_copy
 
+- func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: narrow_copy_symint
+
 - func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: narrow_copy_dense_cpu_out
@@ -4245,11 +4250,12 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-# The signature is designed to be consistent with librosa except that it is
-# missing the `pad_mode` and `center` arguments, which are taken care of at
-# `torch.functional.py`. They shall be moved here once we have mapping between
-# Python strings and C++ Enum in codegen.
+# Overload without center & pad mode, needed for forward-compatibility
 - func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+  variants: function, method
+  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
+
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -6084,10 +6090,19 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+  structured_delegate: scatter_reduce.two_out
   variants: function, method
+
+- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce) -> Tensor(a!)
+  structured_delegate: scatter_reduce.two_out
+  variants: method
+
+- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
   dispatch:
-    CPU: scatter_reduce_two_cpu
+    CPU: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
@@ -9586,6 +9601,12 @@
 - func: _pad_circular(Tensor self, int[] pad) -> Tensor
   python_module: nn
 
+- func: _pad_enum(Tensor self, int[] pad, int mode, float? value=None) -> Tensor
+  python_module: nn
+
+- func: pad(Tensor self, int[] pad, str mode="constant", float? value=None) -> Tensor
+  python_module: nn
+
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
@@ -10546,7 +10567,7 @@
 
 - func: special_polygamma(int n, Tensor self) -> Tensor
   python_module: special
-  variants: function, method
+  variants: function
 
 - func: special_polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -11302,229 +11323,196 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: _fw_primal_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _make_dual_copy(Tensor primal, Tensor tangent, int level) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: _make_dual_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: view_as_real_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: view_as_real_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: view_as_complex_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: view_as_complex_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _conj_copy(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: _conj_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _neg_view_copy(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: _neg_view_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: as_strided_copy(Tensor self, int[] size, int[] stride, int? storage_offset=None) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: as_strided_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _sparse_broadcast_to_copy(Tensor self, int[] size) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: _sparse_broadcast_to_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: diagonal_copy(Tensor self, int offset=0, int dim1=0, int dim2=1) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: diagonal_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: expand_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: permute_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _reshape_alias_copy(Tensor self, int[] size, int[] stride) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: _reshape_alias_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: select_copy.int(Tensor self, int dim, int index) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: select_copy_int
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: detach_copy(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: detach_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: slice_copy.Tensor(Tensor self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: slice_copy_Tensor
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: split_copy.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: split_copy_Tensor
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: split_with_sizes_copy(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: squeeze_copy(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: squeeze_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: squeeze_copy.dim(Tensor self, int dim) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: squeeze_copy_dim
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: t_copy(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: t_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: transpose_copy.int(Tensor self, int dim0, int dim1) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: transpose_copy_int
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: unsqueeze_copy(Tensor self, int dim) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unsqueeze_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _indices_copy(Tensor self) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: _indices_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: _values_copy(Tensor self) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: _values_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: indices_copy(Tensor self) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: indices_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: values_copy(Tensor self) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: values_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: crow_indices_copy(Tensor self) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: crow_indices_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: col_indices_copy(Tensor self) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: col_indices_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: unbind_copy.int(Tensor self, int dim=0) -> Tensor[]
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind_copy_int
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: view_copy(Tensor self, int[] size) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: view_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: view_copy.dtype(Tensor self, ScalarType dtype) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: view_copy_dtype
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: unfold_copy(Tensor self, int dimension, int size, int step) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: unfold_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy
 
 - func: alias_copy(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: alias_copy
-  # See Note [view_copy NativeFunctions]
   tags: view_copy

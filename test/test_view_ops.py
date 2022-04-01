@@ -912,17 +912,19 @@ class TestViewOps(TestCase):
     def test_view_copy(self, device):
         a = torch.randn(4, device=device, requires_grad=True)
         a_ref = a.clone()
-        a_view_copy = a.view_copy(2, 2)
-        a_view_copy.sum().backward()
-
         a_view = a_ref.view(2, 2)
+        a_view_copy = a.view_copy(2, 2)
+
+        # view_copy ops don't preserve view relationship
+        self.assertTrue(self.is_view_of(a_view, a_ref))
+        self.assertFalse(self.is_view_of(a_view_copy, a))
+
+        a_view_copy.sum().backward()
         a_view.sum().backward()
 
         # forward and backward give the same shape + result
         self.assertEqual(a_view_copy, a_view)
-        self.assertEqual(a_view_copy.grad, a_view.grad)
-        # view_copy ops don't preserve view relationship
-        self.assertFalse(self.is_view_of(a_view_copy, a))
+        self.assertEqual(a.grad, a_ref.grad)
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):

@@ -159,7 +159,7 @@ class DifferentiabilityInfo:
             return None
         f = g.view_copy
 
-        name_split_by_period = self.name.split('.')
+        name_split_by_period = self.name.split('.', maxsplit=2)
         # Append a "_copy" to the base name of the operator (but keep the overload name the same)
         view_copy_name = f'{name_split_by_period[0]}_copy.' + '.'.join(name_split_by_period[1:])
         view_copy_op_name = None if self.op is None else f'{self.op}_copy'

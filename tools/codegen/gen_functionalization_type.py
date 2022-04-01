@@ -17,7 +17,16 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
 
 # This file contains codegen that relates to the functionalization pass.
-# TODO: UPDATE THIS
+# It includes:
+# - gen_functionalization_definition
+#     Generates dispatcher kernel definitions for the functionalization pass.
+# - gen_functionalization_registration
+#     Generates dispatcher kernel registrations for the functionalization pass.
+# - gen_functionalization_view_inverse_declaration
+#     Generates a declaration for an "inverse view", for every view op
+#     that is needed in functionalization. We manually implement their definitions.
+# - gen_composite_view_copy_kernel
+#     Generates view_copy() composite kernels for all view_copy operators.
 
 
 # Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
