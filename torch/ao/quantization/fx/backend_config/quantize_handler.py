@@ -3,7 +3,6 @@ from typing import Dict, Callable
 from .observation_type import ObservationType
 from ..quantization_patterns import QuantizeHandler
 from ..quantization_types import NodePattern
-from torch.fx import Node
 
 def get_quantize_handler_cls(
         observation_type, dtype_configs, num_tensor_args_to_observation_type):
