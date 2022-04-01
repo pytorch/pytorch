@@ -480,9 +480,25 @@ operator!=(const _Tp& __x, const complex<_Tp>& __y)
 template<class _Tp>
 inline constexpr
 bool
+operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return (__x.real() && __y.real()) && (__x.imag() && __y.imag());
+}
+
+template<class _Tp>
+inline constexpr
+bool
+operator&&(const complex<_Tp>& __x, const _Tp& __y)
+{
+    return (__x.real() && __y) && (__x.imag() == 0);
+}
+
+template<class _Tp>
+inline constexpr
+bool
 operator&&(const _Tp& __x, const complex<_Tp>& __y)
 {
-    return __x && __y;
+    return (__x && __y.real()) && (__y.imag() == 0);
 }
 
 // 26.3.7 values:
