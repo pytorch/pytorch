@@ -36,7 +36,9 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
+          # pin cmake version to 3.22 since 3.23 breaks pytorch build
+          # see details at: https://github.com/pytorch/pytorch/issues/74985
+          conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake=3.22 cffi typing_extensions \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
