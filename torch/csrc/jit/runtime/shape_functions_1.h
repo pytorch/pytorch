@@ -410,7 +410,14 @@ def squeeze(li: List[int], dim: int):
             out.append(li[i])
     return out
 
+def LOWER_BOUND__nonzero(input: List[int]):
+    assert len(input) >= 1
+    return [len(input), 0]
 
-####    SHAPE COMPUTE FUNCTIONS END   ###
+def UPPER_BOUND__nonzero(input: List[int]):
+    assert len(input) >= 1
+    return [len(input), numel(input)]
+
+ ####    SHAPE COMPUTE FUNCTIONS END   ###
 ### DO NOT REMOVE THIS STRING!!! #
 ")====="

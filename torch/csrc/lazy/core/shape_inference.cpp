@@ -244,6 +244,25 @@ std::vector<Shape> compute_shape_min(const at::Tensor & self){
     return {Shape(self.scalar_type(), {})};
 }
 
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
+  if (as_tuple) {
+    auto res = std::vector<Shape>();
+    for (auto dim_size : t.sizes()) {
+      res.emplace_back(Shape(at::kLong, {dim_size}));
+    }
+    return res;
+  }
+  int64_t max_elements = 1;
+  for (auto dim_size : t.sizes()) {
+    max_elements *= dim_size;
+  }
+  return {Shape(at::kLong, {(int64_t)t.sizes().size(), max_elements})};
+}
+
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
+  return compute_shape_nonzero(self, false);
+}
+
 std::vector<Shape> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
   // Based on aten/src/ATen/native/Embedding.cpp::embedding.
   std::vector<int64_t> out_sizes = indices.sizes().vec();

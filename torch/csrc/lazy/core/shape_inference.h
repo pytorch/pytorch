@@ -48,6 +48,7 @@ TORCH_API std::vector<Shape> compute_shape_native_layer_norm(const at::Tensor & 
 TORCH_API std::vector<Shape> compute_shape_native_layer_norm_backward(const at::Tensor & grad_out, const at::Tensor & input, at::IntArrayRef normalized_shape, const at::Tensor & mean, const at::Tensor & rstd, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, ::std::array<bool,3> output_mask);
 TORCH_API std::vector<Shape> compute_shape_nll_loss2d_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction, int64_t ignore_index, const at::Tensor & total_weight);
 TORCH_API std::vector<Shape> compute_shape_nll_loss2d_forward(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction, int64_t ignore_index);
+TORCH_API std::vector<Shape> compute_shape_nonzero(const at::Tensor& self);
 TORCH_API std::vector<Shape> compute_shape_random_(at::Tensor & self, c10::optional<at::Generator> generator);
 TORCH_API std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator);
 TORCH_API std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator);
