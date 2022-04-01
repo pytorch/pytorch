@@ -91,6 +91,15 @@ class UnaryOpInserter : private kir::ExprMutator {
         gop, IrBuilder::create<UnaryOp>(container, UnaryOpType::Set, out, in));
   }
 
+  void handle(ViewDtypeOp* vop) final {
+    auto out = vop->out();
+    auto in = vop->in();
+    auto container = out->container();
+    registerReplace(
+        vop,
+        IrBuilder::create<UnaryOp>(container, UnaryOpType::EraseType, out, in));
+  }
+
   void handle(ViewOp* vop) final {
     auto out = vop->out();
     auto in = vop->in();
