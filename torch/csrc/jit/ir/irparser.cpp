@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/ir/irparser.h>
 
+#include <ATen/EmptyTensor.h>
+#include <ATen/ops/empty_strided.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -18,15 +20,18 @@ class IRParser {
   friend void parseIR(
       const std::string& str,
       torch::jit::Graph* graph,
-      std::unordered_map<std::string, Value*>& vmap);
+      std::unordered_map<std::string, Value*>& vmap,
+      bool parse_tensor_constants);
   IRParser(
       const std::string& str,
       torch::jit::Graph* graph,
-      std::unordered_map<std::string, Value*>& vmap)
+      std::unordered_map<std::string, Value*>& vmap,
+      bool parse_tensor_constants)
       : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
-        type_parser(L, /*parse_complete_tensor_types*/ true) {}
+        type_parser(L, /*parse_complete_tensor_types*/ true),
+        parse_tensor_constants_(parse_tensor_constants) {}
 
   std::string parseVar();
   VarWithType parseVarWithType(bool allow_optional = false);
@@ -61,6 +66,8 @@ class IRParser {
   torch::jit::Graph* g = nullptr;
   std::unordered_map<std::string, Value*>& vmap;
   SchemaTypeParser type_parser;
+  bool parse_tensor_constants_;
+  std::unordered_set<Node*> deferred_tensor_value_initializations_;
 };
 
 struct ParsedLiteral {
@@ -89,14 +96,18 @@ struct VarWithType {
 void parseIR(
     const std::string& str,
     torch::jit::Graph* graph,
-    std::unordered_map<std::string, Value*>& vmap) {
-  torch::jit::IRParser p(str, graph, vmap);
+    std::unordered_map<std::string, Value*>& vmap,
+    bool parse_tensor_constants) {
+  torch::jit::IRParser p(str, graph, vmap, parse_tensor_constants);
   p.parse();
 }
 
-void parseIR(const std::string& str, torch::jit::Graph* graph) {
+void parseIR(
+    const std::string& str,
+    torch::jit::Graph* graph,
+    bool parse_tensor_constants) {
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(str, graph, vmap);
+  parseIR(str, graph, vmap, parse_tensor_constants);
 }
 
 VarWithType IRParser::parseVarWithType(bool allow_optional) {
@@ -117,17 +128,21 @@ VarWithType IRParser::parseVarWithType(bool allow_optional) {
 
 std::string IRParser::parseVar() {
   L.expect('%');
-  if (L.cur().kind == TK_IDENT) {
-    auto name = L.expect(TK_IDENT).text();
-    if (L.cur().kind == TK_NUMBER) {
-      auto suffix = L.expect(TK_NUMBER).text();
-      AT_ASSERT(suffix[0] == '.');
-      name += suffix;
+  std::string name;
+  bool continue_parsing;
+  do {
+    if (L.cur().kind == TK_IDENT) {
+      name += L.expect(TK_IDENT).text();
+    } else {
+      name += L.expect(TK_NUMBER).text();
     }
-    return name;
-  } else {
-    return L.expect(TK_NUMBER).text();
-  }
+    continue_parsing = false;
+    if (L.nextIf('.')) {
+      continue_parsing = true;
+      name += '.';
+    }
+  } while (continue_parsing);
+  return name;
 }
 
 void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
@@ -184,6 +199,25 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
       r.ty = type_alias.first;
       return r;
+    case '<': {
+      L.next();
+      auto text = L.expect(TK_IDENT);
+      if (text.text() != "Tensor") {
+        throw ErrorReport(token.range)
+            << "Could not parse literal" << token.text();
+      }
+      if (!parse_tensor_constants_) {
+        throw ErrorReport(token.range)
+            << "Tensor constant encountered but `parse_tensor_constants` set to false"
+            << token.text();
+      }
+      L.expect('>');
+      // these values will be set with randomly initialized data in
+      // a post processing pass;
+      deferred_tensor_value_initializations_.insert(n);
+      r.k = AttributeKind::t;
+      return r;
+    }
     default:
       throw ErrorReport(token.range)
           << "Could not parse literal" << token.text();
@@ -282,6 +316,9 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::ty:
         n->ty_(Symbol::attr(attrname), r.ty);
+        break;
+      case AttributeKind::t:
+        // initialized with random data later
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -483,6 +520,22 @@ void IRParser::parse() {
 
   // The last statement should be return, which specifies graph outputs
   parseReturnOperator();
+
+  for (Node* n : deferred_tensor_value_initializations_) {
+    auto type = n->output()->type()->expect<TensorType>();
+    auto tt = n->output()->type()->cast<TensorType>();
+    TORCH_INTERNAL_ASSERT(tt, "expected tensor output ", *n);
+    auto sizes = tt->sizes().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(sizes);
+    auto strides = tt->strides().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(strides);
+    auto device = tt->device();
+    TORCH_INTERNAL_ASSERT(device);
+    auto dtype = tt->scalarType();
+    TORCH_INTERNAL_ASSERT(dtype);
+    auto options = at::TensorOptions(*device).dtype(*dtype);
+    auto t = n->t_(attr::value, at::empty_strided(*sizes, *strides, options));
+  }
 }
 
 void IRParser::parseList(
