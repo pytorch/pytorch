@@ -3672,35 +3672,18 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
 
 upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
+_InterpolateSizeType = Union[None, int, Tuple[int], Tuple[int, int], Tuple[int, int, int]]
+_InterpolateScaleType = Union[None, float, Tuple[float], Tuple[float, float], Tuple[float, float, float]]
 
-@_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
-    pass
-
-
-@_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
-    pass
-
-
-@_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
-    pass
-
-
-@_overload  # noqa: F811
-def interpolate(  # noqa: F811
+def interpolate(
     input: Tensor,
-    size: Optional[List[int]] = None,
-    scale_factor: Optional[float] = None,
-    mode: str = "nearest",
+    size: _InterpolateSizeType = None,
+    scale_factor: _InterpolateScaleType = None,
+    mode: str = 'nearest',
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
     antialias: bool = False,
 ) -> Tensor:  # noqa: F811
-    pass
-
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3718,9 +3701,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     Args:
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
-            output spatial size.
-        scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
-            its length has to match `input.dim()`.
+            output spatial size.  If `size` is a tuple, its length has to match
+            spatial dimensions in `input.dim()`.
+        scale_factor (float or Tuple[float, ...]): multiplier for spatial size.
+            If `scale_factor` is a tuple, its length has to match spatial dimensions
+            in `input.dim()`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
