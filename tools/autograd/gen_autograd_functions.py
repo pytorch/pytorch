@@ -205,7 +205,7 @@ return obj.release().ptr();
 
 GETTER_BODY_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i: c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack(self->cdata)));
 }
 return tup;
@@ -213,7 +213,7 @@ return tup;
 
 GETTER_BODY_RAW_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   pybind11::object obj = pybind11::cast(prop[i], pybind11::return_value_policy::reference);
   PyTuple_SetItem(tup, (Py_ssize_t) i, obj.release().ptr());
 }
@@ -222,7 +222,7 @@ return tup;
 
 GETTER_BODY_ARRAYREF_LONG = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
 }
 return tup;
@@ -230,7 +230,7 @@ return tup;
 
 GETTER_BODY_ARRAYREF_DOUBLE = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
 }
 return tup;
