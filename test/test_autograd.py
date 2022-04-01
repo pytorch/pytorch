@@ -40,7 +40,7 @@ from torch.testing._internal.common_methods_invocations import mask_not_all_zero
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta)
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.logging_tensor import no_dispatch
 
 import pickle
@@ -389,8 +389,8 @@ class TestAutograd(TestCase):
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                # if forward AD ends up being implemented for torch.atan2, choose a different op
-                torch.atan2(dual_x, dual_x)
+                # if forward AD ends up being implemented for torch.polar, choose a different op
+                torch.polar(dual_x, dual_x)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -7497,7 +7497,7 @@ class TestAutogradDeviceType(TestCase):
         # At the time of writing this test, copy_ is not generated from native_functions.yaml
         # there was a bug that bfloat16 was not recognized as floating.
         x = torch.randn(10, device=device, requires_grad=True)
-        floating_dt = [dt for dt in get_all_dtypes() if dt.is_floating_point]
+        floating_dt = floating_types_and(torch.half, torch.bfloat16)
         for dt in floating_dt:
             y = torch.empty(10, device=device, dtype=dt)
             y.copy_(x)

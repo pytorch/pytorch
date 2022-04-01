@@ -4,7 +4,7 @@ import torch
 import random
 import itertools
 import unittest
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TEST_SCIPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, parametrize)
@@ -14,7 +14,10 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, CUDA11OrLater
-from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
+from torch.testing._internal.common_dtype import (
+    floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
+    all_types_and_complex, floating_and_complex_types_and
+)
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
@@ -135,7 +138,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_constructor_shape_inference(self, device, dtype):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
@@ -148,7 +151,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(dtype, sparse.dtype)
         self.assertEqual(torch.device(device), sparse.device)
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_constructor(self, device, dtype):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
@@ -165,7 +168,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(col_indices, dtype=index_dtype), sparse.col_indices())
             self.assertEqual(torch.tensor(values, dtype=dtype), sparse.values())
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_sparse_csr_constructor_from_lists(self, device, dtype):
         # without size
         sparse = torch.sparse_csr_tensor([0, 2, 4],
@@ -195,7 +198,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
     def test_empty(self, device, dtype):
         ns = [5, 2, 0]
         for shape in itertools.product(ns, ns):
@@ -216,7 +219,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(result.values().dtype, dtype)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_empty_errors(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
             torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
@@ -225,7 +228,7 @@ class TestSparseCSR(TestCase):
             torch.empty((2, 3, 4), dtype=dtype, device=device, layout=torch.sparse_csr)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_clone(self, device, dtype):
         x = torch.sparse_csr_tensor([0, 2, 4],
                                     [0, 1, 0, 1],
@@ -237,7 +240,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(x, y)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy(self, device, dtype):
 
         def run_test(shape, nnz, index_type):
@@ -254,7 +257,7 @@ class TestSparseCSR(TestCase):
             run_test(shape, shape[0] * shape[1], index_dtype)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
             shape1 = (2, 3)
@@ -273,7 +276,7 @@ class TestSparseCSR(TestCase):
                 a.copy_(b)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
             shape = (2, 3)
@@ -295,7 +298,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a._nnz(), 5)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
             shape = (2, 3)
@@ -421,7 +424,7 @@ class TestSparseCSR(TestCase):
                                     device=device)
 
     @onlyCUDA
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_factory_device_type_inference(self, device, dtype):
         cpu_cuda = ('cpu', 'cuda')
         cpu_cuda_none = cpu_cuda + (None,)
@@ -492,7 +495,7 @@ class TestSparseCSR(TestCase):
         self.assertExpected('\n'.join(printed))
         self.maxDiff = orig_maxDiff
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_from_dense(self, device, dtype):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], dtype=dtype, device=device)
         sparse = dense.to_sparse_csr()
@@ -512,7 +515,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_to_dense(self, device, dtype):
         mn = [5, 2, 0]
         for (m, n) in itertools.product(mn, mn):
@@ -604,7 +607,7 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
                 block_t = torch.sparse._csr_to_block_csr(t, (5, 5))
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_from_dense_convert_error(self, device, dtype):
         size = (4, 2, 4)
         dense = make_tensor(size, dtype=dtype, device=device)
@@ -630,8 +633,9 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @skipCUDAIfNoCusparseGeneric
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*get_all_complex_dtypes(),
-                  *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                  *[torch.half] if SM53OrLater else [],
+                  *[torch.bfloat16] if SM80OrLater else []))
     def test_csr_matvec(self, device, dtype):
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
@@ -886,9 +890,9 @@ class TestSparseCSR(TestCase):
 
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*get_all_complex_dtypes(),
-                  *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
-                                     include_bfloat16=SM80OrLater and TEST_CUSPARSE_GENERIC))
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
+                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -905,9 +909,9 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype)
 
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*get_all_complex_dtypes(),
-                  *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
-                                     include_bfloat16=SM80OrLater and TEST_CUSPARSE_GENERIC))
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
+                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
@@ -939,10 +943,10 @@ class TestSparseCSR(TestCase):
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(torch.complex64,
-                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
-                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                                   include_half=SM53OrLater))
+    @dtypesIfCUDA(*floating_types_and(torch.complex64,
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      *[torch.half] if SM53OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @skipCUDAIf(
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"
@@ -1015,10 +1019,10 @@ class TestSparseCSR(TestCase):
     @parametrize("m", [0, 1, 25])
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(torch.complex64,
-                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
-                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                                   include_half=SM53OrLater))
+    @dtypesIfCUDA(*floating_types_and(torch.complex64,
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      *[torch.half] if SM53OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @skipCUDAIf(
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"
@@ -1387,7 +1391,7 @@ class TestSparseCSR(TestCase):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
@@ -1398,7 +1402,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(csr_sparse.to_dense(), dense)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_csr_coo_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
@@ -1633,7 +1637,7 @@ class TestSparseCSR(TestCase):
             args = [make_tensor(a.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True) for a in sample.args]
             self.assertTrue(torch.autograd.gradcheck(fn, args, fast_mode=True))
 
-    @dtypes(*get_all_dtypes(include_bool=False))
+    @dtypes(*all_types_and_complex())
     def test_direct_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
@@ -1643,12 +1647,12 @@ class TestSparseCSR(TestCase):
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sum(self, device, dtype):
         def run_test(shape, nnz, index_type):
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
             self.assertEqual(a.sum(), a.values().sum())
-            if dtype in get_all_fp_dtypes():
+            if dtype in floating_types():
                 a.requires_grad_(True)
                 with self.assertRaisesRegex(RuntimeError,
                                             ("Function SumBackward0 returned an invalid gradient at " +
@@ -1663,7 +1667,7 @@ class TestSparseCSR(TestCase):
 
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_transpose(self, device, dtype):
 
         def run_test(shape, nnz, index_type, dim0, dim1):
@@ -1684,7 +1688,7 @@ class TestSparseCSR(TestCase):
     # TODO: This is a stopgap for a rigorous extension of our autograd tests
     # to test the functionality of detach
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_exercise_detach(self, device, dtype):
         shape = (3, 3)
         nnz = 4
