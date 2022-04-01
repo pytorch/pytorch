@@ -5988,6 +5988,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.sigmoid = torch.nn.Sigmoid()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.tanh = torch.nn.Tanh()
+                self.softmax = torch.nn.Softmax()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -6002,6 +6003,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # F.tanh is deprecated
                 x = torch.tanh(x)
                 x = x.tanh()
+                # TODO(future PR): handle F.softmax
+                x = self.softmax(x)
                 return x
 
         for eval_mode in [True, False]:
@@ -6012,12 +6015,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m.eval()
                 qconfig = default_qconfig
                 prepare = prepare_fx
-                fq_count = 9
+                fq_count = 10
             else:
                 m.train()
                 qconfig = default_qat_qconfig
                 prepare = prepare_qat_fx
-                fq_count = 9
+                fq_count = 10
 
             # nothing to fuse so skipping the fuse step
             m_copy = copy.deepcopy(m)
@@ -6039,6 +6042,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # not runnable
             quantized = convert_fx(prepared)
             quantized_reference = convert_fx(prepared_copy, is_reference=True)
+            # print(quantized_reference)
 
             # This checks that the dequantize from the output of first conv
             # is being propagated to the end, so that we don't insert extra
@@ -6052,6 +6056,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_module(nnq.Conv2d),
                 ns.call_module(nn.Sigmoid),
+                ns.call_module(nnq.Softmax),
                 ns.call_method('dequantize'),
             ]
             self.checkGraphModuleNodes(
@@ -6060,8 +6065,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_list=order_check)
 
             reference_count_check = {
-                ns.call_function(torch.quantize_per_tensor) : 11,
-                ns.call_method('dequantize') : 11
+                ns.call_function(torch.quantize_per_tensor) : 12,
+                ns.call_method('dequantize') : 12
             }
             reference_order_check = [
                 ns.call_function(torch.quantize_per_tensor),
@@ -6072,12 +6077,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_module(nn.Sigmoid),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
+                ns.call_module(nn.Softmax),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize'),
             ]
             self.checkGraphModuleNodes(
                 quantized_reference,
                 expected_node_occurrence=reference_count_check,
                 expected_node_list=reference_order_check)
 
+            # Verify that softmax scale and zero_point are correct
+            self.assertTrue(quantized.softmax.scale - (1.0 / 256) <= 1e-8)
+            self.assertTrue(quantized.softmax.zero_point == 0)
 
     def test_float_functional(self):
         class TorchAdd(nn.Module):
