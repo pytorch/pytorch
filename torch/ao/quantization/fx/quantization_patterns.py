@@ -318,6 +318,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_observer)
 @register_quant_pattern('sigmoid', default_affine_fixed_qparams_observer)
 @register_quant_pattern('sigmoid_', default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.Softmax, default_affine_fixed_qparams_observer)
 @register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_observer)
 @register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_observer)
 @register_quant_pattern('tanh', default_symmetric_fixed_qparams_observer)
