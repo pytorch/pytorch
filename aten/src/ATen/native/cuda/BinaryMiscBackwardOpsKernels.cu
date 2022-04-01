@@ -16,7 +16,7 @@
 namespace at {
 namespace native {
 
-const char sigmoid_backward_name[] = "sigmoid_backward_kernel";
+const char sigmoid_backward_name[] = "sigmoid_backward";
 void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if(isComplexType(dtype)) {
