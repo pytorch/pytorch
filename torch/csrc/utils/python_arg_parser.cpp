@@ -923,7 +923,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
     allow_varargs_intlist = true;
   }
 
-  if (nargs > max_pos_args && !allow_varargs_intlist) {
+  if (nargs > static_cast<decltype(nargs)>(max_pos_args) && !allow_varargs_intlist) {
     if (raise_exception) {
       // foo() takes takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
@@ -1079,7 +1079,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-  auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
+  auto num_args = static_cast<size_t>(PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0));
   std::vector<unsigned> plausible_idxs;
   unsigned i = 0;
   for (auto& signature : signatures_) {
