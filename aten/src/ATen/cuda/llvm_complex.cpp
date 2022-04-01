@@ -477,6 +477,14 @@ operator!=(const _Tp& __x, const complex<_Tp>& __y)
     return !(__x == __y);
 }
 
+template<class _Tp>
+inline constexpr
+bool
+operator&&(const _Tp& __x, const complex<_Tp>& __y)
+{
+    return __x && __y; 
+}
+
 // 26.3.7 values:
 
 template <class _Tp, bool = is_integral<_Tp>::value,
