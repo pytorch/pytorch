@@ -650,6 +650,11 @@ void all2all_single_equal_split(at::Tensor& input,
   const auto* sendbuff = reinterpret_cast<char*>(input.data_ptr());
   auto* recvbuff = reinterpret_cast<char *>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
+#if defined(USE_ROCM) && ROCM_VERSION >= 50000
+  NCCL_CHECK(ncclGroupStart());
+  NCCL_CHECK(ncclAllToAll(sendbuff , recvbuff , count,  type, comm, stream));
+  NCCL_CHECK(ncclGroupEnd());
+#else
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for(const auto r : c10::irange(numranks)) {
@@ -661,6 +666,7 @@ void all2all_single_equal_split(at::Tensor& input,
     }
   }
   NCCL_CHECK(ncclGroupEnd());
+#endif
 #else
   AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
