@@ -232,7 +232,7 @@ class TestNumPyInterop(TestCase):
     def test_from_list_of_ndarray_warning(self, device):
         warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
         with self.assertWarnsOnceRegex(UserWarning, warning_msg):
-            torch.tensor([np.random.random(size=(3, 3)).T, np.random.random(size=(3, 3)).T], device=device)
+            torch.tensor([np.array([0]), np.array([1])], device=device)
 
     def test_ctor_with_invalid_numpy_array_sequence(self, device):
         # Invalid list of numpy array
