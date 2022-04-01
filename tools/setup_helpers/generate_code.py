@@ -1,8 +1,15 @@
 import argparse
 import os
+import pathlib
+import shutil
 import sys
+import tempfile
 import yaml
 from typing import Any, List, Optional, cast
+
+# Note that even though this is deprecated, a certain Meta internal
+# build is not compatible with importlib.resources file listing.
+import pkg_resources
 
 try:
     # use faster C loader if available
@@ -32,7 +39,9 @@ def generate_code(ninja_global: Optional[str] = None,
                   subset: Optional[str] = None,
                   disable_autograd: bool = False,
                   force_schema_registration: bool = False,
-                  operator_selector: Any = None) -> None:
+                  operator_selector: Any = None,
+                  *,
+                  autograd_dir: pathlib.Path) -> None:
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -51,7 +60,6 @@ def generate_code(ninja_global: Optional[str] = None,
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
     data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
-    autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
     if subset == "pybindings" or not subset:
@@ -172,16 +180,25 @@ def main() -> None:
     )
     options = parser.parse_args()
 
-    generate_code(
-        options.ninja_global,
-        options.native_functions_path,
-        options.install_dir,
-        options.subset,
-        options.disable_autograd,
-        options.force_schema_registration,
-        # options.selected_op_list
-        operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
-    )
+    with tempfile.TemporaryDirectory() as autograd_dir_str:
+        # Copy all of the tools.autograd resources to a temporary
+        # directory so that code generation below can see it as local
+        # files.
+        autograd_dir = pathlib.Path(autograd_dir_str)
+        copy_resources_to_dir(autograd_dir)
+
+        generate_code(
+            options.ninja_global,
+            options.native_functions_path,
+            options.install_dir,
+            options.subset,
+            options.disable_autograd,
+            options.force_schema_registration,
+            # options.selected_op_list
+            operator_selector=get_selector(options.selected_op_list_path,
+                                           options.operators_yaml_path),
+            autograd_dir=autograd_dir,
+        )
 
     if options.gen_lazy_ts_backend:
         aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
@@ -208,6 +225,30 @@ def main() -> None:
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
                             per_operator_headers=options.per_operator_headers)
+
+
+def copy_resources_to_dir(autograd_dir: pathlib.Path) -> None:
+    copy_resource_to_dir("tools.autograd", "deprecated.yaml", autograd_dir)
+    copy_resource_to_dir("tools.autograd", "derivatives.yaml", autograd_dir)
+
+    templates_dir = autograd_dir / "templates/"
+    templates_dir.mkdir()
+    for template_name in pkg_resources.resource_listdir("tools.autograd", "templates"):
+        if pkg_resources.resource_isdir("tools.autograd.templates", template_name):
+            # Only copy one level deep.
+            continue
+        copy_resource_to_dir("tools.autograd.templates", template_name, templates_dir)
+
+
+def copy_resource_to_dir(package: str, name: str, dest_dir: pathlib.Path) -> None:
+    """Copies the file resource from the package to the given directory."""
+    # Note that this will read the local file in the event that there
+    # is no archive to extract from, e.g. normal CMake and Bazel
+    # builds.
+    with pkg_resources.resource_stream(package, name) as in_file:
+        dest = dest_dir / name
+        with dest.open(mode="xb") as out_file:
+            shutil.copyfileobj(in_file, out_file)
 
 
 if __name__ == "__main__":
