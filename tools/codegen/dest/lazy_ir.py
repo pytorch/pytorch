@@ -211,26 +211,11 @@ class GenLazyNativeFuncDefinition:
     backend_index: BackendIndex
     tensor_class: str
 
-    @method_with_native_function
-    def __call__(self, func: NativeFunction) -> List[str]:
-        sig = kernel_signature(func, self.backend_index)
+    def gen_shape_call(self, func: NativeFunction):
         metadata = self.backend_index.get_kernel(func)
-        assert metadata is not None
         schema = LazyIrSchema(func.func)
         all_args = schema.filtered_args()
-        value_args = schema.filtered_args(values=True, scalars=False)
         returns_length = len(schema.returns)
-
-        fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
-
-        value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
-        get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
-        TORCH_INTERNAL_ASSERT(common_device);
-        """
-
-        lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
-        node_ctor_input_str = node_ctor_inputs(schema)
 
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
         if func.structured or func.structured_delegate is not None:
@@ -250,6 +235,40 @@ class GenLazyNativeFuncDefinition:
 
         meta_str += f"""
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
+
+        # Calculating which dimmensions are symbolic
+        # func_schema_str = "aten::" + str(func.func)
+        # TODO: figure out if `aten::` is needed here
+        func_schema_str = str(func.func)
+        meta_str += f"""
+        if(symbolicShapeEnabled()){{
+            std::vector<jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
+            char* schema_str = "{func_schema_str}";
+            applySymbolicShapesOnLT(schema_str, inputs, shapes);
+        }}
+        """
+        return meta_str
+
+    @method_with_native_function
+    def __call__(self, func: NativeFunction) -> List[str]:
+        sig = kernel_signature(func, self.backend_index)
+        metadata = self.backend_index.get_kernel(func)
+        assert metadata is not None
+        schema = LazyIrSchema(func.func)
+        value_args = schema.filtered_args(values=True, scalars=False)
+        returns_length = len(schema.returns)
+
+        fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
+
+        value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
+        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
+        TORCH_INTERNAL_ASSERT(common_device);
+        """
+
+        lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
+        node_ctor_input_str = node_ctor_inputs(schema)
+        shape_str = self.gen_shape_call(func)
 
         node_str = f"""auto node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
@@ -277,7 +296,7 @@ class GenLazyNativeFuncDefinition:
         TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
-        {meta_str}
+        {shape_str}
         {node_str}
         {bridge_str}
         return result;
