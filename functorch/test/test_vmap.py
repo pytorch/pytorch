@@ -3106,6 +3106,15 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.glu'),
         xfail('nn.functional.rrelu'),  # random?
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
+        xfail('bernoulli', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('multinomial', ''),
+        xfail('column_stack', ''),
+        xfail('pca_lowrank', ''),
+        xfail('normal', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('normal', 'number_mean'),
+        xfail('svd_lowrank', ''),
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -3237,6 +3246,21 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.embedding_bag'),
         xfail('linalg.tensorsolve'),
+        xfail('bernoulli', ''),
+        xfail('linalg.lu_factor', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('nn.functional.kl_div', ''),
+        xfail('multinomial', ''),
+        xfail('scatter_reduce', '', device_type='cpu'),
+        xfail('column_stack', ''),
+        xfail('pca_lowrank', ''),
+        xfail('normal', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('normal', 'number_mean'),
+        xfail('svd_lowrank', ''),
+        xfail('linalg.lu_factor_ex', ''),
+        xfail('diagflat', ''),
+        xfail('special.log_ndtr'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
