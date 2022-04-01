@@ -46,6 +46,7 @@ def generate_code(ninja_global: Optional[str] = None,
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.codegen.selective_build.selector import SelectiveBuilder
 
+    copy_resources_to_dir(autograd_dir)
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -185,7 +186,6 @@ def main() -> None:
         # directory so that code generation below can see it as local
         # files.
         autograd_dir = pathlib.Path(autograd_dir_str)
-        copy_resources_to_dir(autograd_dir)
 
         generate_code(
             options.ninja_global,
