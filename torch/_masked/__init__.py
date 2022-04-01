@@ -163,8 +163,6 @@ Example::
         prod=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         amin=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
-        argmin=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
-        argmax=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
@@ -229,8 +227,6 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         prod='product',
         amax='maximum',
         amin='minimum',
-        argmax='argmax',
-        argmin='argmin',
         mean='mean',
         norm='norm',
         var='variance',
@@ -349,12 +345,12 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name == 'prod':
         return torch.tensor(1, dtype=dtype, device=device)
-    elif op_name in {'amax', 'argmax'}:
+    elif op_name == 'amax':
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
             return torch.tensor(torch.iinfo(dtype).min, dtype=dtype, device=device)
-    elif op_name in {'amin', 'argmin'}:
+    elif op_name == 'amin':
         if torch.is_floating_point(input):
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
@@ -625,7 +621,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'argmax', 'argmin', 'mean', 'norm', 'var', 'std'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var', 'std'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -781,50 +777,6 @@ def amin(input: Tensor,
         return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
     else:
         raise ValueError(f'masked amin expects strided tensor (got {input.layout} tensor)')
-
-
-@_apply_docstring_templates
-def argmax(input: Tensor,
-           dim: int = None,
-           *,
-           keepdim: Optional[bool] = False,
-           dtype: Optional[DType] = None,
-           mask: Optional[Tensor] = None) -> Tensor:
-    """\
-{reduction_signature}
-{reduction_descr}
-{reduction_identity_dtype}
-{reduction_args}
-{reduction_example}"""
-    if dtype is None:
-        dtype = input.dtype
-    mask_input = _combine_input_and_mask(argmax, input, mask)
-    if input.layout == torch.strided:
-        return torch.argmax(mask_input, dim, bool(keepdim)).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked argmax expects strided tensor (got {input.layout} tensor)')
-
-
-@_apply_docstring_templates
-def argmin(input: Tensor,
-           dim: int = None,
-           *,
-           keepdim: Optional[bool] = False,
-           dtype: Optional[DType] = None,
-           mask: Optional[Tensor] = None) -> Tensor:
-    """\
-{reduction_signature}
-{reduction_descr}
-{reduction_identity_dtype}
-{reduction_args}
-{reduction_example}"""
-    if dtype is None:
-        dtype = input.dtype
-    mask_input = _combine_input_and_mask(argmin, input, mask)
-    if input.layout == torch.strided:
-        return torch.argmin(mask_input, dim, bool(keepdim)).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked argmin expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
