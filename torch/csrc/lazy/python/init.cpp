@@ -173,7 +173,8 @@ void initLazyBindings(PyObject* module){
    * TODO(shunting) revisit this API for XLA
    */
   lazy_ts_backend.def("_get_tensors_ts_device_data_node",
-        [](const std::vector<at::Tensor>& tensors) {
+        [](const std::vector<at::Tensor>& tensors) -> std::pair<std::vector<int64_t>, std::vector<at::IValue>> {
+        #ifndef FBCODE_CAFFE2
           std::vector<Node*> roots;
           for (auto& tensor : tensors) {
             auto xtensor = TryGetLtcTensor(tensor);
@@ -214,6 +215,9 @@ void initLazyBindings(PyObject* module){
             }
           }
           return std::make_pair(tensor_ids, ivalues);
+        #else
+          return std::make_pair(std::vector<int64_t>(), std::vector<at::IValue>());
+        #endif
         });
   // TODO(shunting) revisit this part for XLA
   lazy_ts_backend.def("_run_cached_graph", [](const std::string& hash_str, const std::vector<at::IValue>& graph_inputs) {
