@@ -204,7 +204,6 @@ void initPythonIRBindings(PyObject* module_) {
           "has_writers",
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
-
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
@@ -951,6 +950,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &NumberType::get);
   py::class_<IntType, Type, IntTypePtr>(m, "IntType")
       .def_static("get", &IntType::get);
+  py::class_<SymIntType, Type, SymIntTypePtr>(m, "SymIntType")
+      .def_static("get", &SymIntType::get);
   py::class_<FloatType, Type, FloatTypePtr>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<ComplexType, Type, ComplexTypePtr>(m, "ComplexType")
