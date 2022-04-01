@@ -2,8 +2,9 @@
 #include <c10/util/Exception.h>
 #include <fmt/format.h>
 #include <torch/csrc/deploy/Exception.h>
-#include <torch/csrc/deploy/interpreter/builtin_registry.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+// #include <torch/csrc/deploy/interpreter/adapter.h>
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 using at::IValue;
 using torch::deploy::Obj;
@@ -11,11 +12,11 @@ using torch::deploy::Obj;
 namespace torch {
 namespace deploy {
 
-Obj fromIValue(IValue value) override {
+py::object toPyObj(at::IValue value){
     return torch::jit::toPyObject(value);
 }
 
-IValue toIValue(Obj obj) const override {
+at::IValue fromPyObj(py::handle obj){
     return torch::jit::toTypeInferredIValue(obj);
 }
 

@@ -88,6 +88,7 @@ add_library(torch_python_static STATIC $<TARGET_OBJECTS:torch_python_obj>)
 set(INTERPRETER_LIB_SOURCES
   ${INTERPRETER_DIR}/interpreter_impl.cpp
   ${INTERPRETER_DIR}/builtin_registry.cpp
+  ${INTERPRETER_DIR}/adapter.cpp
   ${INTERPRETER_DIR}/register_frozenpython.cpp
   ${INTERPRETER_DIR}/import_find_sharedfuncptr.cpp
   ${FROZEN_FILES}
