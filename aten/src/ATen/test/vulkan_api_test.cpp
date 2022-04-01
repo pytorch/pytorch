@@ -65,7 +65,7 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
 }
 
 
-static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
+static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, unsigned i) {
   // generate all permutations of a given dims
   if (i == in.size()) {
     out.push_back(in);

@@ -4126,7 +4126,7 @@ TEST_F(LazyOpsTest, TestDropoutInPlace) {
 }
 
 TEST_F(LazyOpsTest, TestRandperm) {
-  int n = 5;
+  unsigned n = 5;
   torch::Tensor shuffle = torch::randperm(
       n, torch::TensorOptions(torch::kLong).device(torch::kLazy));
   torch::Tensor shuffle_cpu = CopyToDevice(shuffle, torch::kCPU);

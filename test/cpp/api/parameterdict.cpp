@@ -105,7 +105,7 @@ TEST_F(ParameterDictTest, Values) {
   auto dict = torch::nn::ParameterDict(params);
   std::vector<torch::Tensor> values = dict->values();
   std::vector<torch::Tensor> true_values{ta, tb, tc};
-  for (auto i = 0; i < values.size(); i += 1) {
+  for (auto i = 0U; i < values.size(); i += 1) {
     ASSERT_TRUE(torch::all(torch::eq(values[i], true_values[i])).item<bool>());
   }
 }

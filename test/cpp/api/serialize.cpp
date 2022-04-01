@@ -129,7 +129,7 @@ void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_glo
   // optim3_2 and optim1 should have param_groups and state of size 1 and state_size respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
   // state_size = 2 for all optimizers except LBFGS as LBFGS only maintains one global state
-  int state_size = only_has_global_state ? 1 : 2;
+  unsigned state_size = only_has_global_state ? 1 : 2;
   ASSERT_TRUE(optim3_2_state.size() == state_size);
 
   // optim3_2 and optim1 should have param_groups and state of same size
