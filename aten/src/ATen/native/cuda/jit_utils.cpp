@@ -878,6 +878,9 @@ bool r_mkdir_with_base(std::string& base, std::string& dir){
   }
 
   return _r_mkdir(base+dir);
+
+}
+
 std::string load_code_template(const std::string& path) {
   std::ifstream ifs{path};
   std::string s{
@@ -938,9 +941,6 @@ std::string generate_reduction_code(
       const auto code = cuda_template.format(env);
       return code;
 }
-
-}
-
 
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
