@@ -69,7 +69,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
-    nn.Softmax: nnq.Softmax,
     nn.Dropout: nnq.Dropout,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,

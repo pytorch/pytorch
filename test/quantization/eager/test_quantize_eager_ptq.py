@@ -650,20 +650,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             NormalizationTestModel(), test_only_eval_fn, [self.calib_data])
         checkQuantized(model)
 
-    @skipIfNoFBGEMM
-    def test_softmax(self):
-        model = nn.Sequential(nn.Softmax()).eval()
-        model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
-        # TODO(before land): currently default observer is being inserted in
-        # PTQ, need to check if we can insert the right observer instead.
-        prepare(model, inplace=True)
-        print(model)
-        self.checkObservers(model)
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-        self.checkNoPrepModules(model[0])
-        self.assertEqual(type(model[0]), nnq.Softmax)
-
     def test_save_load_state_dict(self):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
         Load the quantized state_dict for eval and compare results against original model
