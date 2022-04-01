@@ -304,6 +304,11 @@ vjp_fail = {
     xfail('tensor_split'),
     xfail('to_sparse'),
     xfail('nn.functional.ctc_loss'),
+    skip('nn.functional.feature_alpha_dropout', 'with_train'),  # fails on cuda, runs okay on cpu
+    skip('nn.functional.feature_alpha_dropout', 'without_train'),  # fails on cuda, runs okay on cpu
+    skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
+    skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
+    skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
 }
 
 
@@ -364,6 +369,11 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
+        skip('nn.functional.feature_alpha_dropout', 'with_train'),  # fails on cuda, runs okay on cpu
+        skip('nn.functional.feature_alpha_dropout', 'without_train'),  # fails on cuda, runs okay on cpu
+        skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
+        skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
+        skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
 
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
@@ -394,8 +404,6 @@ class TestOperators(TestCase):
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
-
-
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -430,6 +438,11 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         skip('nn.functional.fractional_max_pool2d'),  # fails on cpu, runs okay on cuda
         skip('nn.functional.fractional_max_pool3d'),  # fails on cpu, runs okay on cuda
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('pca_lowrank', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
+        xfail('svd_lowrank', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -613,6 +626,9 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('index_copy'),
         xfail('nn.functional.gelu', device_type='cpu'),
+
+        xfail('linalg.lu_factor', ''),
+        xfail('scatter_reduce', '', device_type='cpu'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -710,6 +726,12 @@ class TestOperators(TestCase):
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
+
+        skip('nn.functional.feature_alpha_dropout', 'with_train'),
+        skip('pca_lowrank', ''),
+        skip('nn.functional.dropout2d', ''),
+        skip('nn.functional.feature_alpha_dropout', 'without_train'),
+        skip('svd_lowrank', ''),
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
@@ -781,6 +803,13 @@ class TestOperators(TestCase):
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
+
+        xfail('linalg.lu_factor', ''),
+        skip('nn.functional.dropout2d', ''),
+        skip('nn.functional.feature_alpha_dropout', 'without_train'),
+        skip('pca_lowrank', ''),
+        skip('svd_lowrank', ''),
+        skip('nn.functional.feature_alpha_dropout', 'with_train'),
     }
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -843,6 +872,15 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
         xfail('linalg.cross'),
+        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
+        xfail('linalg.lu_factor', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('nn.functional.kl_div', ''),
+        xfail('pca_lowrank', ''),
+        xfail('svd_lowrank', ''),
+        xfail('linalg.lu_factor_ex', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('special.log_ndtr', ''),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -884,6 +922,7 @@ class TestOperators(TestCase):
         xfail('fmax'),
         xfail('fft.ihfft'),
         xfail('fft.rfft'),
+        xfail('special.log_ndtr'),
         xfail('fft.rfftn'),
         xfail('fill_'),
         xfail('index_copy'),
@@ -953,6 +992,15 @@ class TestOperators(TestCase):
         xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.tensorsolve'),
+        xfail('linalg.lu_factor', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('nn.functional.kl_div', ''),
+        xfail('scatter_reduce', '', device_type='cpu'),
+        xfail('pca_lowrank', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
+        xfail('svd_lowrank', ''),
+        xfail('linalg.lu_factor_ex', ''),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1002,6 +1050,12 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         skip('solve'),
+        xfail('column_stack', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('svd_lowrank', ''),
+        xfail('pca_lowrank', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1158,6 +1212,16 @@ class TestOperators(TestCase):
         xfail('symeig', ''),
         xfail('take', ''),
         xfail('var_mean', ''),
+        xfail('linalg.lu_factor', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('nn.functional.kl_div', ''),
+        xfail('scatter_reduce', '', device_type='cpu'),
+        xfail('pca_lowrank', ''),
+        xfail('nn.functional.dropout2d', ''),
+        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
+        xfail('svd_lowrank', ''),
+        xfail('rsub', ''),
+        xfail('linalg.lu_factor_ex', ''),
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1256,6 +1320,7 @@ class TestDecompositionOpInfo(TestCase):
         skip('stft'),
         skip('_masked.softmax'),
         skip('_masked.normalize'),
+        xfail('linalg.lu_factor', ''),
         # Some weird matmul stuff with int64 matmuls
         # inplace op
         skip('resize_'),
