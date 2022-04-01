@@ -1,6 +1,7 @@
 import torch._lazy.metrics as metrics
 from torch._lazy.tensor_factory_functions import tensor_factory_functions
 from torch._lazy import computation
+from torch._lazy import debug as lazy_debug
 import torch._lazy as lazy
 import dataclasses
 from typing import List, Dict, Any, Callable
@@ -9,6 +10,7 @@ from torch import fx
 import torch
 import itertools
 import os
+from typing import Dict, List
 
 debug = os.environ.get("debug_extract_compiled_graph") is not None
 
@@ -62,10 +64,10 @@ class ReturnValueHandler:
     to duplicate the eager tensors later.
     """
     def __init__(self, lazy_out_list):
-        self.index = []
+        self.index: List[List[int]] = []
         self.total_count = len(lazy_out_list)
 
-        tensor_id_to_idx = dict()
+        tensor_id_to_idx: Dict[int, int] = dict()
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
             uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
             if uniq_idx is not None:
@@ -141,7 +143,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     lazy_args = [arg.to(device="lazy") for arg in example_inputs]
     args_tensor_ids = [lazy.get_tensor_id(lazy_arg) for lazy_arg in lazy_args]
     tensor_id_to_arg_idx = {tensor_id: i for i, tensor_id in enumerate(args_tensor_ids)}
-    lazy_model = copy.deepcopy(model).to(device="lazy")
+    lazy_model = copy.deepcopy(model).to(device=torch.device("lazy"))
     force_lazy_device(lazy_model)
 
     # This line executes lazy tracing and enable us extracting compiled graph later
@@ -159,8 +161,10 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     return_value_handler = ReturnValueHandler(lazy_out)
     if debug:
         print("Fx code:\n", model.code)
-        print("LTC IR:", lazy.get_tensors_text(lazy_out))
+        print("LTC IR:", lazy_debug.dump_ir(lazy_out, "text"))
 
+    # TODO: this part is TS backend specific for now and will be generalized to
+    # support XLA
     graph_input_tensor_ids, graph_input_ivalues = computation.get_tensors_ts_device_data_node(lazy_out)
     assert len(graph_input_tensor_ids) == len(graph_input_ivalues)
     graph_input_matcher = GraphInputMatcher(tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_ivalues)

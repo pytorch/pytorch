@@ -20,12 +20,6 @@
 namespace torch {
 namespace lazy {
 
-struct NoGilSection {
-  NoGilSection() : state(PyEval_SaveThread()) {}
-  ~NoGilSection() { PyEval_RestoreThread(state); }
-  PyThreadState* state = nullptr;
-};
-
 // TODO(whc) backend 'device' related APIs are not very clear, this code could be
 // simplified but it should probably be done together with designing/refactoring
 // the overall approach to get/set of default eager/lazy device types
@@ -145,6 +139,7 @@ void initLazyBindings(PyObject* module){
         });
   lazy.def("_get_graph_hash", [](const std::vector<at::Tensor>& tensors) {
     std::vector<LazyTensorPtr> xtensors;
+    xtensors.reserve(tensors.size());
     for (auto& tensor : tensors) {
       xtensors.push_back(TryGetLtcTensor(tensor));
     }
@@ -157,7 +152,7 @@ void initLazyBindings(PyObject* module){
       [](const std::vector<at::Tensor>& tensors,
          const std::vector<std::string>& devices, bool wait,
          bool sync_ltc_data) {
-        NoGilSection nogil;
+        pybind11::gil_scoped_release no_gil;
         SyncTensors(tensors, devices, wait, sync_ltc_data);
       },
       py::arg("tensors"), py::arg("devices"), py::arg("wait") = true,
@@ -211,10 +206,10 @@ void initLazyBindings(PyObject* module){
                * future calls.
                */
               if (tsDataPtr->HasValue()) {
-                ivalues.push_back(tsDataPtr->data());
+                ivalues.emplace_back(tsDataPtr->data());
               } else {
                 CHECK(tsDataPtr->scalar.has_value());
-                ivalues.push_back(tsDataPtr->scalar.value());
+                ivalues.emplace_back(tsDataPtr->scalar.value());
               }
             }
           }
@@ -229,11 +224,13 @@ void initLazyBindings(PyObject* module){
     auto computationPtr = (torch::lazy::TSComputation*) cachedComputation->computation.get();
 
     std::vector<torch::jit::IValue> stack;
-    for (auto arg : graph_inputs) {
+    stack.reserve(graph_inputs.size());
+    for (const auto& arg : graph_inputs) {
       stack.emplace_back(arg);
     }
     computationPtr->graph_executor().run(stack);
     std::vector<at::Tensor> result;
+    result.reserve(stack.size());
     for (torch::jit::IValue elem : stack) {
       result.push_back(elem.toTensor());
     }
