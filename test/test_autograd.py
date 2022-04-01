@@ -389,8 +389,8 @@ class TestAutograd(TestCase):
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                # if forward AD ends up being implemented for torch.atan2, choose a different op
-                torch.atan2(dual_x, dual_x)
+                # if forward AD ends up being implemented for torch.polar, choose a different op
+                torch.polar(dual_x, dual_x)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
