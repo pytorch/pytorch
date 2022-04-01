@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/custom_class.h>
 
 namespace torch {
 namespace distributed {
@@ -22,33 +23,12 @@ Message::Message(
       type_(type),
       id_(id) {}
 
-Message::Message(const Message& other) = default;
-
-Message::Message(Message&& other) noexcept = default;
-
-Message& Message::operator=(Message const& rhs) & {
-  auto payload = rhs.payload_;
-  auto tensors = rhs.tensors_;
-  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_)
-      .swap(*this);
-  return *this;
-}
-
-Message& Message::operator=(Message&& rhs) & {
-  Message(std::move(rhs.payload_), std::move(rhs.tensors_), rhs.type_, rhs.id_)
-      .swap(*this);
-  return *this;
-}
-
-void Message::swap(Message& rhs) noexcept {
-  std::swap(payload_, rhs.payload_);
-  std::swap(tensors_, rhs.tensors_);
-  std::swap(type_, rhs.type_);
-  std::swap(id_, rhs.id_);
-}
-
 std::vector<char>&& Message::movePayload() && {
   return std::move(payload_);
+}
+
+std::vector<char>& Message::payload() {
+  return payload_;
 }
 
 const std::vector<char>& Message::payload() const {
@@ -72,36 +52,11 @@ MessageType Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageType::SCRIPT_CALL == type_ || // dist.rpc on builtin ops
-      MessageType::PYTHON_CALL == type_ || // dist.rpc on Python UDFs
-      MessageType::SCRIPT_REMOTE_CALL == type_ || // dist.remote on builtin ops
-      MessageType::PYTHON_REMOTE_CALL == type_ || // dist.remote on Python UDFs
-      // RRef related internal messages
-      MessageType::SCRIPT_RREF_FETCH_CALL == type_ ||
-      MessageType::PYTHON_RREF_FETCH_CALL == type_ ||
-      MessageType::RREF_USER_DELETE == type_ ||
-      MessageType::RREF_CHILD_ACCEPT == type_ ||
-      MessageType::RREF_FORK_REQUEST == type_ ||
-      // Autograd message
-      MessageType::BACKWARD_AUTOGRAD_REQ == type_ ||
-      MessageType::FORWARD_AUTOGRAD_REQ == type_ ||
-      // Cleanup Autograd context request
-      MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ == type_;
+  return MessageTypeFlags::REQUEST_TYPE & type_;
 }
 
 bool Message::isResponse() const {
-  return MessageType::SCRIPT_RET == type_ || // ret of dist.rpc on builtin ops
-      MessageType::PYTHON_RET == type_ || // ret of dist.rpc on Python UDFs
-      MessageType::REMOTE_RET == type_ || // ret of dist.remote
-      MessageType::SCRIPT_RREF_FETCH_RET == type_ || // ret on RRef::toHere()
-      MessageType::PYTHON_RREF_FETCH_RET == type_ || // ret on RRef::toHere()
-      MessageType::EXCEPTION == type_ || // propagate back exceptions
-      MessageType::RREF_ACK == type_ || // ret of other types
-      // Autograd response
-      MessageType::BACKWARD_AUTOGRAD_RESP == type_ ||
-      MessageType::FORWARD_AUTOGRAD_RESP == type_ ||
-      // Cleanup autograd context response
-      MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_;
+  return MessageTypeFlags::RESPONSE_TYPE & type_;
 }
 
 int64_t Message::id() const {
@@ -112,18 +67,51 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createExceptionResponse(const std::exception& e, int64_t id) {
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
+    const {
+  // Sparse tensors do not have storage. Instead, a sparse tensor
+  // contains two tensors indices and values, and both contain storage.
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
+  storages.reserve(2 * tensors_.size());
+  for (const auto& tensor : tensors_) {
+    if (tensor.is_sparse()) {
+      storages.emplace_back(tensor._indices().storage().getWeakStorageImpl());
+      storages.emplace_back(tensor._values().storage().getWeakStorageImpl());
+    } else {
+      storages.emplace_back(tensor.storage().getWeakStorageImpl());
+    }
+  }
+  return storages;
+}
+
+c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::exception& e,
+    int64_t id) {
   return createExceptionResponse(e.what(), id);
 }
 
-Message createExceptionResponse(const std::string& exceptionStr, int64_t id) {
+c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::string& exceptionStr,
+    int64_t id) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,
       id);
 }
+
+namespace {
+
+// NB: need to call torch::class_ to register Message in the map returned by
+// c10::getCustomClassTypeMap(). Otherwise, Message cannot be wrapped within
+// an IValue.
+// NB: add this line here instead of in rpc/init.cpp because 1) we have C++
+// only tests that won't run rpc/init.cpp; 2) Message is not meant to be
+// visible from Python.
+static const auto message = torch::class_<Message>("rpc", "_Message");
+
+} // namespace
 
 } // namespace rpc
 } // namespace distributed

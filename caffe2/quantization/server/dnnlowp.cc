@@ -82,22 +82,22 @@ QuantizationFactory::QuantizationKind StringToKind(const string& s) {
   string s_lower(s);
   transform(s_lower.begin(), s_lower.end(), s_lower.begin(), ::tolower);
 
-  if (s_lower == "min_max") {
+  if (s_lower == "min_max" || s == "MIN_MAX_QUANTIZATION") {
     return QuantizationFactory::MIN_MAX_QUANTIZATION;
-  } else if (s_lower == "l1") {
+  } else if (s_lower == "l1" || s == "L1_MIN_QUANTIZATION") {
     return QuantizationFactory::L1_MIN_QUANTIZATION;
-  } else if (s_lower == "l2") {
+  } else if (s_lower == "l2" || s == "L2_MIN_QUANTIZATION") {
     return QuantizationFactory::L2_MIN_QUANTIZATION;
-  } else if (s_lower == "l2_approx") {
+  } else if (s_lower == "l2_approx" || s == "L2_MIN_QUANTIZATION_APPROX") {
     if (FLAGS_caffe2_dnnlowp_preserve_weight_sparsity ||
         FLAGS_caffe2_dnnlowp_preserve_activation_sparsity) {
       return QuantizationFactory::L2_MIN_QUANTIZATION;
     } else {
       return QuantizationFactory::L2_MIN_QUANTIZATION_APPROX;
     }
-  } else if (s_lower == "kl") {
+  } else if (s_lower == "kl" || s == "KL_MIN_QUANTIZATION") {
     return QuantizationFactory::KL_MIN_QUANTIZATION;
-  } else if (s_lower == "p99") {
+  } else if (s_lower == "p99" || s == "P99_QUANTIZATION") {
     return QuantizationFactory::P99_QUANTIZATION;
   } else {
     assert(false);
@@ -116,7 +116,9 @@ QuantizationFactory* QuantizationFactory::GetDefaultInstance() {
       FLAGS_caffe2_dnnlowp_force_scale_power_of_two,
       StringToKind(FLAGS_caffe2_dnnlowp_activation_quantization_kind),
       StringToKind(FLAGS_caffe2_dnnlowp_weight_quantization_kind),
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       FLAGS_caffe2_dnnlowp_weight_p99_threshold,
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       FLAGS_caffe2_dnnlowp_activation_p99_threshold);
 
   static bool log_printed = false;
@@ -281,6 +283,7 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
 RequantizationParams QuantizationFactory::ChooseRequantizationMultiplier(
     float real_multiplier,
     TensorQuantizationParams target_qparams) const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RequantizationParams params;
   params.target_qparams = target_qparams;
   params.real_multiplier = real_multiplier;
@@ -300,21 +303,26 @@ adjust_hist_to_include_zero(const Histogram& hist, float* min, float* max) {
   *min = hist.Min();
   *max = hist.Max();
   int nbins = bins.size();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float bin_width = (*max - *min) / nbins;
 
   // Pad histogram to include zero
   int additional_nbins = 0;
   int offset = 0;
-  if (*min > 0) {
-    // additional nbins to include 0
-    additional_nbins = ceil(*min / bin_width);
-    offset = additional_nbins;
-    *min -= additional_nbins * bin_width;
-    assert(*min <= 0);
-  } else if (*max < 0) {
-    additional_nbins = ceil((-*max) / bin_width);
-    *max += additional_nbins * bin_width;
-    assert(*max >= 0);
+  if (bin_width > 0) {
+    if (*min > 0) {
+      // additional nbins to include 0
+      additional_nbins = ceil(*min / bin_width);
+      offset = additional_nbins;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      *min -= additional_nbins * bin_width;
+      assert(*min <= 0);
+    } else if (*max < 0) {
+      additional_nbins = ceil((-*max) / bin_width);
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      *max += additional_nbins * bin_width;
+      assert(*max >= 0);
+    }
   }
 
   vector<float> bins_f(nbins + additional_nbins);

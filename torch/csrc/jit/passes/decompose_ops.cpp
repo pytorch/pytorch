@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -6,6 +7,8 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+
+#include <ATen/core/symbol.h>
 
 namespace torch {
 namespace jit {
@@ -20,7 +23,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 // statically defined (neither a None constant nor a Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
 c10::optional<bool> isDefined(Value* tensor) {
-  if (tensor->type()->isSubtypeOf(TensorType::get())) {
+  if (tensor->type()->isSubtypeOf(*TensorType::get())) {
     return true;
   }
   if (tensor->node()->mustBeNone()) {
@@ -35,10 +38,10 @@ bool isDecomposableNorm(Node* normalize_op) {
       "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
   };
   Value* input = normalize_op->namedInput(attr::input);
-  if (!input->type()->isSubtypeOf(TensorType::get())) {
+  if (!input->type()->isSubtypeOf(*TensorType::get())) {
     return false;
   }
-  auto device = input->type()->expect<TensorType>()->device();
+  auto device = input->type()->expectRef<TensorType>().device();
   // As of now, we do the decomposition for batchnorm/layernorm on GPU device
   // only
   if (!device || (*device).is_cpu()) {
@@ -65,7 +68,6 @@ RegisterOperators reg_ops(
            AT_ASSERT(self.dim() == 1);
            sizes.at(1) = self.size(0);
            push(stack, self.reshape(sizes));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -80,7 +82,6 @@ RegisterOperators reg_ops(
              sizes.at(i) = input_shape.get(i);
            }
            push(stack, self.reshape(sizes));
-           return 0;
          },
          aliasAnalysisFromSchema())});
 
@@ -99,15 +100,15 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       // and both of those scalars are equal to 1.0, decompose this into an mm
       // followed by an add so that it can go through the existing optimization
       // (batchmm)
-      if (it->get<at::Scalar>(attr::alpha)->toDouble() != 1.0 ||
-          it->get<at::Scalar>(attr::beta)->toDouble() != 1.0) {
+      if (it->get<at::Scalar>(attr::alpha)->toComplexDouble() != 1.0 ||
+          it->get<at::Scalar>(attr::beta)->toComplexDouble() != 1.0) {
         continue;
       }
 
       decomposed = true;
       WithInsertPoint guard(*it);
       std::shared_ptr<Graph> d_graph =
-          decompose_funcs.get_function("addmm").graph();
+          toGraphFunction(decompose_funcs.get_function("addmm")).graph();
       Value* new_output =
           insertGraph(*it->owningGraph(), *d_graph, it->inputs()).at(0);
       // Set the output of the decomposed graph to have the same output type as
@@ -127,16 +128,17 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       Graph* graph = it->owningGraph();
       Value* input = it->namedInput(attr::input);
       Value* input_dim = graph->insert(aten::dim, {input});
-      std::vector<Value*> inputs{input,
-                                 it->namedInput(attr::running_mean),
-                                 it->namedInput(attr::running_var),
-                                 it->namedInput(attr::training),
-                                 it->namedInput(attr::momentum),
-                                 it->namedInput(attr::eps)};
+      std::vector<Value*> inputs{
+          input,
+          it->namedInput(attr::running_mean),
+          it->namedInput(attr::running_var),
+          it->namedInput(attr::training),
+          it->namedInput(attr::momentum),
+          it->namedInput(attr::eps)};
 
       // inline the compiled decomposed batchnorm
       std::shared_ptr<Graph> d_graph =
-          decompose_funcs.get_function("batch_norm").graph();
+          toGraphFunction(decompose_funcs.get_function("batch_norm")).graph();
       Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
@@ -163,14 +165,15 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       decomposed = true;
       WithInsertPoint insert_guard{*it};
       Graph* graph = it->owningGraph();
-      std::vector<Value*> inputs{it->namedInput(attr::input),
-                                 it->namedInput(attr::normalized_shape),
-                                 it->namedInput(attr::eps),
-                                 it->namedInput(attr::cudnn_enable)};
+      std::vector<Value*> inputs{
+          it->namedInput(attr::input),
+          it->namedInput(attr::normalized_shape),
+          it->namedInput(attr::eps),
+          it->namedInput(attr::cudnn_enable)};
 
       // inline the compiled decomposed layernorm
       std::shared_ptr<Graph> d_graph =
-          decompose_funcs.get_function("layer_norm").graph();
+          toGraphFunction(decompose_funcs.get_function("layer_norm")).graph();
       Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph

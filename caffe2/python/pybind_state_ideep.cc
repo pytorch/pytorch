@@ -9,8 +9,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/ideep/operators/operator_fallback_ideep.h"
 #include <caffe2/ideep/ideep_utils.h>
+#include "caffe2/ideep/operators/operator_fallback_ideep.h"
 
 namespace caffe2 {
 namespace python {
@@ -26,39 +26,39 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<itensor>()), IDeepFetcher);
 REGISTER_BLOB_FEEDER(IDEEP, IDeepFeeder);
 
 class IDeepFetcher : public BlobFetcherBase {
-  TypeMeta type_transform(const itensor &atensor) {
+  TypeMeta type_transform(const itensor& atensor) {
     switch (atensor.get_data_type()) {
-    case itensor::data_type::f32:
-      return TypeMeta::Make<float>();
-    case itensor::data_type::s32:
-      return TypeMeta::Make<int>();
-    case itensor::data_type::s8:
-      return TypeMeta::Make<int8_t>();
-    case itensor::data_type::u8:
-      return TypeMeta::Make<uint8_t>();
-    default:
-      // Should we throw exception?
-      return TypeMeta();
+      case itensor::data_type::f32:
+        return TypeMeta::Make<float>();
+      case itensor::data_type::s32:
+        return TypeMeta::Make<int>();
+      case itensor::data_type::s8:
+        return TypeMeta::Make<int8_t>();
+      case itensor::data_type::u8:
+        return TypeMeta::Make<uint8_t>();
+      default:
+        // Should we throw exception?
+        return TypeMeta();
     }
   }
 
-public:
-  pybind11::object Fetch(const Blob &blob) override {
+ public:
+  pybind11::object Fetch(const Blob& blob) override {
     try {
       return FetchTensor(blob.Get<itensor>(), true).obj;
-    } catch (ideep::error &e) {
+    } catch (ideep::error& e) {
       LOG(ERROR) << "IDEEP error: " << e.message;
       throw;
     }
   }
 
-  FetchedBlob FetchTensor(const itensor &atensor, bool force_copy) {
+  FetchedBlob FetchTensor(const itensor& atensor, bool force_copy) {
 #ifdef USE_NUMPY
     FetchedBlob result;
-    CAFFE_ENFORCE((atensor.ndims() != 0) &&
-                  (atensor.get_nelems() == 0 ||
-                   atensor.get_data_handle() != nullptr),
-                  "Trying to fetch uninitialized tensor");
+    CAFFE_ENFORCE(
+        (atensor.ndims() != 0) &&
+            (atensor.get_nelems() == 0 || atensor.get_data_handle() != nullptr),
+        "Trying to fetch uninitialized tensor");
     // NOTE: Only support float so far.
     const int numpy_type = NPY_FLOAT;
     CAFFE_ENFORCE(
@@ -69,12 +69,13 @@ public:
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
-    void *outPtr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    void* outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
           PyArray_SimpleNew(atensor.ndims(), npy_dims.data(), numpy_type));
-      outPtr = static_cast<void *>(
-          PyArray_DATA(reinterpret_cast<PyArrayObject *>(result.obj.ptr())));
+      outPtr = static_cast<void*>(
+          PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
     } else {
       outPtr = atensor.get_data_handle();
       result.obj = py::reinterpret_steal<py::object>(PyArray_SimpleNewFromData(
@@ -97,7 +98,7 @@ public:
 };
 
 class IDeepFeeder : public BlobFeederBase {
-  itensor::data_type type_transform(const TypeMeta &meta) {
+  itensor::data_type type_transform(const TypeMeta meta) {
     if (meta == TypeMeta::Make<float>())
       return itensor::data_type::f32;
     else if (meta == TypeMeta::Make<int>())
@@ -110,24 +111,25 @@ class IDeepFeeder : public BlobFeederBase {
       return itensor::data_type::undef;
   }
 
-public:
+ public:
   void FeedTensor(
-      const DeviceOption &option,
-      PyArrayObject *original_array,
-      itensor *tensor) {
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      itensor* tensor) {
 #ifdef USE_NUMPY
-    PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
+    PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
-    const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
+    const TypeMeta meta = NumpyTypeToCaffe(npy_type);
     CAFFE_ENFORCE_NE(
-        meta.id(),
-        TypeIdentifier::uninitialized(),
+        meta,
+        ScalarType::Undefined,
         "This numpy data type is not supported: ",
-        PyArray_TYPE(array), ".");
+        PyArray_TYPE(array),
+        ".");
 
     int ndim = PyArray_NDIM(array);
-    npy_intp *npy_dims = PyArray_DIMS(array);
+    npy_intp* npy_dims = PyArray_DIMS(array);
 
     itensor::dims adims;
     for (int i = 0; i < ndim; i++) {
@@ -144,15 +146,14 @@ public:
         if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
           tensor->resize(adims, type);
         }
-        tensor->feed_from(adims, type,
-                             static_cast<void *>(PyArray_DATA(array)));
+        tensor->feed_from(adims, type, static_cast<void*>(PyArray_DATA(array)));
     }
 #else
     CAFFE_THROW("Caffe2 was compiled without NumPy support.");
 #endif // USE_NUMPY
   }
 
-  bool ZeroDim(PyArrayObject *array) {
+  bool ZeroDim(PyArrayObject* array) {
 #ifdef USE_NUMPY
     int ndim = PyArray_NDIM(array);
     return ndim == 0;
@@ -168,15 +169,15 @@ public:
       bool in_place) override {
 #ifdef USE_NUMPY
     try {
-      PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
+      PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
       auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
       const auto npy_type = PyArray_TYPE(array);
-      const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
+      const TypeMeta meta = NumpyTypeToCaffe(npy_type);
 
       // TODO: if necessary, use dispatcher.
-      if ((in_place && blob->IsType<itensor>())
-          || (meta.Match<float>() && !ZeroDim(original_array))) {
+      if ((in_place && blob->IsType<itensor>()) ||
+          (meta.Match<float>() && !ZeroDim(original_array))) {
         FeedTensor(option, original_array, blob->GetMutable<itensor>());
       } else {
         DeviceOption cpu_option(option);
@@ -190,10 +191,10 @@ public:
               true);
         } else {
           blob->Reset<Tensor>(new Tensor(
-                                  cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
+              cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
         }
       }
-    } catch (ideep::error &e) {
+    } catch (ideep::error& e) {
       LOG(ERROR) << "IDEEP error: " << e.message;
       throw;
     }

@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 namespace torch {
 namespace jit {

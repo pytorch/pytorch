@@ -9,6 +9,23 @@
 #include <qnnpack/assembly.h>
 #include <requantization/runtime-assembly.h>
 
+#  Args passed via 8 registers (64 bytes)
+#  x0: mr
+#  x1: nr
+#  x2: k
+#  x3: a
+#  x4: a_stride
+#  x5: w
+#  x6: c
+#  x7: c_stride
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |out ch indx| 0
+#  |params     | 8
+#  |-----------|
 
 # void pytorch_q8gemm_ukernel_8x8__aarch64_neon(
 #     size_t mr,
@@ -19,10 +36,22 @@
 #     const void*restrict w,
 #     uint8_t*restrict c,
 #     size_t c_stride,
+#     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
+    # https://developer.arm.com/docs/ihi0055/d/procedure-call-standard-for-the-arm-64-bit-architecture
+    # Callee need to save 8-15 vector registers and only the lower 64 bits of each.
+
+    # Load params
+    LDP x16, x8, [sp]
+
     STP d15, d14, [sp, -16]
+
+    # Load pointer to per channel zero points array
+    # And go to the a_zero_point with post-index
+    LDR x17, [x8], 8
+
     STP d13, d12, [sp, -32]
     STP d11, d10, [sp, -48]
     STP d9, d8, [sp, -64]
@@ -30,15 +59,16 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # Load bias0123, bias4567
     LD1 {v8.4s, v9.4s}, [x5], 32
 
-    MOV x9, 2
-
-    # Load params
-    LDR x8, [sp]
+    # Add offset to the base pointer
+    ADD x17, x17, x16
 
     # Load b_zero_point
-    LD1R {v25.8b}, [x8], x9
+    LD1 {v25.8b}, [x17]
     # Load a_zero_point
-    LD1R {v24.8b}, [x8], x9
+    LD1R {v24.8b}, [x8]
+    # Load pointer to per channel requant scale
+    LDR x17, [x8, 8]
+    ADD x8, x8, 16
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -75,9 +105,13 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # v23 := vacc7x4567
     MOV v23.16b, v9.16b
 
-    // Load multiplier
-    // - v26 = vmultiplier
-    LD1R {v26.4s}, [x8], 4
+    # Fold mul by 4 to get byte offset for requant scale.
+    # Add offset to the base pointer
+    ADD x17, x17, x16, lsl#2
+    // Load requantization_scale
+    // - v26 = requantization_scale channels 0-3
+    // - v27 = requantization_scale channels 4-7
+    LD1 {v26.4s}, [x17], 16
 
     # a1
     CMP x0, 2
@@ -526,96 +560,73 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     .p2align 4
 #endif
 2:
-    // Load right_shift:
-    // - v27 = vright_shift
-    LD1R {v27.4s}, [x8], 4
-
-    SQRDMULH  v8.4s,  v8.4s, v26.4s
-    SQRDMULH  v9.4s,  v9.4s, v26.4s
-    SQRDMULH v10.4s, v10.4s, v26.4s
-    SQRDMULH v11.4s, v11.4s, v26.4s
-    SQRDMULH v12.4s, v12.4s, v26.4s
-    SQRDMULH v13.4s, v13.4s, v26.4s
-    SQRDMULH v14.4s, v14.4s, v26.4s
-    SQRDMULH v15.4s, v15.4s, v26.4s
-
-    // Compute vzero_shift_mask
-    // - v28 = vzero_shift_mask
-    CMEQ v28.4s, v27.4s, 0
-
-    SQRDMULH v16.4s, v16.4s, v26.4s
-    SQRDMULH v17.4s, v17.4s, v26.4s
-    SQRDMULH v18.4s, v18.4s, v26.4s
-    SQRDMULH v19.4s, v19.4s, v26.4s
-    SQRDMULH v20.4s, v20.4s, v26.4s
-    SQRDMULH v21.4s, v21.4s, v26.4s
-    SQRDMULH v22.4s, v22.4s, v26.4s
-    SQRDMULH v23.4s, v23.4s, v26.4s
-
+    # Load requant scale for channels 4-7
+    LD1 {v27.4s}, [x17]
     // Load zero_point:
     // - v29 = vzero_point
     LD1R {v29.8h}, [x8], 2
-
-    BIC v0.16b,  v8.16b, v28.16b
-    BIC v1.16b,  v9.16b, v28.16b
-    BIC v2.16b, v10.16b, v28.16b
-    BIC v3.16b, v11.16b, v28.16b
-    BIC v4.16b, v12.16b, v28.16b
-    BIC v5.16b, v13.16b, v28.16b
-    BIC v6.16b, v14.16b, v28.16b
-    BIC v7.16b, v15.16b, v28.16b
-
-    SSRA  v8.4s, v0.4s, 31
-    SSRA  v9.4s, v1.4s, 31
-    SSRA v10.4s, v2.4s, 31
-    SSRA v11.4s, v3.4s, 31
-    SSRA v12.4s, v4.4s, 31
-    SSRA v13.4s, v5.4s, 31
-    SSRA v14.4s, v6.4s, 31
-    SSRA v15.4s, v7.4s, 31
 
     // Load max:
     // - v30 = vmax
     LD1R {v30.16b}, [x8], 1
 
-    BIC v0.16b, v16.16b, v28.16b
-    BIC v1.16b, v17.16b, v28.16b
-    BIC v2.16b, v18.16b, v28.16b
-    BIC v3.16b, v19.16b, v28.16b
-    BIC v4.16b, v20.16b, v28.16b
-    BIC v5.16b, v21.16b, v28.16b
-    BIC v6.16b, v22.16b, v28.16b
-    BIC v7.16b, v23.16b, v28.16b
-
-    SSRA v16.4s, v0.4s, 31
-    SSRA v17.4s, v1.4s, 31
-    SSRA v18.4s, v2.4s, 31
-    SSRA v19.4s, v3.4s, 31
-    SSRA v20.4s, v4.4s, 31
-    SSRA v21.4s, v5.4s, 31
-    SSRA v22.4s, v6.4s, 31
-    SSRA v23.4s, v7.4s, 31
-
     // Load min:
     // - v31 = vmin
     LD1R {v31.16b}, [x8]
 
-    SRSHL  v8.4s,  v8.4s, v27.4s
-    SRSHL  v9.4s,  v9.4s, v27.4s
-    SRSHL v10.4s, v10.4s, v27.4s
-    SRSHL v11.4s, v11.4s, v27.4s
-    SRSHL v12.4s, v12.4s, v27.4s
-    SRSHL v13.4s, v13.4s, v27.4s
-    SRSHL v14.4s, v14.4s, v27.4s
-    SRSHL v15.4s, v15.4s, v27.4s
-    SRSHL v16.4s, v16.4s, v27.4s
-    SRSHL v17.4s, v17.4s, v27.4s
-    SRSHL v18.4s, v18.4s, v27.4s
-    SRSHL v19.4s, v19.4s, v27.4s
-    SRSHL v20.4s, v20.4s, v27.4s
-    SRSHL v21.4s, v21.4s, v27.4s
-    SRSHL v22.4s, v22.4s, v27.4s
-    SRSHL v23.4s, v23.4s, v27.4s
+    SCVTF v8.4s, v8.4s
+    SCVTF v9.4s, v9.4s
+    SCVTF v10.4s, v10.4s
+    SCVTF v11.4s, v11.4s
+    SCVTF v12.4s, v12.4s
+    SCVTF v13.4s, v13.4s
+    SCVTF v14.4s, v14.4s
+    SCVTF v15.4s, v15.4s
+
+    SCVTF v16.4s, v16.4s
+    SCVTF v17.4s, v17.4s
+    SCVTF v18.4s, v18.4s
+    SCVTF v19.4s, v19.4s
+    SCVTF v20.4s, v20.4s
+    SCVTF v21.4s, v21.4s
+    SCVTF v22.4s, v22.4s
+    SCVTF v23.4s, v23.4s
+
+    FMUL v8.4s, v8.4s, v26.4s
+    FMUL v9.4s, v9.4s, v27.4s
+    FMUL v10.4s, v10.4s, v26.4s
+    FMUL v11.4s, v11.4s, v27.4s
+    FMUL v12.4s, v12.4s, v26.4s
+    FMUL v13.4s, v13.4s, v27.4s
+    FMUL v14.4s, v14.4s, v26.4s
+    FMUL v15.4s, v15.4s, v27.4s
+
+    FMUL v16.4s, v16.4s, v26.4s
+    FMUL v17.4s, v17.4s, v27.4s
+    FMUL v18.4s, v18.4s, v26.4s
+    FMUL v19.4s, v19.4s, v27.4s
+    FMUL v20.4s, v20.4s, v26.4s
+    FMUL v21.4s, v21.4s, v27.4s
+    FMUL v22.4s, v22.4s, v26.4s
+    FMUL v23.4s, v23.4s, v27.4s
+
+    FCVTNS v8.4s, v8.4s
+    FCVTNS v9.4s, v9.4s
+    FCVTNS v10.4s, v10.4s
+    FCVTNS v11.4s, v11.4s
+    FCVTNS v12.4s, v12.4s
+    FCVTNS v13.4s, v13.4s
+    FCVTNS v14.4s, v14.4s
+    FCVTNS v15.4s, v15.4s
+
+    FCVTNS v16.4s, v16.4s
+    FCVTNS v17.4s, v17.4s
+    FCVTNS v18.4s, v18.4s
+    FCVTNS v19.4s, v19.4s
+    FCVTNS v20.4s, v20.4s
+    FCVTNS v21.4s, v21.4s
+    FCVTNS v22.4s, v22.4s
+    FCVTNS v23.4s, v23.4s
 
     SQXTN   v8.4h,  v8.4s
     SQXTN  v10.4h, v10.4s

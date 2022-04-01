@@ -1,5 +1,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <cmath>
+#include <iostream>
+#include "caffe2/core/types.h"
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
@@ -33,9 +35,11 @@ OpSchema::Cost CostInferenceForWeightedSum(
   const auto& nElem = nElemFromDim(X0);
   const auto& nInputs = in.size();
   c.flops = (nInputs - 1) * nElem;
-  c.bytes_read = (nInputs / 2) * (nElem + 1) * sizeof(X0.data_type());
-  c.bytes_written = nElem * sizeof(X0.data_type());
-  c.params_bytes = (nInputs / 2) * sizeof(X0.data_type());
+  auto const& X0_element_size_byte =
+      DataTypeToTypeMeta(X0.data_type()).itemsize();
+  c.bytes_read = (nInputs / 2) * (nElem + 1) * X0_element_size_byte;
+  c.bytes_written = nElem * X0_element_size_byte;
+  c.params_bytes = (nInputs / 2) * X0_element_size_byte;
   return c;
 }
 
@@ -47,9 +51,7 @@ REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
-REGISTER_CPU_OPERATOR(
-    ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(ScatterWeightedSum, ScatterWeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 
@@ -59,6 +61,7 @@ REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
+REGISTER_CPU_OPERATOR(LengthsToOffsets, LengthsToOffsetsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToRanges, SegmentIdsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToWeights, LengthsToWeightsOp<CPUContext>);
@@ -345,6 +348,12 @@ OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
     .NumOutputs(1)
     .EnforceInplace({{0, 0}})
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0] = in[0];
+      return out;
+    })
     .SetDoc(R"DOC(
 Update slices of the tensor in-place by overriding current value.
 
@@ -516,20 +525,20 @@ Example:
         "LENGTHS",
         "1-D tensor of size N with lengths over gathered data"
         " for each row in a batch. sum(LENGTHS) == OUTPUT.size()")
-    .TensorInferenceFunction([](const OperatorDef& /* unused */,
-                                const vector<TensorShape>& in) {
-      std::vector<TensorShape> out(2);
+    .TensorInferenceFunction(OpSchema::NeedsAllInputShapes(
+        [](const OperatorDef& /* unused */, const vector<TensorShape>& in) {
+          std::vector<TensorShape> out(2);
 
-      int total = 1;
-      for (auto d : in[0].dims()) {
-        total *= d;
-      }
-      out[0].add_dims(total);
-      out[0].set_data_type(in[0].data_type());
-      out[1].add_dims(in[1].dims(0));
-      out[1].set_data_type(in[1].data_type());
-      return out;
-    });
+          int total = 1;
+          for (auto d : in[0].dims()) {
+            total *= d;
+          }
+          out[0].add_dims(total);
+          out[0].set_data_type(in[0].data_type());
+          out[1].add_dims(in[1].dims(0));
+          out[1].set_data_type(in[1].data_type());
+          return out;
+        }));
 
 OPERATOR_SCHEMA(LengthsGather)
     .NumInputs(3)
@@ -629,6 +638,30 @@ For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
         0,
         "ranges",
         "2D tensor of shape len(lengths) X 2 and the same type as `lengths`");
+
+OPERATOR_SCHEMA(LengthsToOffsets)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Given a vector of segment lengths, returns a vector of offsets from these lengths,
+which will have the same size as the input vector. Output is going to have
+the same type as input. For long tensors explicit casting from int32 to int64
+might be necessary prior to this op.
+
+For example, `[1, 3, 0, 2]` transforms into `[0, 1, 4, 4]`.
+)DOC")
+    .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
+    .Output(0, "offsets", "1D tensor of the same shape and type as `lengths`")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      const ArgumentHelper args(def);
+      bool include_last_offset =
+          args.GetSingleArgument<bool>("include_last_offset", false);
+      vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
+      out_shape[0] += include_last_offset ? 1 : 0;
+      return vector<TensorShape>{
+          CreateTensorShape(out_shape, in[0].data_type())};
+    });
 
 OPERATOR_SCHEMA(SegmentIdsToLengths)
     .NumInputs(1, 2)
@@ -781,6 +814,7 @@ class GetWeightedSumGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     ArgumentHelper argsHelper(def_);
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     const bool grad_on_w = argsHelper.GetSingleArgument<bool>("grad_on_w", 0);
 
     auto inputs = vector<string>{GO(0)};
@@ -839,6 +873,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
       tensorPrinter_.Print<float>(Input(j));
       std::cerr << "NaN idxs:" << std::endl;
       const float* x = Input(j).data<float>();
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 0; i < Input(j).numel(); ++i) {
         if (std::isnan(x[i]) || std::isinf(x[i])) {
           std::cerr << i << " ";
@@ -1062,3 +1097,13 @@ OPERATOR_SCHEMA(Fail).NumInputs(0).NumOutputs(0);
 SHOULD_NOT_DO_GRADIENT(Fail);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRanges,
+    "_caffe2::GatherRanges(Tensor data, Tensor ranges) -> (Tensor, Tensor)",
+    caffe2::GatherRangesOp<caffe2::CPUContext>)
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsGather,
+    "_caffe2::LengthsGather(Tensor data, Tensor lengths, Tensor indices) -> (Tensor)",
+    caffe2::LengthsGatherOp<caffe2::CPUContext>)

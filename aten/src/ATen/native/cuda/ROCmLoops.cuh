@@ -30,7 +30,6 @@
 
 #include <type_traits>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -40,12 +39,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 
-// Marks a lambda as executable on both the host and device. The __host__
-// attribute is important so that we can access static type information from
-// the host, even if the function is typically only executed on the device.
-#ifndef GPU_LAMBDA
-#define GPU_LAMBDA __host__ __device__
-#endif
 
 #ifdef __NVCC__
 #define ASSERT_HOST_DEVICE_LAMBDA(type) \
@@ -61,6 +54,45 @@ static constexpr int launch_bound2 = 4;
 
 
 namespace at { namespace native {
+
+// See [NOTE: Complex Operator Unification]
+// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
+// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
+// to reinterpret_cast between these representations.
+// In order to separate these concerns, we have a check for non-c10 complex separately.
+template<typename func_t, int nargs=function_traits<func_t>::arity>
+struct uses_non_c10_complex {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::template arg<nargs - 1>::type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
+      return true;
+    }, /* else */ []() {
+      return uses_non_c10_complex<func_t, nargs - 1>::check();
+    });
+  }
+};
+
+template<typename func_t>
+struct uses_non_c10_complex<func_t, 0> {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::result_type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return non_c10_complex;
+  }
+};
 
 // NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
 // Some of the old codes has been moved to namespace legacy, and
@@ -95,7 +127,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... INDEX>
@@ -190,7 +222,7 @@ struct has_same_arg_types<func_t, -1> {
 }  // namespace detail
 
 template<typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
@@ -207,7 +239,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
-  int idx = block_work_size * blockIdx.x + tid;
+  int idx = block_work_size() * blockIdx.x + tid;
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
@@ -218,31 +250,31 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 
   // fetch data
-  return_t results[thread_work_size];
-  arg_t args[thread_work_size][nargs];
+  return_t results[thread_work_size()];
+  arg_t args[thread_work_size()][nargs];
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
+  for (int i = 0; i < thread_work_size(); i++) {
+    if (idx + num_threads() * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * num_threads);
+        args[i][j] = *(args_base[j] + i * num_threads());
       }
     }
   }
 
   // compute
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
+  for (int i = 0; i < thread_work_size(); i++) {
+    if (idx + num_threads() * i < N) {
       results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
   // store data
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
-      *(result_base + i * num_threads) = results[i];
+  for (int i = 0; i < thread_work_size(); i++) {
+    if (idx + num_threads() * i < N) {
+      *(result_base + i * num_threads()) = results[i];
     }
   }
 }
@@ -254,10 +286,10 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   if (N == 0) {
     return;
   }
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
-  AT_CUDA_CHECK(cudaGetLastError());
+  elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
@@ -267,13 +299,14 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 
 template <typename func_t>
-void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
@@ -282,7 +315,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   at::detail::Array<ScalarType, ntensors> dtypes;
   for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
+    dtypes[i] = iter.dtype(i);
   }
 
   int64_t numel = iter.numel();
@@ -293,7 +326,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       strides[i] = inner_strides[i];
     }
 
-    if (needs_dynamic_casting<func_t>::check(iter)) {
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
@@ -309,7 +343,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
   } else {
     auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-    if (needs_dynamic_casting<func_t>::check(iter)) {
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];

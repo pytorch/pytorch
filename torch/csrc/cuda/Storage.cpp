@@ -2,11 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
+#include <fmt/format.h>
 
-// See Note [TH abstraction violation]
-//    - Used to get at allocator from storage
-#include <TH/THTensor.hpp>
-#include <THC/THCTensor.hpp>
 #include <torch/csrc/cuda/THCP.h>
 
 #include <torch/csrc/cuda/override_macros.h>
@@ -17,10 +14,4 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateAllTypes.h>
-
-#define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateBoolType.h>
-
-#define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateBFloat16Type.h>
+#include <torch/csrc/THCGenerateByteType.h>

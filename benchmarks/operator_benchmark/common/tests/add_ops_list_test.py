@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import operator_benchmark as op_bench
 import torch
 
@@ -23,7 +22,7 @@ unary_ops_list = op_bench.op_list(
 
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, op_func): 
+    def init(self, M, N, op_func):
         self.input_one = torch.rand(M, N)
         self.op_func = op_func
 

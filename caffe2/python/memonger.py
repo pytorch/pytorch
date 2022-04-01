@@ -1,9 +1,9 @@
 ## @package memonger
 # Module caffe2.python.memonger
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import networkx as nx
 import collections
@@ -126,7 +126,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
             if is_activation_blob(b):
                 activation_blobs.add(b)
                 if b not in seen_as_output:
-                    assert False, "{} not in external input".format(b)
+                    raise AssertionError("{} not in external input".format(b))
         for b in op.output:
             if is_activation_blob(b):
                 activation_blobs.add(b)
@@ -333,13 +333,12 @@ def _get_path(pred_list, dist_list):
     ret = []
     cur = target
 
-
     while cur is not None:
         ret.append(cur)
         # Hack to get networkx 2.0 happy: it uses list in pred.
         # TODO(tulloch): are there cases with multiple predecessors?
         try:
-            cur = pred_list[cur][0]
+            cur = pred_list[cur][0] if pred_list[cur] else None
         except TypeError:
             cur = pred_list[cur]
 
@@ -357,7 +356,7 @@ def _get_longest_paths(g, source_nodes):
 
     ret = {}
     for cn in source_nodes:
-        pred, dist = nx.bellman_ford(ng, cn, weight="weight")
+        pred, dist = nx.bellman_ford_predecessor_and_distance(ng, cn, weight="weight")
         path = _get_path(pred, dist)
         assert path[0] == cn
         assert len(path) - 1 == -dist[path[-1]]
@@ -394,7 +393,7 @@ def _compute_tree_height(g, root):
         if children:
             child_heights = [_get_height(x) for x in children]
             height = max(child_heights) + 1
-        g.node[root]["height"] = height
+        g.nodes[root]["height"] = height
         return height
 
     _get_height(root)
@@ -405,7 +404,7 @@ def _sort_tree_leaves(g, root):
         Return the leaf nodes of the tree after sorting.
     '''
     def _get_height(root):
-        return g.node[root]["height"]
+        return g.nodes[root]["height"]
 
     def _get_sorted_leaves(root):
         children = list(g.successors(root))
@@ -460,7 +459,7 @@ def topological_sort_traversal_longest_path(g):
         ret = nx.algorithms.dag.lexicographical_topological_sort(
             g, key=lambda x: sort_key[x])
         ret = list(ret)
-    assert(len(ret) == len(g.node))
+    assert(len(ret) == len(g.nodes))
     return ret
 
 

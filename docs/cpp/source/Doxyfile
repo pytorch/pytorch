@@ -56,10 +56,15 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../c10/cuda/CUDAStream.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
+                         ../../../torch/csrc/autograd/autograd.h \
+                         ../../../torch/csrc/autograd/custom_function.h \
+                         ../../../torch/csrc/autograd/function.h \
+                         ../../../torch/csrc/autograd/variable.h \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
                          ../../../torch/csrc/jit/runtime/custom_operator.h \
                          ../../../torch/csrc/jit/serialization/import.h \
                          ../../../torch/csrc/jit/api/module.h \
+                         ../../../torch/library.h \
                          ../../../torch/custom_class.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
@@ -69,7 +74,7 @@ CREATE_SUBDIRS         = NO
 FULL_PATH_NAMES        = YES
 # Nested folders will be ignored without this.
 RECURSIVE              = YES
-# Blacklist certain file patterns from the INPUT section.
+# Exclude certain file patterns from the INPUT section.
 EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
           ../../../torch/csrc/api/include/torch/detail
 # Increase the max node size for our large files

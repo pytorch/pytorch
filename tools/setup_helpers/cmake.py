@@ -1,26 +1,26 @@
 "Manages CMake."
 
-from __future__ import print_function
+
 
 import multiprocessing
 import os
 import re
-from subprocess import check_call, check_output
+from subprocess import check_call, check_output, CalledProcessError
 import sys
-import distutils
-import distutils.sysconfig
+import sysconfig
 from distutils.version import LooseVersion
+from typing import IO, Any, Dict, List, Optional, Union, cast
 
 from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 
-def _mkdir_p(d):
+def _mkdir_p(d: str) -> None:
     try:
-        os.makedirs(d)
-    except OSError:
-        pass
+        os.makedirs(d, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(f"Failed to create folder {os.path.abspath(d)}: {e.strerror}") from e
 
 
 # Ninja
@@ -29,10 +29,14 @@ def _mkdir_p(d):
 USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
              which('ninja') is not None)
 
-def convert_cmake_value_to_python_value(cmake_value, cmake_type):
+
+CMakeValue = Optional[Union[bool, str]]
+
+
+def convert_cmake_value_to_python_value(cmake_value: str, cmake_type: str) -> CMakeValue:
     r"""Convert a CMake value in a string form to a Python value.
 
-    Arguments:
+    Args:
       cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
       cmake_type (string): The CMake type of :attr:`cmake_value`.
 
@@ -53,10 +57,10 @@ def convert_cmake_value_to_python_value(cmake_value, cmake_type):
     else:  # Directly return the cmake_value.
         return cmake_value
 
-def get_cmake_cache_variables_from_file(cmake_cache_file):
+def get_cmake_cache_variables_from_file(cmake_cache_file: IO[str]) -> Dict[str, CMakeValue]:
     r"""Gets values in CMakeCache.txt into a dictionary.
 
-    Arguments:
+    Args:
       cmake_cache_file: A CMakeCache.txt file object.
     Returns:
       dict: A ``dict`` containing the value of cached CMake variables.
@@ -94,12 +98,12 @@ def get_cmake_cache_variables_from_file(cmake_cache_file):
 class CMake:
     "Manages cmake."
 
-    def __init__(self, build_dir=BUILD_DIR):
+    def __init__(self, build_dir: str = BUILD_DIR) -> None:
         self._cmake_command = CMake._get_cmake_command()
         self.build_dir = build_dir
 
     @property
-    def _cmake_cache_file(self):
+    def _cmake_cache_file(self) -> str:
         r"""Returns the path to CMakeCache.txt.
 
         Returns:
@@ -108,46 +112,62 @@ class CMake:
         return os.path.join(self.build_dir, 'CMakeCache.txt')
 
     @staticmethod
-    def _get_cmake_command():
+    def _get_cmake_command() -> str:
         "Returns cmake command."
 
         cmake_command = 'cmake'
         if IS_WINDOWS:
             return cmake_command
-        cmake3 = which('cmake3')
-        if cmake3 is not None:
-            cmake = which('cmake')
-            if cmake is not None:
-                bare_version = CMake._get_version(cmake)
-                if (bare_version < LooseVersion("3.5.0") and
-                        CMake._get_version(cmake3) > bare_version):
-                    cmake_command = 'cmake3'
+        cmake3_version = CMake._get_version(which('cmake3'))
+        cmake_version = CMake._get_version(which('cmake'))
+
+        _cmake_min_version = LooseVersion("3.10.0")
+        if all((ver is None or ver < _cmake_min_version for ver in [cmake_version, cmake3_version])):
+            raise RuntimeError('no cmake or cmake3 with version >= 3.10.0 found')
+
+        if cmake3_version is None:
+            cmake_command = 'cmake'
+        elif cmake_version is None:
+            cmake_command = 'cmake3'
+        else:
+            if cmake3_version >= cmake_version:
+                cmake_command = 'cmake3'
+            else:
+                cmake_command = 'cmake'
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd):
+    def _get_version(cmd: Optional[str]) -> Any:
         "Returns cmake version."
 
+        if cmd is None:
+            return None
         for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
             if 'version' in line:
                 return LooseVersion(line.strip().split(' ')[2])
         raise RuntimeError('no version found')
 
-    def run(self, args, env):
+    def run(self, args: List[str], env: Dict[str, str]) -> None:
         "Executes cmake with arguments and an environment."
 
         command = [self._cmake_command] + args
         print(' '.join(command))
-        check_call(command, cwd=self.build_dir, env=env)
+        try:
+            check_call(command, cwd=self.build_dir, env=env)
+        except (CalledProcessError, KeyboardInterrupt) as e:
+            # This error indicates that there was a problem with cmake, the
+            # Python backtrace adds no signal here so skip over it by catching
+            # the error and exiting manually
+            sys.exit(1)
 
     @staticmethod
-    def defines(args, **kwargs):
+    def defines(args: List[str], **kwargs: CMakeValue) -> None:
         "Adds definitions to a cmake argument list."
         for key, value in sorted(kwargs.items()):
             if value is not None:
                 args.append('-D{}={}'.format(key, value))
 
-    def get_cmake_cache_variables(self):
+    def get_cmake_cache_variables(self) -> Dict[str, CMakeValue]:
         r"""Gets values in CMakeCache.txt into a dictionary.
         Returns:
           dict: A ``dict`` containing the value of cached CMake variables.
@@ -155,11 +175,20 @@ class CMake:
         with open(self._cmake_cache_file) as f:
             return get_cmake_cache_variables_from_file(f)
 
-    def generate(self, version, cmake_python_library, build_python, build_test, my_env, rerun):
+    def generate(
+        self,
+        version: Optional[str],
+        cmake_python_library: Optional[str],
+        build_python: bool,
+        build_test: bool,
+        my_env: Dict[str, str],
+        rerun: bool,
+    ) -> None:
         "Runs cmake to generate native build files."
 
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
+
         ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
         if os.path.exists(self._cmake_cache_file) and not (
                 USE_NINJA and not os.path.exists(ninja_build_file)):
@@ -205,10 +234,8 @@ class CMake:
         _mkdir_p(self.build_dir)
 
         # Store build options that are directly stored in environment variables
-        build_options = {
-            # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
-            'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
-        }
+        build_options: Dict[str, CMakeValue] = {}
+
         # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
         # This is a dict that maps environment variables to the corresponding variable name in CMake.
         additional_options = {
@@ -226,8 +253,9 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
-             'CUDA_HOST_COMPILER',
+             'CUDA_HOST_COMILER',
              'CUDA_NVCC_EXECUTABLE',
+             'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
              'CUDNN_INCLUDE_DIR',
              'CUDNN_ROOT',
@@ -239,13 +267,24 @@ class CMake:
              'MKL_THREADING',
              'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
+             'CAFFE2_USE_MSVC_STATIC_RUNTIME',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
-             'WERROR')
+             'WERROR',
+             'OPENSSL_ROOT_DIR')
         })
+
+        # Aliases which are lower priority than their canonical option
+        low_priority_aliases = {
+            'CUDA_HOST_COMPILER': 'CMAKE_CUDA_HOST_COMPILER',
+            'CUDAHOSTCXX': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_HOST_COMPILER': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
+            'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
+        }
 
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
@@ -256,8 +295,23 @@ class CMake:
             true_var = additional_options.get(var)
             if true_var is not None:
                 build_options[true_var] = val
-            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')):
+            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')) or var.endswith(('EXITCODE', 'EXITCODE__TRYRUN_OUTPUT')):
                 build_options[var] = val
+
+            if var in low_priority_aliases:
+                key = low_priority_aliases[var]
+                if key not in build_options:
+                    build_options[key] = val
+
+        # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
+        py_lib_path = sysconfig.get_path('purelib')
+        cmake_prefix_path = build_options.get('CMAKE_PREFIX_PATH', None)
+        if cmake_prefix_path:
+            build_options["CMAKE_PREFIX_PATH"] = (
+                cast(str, py_lib_path) + ";" + cast(str, cmake_prefix_path)
+            )
+        else:
+            build_options['CMAKE_PREFIX_PATH'] = py_lib_path
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
         # future, as CMake can detect many of these libraries pretty comfortably. We have them here for now before CMake
@@ -291,7 +345,7 @@ class CMake:
         CMake.defines(args,
                       PYTHON_EXECUTABLE=sys.executable,
                       PYTHON_LIBRARY=cmake_python_library,
-                      PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
+                      PYTHON_INCLUDE_DIR=sysconfig.get_path('include'),
                       TORCH_BUILD_VERSION=version,
                       NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
                       **build_options)
@@ -322,34 +376,44 @@ class CMake:
         args.append(base_dir)
         self.run(args, env=my_env)
 
-    def build(self, my_env):
+    def build(self, my_env: Dict[str, str]) -> None:
         "Runs cmake to build binaries."
 
         from .env import build_type
 
-        max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
         build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
-        # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
-        # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
-        # would be sufficient by then.
-        if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
-            build_args += ['--', '/p:CL_MPCount={}'.format(max_jobs)]
-        else:
-            build_args += ['--', '-j', max_jobs]
-        self.run(build_args, my_env)
 
-        # in cmake, .cu compilation involves generating certain intermediates
-        # such as .cu.o and .cu.depend, and these intermediates finally get compiled
-        # into the final .so.
-        # Ninja updates build.ninja's timestamp after all dependent files have been built,
-        # and re-kicks cmake on incremental builds if any of the dependent files
-        # have a timestamp newer than build.ninja's timestamp.
-        # There is a cmake bug with the Ninja backend, where the .cu.depend files
-        # are still compiling by the time the build.ninja timestamp is updated,
-        # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
-        # build detector.
-        # This line works around that bug by manually updating the build.ninja timestamp
-        # after the entire build is finished.
-        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
-        if os.path.exists(ninja_build_file):
-            os.utime(ninja_build_file, None)
+        # Determine the parallelism according to the following
+        # priorities:
+        # 1) MAX_JOBS environment variable
+        # 2) If using the Ninja build system, delegate decision to it.
+        # 3) Otherwise, fall back to the number of processors.
+
+        # Allow the user to set parallelism explicitly. If unset,
+        # we'll try to figure it out.
+        max_jobs = os.getenv('MAX_JOBS')
+
+        if max_jobs is not None or not USE_NINJA:
+            # Ninja is capable of figuring out the parallelism on its
+            # own: only specify it explicitly if we are not using
+            # Ninja.
+
+            # This lists the number of processors available on the
+            # machine. This may be an overestimate of the usable
+            # processors if CPU scheduling affinity limits it
+            # further. In the future, we should check for that with
+            # os.sched_getaffinity(0) on platforms that support it.
+            max_jobs = max_jobs or str(multiprocessing.cpu_count())
+
+            # This ``if-else'' clause would be unnecessary when cmake
+            # 3.12 becomes minimum, which provides a '-j' option:
+            # build_args += ['-j', max_jobs] would be sufficient by
+            # then. Until then, we use "--" to pass parameters to the
+            # underlying build system.
+            build_args += ['--']
+            if IS_WINDOWS and not USE_NINJA:
+                # We are likely using msbuild here
+                build_args += ['/p:CL_MPCount={}'.format(max_jobs)]
+            else:
+                build_args += ['-j', max_jobs]
+        self.run(build_args, my_env)

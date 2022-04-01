@@ -1,8 +1,7 @@
-from __future__ import absolute_import, division, print_function
+
 
 import collections
 import functools
-import os
 import unittest
 
 import caffe2.python._import_c_extension as C
@@ -14,7 +13,7 @@ import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, utils, workspace
 from caffe2.python.model_helper import ModelHelper
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 def _cudnn_supports(dilation=False, nhwc=False, backward=False):
@@ -71,6 +70,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=None, max_examples=50)
     def test_convolution_separate_stride_pad_gradients(
         self,
         op_type,
@@ -164,6 +164,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=None)
     def test_convolution_separate_stride_pad_layout(
         self,
         op_type,
@@ -245,6 +246,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
         **hu.gcs
     )
+    @settings(max_examples=20, deadline=None)
     def test_convolution_gradients(
         self,
         op_type,
@@ -445,6 +447,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_1d_convolution(
         self,
         input_channels,
@@ -512,6 +515,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
         **hu.gcs
     )
+    @settings(max_examples=20, deadline=None)
     def test_3d_convolution(
         self,
         input_channels,
@@ -571,6 +575,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
         **hu.gcs_no_hip
     )  # MIOPEN doesn't support 3D conv yet
+    @settings(deadline=10000)
     def test_3d_convolution_cudnn_nchw(
         self,
         op_type,
@@ -660,6 +665,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=None, max_examples=50)
     def test_convolution_layout(
         self,
         op_type,
@@ -755,6 +761,7 @@ class TestConvolution(serial.SerializedTestCase):
         engine=st.sampled_from(["CUDNN", ""]),
         **hu.gcs_no_hip
     )
+    @settings(deadline=None)
     def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
         m = ModelHelper(name="test_model")
         n = 1
@@ -884,7 +891,7 @@ class TestConvolution(serial.SerializedTestCase):
                         f(**kwargs)
                         self.assertEqual(model.Proto().op[-1].engine, expected_engine)
 
-    @serial.given(
+    @given(
         op_type=st.sampled_from(["Conv", "Conv2D"]),
         N=st.integers(0, 3),
         G=st.integers(1, 3),
@@ -899,6 +906,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_1x1_conv(
         self,
         op_type,

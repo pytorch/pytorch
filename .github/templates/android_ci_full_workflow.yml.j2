@@ -1,0 +1,165 @@
+{%- extends "linux_ci_workflow.yml.j2" -%}
+{% import 'common_android.yml.j2' as common_android %}
+{%- set exclude_test = true -%}
+{% block name -%}
+# Template is at:    .github/templates/android_ci_full_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
+on:
+{%- if is_default %}
+  pull_request:
+{%- endif -%}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+  push:
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+
+{% block build +%}
+  # building and testing in a single job since bazel runs only small subset of tests
+  build-and-test:
+    runs-on: !{{ test_runner_type }}
+    env:
+      JOB_BASE_NAME: !{{ build_environment }}-build-and-test
+      NUM_TEST_SHARDS: !{{ num_test_shards }}
+    steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout() }}
+      !{{ common.calculate_docker_image(false) }}
+      - name: Pull Docker image
+        run: |
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Determine shm-size
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
+      - name: Output disk space left
+        run: |
+          sudo df -H
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      !{{ common.parse_ref() }}
+      !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a-build", "arm-v7a") }}
+      !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build", "arm-v8a") }}
+      !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build", "x86_32") }}
+      !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build", "x86_64") }}
+      - name: Build-Final-Artifcact
+        env:
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+        run: |
+          set -eux
+
+          docker_image_libtorch_android_x86_32="${DOCKER_IMAGE}-x86_32"
+          docker_image_libtorch_android_x86_64="${DOCKER_IMAGE}-x86_64"
+          docker_image_libtorch_android_arm_v7a="${DOCKER_IMAGE}-arm-v7a"
+          docker_image_libtorch_android_arm_v8a="${DOCKER_IMAGE}-arm-v8a"
+
+          echo "docker_image_commit: ${DOCKER_IMAGE}"
+          echo "docker_image_libtorch_android_x86_32: ${docker_image_libtorch_android_x86_32}"
+          echo "docker_image_libtorch_android_x86_64: ${docker_image_libtorch_android_x86_64}"
+          echo "docker_image_libtorch_android_arm_v7a: ${docker_image_libtorch_android_arm_v7a}"
+          echo "docker_image_libtorch_android_arm_v8a: ${docker_image_libtorch_android_arm_v8a}"
+
+          # x86_32
+          time docker pull "${docker_image_libtorch_android_x86_32}" >/dev/null
+          export id_x86_32
+          id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_x86_32}")
+
+          # shellcheck disable=SC1105
+          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "${id_x86_32}" bash) 2>&1
+
+          # arm-v7a
+          time docker pull "${docker_image_libtorch_android_arm_v7a}" >/dev/null
+          export id_arm_v7a
+          id_arm_v7a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_arm_v7a}")
+
+          # shellcheck disable=SC1105
+          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "${id_arm_v7a}" bash) 2>&1
+
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
+          docker cp "${id_arm_v7a}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
+
+          # x86_64
+          time docker pull "${docker_image_libtorch_android_x86_64}" >/dev/null
+          export id_x86_64
+          id_x86_64=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_x86_64}")
+
+          # shellcheck disable=SC1105
+          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "${id_x86_64}" bash) 2>&1
+
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_x86_64"
+          docker cp "${id_x86_64}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_x86_64"
+
+          # arm-v8a
+          time docker pull "${docker_image_libtorch_android_arm_v8a}" >/dev/null
+          export id_arm_v8a
+          id_arm_v8a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_arm_v8a}")
+
+          # shellcheck disable=SC1105
+          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1
+
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
+          docker cp "${id_arm_v8a}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
+
+          # Putting everything together
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
+
+          # run gradle buildRelease
+          # shellcheck disable=SC1105
+          ((echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec \
+            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e AWS_DEFAULT_REGION \
+            -e IS_GHA \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
+            -e GITHUB_RUN_ID \
+            -e SCCACHE_BUCKET \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e TORCH_CUDA_ARCH_LIST \
+            -e PR_LABELS \
+            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --user jenkins \
+            -u jenkins -i "${id_x86_32}" bash) 2>&1
+
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
+          docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
+
+          output_image="${DOCKER_IMAGE}-android-x86_32-gradle"
+          docker commit "${id_x86_32}" "${output_image}"
+          time docker push "${output_image}"
+      !{{ common_android.upload_androind_binary_size("prebuilt", "${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz") }}
+      - uses: !{{ common.upload_artifact_s3_action }}
+        name: Store PyTorch Android Build Artifacts on S3
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            build_android_artifacts/artifacts.tgz
+      !{{ common.teardown_ec2_linux() }}
+{%- endblock %}

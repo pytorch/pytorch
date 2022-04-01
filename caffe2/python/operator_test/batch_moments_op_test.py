@@ -1,11 +1,11 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 
@@ -62,6 +62,7 @@ class TestBatchMomentsOp(serial.SerializedTestCase):
     @given(N=st.integers(1, 5), C=st.integers(1, 5), T=st.integers(1, 3),
            H=st.integers(1, 3), W=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @settings(deadline=10000)
     def test_batch_moments_3d(self, N, C, T, H, W, order, gc, dc):
         op = core.CreateOperator(
             "BatchMoments",

@@ -2,14 +2,15 @@
 
 #include <vector>
 
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/operators/elementwise_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
-
+using namespace std;
 template <class Context>
 struct ReluFakeFp16Functor {
   template <typename T>
@@ -62,3 +63,12 @@ struct TanhFakeIdealFp16Functor {
 };
 
 } // namespace caffe2
+
+namespace fake_fp16 {
+
+at::Half CalcSigmoidByLUT(at::Half x);
+at::Half CalcSwishByLUT(at::Half x);
+at::Half CalcSwishByLUTCubic(at::Half x);
+at::Half CalcTanhByLUT(at::Half input);
+
+} // namespace fake_fp16

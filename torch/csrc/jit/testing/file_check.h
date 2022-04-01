@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <memory>
 #include <string>
 
@@ -61,6 +61,9 @@ struct FileCheck {
   // is the minimum match of all individual checks to the maximum match of all
   // individual checks.
   TORCH_API FileCheck* check_dag(const std::string& str);
+
+  // Checks that source token is highlighted in str (usually an error message).
+  TORCH_API FileCheck* check_source_highlighted(const std::string& str);
 
   // reset checks
   TORCH_API void reset();

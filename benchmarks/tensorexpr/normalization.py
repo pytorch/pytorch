@@ -1,10 +1,10 @@
-import benchmark
-import tensor_engine
+from . import benchmark
+from . import tensor_engine
 
 
 class NormalizationBench(benchmark.Benchmark):
-    def __init__(self, mode, device, N, C, H, W):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, N, C, H, W):
+        super().__init__(mode, device, dtype)
         self.N = N
         self.C = C
         self.H = H
@@ -12,11 +12,11 @@ class NormalizationBench(benchmark.Benchmark):
 
         self.data = self.nchw_rand(
             [self.N, self.C, self.H, self.W],
-            device=device,
+            device=device, dtype=dtype,
             requires_grad=self.requires_grad,
         )
-        self.running_mean = self.rand([self.C], device=device)
-        self.running_var = self.rand([self.C], device=device)
+        self.running_mean = self.rand([self.C], device=device, dtype=dtype)
+        self.running_var = self.rand([self.C], device=device, dtype=dtype)
         self.training = self.mode == "both"
 
     def config(self):

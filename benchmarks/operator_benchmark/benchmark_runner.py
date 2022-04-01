@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import argparse
 
 import torch
@@ -15,14 +10,12 @@ import benchmark_utils
 This is the main function for running performance microbenchmark tests.
 It also registers existing benchmark tests via Python module imports.
 """
+parser = argparse.ArgumentParser(
+    description="Run microbenchmarks.",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+)
 
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Run microbenchmarks.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
+def parse_args():
     parser.add_argument(
         '--tag_filter',
         help='tag_filter can be used to run the shapes which matches the tag. (all is used to run all the shapes)',
@@ -150,6 +143,10 @@ def main():
     if args.mkl_num_threads:
         benchmark_utils.set_mkl_threads(args.mkl_num_threads)
 
+    return args
+
+def main():
+    args = parse_args()
     benchmark_core.BenchmarkRunner(args).run()
 
 

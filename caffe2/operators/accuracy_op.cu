@@ -1,7 +1,9 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/accuracy_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {
@@ -34,7 +36,7 @@ __global__ void AccuracyKernel(
     __syncthreads();
   }
   if (threadIdx.x == 0) {
-    atomicAdd(accuracy, static_cast<float>(correct));
+    gpu_atomic_add(accuracy, static_cast<float>(correct));
   }
 }
 
@@ -47,7 +49,7 @@ template <>
 bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
+
   CAFFE_ENFORCE_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -62,10 +64,14 @@ bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, D, top_k_, X.data<float>(), label.data<int>(), Ydata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // This is going to be executed only in one single kernel. Not very beautiful,
   // but probably we have to do this?
   AccuracyDivideKernel<<<1, 1, 0, context_.cuda_stream()>>>(
       N, Ydata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

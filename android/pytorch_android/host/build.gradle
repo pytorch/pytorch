@@ -32,10 +32,9 @@ sourceSets {
 
 dependencies {
     compileOnly 'com.google.code.findbugs:jsr305:3.0.1'
-    implementation 'com.facebook.soloader:nativeloader:0.8.0'
-    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    implementation 'com.facebook.soloader:nativeloader:0.10.1'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
     testImplementation 'junit:junit:4.12'
 }
 
 apply from: rootProject.file('gradle/release.gradle')
-

@@ -16,30 +16,33 @@ void destroyCuDNNHandle(cudnnHandle_t handle) {
 // happens in fbcode setting. @colesbury and I decided to not destroy
 // the handle as a workaround.
 //   - @soumith
-#ifdef NO_CUDNN_DESTROY_HANDLE
-#else
-    cudnnDestroy(handle);
-#endif
+//
+// Further note: this is now disabled globally, because we are seeing
+// the same issue as mentioned above in CUDA 11 CI.
+//   - @zasdfgbnm
+//
+// #ifdef NO_CUDNN_DESTROY_HANDLE
+// #else
+//   cudnnDestroy(handle);
+// #endif
 }
 
-at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle> pool;
-
-// Thread local PoolWindows are wrapped by unique_ptrs and lazily-initialized
-// to avoid initialization issues that caused hangs on Windows.
-// See: https://github.com/pytorch/pytorch/pull/22405
-// This thread local unique_ptrs will be destroyed when the thread terminates,
-// releasing its reserved handles back to the pool.
-thread_local std::unique_ptr<decltype(pool)::PoolWindow> myPoolWindow;
+using CudnnPoolType = at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle>;
 
 } // namespace
 
-cudnnHandle_t getCudnnHandle()
-{
+cudnnHandle_t getCudnnHandle() {
   int device;
   AT_CUDA_CHECK(cudaGetDevice(&device));
 
-  if (!myPoolWindow)
-    myPoolWindow.reset(pool.newPoolWindow());
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+  static auto pool = std::make_shared<CudnnPoolType>();
+  thread_local std::unique_ptr<CudnnPoolType::PoolWindow> myPoolWindow(
+      pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
   AT_CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));

@@ -1,7 +1,4 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+# Owner(s): ["module: onnx"]
 
 import torch
 from torch.autograd import Function
@@ -10,8 +7,6 @@ import caffe2.python.onnx.backend as backend
 from verify import verify
 
 from test_pytorch_common import TestCase, run_tests
-
-import unittest
 
 
 class TestVerify(TestCase):
@@ -66,21 +61,6 @@ class TestVerify(TestCase):
         with self.assertRaisesRegex(RuntimeError, "state_dict changed"):
             verify(MyModel(), x, backend)
 
-    def test_modifying_params(self):
-        class MyModel(Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.param = Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        # To keep the unused model parameter, need to set constant folding to False
-        self.assertVerifyExpectFail(MyModel(), x, backend, do_constant_folding=False)
-
     def test_dynamic_model_structure(self):
         class MyModel(Module):
             def __init__(self):
@@ -98,7 +78,6 @@ class TestVerify(TestCase):
         x = torch.tensor([1, 2])
         self.assertVerifyExpectFail(MyModel(), x, backend)
 
-    @unittest.skip("Indexing is broken by #3725")
     def test_embedded_constant_difference(self):
         class MyModel(Module):
             def __init__(self):
@@ -126,5 +105,5 @@ class TestVerify(TestCase):
         self.assertVerifyExpectFail(MyModel(), x, backend, test_args=[(y,)])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

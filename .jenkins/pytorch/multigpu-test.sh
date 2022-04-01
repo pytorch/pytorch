@@ -7,31 +7,24 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
-if [ -n "${IN_CIRCLECI}" ]; then
+if [ -n "${IN_CI}" ]; then
   # TODO move this to docker
   pip_install unittest-xml-reporting
-
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-  fi
-
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get install -y --no-install-recommends openssh-client openssh-server
-    sudo mkdir -p /var/run/sshd
-  fi
 fi
 
-python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
-time python test/run_test.py --verbose -i distributed/test_distributed
-time python test/run_test.py --verbose -i distributed/test_c10d
-time python test/run_test.py --verbose -i distributed/test_c10d_spawn
+# Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
+# python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+# OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+time python test/run_test.py --verbose -i distributed/test_c10d_common
+time python test/run_test.py --verbose -i distributed/test_c10d_gloo
+time python test/run_test.py --verbose -i distributed/test_c10d_nccl
+time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
+time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
+time python test/run_test.py --verbose -i distributed/test_store
+time python test/run_test.py --verbose -i distributed/test_pg_wrapper
+time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
 assert_git_not_dirty

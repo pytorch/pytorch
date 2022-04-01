@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import shutil
 import sys
@@ -8,16 +10,21 @@ import tempfile
 import subprocess
 import glob
 
+import textwrap
+from multiprocessing import Process
+
 import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
-from torch.utils.cpp_extension import CUDA_HOME
+from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN, has_breakpad
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
 TEST_CUDNN = False
-if TEST_CUDA:
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
     CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
     TEST_CUDNN = (
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
@@ -25,11 +32,13 @@ if TEST_CUDA:
 IS_WINDOWS = sys.platform == "win32"
 
 
-# This effectively allows re-using the same extension (compiled once) in
-# multiple tests, just to split up the tested properties.
-def dont_wipe_extensions_build_folder(func):
-    func.dont_wipe = True
-    return func
+def remove_build_path():
+    if sys.platform == "win32":
+        print("Not wiping extensions build folder because Windows")
+        return
+    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    if os.path.exists(default_build_root):
+        shutil.rmtree(default_build_root)
 
 
 class TestCppExtensionJIT(common.TestCase):
@@ -38,38 +47,24 @@ class TestCppExtensionJIT(common.TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        test_name = self.id().split(".")[-1]
-        dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
-        if dont_wipe:
-            print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
-                + "therefore not wiping extensions build folder before running the test"
-            )
-            return
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
-
     def tearDown(self):
+        super().tearDown()
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
     @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+
+    @classmethod
     def tearDownClass(cls):
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
+        remove_build_path()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -98,7 +93,7 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.
         module = torch.utils.cpp_extension.load(
@@ -109,6 +104,7 @@ class TestCppExtensionJIT(common.TestCase):
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
+            keep_intermediates=False,
         )
 
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
@@ -132,9 +128,8 @@ class TestCppExtensionJIT(common.TestCase):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output, err = p.communicate()
-            if common.PY3:
-                output = output.decode("ascii")
-                err = err.decode("ascii")
+            output = output.decode("ascii")
+            err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
                 raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
@@ -142,12 +137,12 @@ class TestCppExtensionJIT(common.TestCase):
                                                           err, output))
 
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
-            expected_arches = ['sm_' + xx for xx in expected_values]
+            expected_arches = sorted(['sm_' + xx for xx in expected_values])
             self.assertEqual(actual_arches, expected_arches,
-                             message="Flags: {},  Actual: {},  Expected: {}\n"
-                                     "Stderr: {}\nOutput: {}".format(
-                                         flags, actual_arches, expected_arches,
-                                         err, output))
+                             msg="Flags: {},  Actual: {},  Expected: {}\n"
+                                 "Stderr: {}\nOutput: {}".format(
+                                     flags, actual_arches, expected_arches,
+                                     err, output))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -184,6 +179,7 @@ class TestCppExtensionJIT(common.TestCase):
                 os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "disabled on rocm")
     def test_jit_cuda_archflags(self):
         # Test a number of combinations:
         #   - the default for the machine we're testing on
@@ -191,11 +187,12 @@ class TestCppExtensionJIT(common.TestCase):
         #   - Architecture names
         #   - With/without '+PTX'
 
-        capability = torch.cuda.get_device_capability()
+        n = torch.cuda.device_count()
+        capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1])], None),
+            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
@@ -296,7 +293,8 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.sin_add(x, y)
         self.assertEqual(z, x.sin() + y.sin())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skip("Temporarily disabled")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
         __global__ void cos_add_kernel(
@@ -338,6 +336,54 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
+    @unittest.skip("Temporarily disabled")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
+    def test_inline_jit_compile_custom_op_cuda(self):
+        cuda_source = """
+        __global__ void cos_add_kernel(
+            const float* __restrict__ x,
+            const float* __restrict__ y,
+            float* __restrict__ output,
+            const int size) {
+          const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+          if (index < size) {
+            output[index] = __cosf(x[index]) + __cosf(y[index]);
+          }
+        }
+
+        torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
+          auto output = torch::zeros_like(x);
+          const int threads = 1024;
+          const int blocks = (output.numel() + threads - 1) / threads;
+          cos_add_kernel<<<blocks, threads>>>(x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), output.numel());
+          return output;
+        }
+        """
+
+        # Here, the C++ source need only declare the function signature.
+        cpp_source = """
+           #include <torch/library.h>
+           torch::Tensor cos_add(torch::Tensor x, torch::Tensor y);
+
+           TORCH_LIBRARY(inline_jit_extension_custom_op_cuda, m) {
+             m.def("cos_add", cos_add);
+           }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="inline_jit_extension_custom_op_cuda",
+            cpp_sources=cpp_source,
+            cuda_sources=cuda_source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        x = torch.randn(4, 4, device="cuda", dtype=torch.float32)
+        y = torch.randn(4, 4, device="cuda", dtype=torch.float32)
+
+        z = torch.ops.inline_jit_extension_custom_op_cuda.cos_add(x, y)
+        self.assertEqual(z, x.cos() + y.cos())
+
     def test_inline_jit_compile_extension_throws_when_functions_is_bad(self):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(
@@ -365,7 +411,8 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skip("Temporarily disabled")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_half_support(self):
         """
         Checks for an issue with operator< ambiguity for half when certain
@@ -375,8 +422,6 @@ class TestCppExtensionJIT(common.TestCase):
         for the corresponding issue.
         """
         cuda_source = """
-        #include <THC/THCNumerics.cuh>
-
         template<typename T, typename U>
         __global__ void half_test_kernel(const T* input, U* output) {
             if (input[0] < input[1] || input[0] >= input[1]) {
@@ -427,8 +472,6 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -460,8 +503,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(cpp_parameters["fc.weight"].grad, python_linear.weight.grad)
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -559,8 +600,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIn("buf", nb)
         self.assertEqual(nb[0][1], torch.eye(5))
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_up_to_date_attributes(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -582,9 +621,7 @@ class TestCppExtensionJIT(common.TestCase):
         net.add_new_submodule("fc2")
         self.assertEqual(len(net._modules), 2)
 
-    @dont_wipe_extensions_build_folder
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @common.skipIfRocm
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -741,21 +778,21 @@ class TestCppExtensionJIT(common.TestCase):
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should not be detected
+            # Catched with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 2)
 
-            # Catched with python error should not be detected
+            # Catched with python error should also be detected
             with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
                 warn_mod.foo(t, 2)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should not be detected
+            # Catched with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 4)
 
         # Make sure raising warnings are handled properly
         with warnings.catch_warnings(record=True) as w:
@@ -805,6 +842,106 @@ class TestCppExtensionJIT(common.TestCase):
         inp = torch.rand(20, requires_grad=True)
         loss = MyFn.apply(inp).sum()
         test_backward_deadlock.run_back_no_gil(loss)
+
+    def test_custom_compound_op_autograd(self):
+        # Test that a custom compound op (i.e. a custom op that just calls other aten ops)
+        # correctly returns gradients of those other ops
+
+        source = """
+        #include <torch/library.h>
+        torch::Tensor my_add(torch::Tensor x, torch::Tensor y) {
+          return x + y;
+        }
+        TORCH_LIBRARY(my, m) {
+            m.def("add", &my_add);
+        }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="is_python_module",
+            cpp_sources=source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        a = torch.randn(5, 5, requires_grad=True)
+        b = torch.randn(5, 5, requires_grad=True)
+
+        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
+
+    @staticmethod
+    def _crash_handler_test_process(stderr_file, destination):
+        # Code to enable dumps and trigger a segfault
+        if sys.platform == "win32":
+            destination = destination.replace("\\", "\\\\")
+            csrc = textwrap.dedent(f"""
+            #include <torch/torch.h>
+            #include <locale>
+            #include <iostream>
+            #include <codecvt>
+            #include <string>
+
+            int fail() {{
+                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+                std::string narrow("{destination}");
+                std::wstring wide = converter.from_bytes(narrow);
+                torch::crash_handler::enable_minidumps(wide.c_str());
+
+                volatile int* bad = nullptr;
+                return *bad;
+            }}
+            """)
+        else:
+            csrc = textwrap.dedent(f"""
+            #include <torch/torch.h>
+
+            int fail() {{
+                torch::crash_handler::enable_minidumps("{destination}");
+
+                volatile int* bad = nullptr;
+                return *bad;
+            }}
+            """)
+
+        # Some special stuff to overwrite stderr for a C++ extension
+        # Copied from: https://stackoverflow.com/questions/8804893/redirect-stdout-from-python-for-c-calls
+        sys.stdout.flush()
+        newstdout = os.dup(2)
+        devnull = os.open(stderr_file, os.O_WRONLY)
+        os.dup2(devnull, 2)
+        os.close(devnull)
+        sys.stdout = os.fdopen(newstdout, 'w')
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="segfault",
+            cpp_sources=csrc,
+            functions=["fail"],
+        )
+        module.fail()
+
+    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
+    @unittest.skipIf(os.environ.get("TEST_CONFIG") == "force_on_cpu", "fails on force_on_cpu config, tracked w/ #65253")
+    def test_crash_handler(self):
+        with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
+            # Use multiprocessing to spin up a separate process to make catching
+            # the segfault easier
+            p = Process(target=self._crash_handler_test_process, args=(stderr.name, temp_dir))
+            p.start()
+            p.join()
+
+            with open(stderr.name) as f:
+                result = f.read().strip()
+
+            # Check that the signal handler was called
+            self.assertTrue(result.startswith(f"Wrote minidump to {temp_dir}"))
+
+            with open(result.replace("Wrote minidump to ", ""), "rb") as dump_file:
+                dump_bytes = dump_file.read()
+
+                # Check that the file has the correct magic number
+                self.assertEqual(b"MDMP", dump_bytes[0:4])
+
 
 
 if __name__ == "__main__":

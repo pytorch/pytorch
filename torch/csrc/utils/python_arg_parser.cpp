@@ -7,6 +7,8 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TracerMode.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -23,7 +25,9 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"double", ParameterType::DOUBLE},
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
+  {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
+  {"ArrayRef<double>", ParameterType::FLOAT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
@@ -33,9 +37,12 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
   {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
+  {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
+  {"c10::string_view", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
+  {"ScalarList", ParameterType::SCALAR_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -65,15 +72,18 @@ static const std::unordered_map<std::string, std::vector<std::string>> numpy_com
 // overloads and binding to the Tensor overload with a number of a different
 // type will trigger a type error.
 //
-// If you modify this, you will need to adjust the blacklist in
+// If you modify this, you will need to adjust the blocklist in
 // tools/pyi/gen_pyi.py (and add hardcoded signatures for these
 // functions.)
 static bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
     "add", "add_", "add_out",
     "div", "div_", "div_out",
+    "divide", "divide_", "divide_out", // alias of div
     "mul", "mul_", "mul_out",
+    "multiply", "multiply_", "multiply_out", // alias of mul
     "sub", "sub_", "sub_out",
+    "subtract", "subtract_", "subtract_out", // alias of sub
     "true_divide", "true_divide_", "true_divide_out",
     "floor_divide", "floor_divide_", "floor_divide_out"
   };
@@ -133,22 +143,95 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
-  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
-  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
-  py::object ret;
+auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject* {
+  py::object torch_api = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
+  std::string module_name = "torch.Tensor." + property_name;
+  return handle_torch_function((PyObject *)self, "__get__", nullptr, nullptr, torch_api.ptr(), module_name);
+}
 
+auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int {
+  py::object torch_api = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
+  std::string module_name = "torch.Tensor." + property_name;
+  if (value != nullptr)
+  {
+    py::tuple args_ = py::make_tuple(py::handle(value));
+    handle_torch_function((PyObject *)self, "__set__", args_.ptr(), nullptr, torch_api.ptr(), module_name);
+  }
+  else {
+    handle_torch_function((PyObject *)self, "__delete__", nullptr, nullptr, torch_api.ptr(), module_name);
+  }
+  return 0;
+}
+
+// Combines self and args into one tuple.
+auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
+  if (args == nullptr) {
+    return py::make_tuple(py::handle(self));
+  }
+  else if (self == nullptr) {
+    return py::reinterpret_borrow<py::tuple>(args);
+  }
+
+  auto py_args = py::reinterpret_borrow<py::tuple>(args);
+  size_t n = py_args.size();
+  auto args_ = py::tuple(n + 1);
+  args_[0] = py::handle(self);
+  for(const auto i : c10::irange(n)) {
+    args_[i+1] = py_args[i];
+  }
+  return args_;
+}
+
+auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* kwargs, PyObject* torch_api, const std::string& module_name) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::tuple args_ = combine_self_args(self, args);
+  py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
+  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
+  py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
+  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs));
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __torch_function__, throw it
+    throw python_error();
+  }
+  if (ret.ptr() == Py_NotImplemented) {
+    std::string error_msg = "no implementation found for " + module_name + "." + func_name + "' on types that implement __torch_function__: [" + self->ob_type->tp_name + "]";
+    PyErr_SetString(PyExc_TypeError, error_msg.c_str());
+    throw python_error();
+  }
+  return ret.release().ptr();
+}
+
+// Note: [Overloaded args]
+// An overloaded arg may be one of the following:
+// - an instance of an object that has a __torch_function__ method
+// - an instance of an object that has a __torch_dispatch__ classmethod
+// - a class type that has a __torch_dispatch__ classmethod
+//
+// This function returns the type of the arg (if the arg is an instance),
+// otherwise, it returns the arg.
+static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
+  if (PyType_Check(obj_or_type)) {
+    return obj_or_type;
+  }
+  return (PyObject*)Py_TYPE(obj_or_type);
+}
+
+// See Note: [Overloaded args] for what they hold
+auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
   // overloaded_args already all have unique types
   std::vector<py::object> overloaded_types;
-  overloaded_types.reserve(r.signature.overloaded_args.size());
-  for (auto &arg : r.signature.overloaded_args) {
-    overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
+  overloaded_types.reserve(overloaded_args.size());
+  for (auto &arg : overloaded_args) {
+    overloaded_types.push_back(py::reinterpret_borrow<py::object>(get_type_of_overloaded_arg(arg.ptr())));
   }
   py::tuple py_types = py::cast(overloaded_types);
-
-  for (auto &arg : r.signature.overloaded_args) {
-    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args, kwargs, NULL));
+  py::object ret;
+  for (auto &arg : overloaded_args) {
+    // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
+    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), torch_function_name);
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function, py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
       // is NULL and __torch_function__ raised an exception, which we throw below
@@ -157,18 +240,18 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
   }
   if (ret.ptr() == nullptr) {
     // if an exception occurred in a user's implementation of
-    // __array_function__, throw it
+    // __torch_function__, throw it
     throw python_error();
   }
   else if (ret.ptr() == Py_NotImplemented) {
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '" << module_name << "." << r.get_func_name()
-       << "' on types that implement __torch_function__: [";
-    for (auto &arg : r.signature.overloaded_args) {
-      ss << arg.ptr()->ob_type->tp_name;
-      if (!arg.is(r.signature.overloaded_args.back())) {
+    ss << "no implementation found for '" << module_name << "." << func_name
+       << "' on types that implement " << torch_function_name << ": [";
+    for (auto &arg : overloaded_args) {
+      ss << PyObject_Repr(get_type_of_overloaded_arg(arg.ptr()));
+      if (!arg.is(overloaded_args.back())) {
         ss << ", ";
       }
       else {
@@ -180,6 +263,50 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
     throw python_error();
   }
   return ret.release().ptr();
+}
+
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::object ret;
+  py::tuple args_ = combine_self_args(self, args);
+  // overloaded_args already all have unique types
+  std::vector<py::object> overloaded_types;
+  overloaded_types.reserve(r.signature.overloaded_args.size());
+  for (auto &arg : r.signature.overloaded_args) {
+    overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
+  }
+  py::tuple py_types = py::cast(overloaded_types);
+  return handle_torch_function_no_python_arg_parser(r.signature.overloaded_args, args_.ptr(), kwargs, r.get_func_name().c_str(), torch_api_function.ptr(), module_name);
+}
+
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*
+{
+  return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name);
+}
+
+auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val) -> PyObject* {
+  const char *func_name = (val == nullptr) ? "__getitem__" : "__setitem__";
+  py::object index_tup;
+  if (PyTuple_Check(index)) {
+    index_tup = py::reinterpret_borrow<py::object>(index);
+  }
+  else {
+    index_tup = py::make_tuple(py::handle(index));
+  }
+  std::vector<py::handle> overridable_args;
+  is_tensor_and_append_overloaded(self, &overridable_args);
+  auto  size = PyTuple_GET_SIZE(index_tup.ptr());
+  for (auto i : c10::irange(size)) {
+    auto *obj = PyTuple_GetItem(index_tup.ptr(), i);
+    is_tensor_and_append_overloaded(obj, &overridable_args);
+  }
+  if (val != nullptr) {
+    is_tensor_and_append_overloaded(val, &overridable_args);
+  }
+  py::object func = PyObject_FastGetAttrString(THPVariableClass, (char *)func_name);
+  py::object args = (val == nullptr) ? py::make_tuple(py::handle(self), py::handle(index)) : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  return handle_torch_function_no_python_arg_parser(overridable_args, args.ptr(), nullptr, func_name, func.ptr(), "torch.Tensor");
 }
 
 /*
@@ -210,18 +337,23 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
  *  described in NEP-0018:
  *  https://numpy.org/neps/nep-0018-array-function-protocol.html
  *
- *  'overloaded_args' is a reference to a vector of pybind11 handles
+ *  'overloaded_args' is a raw pointer to a vector of pybind11 handles
  *  that have distinct __torch_function__ implementations, in order of calling
  *  precedence.
  *
  *  'obj' is an object to check for a __torch_function__ implementation
  *
+ * If changing this file in a way that can affect the __torch_function__
+ * overhead, please report the benchmarks in 'benchmarks/overrides_benchmark'.
+ * See the instructions in the 'README.md' in that directory.
+ *
  */
 
-void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* obj) {
+static void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* obj, bool obj_is_type) {
   bool class_not_seen_yet = true;
-  for (auto &arg : overloaded_args) {
-    if (Py_TYPE(obj) == Py_TYPE(arg.ptr())) {
+  PyObject* obj_type = obj_is_type ? obj : (PyObject*)Py_TYPE(obj);
+  for (auto &arg : *overloaded_args) {
+    if (obj_type == get_type_of_overloaded_arg(arg.ptr())) {
       // obj is the same type as another parameter we've seen in a prior
       // iteration of the loop over parameters so we already have an entry
       // with the proper __torch_function__ implementation to call, so skip
@@ -231,9 +363,9 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
     }
   }
   if (class_not_seen_yet) {
-    int arg_index = overloaded_args.size();
-    for (int j = 0; j < arg_index; j++) {
-      if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
+    int arg_index = overloaded_args->size();
+    for(const auto j : c10::irange(arg_index)) {
+      if (PyObject_IsSubclass(obj_type, (PyObject*)(get_type_of_overloaded_arg((*overloaded_args)[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
         // insert it into overloaded_args before the superclass
@@ -244,21 +376,111 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
     // add object to overloaded_args. If it's a subclass of another class
     // we've already seen it will be inserted before the superclass,
     // otherwise it will be inserted at the end of the array
-    overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
+    overloaded_args->insert(overloaded_args->begin() + arg_index, obj);
   }
 }
 
-auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool
+void append_overloaded_tensor(std::vector<py::handle>* overloaded_args, PyObject* obj) {
+  append_overloaded_arg(overloaded_args, obj, /*obj_is_type*/false);
+}
+
+void append_overloaded_type(std::vector<py::handle>* overloaded_args, PyObject* obj) {
+  append_overloaded_arg(overloaded_args, obj, /*obj_is_type*/true);
+}
+
+bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args) {
+  if (THPVariable_CheckExact(obj)) {
+    // torch.Tensor instances (not subclasses, except for Parameter)
+    return true;
+  }
+
+  if (check_has_torch_function(obj)) {
+    // tensor subclasses and unrelated objects with __torch_function__
+    append_overloaded_tensor(overloaded_args, obj);
+    return true;
+  } else if (THPVariable_Check(obj)) {
+    // tensor subclasses without __torch_function__
+    return true;
+  }
+
+  return false;
+}
+
+bool is_scalar_list(PyObject* obj) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (const auto idx : c10::irange(size)) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!THPUtils_checkScalar(iobj)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+const   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (long idx = 0; idx < size; idx++) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
+      if (throw_error) {
+        throw TypeError("expected Tensor as element %d in argument %d, but got %s",
+            static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool is_float_or_complex_list(PyObject* obj) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  if (size > 0) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
+    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool is_int_list(PyObject* obj, int broadcast_size) {
+  if (PyTuple_Check(obj) || PyList_Check(obj)) {
+    if (PySequence_Size(obj) == 0) {
+      return true;
+    }
+    auto item = py::reinterpret_steal<py::object>(
+        PySequence_GetItem(obj, 0));
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
+    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+  }
+  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
+  return broadcast_size > 0 && THPUtils_checkLong(obj);
+}
+
+// argnum is needed for raising the TypeError, it's used in the error message.
+auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      if (THPVariable_CheckExact(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        if (check_has_torch_function(obj)) {
-          append_overloaded_arg(overloaded_args, obj);
-        }
+      if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
         return true;
       }
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
@@ -274,7 +496,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         return true;
       }
       if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
+        const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
       return false;
@@ -284,7 +506,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         return true;
       }
       if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
+        const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
@@ -297,14 +519,11 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
-    case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
-      return size > 0 && THPUtils_checkLong(obj);
+    case ParameterType::TENSOR_LIST: {
+      return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
+    case ParameterType::INT_LIST: return is_int_list(obj, size);
+    case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
@@ -315,8 +534,13 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
+    case ParameterType::STREAM:
+      return THPStream_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
+    case ParameterType::SCALAR_LIST: {
+      return is_scalar_list(obj);
+    }
   }
 }
 
@@ -329,6 +553,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
     case ParameterType::INT_LIST: return "tuple of ints";
+    case ParameterType::FLOAT_LIST: return "tuple of floats";
     case ParameterType::GENERATOR: return "torch.Generator";
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
@@ -341,6 +566,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STRING: return "str";
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
+    case ParameterType::SCALAR_LIST: return "tuple of Scalars";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -348,6 +574,7 @@ std::string FunctionParameter::type_name() const {
 static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return c10::nullopt;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char *str_end;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
@@ -386,6 +613,62 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   return args;
 }
 
+// Parse a string literal to remove quotes and escape sequences
+static std::string parse_string_literal(c10::string_view str) {
+  TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
+
+  if (str.front() == '"') {
+    TORCH_CHECK(str.back() == '"',
+                "Mismatched quotes in string default: ", str);
+  } else {
+    TORCH_CHECK(str.front() == '\'' && str.back() == '\'',
+                "Invalid quotes in string default: ", str)
+  }
+
+  std::string parsed;
+  parsed.reserve(str.size());
+  for (size_t i = 1; i < str.size() - 1;) {
+    if (str[i] != '\\') {
+      parsed.push_back(str[i]);
+      ++i;
+      continue;
+    }
+
+    // Handle escape sequences
+    TORCH_CHECK(i < str.size() - 2, "String ends with escaped final quote: ", str)
+    char c = str[i + 1];
+    switch (c) {
+      case '\\':
+      case '\'':
+      case '\"':
+        break;
+      case 'a':
+        c = '\a';
+        break;
+      case 'b':
+        c = '\b';
+        break;
+      case 'f':
+        c = '\f';
+        break;
+      case 'n':
+        c = '\n';
+        break;
+      case 'v':
+        c = '\v';
+        break;
+      case 't':
+        c = '\t';
+        break;
+      default:
+        TORCH_CHECK(false, "Unsupported escape sequence in string default: \\", str[i + 1]);
+    }
+    parsed.push_back(c);
+    i += 2;
+  }
+  return parsed;
+}
+
 void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
     allow_none = true;
@@ -414,6 +697,10 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
+  } else if (type_ == ParameterType::FLOAT_LIST) {
+    if (str != "None") {
+      throw std::runtime_error("Defaults not supported for float[]");
+    }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
       default_scalartype = at::ScalarType::Undefined;
@@ -436,13 +723,18 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       throw std::runtime_error("invalid device: " + str);
     }
+  } else if (type_ == ParameterType::STREAM) {
+    if (str != "None") {
+      throw std::runtime_error("invalid stream: " + str);
+    }
   } else if (type_ == ParameterType::STRING) {
-    if (str != "None" && str != "") {
-      throw std::runtime_error("invalid default string: " + str);
+    if (str != "None") {
+      default_string = parse_string_literal(str);
     }
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
@@ -460,6 +752,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
 
   auto last_offset = open_paren + 1;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto next_offset = last_offset;
   bool keyword_only = false;
   bool done = false;
@@ -468,7 +761,12 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
       done = true;
-      next_offset = offset + 1;
+      next_offset = offset+ 1;
+      // this 'if' happens for an empty parameter list, i.e. fn().
+      if (offset == last_offset) {
+        last_offset = next_offset;
+        break;
+      }
     } else {
       next_offset = offset + 2;
     }
@@ -476,7 +774,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       throw std::runtime_error("missing closing parenthesis: " + fmt);
     }
     if (offset == last_offset) {
-      break;
+      throw std::runtime_error("malformed signature: " + fmt);
     }
 
     auto param_str = fmt.substr(last_offset, offset - last_offset);
@@ -511,12 +809,18 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 }
 
 std::string FunctionSignature::toString() const {
+  // TODO: consider printing more proper schema strings with defaults, optionals, etc.
   std::ostringstream ss;
+  bool keyword_already = false;
   ss << "(";
   int i = 0;
   for (auto& param : params) {
     if (i != 0) {
       ss << ", ";
+    }
+    if (param.keyword_only && !keyword_already) {
+      ss << "*, ";
+      keyword_already = true;
     }
     ss << param.type_name() << " " << param.name;
     i++;
@@ -526,7 +830,7 @@ std::string FunctionSignature::toString() const {
 }
 
 [[noreturn]]
-static void extra_args(const FunctionSignature& signature, ssize_t nargs) {
+static void extra_args(const FunctionSignature& signature, Py_ssize_t nargs) {
   const long max_pos_args = signature.max_pos_args;
   const long min_args = signature.min_args;
   const long nargs_ = nargs;
@@ -563,8 +867,8 @@ static void missing_args(const FunctionSignature& signature, int idx) {
       ss.str().c_str());
 }
 
-static ssize_t find_param(FunctionSignature& signature, PyObject* name) {
-  ssize_t i = 0;
+static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
+  Py_ssize_t i = 0;
   for (auto& param : signature.params) {
     int cmp = PyObject_RichCompareBool(name, param.python_name, Py_EQ);
     if (cmp < 0) {
@@ -578,9 +882,10 @@ static ssize_t find_param(FunctionSignature& signature, PyObject* name) {
 }
 
 [[noreturn]]
-static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t num_pos_args) {
-  PyObject *key, *value;
-  ssize_t pos = 0;
+static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, Py_ssize_t num_pos_args) {
+  PyObject *key = nullptr;
+  PyObject *value  = nullptr;
+  Py_ssize_t pos = 0;
 
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
@@ -603,11 +908,11 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
   throw TypeError("invalid keyword arguments");
 }
 
-bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
+bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               bool raise_exception) {
-  auto nargs = PyTuple_GET_SIZE(args);
-  ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  ssize_t arg_pos = 0;
+  auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
+  auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
+  Py_ssize_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
@@ -629,6 +934,9 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   }
 
   int i = 0;
+  if (self != nullptr && check_has_torch_function(self)) {
+    append_overloaded_tensor(&this->overloaded_args, self);
+  }
   for (auto& param : params) {
     PyObject* obj = nullptr;
     bool is_kwd = false;
@@ -660,14 +968,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, this->overloaded_args)) {
+    } else if (param.check(obj, this->overloaded_args, i)) {
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
-    } else if (check_has_torch_function(obj)) {
-      append_overloaded_arg(overloaded_args, obj);
-      dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
                THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
@@ -751,28 +1056,30 @@ void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
   }
 }
 
-PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    signature.parse(args, kwargs, parsed_args, true);
+    signature.parse(self, args, kwargs, parsed_args, true);
     check_deprecated(signature);
     return PythonArgs(traceable, signature, parsed_args);
   }
 
   for (auto& signature : signatures_) {
-    if (signature.parse(args, kwargs, parsed_args, false)) {
+    if (signature.parse(self, args, kwargs, parsed_args, false)) {
       check_deprecated(signature);
       return PythonArgs(traceable, signature, parsed_args);
     }
   }
 
-  print_error(args, kwargs, parsed_args);
+  print_error(self, args, kwargs, parsed_args);
 }
 
-void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+
+void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
+  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
-  std::vector<int> plausible_idxs;
-  ssize_t i = 0;
+  std::vector<unsigned> plausible_idxs;
+  unsigned i = 0;
   for (auto& signature : signatures_) {
     if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.hidden) {
       plausible_idxs.push_back(i);
@@ -782,7 +1089,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    signature.parse(args, kwargs, parsed_args, true);
+    signature.parse(self, args, kwargs, parsed_args, true);
   }
 
   auto options = get_signatures();
@@ -806,7 +1113,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return at::Tensor();
   }
   if (THPVariable_Check(obj)) {
-    return reinterpret_cast<THPVariable*>(obj)->cdata;
+    return THPVariable_Unpack(obj);
   }
 
   at::Scalar scalar;
@@ -827,7 +1134,8 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  at::AutoNonVariableTypeMode guard;
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -838,27 +1146,31 @@ at::Scalar PythonArgs::scalar_slow(int i) {
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
+        signature.params[i].name, idx, var, c10::NumberType::get());
   }
 
+  return scalar_slow(args[i]);
+}
+
+at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
-  if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata.item();
+  if (THPVariable_Check(arg)) {
+    return THPVariable_Unpack(arg).item();
   }
 
-  if (THPUtils_checkLong(args[i])) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
   }
 
-  if (PyBool_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackBool(args[i]));
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
   }
 
-  if (PyComplex_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
-  return at::Scalar(THPUtils_unpackDouble(args[i]));
+  return at::Scalar(THPUtils_unpackDouble(arg));
 }
 
 } // namespace torch

@@ -3,6 +3,7 @@
 #include <ATen/core/Macros.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
@@ -10,7 +11,7 @@ namespace jit {
 
 using TypePtr = c10::TypePtr;
 
-struct CAFFE2_API SchemaTypeParser {
+struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();
   c10::optional<c10::AliasInfo> parseAliasAnnotation();
   std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();
@@ -22,11 +23,13 @@ struct CAFFE2_API SchemaTypeParser {
   }
 
  private:
+  c10::optional<bool> tryToParseRequiresGrad();
+  c10::optional<c10::Device> tryToParseDeviceType();
   void parseList(
       int begin,
       int sep,
       int end,
-      const std::function<void()>& callback);
+      c10::function_ref<void()> callback);
 
   bool complete_tensor_types;
   Lexer& L;

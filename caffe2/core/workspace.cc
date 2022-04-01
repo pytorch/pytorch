@@ -28,12 +28,14 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(s);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     if (shape_fun) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t capacity;
       DeviceOption _device;
       auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
       // NB: currently it overcounts capacity of shared storages
       // TODO: fix it after the storage sharing is merged
       cumtotal += capacity;
+      // NOLINTNEXTLINE(modernize-use-emplace)
       blob_sizes.push_back(make_pair(capacity, s));
     }
   }
@@ -52,6 +54,7 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(sb.second);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     CHECK(shape_fun != nullptr);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t capacity;
     DeviceOption _device;
 
@@ -84,7 +87,7 @@ vector<string> Workspace::Blobs() const {
     names.push_back(entry.first);
   }
   for (const auto& forwarded : forwarded_blobs_) {
-    const auto parent_ws = forwarded.second.first;
+    const auto* parent_ws = forwarded.second.first;
     const auto& parent_name = forwarded.second.second;
     if (parent_ws->HasBlob(parent_name)) {
       names.push_back(forwarded.first);
@@ -106,19 +109,21 @@ Blob* Workspace::CreateBlob(const string& name) {
             << "(blob " << forwarded_blobs_[name].second << "). Skipping.";
   } else {
     VLOG(1) << "Creating blob " << name;
+    // NOLINTNEXTLINE(modernize-make-unique)
     blob_map_[name] = unique_ptr<Blob>(new Blob());
   }
   return GetBlob(name);
 }
 
 Blob* Workspace::CreateLocalBlob(const string& name) {
-  if (blob_map_.count(name)) {
+  auto p = blob_map_.emplace(name, nullptr);
+  if (!p.second) {
     VLOG(1) << "Blob " << name << " already exists. Skipping.";
   } else {
     VLOG(1) << "Creating blob " << name;
-    blob_map_[name] = unique_ptr<Blob>(new Blob());
+    p.first->second = std::make_unique<Blob>();
   }
-  return GetBlob(name);
+  return p.first->second.get();
 }
 
 Blob* Workspace::RenameBlob(const string& old_name, const string& new_name) {
@@ -158,15 +163,28 @@ bool Workspace::RemoveBlob(const string& name) {
 }
 
 const Blob* Workspace::GetBlob(const string& name) const {
-  if (blob_map_.count(name)) {
-    return blob_map_.at(name).get();
-  } else if (forwarded_blobs_.count(name)) {
-    const auto parent_ws = forwarded_blobs_.at(name).first;
-    const auto& parent_name = forwarded_blobs_.at(name).second;
-    return parent_ws->GetBlob(parent_name);
-  } else if (shared_ && shared_->HasBlob(name)) {
-    return shared_->GetBlob(name);
+  {
+    auto it = blob_map_.find(name);
+    if (it != blob_map_.end()) {
+      return it->second.get();
+    }
   }
+
+  {
+    auto it = forwarded_blobs_.find(name);
+    if (it != forwarded_blobs_.end()) {
+      const auto* parent_ws = it->second.first;
+      const auto& parent_name = it->second.second;
+      return parent_ws->GetBlob(parent_name);
+    }
+  }
+
+  if (shared_) {
+    if (auto blob = shared_->GetBlob(name)) {
+      return blob;
+    }
+  }
+
   LOG(WARNING) << "Blob " << name << " not in the workspace.";
   // TODO(Yangqing): do we want to always print out the list of blobs here?
   // LOG(WARNING) << "Current blobs:";
@@ -208,6 +226,7 @@ void Workspace::AddBlobMapping(
 }
 
 Blob* Workspace::GetBlob(const string& name) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<Blob*>(static_cast<const Workspace*>(this)->GetBlob(name));
 }
 
@@ -249,25 +268,25 @@ NetBase* Workspace::CreateNet(
 }
 
 NetBase* Workspace::GetNet(const string& name) {
-  if (!net_map_.count(name)) {
-    return nullptr;
-  } else {
-    return net_map_[name].get();
+  auto it = net_map_.find(name);
+  if (it != net_map_.end()) {
+    return it->second.get();
   }
+
+  return nullptr;
 }
 
 void Workspace::DeleteNet(const string& name) {
-  if (net_map_.count(name)) {
-    net_map_.erase(name);
-  }
+  net_map_.erase(name);
 }
 
 bool Workspace::RunNet(const string& name) {
-  if (!net_map_.count(name)) {
+  auto it = net_map_.find(name);
+  if (it == net_map_.end()) {
     LOG(ERROR) << "Network " << name << " does not exist yet.";
     return false;
   }
-  return net_map_[name]->Run();
+  return it->second->Run();
 }
 
 bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
@@ -280,8 +299,15 @@ bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
     LOG(ERROR) << "Error when running operator " << op_def.type();
     return false;
   }
-  return true;
+  // workaround for async cpu ops
+  if (op->HasAsyncPart() && op->device_option().device_type() == PROTO_CPU) {
+    op->Finish();
+    return op->event().Query() == EventStatus::EVENT_SUCCESS;
+  } else {
+    return true;
+  }
 }
+
 bool Workspace::RunNetOnce(const NetDef& net_def) {
   std::unique_ptr<NetBase> net(caffe2::CreateNet(net_def, this));
   if (net == nullptr) {

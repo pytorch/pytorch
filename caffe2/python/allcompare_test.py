@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from hypothesis import given
+
+
+
+
+from hypothesis import given, settings
 import hypothesis.strategies as st
 from multiprocessing import Process
 
@@ -60,6 +60,7 @@ class TestAllCompare(hu.HypothesisTestCase):
     @given(
         d=st.integers(1, 5), n=st.integers(2, 11), num_procs=st.integers(1, 8)
     )
+    @settings(deadline=10000)
     def test_allcompare(self, d, n, num_procs):
         dims = []
         for _ in range(d):

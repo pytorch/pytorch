@@ -1,9 +1,9 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Add_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -16,15 +16,15 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "1"
+    input: "onnx::Add_0"
+    input: "onnx::Add_1"
     output: "2"
     name: "Add_1"
     op_type: "Add"
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "onnx::Add_0"
     type {
       tensor_type {
         elem_type: 11

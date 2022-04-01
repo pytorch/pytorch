@@ -1,5 +1,5 @@
-#ifndef CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_8BIT_ROWWISE_OPS_H_
-#define CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_8BIT_ROWWISE_OPS_H_
+#ifndef CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_NBIT_ROWWISE_OPS_H_
+#define CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_NBIT_ROWWISE_OPS_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -92,7 +92,9 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
             block_size,
             weights != nullptr,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 8,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       } else {
         CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
         kernel64_ = fbgemm::GenerateEmbeddingSpMDMNBit<std::int64_t>(
@@ -100,7 +102,9 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
             block_size,
             weights != nullptr,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 8,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       }
     }
 
@@ -133,7 +137,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
 
     // Error handling
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       for (int i = 0; i < lengths_data[m]; ++i) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];
@@ -160,7 +164,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
         << "Running slow path because FBGEMM is not available";
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(output_data, 0, block_size * sizeof(float));
       if (current + lengths_data[m] > index_size) {
         return false;
@@ -181,7 +185,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
         const float scale = weight * scale_bias[0];
         const float bias = weight * scale_bias[1];
 
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           uint8_t quantized =
               input_data[idx * data.size(1) + j / NUM_ELEM_PER_BYTE];
           quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;
@@ -192,7 +196,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
       } // for each i
       if (is_mean && lengths_data[m]) {
         float scale = 1.0f / lengths_data[m];
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           output_data[j] *= scale;
         }
       }
@@ -220,6 +224,107 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
 #endif
 }; // class SparseLengthsFusedNBitRowwiseOp
 
+class SparseLengthsSumSparseLookupOp final : public Operator<CPUContext> {
+ public:
+  SparseLengthsSumSparseLookupOp(const OperatorDef& def, Workspace* ws)
+      : Operator<CPUContext>(def, ws) {}
+
+  ~SparseLengthsSumSparseLookupOp() override {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, Input(INDICES));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    const auto& indices = Input(INDICES);
+    const auto& lengths = Input(LENGTHS);
+    const auto& compressed_indices_mapping = Input(COMPRESSED_INDICES_MAPPING);
+    thread_local static std::vector<float> dummy_weight;
+    CAFFE_ENFORCE_EQ(indices.dim(), 1, "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(
+        compressed_indices_mapping.dim(), 1, "LENGTHS must be a vector");
+    const int32_t* lengths_data = lengths.template data<int32_t>();
+    const IndexType* indices_data = indices.template data<IndexType>();
+    const int32_t* compressed_indices_mapping_data =
+        compressed_indices_mapping.template data<std::int32_t>();
+    dummy_weight.resize(indices.size(0));
+    const float* weights = dummy_weight.data();
+    bool has_weights = (InputSize() > 3);
+    if (has_weights) {
+      const auto& weights_input = Input(WEIGHTS);
+      CAFFE_ENFORCE_EQ(weights_input.dim(), 1, "WEIGHTS must be a vector");
+      CAFFE_ENFORCE_EQ(
+          weights_input.numel(),
+          indices.numel(),
+          "WEIGHTS should have the same length as INDICES.");
+      weights = weights_input.template data<float>();
+    }
+
+    // Allocate for the max possible size for now and later we may shrink the
+    // indices size.
+    auto* output_indices =
+        Output(INDICES, indices.sizes(), at::dtype<IndexType>());
+    auto* output_lengths =
+        Output(LENGTHS, lengths.sizes(), at::dtype<int32_t>());
+    Tensor* output_weights = nullptr;
+    float* output_weights_data = dummy_weight.data();
+    if (has_weights) {
+      output_weights = Output(2, indices.sizes(), at::dtype<float>());
+      output_weights_data = output_weights->template mutable_data<float>();
+    }
+    int32_t* output_lengths_data =
+        output_lengths->template mutable_data<int32_t>();
+    IndexType* output_indices_data =
+        output_indices->template mutable_data<IndexType>();
+    const int32_t output_size = lengths.size(0);
+    const IndexType index_size = indices.size(0);
+    const IndexType compressed_data_size = compressed_indices_mapping.size(0);
+    IndexType current = 0;
+    IndexType current_output = 0;
+    for (const auto m : c10::irange(output_size)) {
+      const auto current_length = lengths_data[m];
+      if (current + current_length > index_size) {
+        return false;
+      }
+      int32_t skipped = 0;
+      for (const auto i : c10::irange(current_length)) {
+        (void)i; // Suppress unused variable warning
+        IndexType compressed_idx = indices_data[current];
+        if (compressed_idx < 0 || compressed_idx >= compressed_data_size) {
+          return false;
+        }
+        IndexType idx = compressed_indices_mapping_data[compressed_idx];
+        if (idx == -1) {
+          ++skipped;
+        } else {
+          output_weights_data[current_output] = weights[current];
+          output_indices_data[current_output++] = idx;
+        }
+        ++current;
+      }
+      output_lengths_data[m] = current_length - skipped;
+    }
+
+    if (current_output < index_size) {
+      output_indices->ShrinkTo(current_output);
+      if (output_weights) {
+        output_weights->ShrinkTo(current_output);
+      }
+    }
+    return true;
+  }
+
+  enum {
+    INDICES = 0,
+    LENGTHS = 1,
+    COMPRESSED_INDICES_MAPPING = 2,
+    WEIGHTS = 3
+  };
+};
+
 template <int BIT_RATE, bool with_weights = false, bool is_mean = false>
 class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
  public:
@@ -227,8 +332,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
       !(with_weights && is_mean),
       "Cannot have with_weights and is_mean a the same time");
 
-  SparseLengthsNBitRowwiseSparseOp(const OperatorDef& def, Workspace* ws)
-      : Operator<CPUContext>(def, ws) {}
+  template<class... Args>
+  explicit SparseLengthsNBitRowwiseSparseOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
   ~SparseLengthsNBitRowwiseSparseOp() override {}
 
   bool RunOnDevice() override {
@@ -308,7 +414,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel32_ =
                 fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<std::int32_t>(
@@ -316,7 +424,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         } else {
           CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
@@ -326,7 +436,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel64_ =
                 fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<std::int64_t>(
@@ -334,7 +446,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         }
       } else { // fallback_to_no_sparse == true
@@ -346,7 +460,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     with_weights,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel32_no_sparse_ =
                 fbgemm::GenerateEmbeddingSpMDMNBit<std::int32_t>(
@@ -354,7 +470,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         } else {
           CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
@@ -364,7 +482,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     with_weights,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel64_no_sparse_ =
                 fbgemm::GenerateEmbeddingSpMDMNBit<std::int64_t>(
@@ -372,7 +492,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         }
       }
@@ -433,7 +555,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
 
     // Error handling
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       for (int i = 0; i < lengths_data[m]; ++i) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];
@@ -471,7 +593,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
         << "Running slow path because FBGEMM is not available";
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(output_data, 0, block_size * sizeof(float));
       if (current + lengths_data[m] > index_size) {
         return false;
@@ -511,7 +633,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
           bias = weight * reinterpret_cast<const at::Half*>(scale_bias)[1];
         }
 
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           uint8_t quantized =
               input_data[idx * data.size(1) + j / NUM_ELEM_PER_BYTE];
           quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;
@@ -522,7 +644,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
       } // for each i
       if (is_mean && lengths_data[m]) {
         float scale = 1.0f / lengths_data[m];
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           output_data[j] *= scale;
         }
       }

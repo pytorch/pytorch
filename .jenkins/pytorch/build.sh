@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
@@ -7,32 +9,10 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# For distributed, four environmental configs:
-# (1) build with only NCCL
-# (2) build with NCCL and MPI
-# (3) build with only MPI
-# (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
-  if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-    sudo apt-get -qq install openmpi-bin libopenmpi-dev
-  else
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  fi
-  sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-  sudo mkdir -p /var/run/sshd
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -40,8 +20,15 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* ]]; then
+  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
+  # only on one config for now, can expand later
+  export USE_DEPLOY=ON
+
+  # Deploy feature builds cpython. It requires these packages.
+  # TODO move this to dockerfile?
+  sudo apt-get -qq update
+  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
 fi
 
 echo "Python version:"
@@ -58,20 +45,42 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  # enable split torch_cuda build option in CMake
+  export BUILD_SPLIT_CUDA=ON
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+  export BUILD_CAFFE2=ON
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+  export ATEN_THREADING=TBB
+  export USE_TBB=1
+elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+  export ATEN_THREADING=NATIVE
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
+
+# Enable LLVM dependency for TensorExpr testing
+export USE_LLVM=/opt/llvm
+export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 
 # TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda10.1-cudnn7-py3-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* ]]; then
     pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
   fi
+else
+  export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -79,8 +88,14 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
   POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  # Add the Windows-specific JNI
+  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
+      # Skip if we're not on Windows but haven't found a JAVA_HOME
+      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
+        break
+      fi
       echo "Found jni.h under $JH"
       export JAVA_HOME="$JH"
       export BUILD_JNI=ON
@@ -105,55 +120,42 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
+  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+    build_args+=("-DUSE_VULKAN=ON")
+  fi
+  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+  export USE_VULKAN=1
+  # shellcheck disable=SC1091
+  source /var/lib/jenkins/vulkansdk/setup-env.sh
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
-
-  # ROCm CI is using Caffe2 docker images, which needs these wrapper
-  # scripts to correctly use sccache.
-  if [ -n "${SCCACHE_BUCKET}" ]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ clang clang++; do
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
+  # hcc used to run out of memory, silently exiting without stopping
+  # the build process, leaving undefined symbols in the shared lib,
+  # causing undefined symbol errors when later running tests.
+  # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
+  if [ -z "$MAX_JOBS" ]; then
+    export MAX_JOBS=$(($(nproc) - 1))
   fi
 
+  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
+
+  # hipify sources
   python tools/amd_build/build_amd.py
-  python setup.py install --user
-
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
-
-  exit 0
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
-  if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi
@@ -161,14 +163,13 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
 
-if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-  export TORCH_CUDA_ARCH_LIST="6.0"
+# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
+  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
 fi
 
-# Patch required to build xla
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  git clone --recursive https://github.com/pytorch/xla.git
-  ./xla/scripts/apply_patches.sh
+if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+  export TORCH_CUDA_ARCH_LIST="6.0"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -176,106 +177,136 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
-
-# check that setup.py would fail with bad arguments
-echo "The next three invocations are expected to fail with invalid command error messages."
-( ! get_exit_code python setup.py bad_argument )
-( ! get_exit_code python setup.py clean] )
-( ! get_exit_code python setup.py clean bad_argument )
-
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-
-  # ppc64le build fails when WERROR=1
-  # set only when building other architectures
-  # only use for "python setup.py install" line
-  if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    WERROR=1 python setup.py install
-  else
-    python setup.py install
-  fi
-
-  # TODO: I'm not sure why, but somehow we lose verbose commands
-  set -x
-
-  if which sccache > /dev/null; then
-    echo 'PyTorch Build Statistics'
-    sccache --show-stats
-  fi
-
-  assert_git_not_dirty
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  python --version
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
-else
-  # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
-    mkdir -p c10/build
-    pushd c10/build
-    cmake ..
-    make -j
-    popd
-    assert_git_not_dirty
-  fi
-
-  # Test no-Python build
-  echo "Building libtorch"
-  # NB: Install outside of source directory (at the same level as the root
-  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-  mkdir -p ../cpp-build/caffe2
-  pushd ../cpp-build/caffe2
-  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
-  popd
+if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
+  export USE_PER_OPERATOR_HEADERS=0
 fi
 
-# Test XLA build
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  # TODO: Move this to Dockerfile.
+if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc5.4-build* ]]; then
+  export USE_GLOO_WITH_OPENSSL=ON
+fi
 
-  pip_install lark-parser
-
-  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
-  wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-  sudo apt-get -qq update
-
-  # Install clang-8 clang++-8 for xla
-  sudo apt-get -qq install clang-8 clang++-8
-
-  sudo apt-get -qq install npm
-  npm config set strict-ssl false
-  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
-  sudo apt-get install -qq nodejs
-
-  # XLA build requires Bazel
-  # We use bazelisk to avoid updating Bazel version manually.
-  sudo npm install -g @bazel/bazelisk
-  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
-
-  # Install bazels3cache for cloud cache
-  sudo npm install -g bazels3cache
-  BAZELS3CACHE="$(which bazels3cache)"
-  if [ -z "${BAZELS3CACHE}" ]; then
-    echo "Unable to find bazels3cache..."
-    exit 1
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
   fi
+fi
 
-  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
-  pushd xla
-  export CC=clang-8 CXX=clang++-8
-  # Use cloud cache to build when available.
-  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
+if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
+  set -e
 
-  python setup.py install
-  popd
-  assert_git_not_dirty
+  get_bazel
+
+  # first build torch for CPU-only
+  tools/bazel build --config=no-tty :torch
+  # then build everything with CUDA
+  tools/bazel build --config=no-tty --config=gpu :all
+else
+  # check that setup.py would fail with bad arguments
+  echo "The next three invocations are expected to fail with invalid command error messages."
+  ( ! get_exit_code python setup.py bad_argument )
+  ( ! get_exit_code python setup.py clean] )
+  ( ! get_exit_code python setup.py clean bad_argument )
+
+  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
+    # ppc64le build fails when WERROR=1
+    # set only when building other architectures
+    # only use for "python setup.py install" line
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+      WERROR=1 python setup.py bdist_wheel
+    else
+      python setup.py bdist_wheel
+    fi
+    python -mpip install dist/*.whl
+
+    # TODO: I'm not sure why, but somehow we lose verbose commands
+    set -x
+
+    if which sccache > /dev/null; then
+      echo 'PyTorch Build Statistics'
+      sccache --show-stats
+
+      sccache --show-stats | python -m tools.stats.upload_sccache_stats
+    fi
+
+    assert_git_not_dirty
+    # Copy ninja build logs to dist folder
+    mkdir -p dist
+    if [ -f build/.ninja_log ]; then
+      cp build/.ninja_log dist
+    fi
+
+    if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+      # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+      sudo rm -f /opt/cache/bin/cc
+      sudo rm -f /opt/cache/bin/c++
+      sudo rm -f /opt/cache/bin/gcc
+      sudo rm -f /opt/cache/bin/g++
+      pushd /opt/rocm/llvm/bin
+      if [[ -d original ]]; then
+        sudo mv original/clang .
+        sudo mv original/clang++ .
+      fi
+      sudo rm -rf original
+      popd
+
+      # exit before building custom test artifacts until we resolve cmake error:
+      # static library kineto_LIBRARY-NOTFOUND not found.
+      exit 0
+    fi
+
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
+    # Build custom operator tests.
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+    CUSTOM_OP_TEST="$PWD/test/custom_operator"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir -p "$CUSTOM_OP_BUILD"
+    pushd "$CUSTOM_OP_BUILD"
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build jit hook tests
+    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+    JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir -p "$JIT_HOOK_BUILD"
+    pushd "$JIT_HOOK_BUILD"
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build custom backend tests.
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    python --version
+    mkdir -p "$CUSTOM_BACKEND_BUILD"
+    pushd "$CUSTOM_BACKEND_BUILD"
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+  else
+    # Test no-Python build
+    echo "Building libtorch"
+    # NB: Install outside of source directory (at the same level as the root
+    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
+    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+    mkdir -p ../cpp-build/caffe2
+    pushd ../cpp-build/caffe2
+    WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
+    popd
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+  # export test times so that potential sharded tests that'll branch off this build will use consistent data
+  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
+  python test/run_test.py --export-past-test-times
 fi

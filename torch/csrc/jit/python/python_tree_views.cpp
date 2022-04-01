@@ -4,6 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <sstream>
 
@@ -24,7 +25,7 @@ c10::optional<std::string> maybeConvertToString(const py::object& obj) {
 struct SourceRangeFactory {
   SourceRangeFactory(
       std::string text,
-      py::object filename,
+      const py::object& filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
@@ -34,10 +35,13 @@ struct SourceRangeFactory {
         leading_whitespace_chars_(leading_whitespace_chars) {}
 
   SourceRange create(int line, int start_col, int end_col) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) = line_col_to_byte_offs(
         line,
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         start_col + leading_whitespace_chars_,
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
@@ -83,6 +87,12 @@ void initTreeViewBindings(PyObject* module) {
             self.highlight(stream);
             return stream.str();
           })
+      .def("__repr__", [](const SourceRange& self) { return self.str(); })
+      .def(
+          "__str__",
+          [](const SourceRange& self) {
+            return "SourceRange at:\n" + self.str();
+          })
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
@@ -94,7 +104,9 @@ void initTreeViewBindings(PyObject* module) {
             return SourceRange(self.source_, start, end);
           })
       .def_property_readonly("source", [](const SourceRangeFactory& self) {
-        return self.source_->text();
+        auto text_view = self.source_->text();
+        std::string text(text_view.begin(), text_view.end());
+        return text;
       });
 
   py::class_<TreeView>(m, "TreeView")
@@ -156,21 +168,55 @@ void initTreeViewBindings(PyObject* module) {
           }))
       .def("decl", [](const Def& def) { return def.decl(); })
       .def("name", [](const Def& def) { return def.name(); });
+  py::class_<Property, TreeView>(m, "Property")
+      .def(py::init([](const SourceRange& r,
+                       const Ident& name,
+                       const Def& getter,
+                       Def* setter) {
+        return Property::create(r, name, getter, wrap_maybe(r, setter));
+      }))
+      .def("name", [](const Property& property) { return property.name(); })
+      .def(
+          "getter_name",
+          [](const Property& property) { return property.getter().name(); })
+      .def("setter_name", [](const Property& property) {
+        if (property.setter().present()) {
+          return c10::optional<Ident>(property.setter().get().name());
+        }
+
+        return c10::optional<Ident>(c10::nullopt);
+      });
+
   py::class_<ClassDef, TreeView>(m, "ClassDef")
-      .def(py::init([](const Ident& name, std::vector<Stmt> body) {
+      .def(py::init([](const Ident& name,
+                       std::vector<Stmt> body,
+                       std::vector<Property> props,
+                       std::vector<Assign> assigns) {
         const auto& r = name.range();
         return ClassDef::create(
-            r, name, Maybe<Expr>::create(r), wrap_list(r, std::move(body)));
+            r,
+            name,
+            Maybe<Expr>::create(r),
+            wrap_list(r, std::move(body)),
+            wrap_list(r, std::move(props)),
+            wrap_list(r, std::move(assigns)));
       }));
+
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
         return Decl::create(
             r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
       }));
 
-  py::class_<Delete, Stmt>(m, "Delete").def(py::init([](Expr expr) {
-    return Delete::create(expr);
-  }));
+  py::class_<Delete, Stmt>(m, "Delete")
+      .def(py::init([](const SourceRange& range, std::vector<Expr> targets) {
+        return Delete::create(range, wrap_list(range, std::move(targets)));
+      }));
+
+  py::class_<WithItem, Expr>(m, "WithItem")
+      .def(py::init([](const SourceRange& range, const Expr& target, Var* var) {
+        return WithItem::create(range, target, wrap_maybe(range, var));
+      }));
 
   py::class_<Assign, Stmt>(m, "Assign")
       .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
@@ -190,20 +236,21 @@ void initTreeViewBindings(PyObject* module) {
             wrap_maybe(li.range(), type));
       }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
-      .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
-        const auto& r = lhs.range();
-        auto kind =
-            AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
-        return AugAssign::create(r, lhs, kind, rhs);
-      }));
+      .def(py::init(
+          [](const Expr& lhs, const std::string& kind_str, const Expr& rhs) {
+            const auto& r = lhs.range();
+            auto kind =
+                AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
+            return AugAssign::create(r, lhs, kind, rhs);
+          }));
   py::class_<Return, Stmt>(m, "Return")
       .def(py::init([](const SourceRange& range, Expr* value) {
         return Return::create(
             range, value ? *value : Expr(Compound::create(TK_NONE, range, {})));
       }));
   py::class_<Raise, Stmt>(m, "Raise")
-      .def(py::init([](const SourceRange& range, Expr* expr) {
-        return Raise::create(range, wrap_maybe(range, expr));
+      .def(py::init([](const SourceRange& range, const Expr& expr) {
+        return Raise::create(range, expr);
       }));
   py::class_<Assert, Stmt>(m, "Assert")
       .def(py::init([](const SourceRange& range, const Expr& test, Expr* msg) {
@@ -236,7 +283,16 @@ void initTreeViewBindings(PyObject* module) {
                        std::vector<Stmt> body) {
         return While::create(range, cond, wrap_list(range, std::move(body)));
       }));
-  py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange range,
+  py::class_<With, Stmt>(m, "With").def(
+      py::init([](const SourceRange& range,
+                  std::vector<WithItem> targets,
+                  std::vector<Stmt> body) {
+        return With::create(
+            range,
+            wrap_list(range, std::move(targets)),
+            wrap_list(range, std::move(body)));
+      }));
+  py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange& range,
                                                   std::vector<Expr>& targets,
                                                   std::vector<Expr>& itrs,
                                                   std::vector<Stmt> body) {
@@ -255,25 +311,26 @@ void initTreeViewBindings(PyObject* module) {
           [](const Ident& name) { return Var::create(name.range(), name); }))
       .def_property_readonly("name", [](const Var& var) { return var.name(); });
   py::class_<BinOp, Expr>(m, "BinOp")
-      .def(py::init([](std::string kind, const Expr& lhs, const Expr& rhs) {
-        return BinOp::create(lhs.range(), stringToKind(kind), lhs, rhs);
-      }));
+      .def(py::init(
+          [](const std::string& kind, const Expr& lhs, const Expr& rhs) {
+            return BinOp::create(lhs.range(), stringToKind(kind), lhs, rhs);
+          }));
   // NB: we take range here, because unary ops precede their exprs, so we need
   // to include them
   py::class_<UnaryOp, Expr>(m, "UnaryOp")
-      .def(py::init(
-          [](const SourceRange& range, std::string kind, const Expr& expr) {
-            auto resolved_kind = stringToKind(kind);
-            resolved_kind =
-                resolved_kind == '-' ? TK_UNARY_MINUS : resolved_kind;
-            return UnaryOp::create(range, resolved_kind, expr);
-          }));
+      .def(py::init([](const SourceRange& range,
+                       const std::string& kind,
+                       const Expr& expr) {
+        auto resolved_kind = stringToKind(kind);
+        resolved_kind = resolved_kind == '-' ? TK_UNARY_MINUS : resolved_kind;
+        return UnaryOp::create(range, resolved_kind, expr);
+      }));
   py::class_<Const, Expr>(m, "Const")
-      .def(py::init([](const SourceRange& range, std::string value) {
+      .def(py::init([](const SourceRange& range, const std::string& value) {
         return Const::create(range, value);
       }));
   py::class_<StringLiteral, Expr>(m, "StringLiteral")
-      .def(py::init([](const SourceRange& range, std::string value) {
+      .def(py::init([](const SourceRange& range, const std::string& value) {
         return StringLiteral::create(range, value);
       }));
   py::class_<Apply, Expr>(m, "Apply")
@@ -302,6 +359,14 @@ void initTreeViewBindings(PyObject* module) {
                        const Expr& target,
                        const Expr& iter) {
         return ListComp::create(range, elt, target, iter);
+      }));
+  py::class_<DictComp, Expr>(m, "DictComp")
+      .def(py::init([](const SourceRange& range,
+                       const Expr& key,
+                       const Expr& value,
+                       const Expr& target,
+                       const Expr& iter) {
+        return DictComp::create(range, key, value, target, iter);
       }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
@@ -337,7 +402,7 @@ void initTreeViewBindings(PyObject* module) {
                 wrap_maybe(range, step));
           }));
   py::class_<Starred, Expr>(m, "Starred")
-      .def(py::init([](const SourceRange& range, Expr expr) {
+      .def(py::init([](const SourceRange& range, const Expr& expr) {
         return Starred::create(range, expr);
       }));
   py::class_<Maybe<Expr>, TreeView>(m, "EmptyTypeAnnotation")

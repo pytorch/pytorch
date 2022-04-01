@@ -336,8 +336,28 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 // ============================================================================
 
-inline Tensor gelu(const Tensor& input) {
-  return torch::gelu(input);
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
+inline Tensor gelu(const Tensor& input, string approximate) {
+  return torch::gelu(input, approximate);
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+inline Tensor gelu(const Tensor& input, const GELUFuncOptions& options = {}) {
+  return detail::gelu(input, options.approximate());
+}
+
+// ============================================================================
+
+inline Tensor silu(const Tensor& input) {
+  return torch::silu(input);
+}
+
+// ============================================================================
+
+inline Tensor mish(const Tensor& input) {
+  return torch::mish(input);
 }
 
 // ============================================================================
@@ -380,7 +400,11 @@ inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor relu6(Tensor input, bool inplace) {
-  return detail::hardtanh(input, /*min_val=*/0, /*max_val=*/6, /*inplace=*/inplace);
+  if (inplace) {
+    return torch::relu6_(input);
+  } else {
+    return torch::relu6(input);
+  }
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -591,7 +615,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& k_proj_weight = {},
   const Tensor& v_proj_weight = {},
   const Tensor& static_k = {},
-  const Tensor& static_v = {}) {
+  const Tensor& static_v = {},
+  bool average_attn_weights = true) {
   namespace F = torch::nn::functional;
 
   const auto query_sizes = query.sizes();
@@ -629,8 +654,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 
       if (!key.defined()) {
         TORCH_INTERNAL_ASSERT(!value.defined());
-        k = {};
-        v = {};
+        k.reset();
+        v.reset();
       } else {
         // This is inline in_proj function with in_proj_weight and in_proj_bias
         _b = in_proj_bias;
@@ -674,23 +699,29 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       v = F::linear(value, _w, _b);
     }
   } else {
-    auto q_proj_weight_non_opt = q_proj_weight;
-    auto sizes = q_proj_weight_non_opt.sizes();
-    auto len1 = sizes[0];
-    auto len2 = sizes[1];
-    TORCH_CHECK(len1 == embed_dim && len2 == query.size(-1));
+    const auto& q_proj_weight_non_opt = q_proj_weight;
+    {
+      const auto sizes = q_proj_weight_non_opt.sizes();
+      const auto len1 = sizes[0];
+      const auto len2 = sizes[1];
+      TORCH_CHECK(len1 == embed_dim && len2 == query.size(-1));
+    }
 
-    auto k_proj_weight_non_opt = k_proj_weight;
-    sizes = k_proj_weight_non_opt.sizes();
-    len1 = sizes[0];
-    len2 = sizes[1];
-    TORCH_CHECK(len1 == embed_dim && len2 == key.size(-1));
+    const auto& k_proj_weight_non_opt = k_proj_weight;
+    {
+      const auto sizes = k_proj_weight_non_opt.sizes();
+      const auto len1 = sizes[0];
+      const auto len2 = sizes[1];
+      TORCH_CHECK(len1 == embed_dim && len2 == key.size(-1));
+    }
 
-    auto v_proj_weight_non_opt = v_proj_weight;
-    sizes = v_proj_weight_non_opt.sizes();
-    len1 = sizes[0];
-    len2 = sizes[1];
-    TORCH_CHECK(len1 == embed_dim && len2 == value.size(-1));
+    const auto& v_proj_weight_non_opt = v_proj_weight;
+    {
+      const auto sizes = v_proj_weight_non_opt.sizes();
+      const auto len1 = sizes[0];
+      const auto len2 = sizes[1];
+      TORCH_CHECK(len1 == embed_dim && len2 == value.size(-1));
+    }
 
     if (in_proj_bias.defined()) {
       q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, 0, embed_dim));
@@ -815,6 +846,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     );
     attn_output_weights = attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   attn_output_weights = F::softmax(attn_output_weights, /*dim=*/-1);
   attn_output_weights = F::dropout(attn_output_weights, F::DropoutFuncOptions().p(dropout_p).training(training));
   auto attn_output = torch::bmm(attn_output_weights, v);
@@ -822,9 +854,12 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   attn_output = attn_output.transpose(0, 1).contiguous().view({tgt_len, bsz, embed_dim});
   attn_output = F::linear(attn_output, out_proj_weight, out_proj_bias);
   if (need_weights) {
-    // average attention weights over heads
     attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
-    return std::make_tuple(attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads);
+    if (average_attn_weights) {
+      // average attention weights over heads
+      attn_output_weights = attn_output_weights.sum(/*dim=*/1) / num_heads;
+    }
+    return std::make_tuple(attn_output, attn_output_weights);
   } else {
     return std::make_tuple(attn_output, Tensor());
   }
@@ -858,7 +893,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     options.k_proj_weight(),
     options.v_proj_weight(),
     options.static_k(),
-    options.static_v()
+    options.static_v(),
+    options.average_attn_weights()
   );
 }
 

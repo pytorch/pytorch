@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import functools
 import numpy as np
 import timeit
@@ -12,9 +7,8 @@ import copy
 import ast
 
 # needs to be imported after torch
-import cpp_extension # noqa
+import torch.utils.cpp_extension as cpp_extension  # noqa: F401
 
-import cpp_extension # noqa
 import benchmark_utils
 from collections import namedtuple
 
@@ -124,6 +118,13 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
 
         op._set_backward_test(run_backward)
         op.init(**init_dict)
+        op.extract_inputs_tuple()
+
+        if not run_backward:
+            for _, attr in vars(op).items():
+                if isinstance(attr, torch.nn.Module):
+                    for param in attr.parameters():
+                        param.requires_grad = False
 
         input_name = None
 
@@ -250,7 +251,7 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False
+        cuda_sync = 'cuda' in test_case.test_config.test_name
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward

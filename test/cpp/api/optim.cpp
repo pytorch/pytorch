@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/optim_baseline.h>
@@ -26,7 +27,7 @@ bool test_optimizer_xor(Options options) {
       Linear(8, 1),
       Functional(torch::sigmoid));
 
-  const int64_t kBatchSize = 50;
+  const int64_t kBatchSize = 200;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
   OptimizerClass optimizer(model->parameters(), options);
@@ -36,7 +37,7 @@ bool test_optimizer_xor(Options options) {
   while (running_loss > 0.1) {
     auto inputs = torch::empty({kBatchSize, 2});
     auto labels = torch::empty({kBatchSize});
-    for (size_t i = 0; i < kBatchSize; i++) {
+    for (const auto i : c10::irange(kBatchSize)) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
@@ -56,6 +57,7 @@ bool test_optimizer_xor(Options options) {
 
     torch::Tensor loss = step(optimizer, model, inputs, labels);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
       std::cout << "Loss is too high after epoch " << epoch << ": "
@@ -111,7 +113,7 @@ void check_exact_values(
   torch::Tensor input =
       torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64).reshape({3, 2});
 
-  for (size_t i = 0; i < kIterations; ++i) {
+  for (const auto i : c10::irange(kIterations)) {
     optimizer.zero_grad();
     auto output = model->forward(input);
     auto loss = output.sum();
@@ -123,7 +125,7 @@ void check_exact_values(
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
-      for (size_t p = 0; p < parameters.size(); ++p) {
+      for (const auto p : c10::irange(parameters.size())) {
         ASSERT_TRUE(parameters[p]->defined());
         // Always compare using double dtype, regardless of the original dtype of the tensors
         auto computed = parameters[p]->flatten().to(torch::kFloat64);
@@ -142,7 +144,8 @@ void check_exact_values(
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
-  for (size_t i = 0; i < 3; i++) {
+  for (const auto i : c10::irange(3)) {
+    (void)i; // Suppress unused variable warning
     params.push_back(torch::randn(10));
   }
   auto optimizer = Adagrad(params, options);
@@ -151,9 +154,10 @@ TEST(OptimTest, OptimizerAccessors) {
   ASSERT_TRUE(options == options_);
   // test for param_groups() with non-const reference return
   auto& params_groups = optimizer.param_groups();
+  // NOLINTNEXTLINE(modernize-use-emplace)
   params_groups.push_back(OptimizerParamGroup(params));
   auto& params_1 = params_groups[1].params();
-  for (size_t i = 0; i < params_1.size(); i++) {
+  for (const auto i : c10::irange(params_1.size())) {
     torch::equal(params[i], params_1[i]);
   }
 
@@ -174,18 +178,15 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-#define OLD_INTERFACE_WARNING_CHECK(func) \
-{ \
-  std::stringstream buffer;\
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());\
-  func;\
-  ASSERT_EQ(\
-    torch::test::count_substr_occurrences(\
-      buffer.str(),\
-      "will be removed"\
-    ),\
-  1);\
-}
+#define OLD_INTERFACE_WARNING_CHECK(func)       \
+  {                                             \
+    torch::test::WarningCapture warnings;       \
+    func;                                       \
+    ASSERT_EQ(                                  \
+        torch::test::count_substr_occurrences(  \
+            warnings.str(), "will be removed"), \
+        1);                                     \
+  }
 
 struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
   MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
@@ -198,12 +199,14 @@ TEST(OptimTest, OldInterface) {
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
     explicit MyOptimizer(
         std::vector<at::Tensor> params, MyOptimizerOptions defaults = {}) :
+          // NOLINTNEXTLINE(performance-move-const-arg)
           Optimizer({std::move(OptimizerParamGroup(params))}, std::make_unique<MyOptimizerOptions>(defaults)) {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
   {
     MyOptimizer optimizer(parameters);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, parameters.size());
@@ -212,6 +215,7 @@ TEST(OptimTest, OldInterface) {
     std::vector<at::Tensor> params;
     MyOptimizer optimizer(params);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, 0);
@@ -223,7 +227,7 @@ TEST(OptimTest, OldInterface) {
 
     std::vector<torch::Tensor> params_;
     OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
-    for (size_t p = 0; p < size; ++p) {
+    for (const auto p : c10::irange(size)) {
       ASSERT_TRUE(params_[p].allclose(parameters[p]));
     }
   }
@@ -231,6 +235,7 @@ TEST(OptimTest, OldInterface) {
     Linear linear(3, 4);
     MyOptimizer optimizer(linear->parameters());
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, linear->parameters().size());
@@ -284,6 +289,31 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
+}
+
+TEST(OptimTest, XORConvergence_AdamW) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(AdamWOptions(0.1)));
+}
+
+TEST(OptimTest, XORConvergence_AdamWWithAmsgrad) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(
+      AdamWOptions(0.1).amsgrad(true)));
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamW) {
+  check_exact_values<AdamW>(AdamWOptions(1.0), expected_parameters::AdamW());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithoutWeightDecay) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).weight_decay(0),
+      expected_parameters::AdamW_without_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithAMSGrad) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).amsgrad(true),
+      expected_parameters::AdamW_with_amsgrad());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
@@ -400,7 +430,7 @@ TEST(OptimTest, ExternalVectorOfParameters) {
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+    parameter.mutable_grad() = torch::ones_like(parameter);
   }
 
   SGD optimizer(parameters, 1.0);
@@ -420,7 +450,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+    parameter.mutable_grad() = torch::ones_like(parameter);
   }
 
   LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
@@ -429,4 +459,52 @@ TEST(OptimTest, AddParameter_LBFGS) {
   optimizer.step([]() { return torch::tensor(1); });
 
   // REQUIRE this doesn't throw
+}
+
+//Check whether the learning rate of the parameter groups in the optimizer are the
+//same as the expected learning rates given in the epoch:learning rate map
+void check_lr_change(
+    Optimizer& optimizer,
+    LRScheduler& lr_scheduler,
+    std::map<unsigned, double> expected_epoch_lrs) {
+
+  //Find maximum epoch in map
+  unsigned kIterations =
+    std::max_element(expected_epoch_lrs.begin(),
+                     expected_epoch_lrs.end(),
+                     [] (const std::pair<unsigned, double>& a,
+                         const std::pair<unsigned, double>& b) -> bool {
+                       return a.second > b.second;
+                     })->first;
+
+  for(unsigned i = 0; i <= kIterations; i++) {
+    const auto epoch_iter = expected_epoch_lrs.find(i);
+    if(epoch_iter != expected_epoch_lrs.end())
+    {
+      //Compare the similarity of the two floating point learning rates
+      ASSERT_TRUE(fabs(epoch_iter->second - optimizer.param_groups()[0].options().get_lr()) <
+                  std::numeric_limits<double>::epsilon());
+    }
+    optimizer.step();
+    lr_scheduler.step();
+  }
+
+}
+
+TEST(OptimTest, CheckLRChange_StepLR_Adam) {
+
+  torch::Tensor parameters = torch::zeros({1});
+  auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
+
+  const unsigned step_size = 20;
+  const double gamma = 0.5;
+  StepLR step_lr_scheduler(optimizer, step_size, gamma);
+
+  //The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {
+    {1, 1e-3},
+    {25, 5e-4}
+  };
+
+  check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
 }

@@ -30,7 +30,9 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs);
-  ~AdagradOptions() = default;
+  ~AdagradOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
@@ -41,7 +43,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs);
-  ~AdagradParamState() = default;
+  ~AdagradParamState() override = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {
@@ -66,6 +68,7 @@ class TORCH_API Adagrad : public Optimizer {
 
   explicit Adagrad(
       std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       AdagradOptions defaults = {}) : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;

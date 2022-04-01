@@ -1,17 +1,17 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "x"
-    input: "y"
+    input: "onnx::Equal_0"
+    input: "onnx::Equal_1"
     output: "2"
     name: "Equal_0"
     op_type: "Equal"
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "onnx::Equal_0"
     type {
       tensor_type {
         elem_type: 6
@@ -33,7 +33,7 @@ graph {
     }
   }
   input {
-    name: "y"
+    name: "onnx::Equal_1"
     type {
       tensor_type {
         elem_type: 6

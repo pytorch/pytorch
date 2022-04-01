@@ -1,5 +1,5 @@
 node {
-  name: "input/input"
+  name: "input/x"
   op: "IO Node"
   attr {
     key: "_output_shapes"
@@ -26,7 +26,7 @@ node {
 node {
   name: "output/output.1"
   op: "IO Node"
-  input: "myLinear/Linear[l]/22"
+  input: "myLinear/Linear[l]/18"
   attr {
     key: "_output_shapes"
     value {
@@ -50,9 +50,9 @@ node {
   }
 }
 node {
-  name: "myLinear/Linear[l]/bias/17"
+  name: "myLinear/Linear[l]/bias/bias"
   op: "prim::GetAttr"
-  input: "myLinear/Linear[l]/weight/14"
+  input: "myLinear/Linear[l]/weight/l"
   attr {
     key: "attr"
     value {
@@ -61,9 +61,9 @@ node {
   }
 }
 node {
-  name: "myLinear/Linear[l]/weight/18"
+  name: "myLinear/Linear[l]/weight/weight"
   op: "prim::GetAttr"
-  input: "myLinear/Linear[l]/weight/14"
+  input: "myLinear/Linear[l]/weight/l"
   attr {
     key: "attr"
     value {
@@ -72,59 +72,11 @@ node {
   }
 }
 node {
-  name: "myLinear/Linear[l]/19"
-  op: "aten::t"
-  input: "myLinear/Linear[l]/weight/18"
-  attr {
-    key: "_output_shapes"
-    value {
-      list {
-        shape {
-          dim {
-            size: 3
-          }
-          dim {
-            size: 5
-          }
-        }
-      }
-    }
-  }
-  attr {
-    key: "attr"
-    value {
-      s: "{}"
-    }
-  }
-}
-node {
-  name: "myLinear/Linear[l]/20"
-  op: "prim::Constant"
-  attr {
-    key: "attr"
-    value {
-      s: "{ value : 1}"
-    }
-  }
-}
-node {
-  name: "myLinear/Linear[l]/21"
-  op: "prim::Constant"
-  attr {
-    key: "attr"
-    value {
-      s: "{ value : 1}"
-    }
-  }
-}
-node {
-  name: "myLinear/Linear[l]/22"
-  op: "aten::addmm"
-  input: "myLinear/Linear[l]/bias/17"
-  input: "input/input"
-  input: "myLinear/Linear[l]/19"
-  input: "myLinear/Linear[l]/20"
-  input: "myLinear/Linear[l]/21"
+  name: "myLinear/Linear[l]/18"
+  op: "aten::linear"
+  input: "input/x"
+  input: "myLinear/Linear[l]/weight/weight"
+  input: "myLinear/Linear[l]/bias/bias"
   attr {
     key: "_output_shapes"
     value {

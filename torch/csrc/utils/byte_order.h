@@ -1,8 +1,8 @@
 #pragma once
 
-#include <TH/THHalf.h>
+#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <cstddef>
 #include <cstdint>
 
@@ -32,7 +32,7 @@ TORCH_API void THP_decodeInt64Buffer(
     THPByteOrder order,
     size_t len);
 TORCH_API void THP_decodeHalfBuffer(
-    THHalf* dst,
+    c10::Half* dst,
     const uint8_t* src,
     THPByteOrder order,
     size_t len);
@@ -53,6 +53,16 @@ TORCH_API void THP_decodeBoolBuffer(
     size_t len);
 TORCH_API void THP_decodeBFloat16Buffer(
     at::BFloat16* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_decodeComplexFloatBuffer(
+    c10::complex<float>* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_decodeComplexDoubleBuffer(
+    c10::complex<double>* dst,
     const uint8_t* src,
     THPByteOrder order,
     size_t len);
@@ -80,6 +90,16 @@ TORCH_API void THP_encodeFloatBuffer(
 TORCH_API void THP_encodeDoubleBuffer(
     uint8_t* dst,
     const double* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_encodeComplexloatBuffer(
+    uint8_t* dst,
+    const c10::complex<float>* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_encodeComplexDoubleBuffer(
+    uint8_t* dst,
+    const c10::complex<double>* src,
     THPByteOrder order,
     size_t len);
 

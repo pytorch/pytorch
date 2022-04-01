@@ -6,11 +6,15 @@ if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   option(BUILD_SHARED_LIBS "Build shared libs." ON)
 endif()
 
-if(BUILD_TEST)
+if(BUILD_TEST AND NOT BUILD_LITE_INTERPRETER)
   add_library(
       caffe2_module_test_dynamic
       ${CMAKE_CURRENT_SOURCE_DIR}/module_test_dynamic.cc)
 
+  if(HAVE_SOVERSION)
+    set_target_properties(caffe2_module_test_dynamic PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
   target_link_libraries(caffe2_module_test_dynamic torch_library)
   install(TARGETS caffe2_module_test_dynamic DESTINATION lib)
   if(MSVC AND BUILD_SHARED_LIBS)

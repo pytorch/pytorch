@@ -4,12 +4,20 @@
 #include <stdint.h>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 
+#include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
 
 namespace c10 {
 
@@ -25,15 +33,16 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-#define DEFINE_IMPLICIT_CTOR(type, name)      \
-  Scalar(type vv) : Scalar(vv, true) { }
+#define DEFINE_IMPLICIT_CTOR(type, name) \
+  Scalar(type vv) : Scalar(vv, true) {}
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
 
 #undef DEFINE_IMPLICIT_CTOR
 
   // Value* is both implicitly convertible to SymbolicVariable and bool which
-  // causes ambiguosity error. Specialized constructor for bool resolves this
+  // causes ambiguity error. Specialized constructor for bool resolves this
   // problem.
   template <
       typename T,
@@ -43,45 +52,35 @@ class C10_API Scalar {
     v.i = convert<int64_t, bool>(vv);
   }
 
-#define DEFINE_IMPLICIT_COMPLEX_CTOR(type, name, member) \
-  Scalar(type vv) : tag(Tag::HAS_##member) {             \
-    v.member[0] = c10::convert<double>(vv.real());       \
-    v.member[1] = c10::convert<double>(vv.imag());       \
-  }
-
-  DEFINE_IMPLICIT_COMPLEX_CTOR(at::ComplexHalf, ComplexHalf, z)
-  DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<float>, ComplexFloat, z)
-  DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<double>, ComplexDouble, z)
-
-#undef DEFINE_IMPLICIT_COMPLEX_CTOR
-
-#define DEFINE_ACCESSOR(type, name)                       \
-  type to##name() const {                                 \
-    if (Tag::HAS_d == tag) {                              \
-      return checked_convert<type, double>(v.d, #type);   \
-    } else if (Tag::HAS_z == tag) {                       \
-      return checked_convert<type, std::complex<double>>( \
-          {v.z[0], v.z[1]}, #type);                       \
-    } if (Tag::HAS_b == tag) {                            \
-      return checked_convert<type, bool>(v.i, #type);     \
-    } else {                                              \
-      return checked_convert<type, int64_t>(v.i, #type);  \
-    }                                                     \
+#define DEFINE_ACCESSOR(type, name)                                   \
+  type to##name() const {                                             \
+    if (Tag::HAS_d == tag) {                                          \
+      return checked_convert<type, double>(v.d, #type);               \
+    } else if (Tag::HAS_z == tag) {                                   \
+      return checked_convert<type, c10::complex<double>>(v.z, #type); \
+    }                                                                 \
+    if (Tag::HAS_b == tag) {                                          \
+      return checked_convert<type, bool>(v.i, #type);                 \
+    } else {                                                          \
+      return checked_convert<type, int64_t>(v.i, #type);              \
+    }                                                                 \
   }
 
   // TODO: Support ComplexHalf accessor
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ACCESSOR)
 
   // also support scalar.to<int64_t>();
+  // Deleted for unsupported types, but specialized below for supported types
   template <typename T>
-  T to() const;
+  T to() const = delete;
 
 #undef DEFINE_ACCESSOR
   bool isFloatingPoint() const {
     return Tag::HAS_d == tag;
   }
 
-  C10_DEPRECATED_MESSAGE("isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
+  C10_DEPRECATED_MESSAGE(
+      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
   bool isIntegral() const {
     return Tag::HAS_i == tag;
   }
@@ -97,6 +96,49 @@ class C10_API Scalar {
   }
 
   Scalar operator-() const;
+  Scalar conj() const;
+  Scalar log() const;
+
+  template <
+      typename T,
+      typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+  bool equal(T num) const {
+    if (isComplex()) {
+      auto val = v.z;
+      return (val.real() == num) && (val.imag() == T());
+    } else if (isFloatingPoint()) {
+      return v.d == num;
+    } else if (isIntegral(/*includeBool=*/false)) {
+      return v.i == num;
+    } else {
+      // boolean scalar does not equal to a non boolean value
+      return false;
+    }
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+  bool equal(T num) const {
+    if (isComplex()) {
+      return v.z == num;
+    } else if (isFloatingPoint()) {
+      return (v.d == num.real()) && (num.imag() == T());
+    } else if (isIntegral(/*includeBool=*/false)) {
+      return (v.i == num.real()) && (num.imag() == T());
+    } else {
+      // boolean scalar does not equal to a non boolean value
+      return false;
+    }
+  }
+
+  bool equal(bool num) const {
+    if (isBoolean()) {
+      return static_cast<bool>(v.i) == num;
+    } else {
+      return false;
+    }
+  }
 
   ScalarType type() const {
     if (isComplex()) {
@@ -113,46 +155,55 @@ class C10_API Scalar {
   }
 
  private:
-    template<typename T,
-             typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_i) {
-      v.i = convert<decltype(v.i), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<
+          std::is_integral<T>::value && !std::is_same<T, bool>::value,
+          bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_i) {
+    v.i = convert<decltype(v.i), T>(vv);
+  }
 
-    template<typename T,
-             typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_d) {
-      v.d = convert<decltype(v.d), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<
+          !std::is_integral<T>::value && !c10::is_complex<T>::value,
+          bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_d) {
+    v.d = convert<decltype(v.d), T>(vv);
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<c10::is_complex<T>::value, bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_z) {
+    v.z = convert<decltype(v.z), T>(vv);
+  }
 
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
 
   enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b };
   Tag tag;
-  union {
+  union v_t {
     double d;
     int64_t i;
-    // Can't do put std::complex in the union, because it triggers
-    // an nvcc bug:
-    //    error: designator may not specify a non-POD subobject
-    double z[2];
+    c10::complex<double> z;
+    v_t() {} // default constructor
   } v;
 };
 
-// define the scalar.to<int64_t>() specializations
-template <typename T>
-inline T Scalar::to() const {
-  throw std::runtime_error("to() cast to unexpected type.");
-}
+using OptionalScalarRef = c10::OptionalRef<Scalar>;
 
-#define DEFINE_TO(T, name)    \
-  template <>                 \
-  inline T Scalar::to<T>() const {  \
-    return to##name();        \
+// define the scalar.to<int64_t>() specializations
+#define DEFINE_TO(T, name)         \
+  template <>                      \
+  inline T Scalar::to<T>() const { \
+    return to##name();             \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
+
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

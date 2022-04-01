@@ -253,6 +253,7 @@ bool PSRoIPoolOp<float, CUDAContext>::RunOnDevice() {
       output_size, X.data<float>(), spatial_scale_, X.dim32(1), X.dim32(2),
       X.dim32(3), pooled_height_, pooled_width_, R.data<float>(), output_dim_,
       group_size_, Y->mutable_data<float>(), A->mutable_data<int>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
 
@@ -276,6 +277,7 @@ bool PSRoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
       dY.size(), dY.data<float>(), A.data<int>(), R.dim32(0), spatial_scale_,
       X.dim32(1), X.dim32(2), X.dim32(3), pooled_height_, pooled_width_,
       output_dim_, dX->mutable_data<float>(), R.data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
 

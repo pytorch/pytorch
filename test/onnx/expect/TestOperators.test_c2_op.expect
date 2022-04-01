@@ -1,12 +1,12 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
-    input: "2"
-    input: "3"
+    input: "_caffe2::GenerateProposals_0"
+    input: "_caffe2::GenerateProposals_1"
+    input: "_caffe2::GenerateProposals_2"
+    input: "_caffe2::GenerateProposals_3"
     output: "4"
     output: "5"
     name: "GenerateProposals_0"
@@ -65,7 +65,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "_caffe2::GenerateProposals_0"
     type {
       tensor_type {
         elem_type: 1
@@ -87,7 +87,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "_caffe2::GenerateProposals_1"
     type {
       tensor_type {
         elem_type: 1
@@ -109,7 +109,7 @@ graph {
     }
   }
   input {
-    name: "2"
+    name: "_caffe2::GenerateProposals_2"
     type {
       tensor_type {
         elem_type: 1
@@ -125,7 +125,7 @@ graph {
     }
   }
   input {
-    name: "3"
+    name: "_caffe2::GenerateProposals_3"
     type {
       tensor_type {
         elem_type: 1
@@ -147,10 +147,10 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 0
+            dim_param: "GenerateProposals4_dim_0"
           }
           dim {
-            dim_value: 5
+            dim_param: "GenerateProposals4_dim_1"
           }
         }
       }
@@ -163,7 +163,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 0
+            dim_param: "GenerateProposals5_dim_0"
           }
         }
       }

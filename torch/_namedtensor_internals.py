@@ -1,4 +1,3 @@
-from torch._six import PY2
 from collections import OrderedDict
 
 """
@@ -42,10 +41,7 @@ def namer_api_name(inplace):
 
 
 def is_ellipsis(item):
-    if PY2:
-        return item == '...'
-    else:
-        return item == Ellipsis or item == '...'
+    return item == Ellipsis or item == '...'
 
 def single_ellipsis_index(names, fn_name):
     ellipsis_indices = [i for i, name in enumerate(names) if is_ellipsis(name)]

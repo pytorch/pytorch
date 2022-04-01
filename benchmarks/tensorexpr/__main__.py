@@ -4,14 +4,18 @@ from . import benchmark
 import os
 from . import tensor_engine
 
-# import normalization
-
-# import reduction
-
-# import softmax
-# import pooling
-# import conv
-# import matmul
+from . import attention      # noqa: F401
+from . import broadcast      # noqa: F401
+from . import concat         # noqa: F401
+# from . import conv           # noqa: F401
+from . import elementwise    # noqa: F401
+from . import matmul         # noqa: F401
+# from . import normalization  # noqa: F401
+# from . import pooling        # noqa: F401
+from . import reduction      # noqa: F401
+from . import softmax        # noqa: F401
+from . import rnn_eltwise    # noqa: F401
+from . import swish          # noqa: F401
 
 
 def main():
@@ -41,6 +45,20 @@ Works only with Python3.\n A few examples:
         type=str,
         default="fwd,both",
         help="a comma separated list of running modes",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="float32",
+        help="a comma separated list of Data Types: {float32[default], float16}",
+    )
+    parser.add_argument(
+        "--input-iter",
+        type=str,
+        default=None,
+        help="a comma separated list of of Tensor dimensions that includes a start, \
+              stop, and increment that can be constant or a power of 2 \
+              {start:stop:inc,start:stop:pow2}",
     )
     parser.add_argument(
         "--engine",
@@ -76,7 +94,7 @@ Works only with Python3.\n A few examples:
         "--cuda_fuser",
         type=str,
         default="te",
-        help="The Cuda fuser backend to use: one of {te, old, none}",
+        help="The Cuda fuser backend to use: one of {te, nvf, old, none}",
     )
     parser.add_argument(
         "--output",
@@ -84,13 +102,69 @@ Works only with Python3.\n A few examples:
         default="stdout",
         help="The output format of the benchmark run {stdout[default], json}",
     )
+    parser.add_argument(
+        "--print-ir",
+        action='store_true',
+        help="Print the IR graph of the Fusion.",
+    )
+    parser.add_argument(
+        "--print-kernel",
+        action='store_true',
+        help="Print generated kernel(s).",
+    )
+    parser.add_argument(
+        "--no-dynamic-shape",
+        action='store_true',
+        help="Disable shape randomization in dynamic benchmarks.",
+    )
+    parser.add_argument(
+        "--cpu_fusion",
+        default=False,
+        action='store_true',
+        help="Enable CPU fusion.",
+    )
+    parser.add_argument(
+        "--cat_wo_conditionals",
+        default=False,
+        action='store_true',
+        help="Enable CAT wo conditionals.",
+    )
 
     args = parser.parse_args()
 
     if args.cuda_fuser == "te":
         import torch
-
+        torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_profiling_mode(True)
+    elif args.cuda_fuser == "old":
+        import torch
+        torch._C._jit_set_profiling_executor(False)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+    elif args.cuda_fuser == "nvf":
+        import torch
+        torch._C._jit_set_profiling_executor(True)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(True)
+        torch._C._jit_set_profiling_mode(True)
+    else :
+        raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
+
+    if args.cpu_fusion:
+        import torch
+        torch._C._jit_override_can_fuse_on_cpu(True)
+    else:
+        import torch
+        torch._C._jit_override_can_fuse_on_cpu(False)
+
+    if args.cat_wo_conditionals:
+        import torch
+        torch._C._jit_cat_wo_conditionals(True)
+    else:
+        import torch
+        torch._C._jit_cat_wo_conditionals(False)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
@@ -122,13 +196,58 @@ Works only with Python3.\n A few examples:
 
     modes = args.mode.split(",")
 
+    datatypes = args.dtype.split(",")
+    for index, dtype in enumerate(datatypes):
+        datatypes[index] = getattr(torch, dtype)
+        if not datatypes[index] :
+            raise AttributeError("DataType: {} is not valid!".format(dtype))
+
     tensor_engine.set_engine_mode(args.engine)
 
     def run_default_configs(bench_cls, allow_skip=True):
-        for mode, device, config in itertools.product(
-            modes, devices, bench_cls.default_configs()
+        for mode, device, dtype, config in itertools.product(
+            modes, devices, datatypes, bench_cls.default_configs()
         ):
-            bench = bench_cls(mode, device, *config)
+            bench = bench_cls(mode, device, dtype, *config)
+            bench.output_type = args.output
+            bench.jit_mode = args.jit_mode
+            if not bench.is_supported():
+                if allow_skip:
+                    continue
+                else:
+                    raise ValueError(
+                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
+                    )
+            bench.run(args)
+
+    def run_with_input_iter(bench_cls, input_iter, allow_skip=True):
+        tensor_dim_specs = input_iter.split(',')
+        tensor_dim_specs = [dim.split(':') for dim in tensor_dim_specs]
+
+        configs = []
+        for start, stop, inc in tensor_dim_specs:
+            dim_list = []
+            if inc == 'pow2' :
+                curr = int(start)
+                while curr <= int(stop) :
+                    dim_list.append(curr)
+                    curr <<= 1
+            elif inc == 'pow2+1' :
+                curr = int(start)
+                while curr <= int(stop) :
+                    dim_list.append(curr)
+                    curr -= 1
+                    curr <<= 1
+                    curr += 1
+            else :
+                dim_list = list(range(int(start), int(stop) + int(inc), int(inc)))
+            configs.append(dim_list)
+        configs = itertools.product(*configs)
+
+        for mode, device, dtype, config in itertools.product(
+            modes, devices, datatypes, list(configs)
+        ):
+            bench = bench_cls(mode, device, dtype, *config)
             bench.output_type = args.output
             bench.jit_mode = args.jit_mode
             if not bench.is_supported():
@@ -152,7 +271,12 @@ Works only with Python3.\n A few examples:
             for bench_cls in benchmark_classes:
                 if name in bench_cls.module():
                     match_class_name = True
-                    run_default_configs(bench_cls, allow_skip=True)
+                    if (args.input_iter is not None) and bench_cls.input_iterable() :
+                        run_with_input_iter(bench_cls, args.input_iter, allow_skip=True)
+                    else :
+                        if args.input_iter is not None :
+                            print("WARNING: Incompatible benchmark class called with input_iter arg: {}".format(name))
+                        run_default_configs(bench_cls, allow_skip=True)
 
             if match_class_name:
                 continue
@@ -179,9 +303,10 @@ Works only with Python3.\n A few examples:
                             config[i] = value
                         except ValueError:
                             pass
-                    bench = bench_cls(*config)
+                    # TODO: output dtype in the config and  parse it back from the str
+                    bench = bench_cls(config[0], config[1], torch.float32, *config[2:])
                     bench.jit_mode = args.jit_mode
-                    bench.output_type = args.output_type
+                    bench.output_type = args.output
                     bench.run(args)
 
             if not match_class_name:

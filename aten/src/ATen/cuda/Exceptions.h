@@ -2,9 +2,16 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+#include <c10/macros/Export.h>
+
+#ifdef CUDART_VERSION
+#include <cusolver_common.h>
+#endif
+
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
+
 
 namespace c10 {
 
@@ -14,24 +21,27 @@ class CuDNNError : public c10::Error {
 
 }  // namespace c10
 
+#define AT_CUDNN_CHECK_WITH_SHAPES(EXPR, ...) AT_CUDNN_CHECK(EXPR, "\n", ##__VA_ARGS__)
+
 // See Note [CHECK macro]
-#define AT_CUDNN_CHECK(EXPR)                                                                  \
-  do {                                                                                        \
-    cudnnStatus_t status = EXPR;                                                              \
-    if (status != CUDNN_STATUS_SUCCESS) {                                                     \
-      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                             \
-        TORCH_CHECK_WITH(CuDNNError, false,                                                   \
-            "cuDNN error: ",                                                                  \
-            cudnnGetErrorString(status),                                                      \
-            ". This error may appear if you passed in a non-contiguous input.");              \
-      } else {                                                                                \
-        TORCH_CHECK_WITH(CuDNNError, false, "cuDNN error: ", cudnnGetErrorString(status));    \
-      }                                                                                       \
-    }                                                                                         \
+#define AT_CUDNN_CHECK(EXPR, ...)                                                               \
+  do {                                                                                          \
+    cudnnStatus_t status = EXPR;                                                                \
+    if (status != CUDNN_STATUS_SUCCESS) {                                                       \
+      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                               \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                     \
+            "cuDNN error: ",                                                                    \
+            cudnnGetErrorString(status),                                                        \
+            ". This error may appear if you passed in a non-contiguous input.", ##__VA_ARGS__); \
+      } else {                                                                                  \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                     \
+            "cuDNN error: ", cudnnGetErrorString(status), ##__VA_ARGS__);                       \
+      }                                                                                         \
+    }                                                                                           \
   } while (0)
 
 namespace at { namespace cuda { namespace blas {
-const char* _cublasGetErrorEnum(cublasStatus_t error);
+C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
 }}} // namespace at::cuda::blas
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \
@@ -54,6 +64,41 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
                 " when calling `" #EXPR "`");                   \
   } while (0)
 
+// cusolver related headers are only supported on cuda now
+#ifdef CUDART_VERSION
+
+namespace at { namespace cuda { namespace solver {
+C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
+}}} // namespace at::cuda::solver
+
+// When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
+// When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
+#define TORCH_CUSOLVER_CHECK(EXPR)                                      \
+  do {                                                                  \
+    cusolverStatus_t __err = EXPR;                                      \
+    if ((CUDA_VERSION < 11500 &&                                        \
+         __err == CUSOLVER_STATUS_EXECUTION_FAILED) ||                  \
+        (CUDA_VERSION >= 11500 &&                                       \
+         __err == CUSOLVER_STATUS_INVALID_VALUE)) {                     \
+      TORCH_CHECK_LINALG(                                               \
+          false,                                                        \
+          "cusolver error: ",                                           \
+          at::cuda::solver::cusolverGetErrorMessage(__err),             \
+          ", when calling `" #EXPR "`",                                 \
+          ". This error may appear if the input matrix contains NaN."); \
+    } else {                                                            \
+      TORCH_CHECK(                                                      \
+          __err == CUSOLVER_STATUS_SUCCESS,                             \
+          "cusolver error: ",                                           \
+          at::cuda::solver::cusolverGetErrorMessage(__err),             \
+          ", when calling `" #EXPR "`");                                \
+    }                                                                   \
+  } while (0)
+
+#else
+#define TORCH_CUSOLVER_CHECK(EXPR) EXPR
+#endif
+
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
 
 // For CUDA Driver API
@@ -61,7 +106,7 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 // This is here instead of in c10 because NVRTC is loaded dynamically via a stub
 // in ATen, and we need to use its nvrtcGetErrorString.
 // See NOTE [ USE OF NVRTC AND DRIVER API ].
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define AT_CUDA_DRIVER_CHECK(EXPR)                                                                               \
   do {                                                                                                           \

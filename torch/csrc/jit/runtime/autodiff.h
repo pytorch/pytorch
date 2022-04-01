@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <ATen/ATen.h>
@@ -90,7 +90,7 @@ struct Gradient {
 TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph);
 
 // can we take a derivative of this node symbolically?
-TORCH_API bool isDifferentiable(Node* n);
+TORCH_API bool isDifferentiable(const Node* n);
 TORCH_API bool isDifferentiable(Graph& g);
 TORCH_API bool isZero(Value* v);
 

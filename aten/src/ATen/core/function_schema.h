@@ -1,8 +1,10 @@
 #pragma once
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/string_view.h>
+#include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
@@ -18,18 +20,6 @@ namespace c10 {
 struct Argument;
 struct FunctionSchema;
 
-namespace detail {
-inline bool defaultValueEquals_(
-    const c10::optional<IValue>& lhs,
-    const c10::optional<IValue>& rhs) {
-  if (lhs.has_value()) {
-    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
-  } else {
-    return !rhs.has_value();
-  }
-}
-} // namespace detail
-
 bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
@@ -39,20 +29,48 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt,
-      bool is_inferred_type = false)
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? type : TensorType::get()),
+        type_(type ? std::move(type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
-        kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)),
-        is_inferred_type_(is_inferred_type) {
+        alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
+        kwarg_only_(kwarg_only) {
+    // this is an softly-enforced invariant for out arguments.
+    bool is_alias = alias_info_ != nullptr && alias_info_->isWrite();
+    is_out_ = kwarg_only_ && is_alias;
   }
+
+  Argument(Argument&& rhs) noexcept = default;
+
+  Argument(const Argument& rhs)
+      : name_(rhs.name_),
+        type_(rhs.type_),
+        N_(rhs.N_),
+        default_value_(rhs.default_value_),
+        alias_info_(rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr),
+        kwarg_only_(rhs.kwarg_only_),
+        is_out_(rhs.is_out_) {}
+
+  Argument& operator=(Argument&& rhs) = default;
+
+  Argument& operator=(const Argument& rhs) {
+    if (this != &rhs) {
+      name_ = rhs.name_;
+      type_ = rhs.type_;
+      N_ = rhs.N_;
+      default_value_ = rhs.default_value_;
+      alias_info_ = rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr;
+      kwarg_only_ = rhs.kwarg_only_;
+      is_out_ = rhs.is_out_;
+    }
+    return *this;
+  }
+
   const std::string& name() const {
     return name_;
   }
-  TypePtr type() const {
+  const TypePtr& type() const {
     return type_;
   }
   c10::optional<int32_t> N() const {
@@ -64,11 +82,24 @@ struct Argument {
   bool kwarg_only() const {
     return kwarg_only_;
   }
-  const c10::optional<AliasInfo>& alias_info() const {
-    return alias_info_;
+
+  bool is_out() const {
+    return is_out_;
   }
+
+  C10_NODISCARD const AliasInfo* alias_info() const {
+    return alias_info_.get();
+  }
+
   bool is_inferred_type() const {
-    return is_inferred_type_;
+    bool is_inferred_type = false;
+    TORCH_INTERNAL_ASSERT(type_);
+    if (auto pt = type_->cast<TensorType>()) {
+      if (pt->isInferredType()) {
+        is_inferred_type = true;
+      }
+    }
+    return is_inferred_type;
   }
 
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
@@ -82,7 +113,7 @@ struct Argument {
     }
     return c10::str(
         "Expected a value of type '",
-        type()->python_str(),
+        type()->repr_str(),
         "' for argument '",
         name(),
         "' but instead found type '",
@@ -92,10 +123,16 @@ struct Argument {
   }
 
   Argument cloneWithType(TypePtr new_type) const {
-    return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
+    return Argument(
+        name_,
+        std::move(new_type),
+        N_,
+        default_value_,
+        kwarg_only_,
+        alias_info_ ? c10::optional<AliasInfo>(*alias_info_) : c10::nullopt);
   }
 
-  // this function check whether this Argument is backward compatible with
+  // this function checks whether this Argument is backward compatible with
   // the old one. we consider the following cases are backward compatible:
   //   1) two arguments are equal
   //   2) this arg's type should be subtype of old
@@ -104,7 +141,16 @@ struct Argument {
       const Argument& old,
       std::ostream* why_not=nullptr) const;
 
-private:
+  // this function checks whether this Argument is forward compatible with
+  // the old one. we consider the following cases are forward compatible:
+  //   1) two arguments are equal
+  //   2) this arg's type should be subtype of old
+  //   3) this arg must provide the same default value if old arg has one,
+  bool isForwardCompatibleWith(
+      const Argument& old,
+      std::ostream* why_not = nullptr) const;
+
+ private:
   std::string name_;
   TypePtr type_;
   // for list types, an optional statically known length for the list
@@ -114,19 +160,29 @@ private:
   c10::optional<int32_t> N_;
 
   c10::optional<IValue> default_value_;
-  // is this only specifyable as a keyword argument?
+  // AliasInfo is huge, so let's only allocate memory for it if
+  // necessary (which it isn't during schema parsing on startup, to
+  // give a pertinent example).
+  std::unique_ptr<AliasInfo> alias_info_;
+  // is this only specifiable as a keyword argument?
   bool kwarg_only_;
-  c10::optional<AliasInfo> alias_info_;
-  bool is_inferred_type_;
+  // marks if the argument is out variant of the schema
+  bool is_out_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
-          && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
+          && lhs.default_value() == rhs.default_value()
           && lhs.kwarg_only() == rhs.kwarg_only()
-          && lhs.alias_info() == rhs.alias_info();
+          && (lhs.alias_info() == rhs.alias_info()
+              || (lhs.alias_info() != nullptr && rhs.alias_info() != nullptr
+                   && *lhs.alias_info() == *rhs.alias_info()));
+}
+
+inline bool operator!=(const Argument& lhs, const Argument& rhs) {
+  return !(lhs == rhs);
 }
 
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
@@ -164,21 +220,54 @@ struct FunctionSchema {
     checkSchema();
   }
 
-  // check whether this schema is backward compatible with the old one.
-  // the following conditions are considered as this schema is backward
-  // compatible with old:
-  //   1) two schemas are equal
-  //   2) this schema has the same or more positional args than old,
-  //      and any positional arg in this schema is backward compatible
-  //      with the corresponding one in old schema, which could be an arg
-  //      or a kwarg, if it has, or it must provide a default value
-  //   3) this schema has the same or more kwargs than old, and all the kwargs
-  //      in old schema can find the corresponding kwarg in this schema which
-  //      is backward compatible with the old kwarg, and the extra kwargs in
-  //      this schema must provide default values.
+  // Checks whether this schema is backward compatible with the old one.
+  // The following conditions must be true:
+  // [Function structure] The new schema's name, overload-name, varargs, and
+  //      return arity are the same.
+  // [Output Narrowing] The new schema's output type must be the same class
+  //      or inherit from the old schema's output type.
+  // [Argument count] The new schema must have at least as many arguments as
+  //      the old schema (considering the list of positional and kwargs).
+  // [Arg Compatibility] Every argument in the old schema has a corresponding
+  //      argument in the new schema that:
+  //        * is at the same position.
+  //        * has the same name.
+  //        * is either positional, or kwarg and the old argument was kwarg.
+  //        * has the same type, or the old argument's type inherits from the
+  //          new argument's type.
+  // [Default Values] Every new argument must have a default value.
+  // E.g.
+  //   OK    f_new(a, b, c=1) => f_old(a, b)
+  //   NOK   f_new(a, c=1, *, b) => f_old(a, *, b)
+  //   OK    f_new(a, b, *, c) => f_old(a, *, b, c)
+  //   NOK   f_new(a, *, b, c) -> f_old(a, b, *, c)
+  //   NOK   f_new(a, *, c, b) => f_old(a, *, b, c)
+  //   OK    f_new(a, *, b, c, d=1) => f_old(a, *, b, c)
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
       std::ostream* why_not = nullptr) const;
+
+  // Checks whether this schema is forward compatible with the old one.
+  // The following conditions must be true:
+  // [Function structure] The new schema's name, overload-name, varargs, and
+  //      return arity are the same.
+  // [Output Narrowing] The new schema's output type must be the same class
+  //      or inherit from the old schema's output type.
+  // [Arg Compatibility] Every argument in the old schema has a corresponding
+  //      argument in the new schema that:
+  //        * is at the same position.
+  //        * has the same name.
+  //        * is either positional, or kwarg and the old argument was kwarg.
+  //        * has the same type, or the old argument's type inherits from the
+  //          new argument's type.
+  // [Default Values] Every new argument must have a default value.
+  //         Each default value type should NOT be a container type.
+  // [Positioning] All defaults arguments MUST go after either old
+  //         default arguments or the end of positional arguments
+  //         and right BEFORE all out arguments
+  bool isForwardCompatibleWith(
+      const FunctionSchema& old,
+      std::ostringstream& why_not) const;
 
  private:
   OperatorName name_;
@@ -197,6 +286,7 @@ struct FunctionSchema {
   // this should always be set no matter what
   c10::optional<AliasAnalysisKind> alias_kind_;
 
+  template <typename T>
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
   void checkSchema() const {
@@ -220,7 +310,7 @@ struct FunctionSchema {
     }
   }
 
-public:
+ public:
 
   void dump() const;
 
@@ -248,13 +338,13 @@ public:
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-          const auto& aliasInfo = arg.alias_info();
-          return aliasInfo && aliasInfo.value().isWrite();
+          const AliasInfo* aliasInfo = arg.alias_info();
+          return aliasInfo && aliasInfo->isWrite();
         });
   }
 
-  c10::optional<int> argumentIndexWithName(const std::string& name) const {
-    for(size_t i = 0; i < arguments().size(); ++i) {
+  c10::optional<int> argumentIndexWithName(c10::string_view name) const {
+    for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
         return i;
     }
@@ -262,13 +352,13 @@ public:
   }
   FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
     return FunctionSchema(
-      std::move(name),
-      std::move(overload_name),
-      arguments(),
-      returns(),
-      is_vararg(),
-      is_varret()
-      );
+        std::move(name),
+        std::move(overload_name),
+        arguments(),
+        returns(),
+        is_vararg(),
+        is_varret()
+        );
   }
   FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
@@ -300,20 +390,22 @@ public:
 
   // Check that inputs have the correct types and appends any missing default
   // values.
+  template <typename T = c10::PlatformType>
   void checkAndNormalizeInputs(
       std::vector<IValue>& inputs,
-      const std::unordered_map<std::string, IValue>& kwargs) const;
+      const std::unordered_map<std::string, IValue>& kwargs =
+          std::unordered_map<std::string, IValue>{}) const;
 
   std::string findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 
   bool hasAnyAliasInfo() const {
     for (const auto& arg : arguments_) {
-      if (arg.alias_info().has_value()) {
+      if (arg.alias_info() != nullptr) {
         return true;
       }
     }
     for (const auto& ret : returns_) {
-      if (ret.alias_info().has_value()) {
+      if (ret.alias_info() != nullptr) {
         return true;
       }
     }
@@ -332,8 +424,14 @@ public:
     alias_kind_ = v;
   }
 
-  void setNamespaceIfNotSet(const char* ns) {
-    name_.setNamespaceIfNotSet(ns);
+  c10::optional<c10::string_view> getNamespace() const {
+    return name_.getNamespace();
+  }
+
+  // Returns true if we successfully set the namespace (as there
+  // was none set, and false otherwise)
+  bool setNamespaceIfNotSet(const char* ns) {
+    return name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's
@@ -345,11 +443,11 @@ public:
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   return lhs.name() == rhs.name()
-      && lhs.overload_name() == rhs.overload_name()
-      && lhs.arguments() == rhs.arguments()
-      && lhs.returns() == rhs.returns()
-      && lhs.is_vararg() == rhs.is_vararg()
-      && lhs.is_varret() == rhs.is_varret();
+     && lhs.overload_name() == rhs.overload_name()
+     && lhs.arguments() == rhs.arguments()
+     && lhs.returns() == rhs.returns()
+     && lhs.is_vararg() == rhs.is_vararg()
+     && lhs.is_varret() == rhs.is_varret();
 }
 
 inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -359,43 +457,46 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 // print out Argument, which is compatible with FunctionSchema parser
 // full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  bool optional_type = arg.type()->kind() == OptionalType::Kind;
+
   // for adjusting the ? position.
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  std::stringstream oss;
-  if (auto list = arg.type()->cast<c10::ListType>()) {
-    oss << list->getElementType()->str();
-    oss << "[";
-    if (arg.N()) {
-      oss << *arg.N();
-    }
-    oss << "]";
+  auto type = arg.type();
+  bool is_opt = type->kind() == OptionalType::Kind;
+  auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
+
+  if (unopt_type->kind() == ListType::Kind && arg.N()) {
+    // sized lists get size N from arg, not type
+    auto list = unopt_type->cast<c10::ListType>();
+    out << list->getElementType()->str() << "[" << *arg.N() << "]";
   } else {
-    oss << arg.type()->str();
+    out << unopt_type->str();
   }
-  if (optional_type) {
-    oss.seekp(oss.str().size() - 1);
-  }
+
   if (arg.alias_info()) {
-    oss << arg.alias_info().value();
+    out << *arg.alias_info();
   }
-  if (optional_type) {
-    oss << "?";
+
+  if (is_opt) {
+    out << "?";
   }
-  out << oss.str();
+
   if (!arg.name().empty()) {
     out << " " << arg.name();
   }
+
   if (arg.default_value()) {
     out << "=";
-    if (arg.type()->kind() == c10::TypeKind::StringType) {
-        printQuotedString(out, arg.default_value().value().toStringRef());
+    if ((type->kind() == c10::TypeKind::StringType ||
+        unopt_type->kind() == c10::TypeKind::StringType) &&
+        arg.default_value().value().isString()) {
+      printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();
     }
   }
+
   return out;
 }
 
@@ -409,4 +510,4 @@ inline std::string toString(const FunctionSchema& schema) {
 
 } // namespace c10
 
-#include <ATen/core/function_schema_inl.h>
+#include <ATen/core/function_schema_inl.h>  // IWYU pragma: keep

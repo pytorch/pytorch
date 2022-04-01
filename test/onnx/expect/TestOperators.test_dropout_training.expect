@@ -1,10 +1,10 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "x"
-    output: "1"
+    output: "onnx::ReduceMax_1"
     output: "2"
     name: "Dropout_0"
     op_type: "Dropout"
@@ -15,7 +15,7 @@ graph {
     }
   }
   node {
-    input: "1"
+    input: "onnx::ReduceMax_1"
     output: "3"
     name: "ReduceMax_1"
     op_type: "ReduceMax"

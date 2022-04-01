@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include <pthreadpool.h>
+#include <qnnpack/log.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,10 +39,8 @@ enum pytorch_qnnp_status pytorch_qnnp_deinitialize(void);
 typedef struct pytorch_qnnp_operator* pytorch_qnnp_operator_t;
 
 enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t kernel_height,
     uint32_t kernel_width,
     uint32_t subsampling_height,
@@ -52,16 +51,43 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
     size_t group_input_channels,
     size_t group_output_channels,
     uint8_t input_zero_point,
-    float input_scale,
-    uint8_t kernel_zero_point,
-    float kernel_scale,
+    const uint8_t* kernel_zero_points,
     const uint8_t* kernel,
     const int32_t* bias,
     uint8_t output_zero_point,
-    float output_scale,
     uint8_t output_min,
     uint8_t output_max,
     uint32_t flags,
+    const float* requantization_scales,
+    bool per_channel,
+    pytorch_qnnp_operator_t* convolution);
+
+enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
+    uint32_t input_padding_depth,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
+    uint32_t kernel_depth,
+    uint32_t kernel_height,
+    uint32_t kernel_width,
+    uint32_t subsampling_depth,
+    uint32_t subsampling_height,
+    uint32_t subsampling_width,
+    uint32_t dilation_depth,
+    uint32_t dilation_height,
+    uint32_t dilation_width,
+    uint32_t groups,
+    size_t group_input_channels,
+    size_t group_output_channels,
+    uint8_t input_zero_point,
+    const uint8_t* kernel_zero_points,
+    const uint8_t* kernel,
+    const int32_t* bias,
+    uint8_t output_zero_point,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    const float* requantization_scales,
+    bool per_channel,
     pytorch_qnnp_operator_t* convolution);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_convolution2d_nhwc_q8(
@@ -75,11 +101,21 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution2d_nhwc_q8(
     size_t output_stride,
     pthreadpool_t threadpool);
 
+enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
+    pytorch_qnnp_operator_t convolution,
+    size_t batch_size,
+    size_t input_depth,
+    size_t input_height,
+    size_t input_width,
+    const uint8_t* input,
+    size_t input_stride,
+    uint8_t* output,
+    size_t output_stride,
+    pthreadpool_t threadpool);
+
 enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t adjustment_height,
     uint32_t adjustment_width,
     uint32_t kernel_height,
@@ -92,16 +128,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
     size_t group_input_channels,
     size_t group_output_channels,
     uint8_t input_zero_point,
-    float input_scale,
-    uint8_t kernel_zero_point,
-    float kernel_scale,
+    const uint8_t* kernel_zero_points,
     const uint8_t* kernel,
     const int32_t* bias,
     uint8_t output_zero_point,
-    float output_scale,
     uint8_t output_min,
     uint8_t output_max,
     uint32_t flags,
+    const float* requantization_scales,
     pytorch_qnnp_operator_t* deconvolution);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
@@ -119,16 +153,32 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
     size_t input_channels,
     size_t output_channels,
     uint8_t input_zero_point,
-    float input_scale,
-    uint8_t kernel_zero_point,
-    float kernel_scale,
+    const uint8_t* kernel_zero_points,
     const uint8_t* kernel,
     const int32_t* bias,
     uint8_t output_zero_point,
-    float output_scale,
     uint8_t output_min,
     uint8_t output_max,
     uint32_t flags,
+    const float* requantization_scales,
+    pytorch_qnnp_operator_t* fully_connected);
+
+enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
+    size_t input_channels,
+    size_t output_channels,
+    uint8_t input_zero_point,
+    const uint8_t* kernel_zero_points,
+    const uint32_t* kernel_col_indices,
+    const uint32_t* kernel_row_values,
+    const uint8_t* kernel_values,
+    const uint32_t kernel_row_block_size,
+    const uint32_t kernel_col_block_size,
+    uint8_t output_zero_point,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    const float* requantization_scales,
+    bool use_prepack_kernel,
     pytorch_qnnp_operator_t* fully_connected);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_nc_q8(
@@ -137,6 +187,15 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_nc_q8(
     const uint8_t* input,
     size_t input_stride,
     uint8_t* output,
+    size_t output_stride);
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
+    pytorch_qnnp_operator_t fully_connected,
+    size_t batch_size,
+    const uint8_t* input,
+    size_t input_stride,
+    const float* bias,
+    float* output,
     size_t output_stride);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_global_average_pooling_nwc_q8(
@@ -160,10 +219,8 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_global_average_pooling_nwc_q8(
     size_t output_stride);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t pooling_height,
     uint32_t pooling_width,
     uint32_t stride_height,
@@ -190,10 +247,8 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
     pthreadpool_t threadpool);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_max_pooling2d_nhwc_u8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t pooling_height,
     uint32_t pooling_width,
     uint32_t stride_height,
@@ -337,6 +392,44 @@ enum pytorch_qnnp_status pytorch_qnnp_create_tanh_nc_q8(
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_tanh_nc_q8(
     pytorch_qnnp_operator_t tanh,
+    size_t batch_size,
+    const uint8_t* input,
+    size_t input_stride,
+    uint8_t* output,
+    size_t output_stride);
+
+enum pytorch_qnnp_status pytorch_qnnp_create_hardsigmoid_nc_q8(
+    size_t channels,
+    uint8_t input_zero_point,
+    float input_scale,
+    uint8_t output_zero_point,
+    float output_scale,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    pytorch_qnnp_operator_t* hardsigmoid);
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_hardsigmoid_nc_q8(
+    pytorch_qnnp_operator_t hardsigmoid,
+    size_t batch_size,
+    const uint8_t* input,
+    size_t input_stride,
+    uint8_t* output,
+    size_t output_stride);
+
+enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
+    size_t channels,
+    uint8_t input_zero_point,
+    float input_scale,
+    uint8_t output_zero_point,
+    float output_scale,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    pytorch_qnnp_operator_t* hardswish);
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_hardswish_nc_q8(
+    pytorch_qnnp_operator_t hardswish,
     size_t batch_size,
     const uint8_t* input,
     size_t input_stride,

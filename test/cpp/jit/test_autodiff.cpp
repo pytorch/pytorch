@@ -1,4 +1,5 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -12,6 +13,9 @@
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/runtime/argument_spec.h"
 #include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/runtime/graph_iterator.h"
+#include "torch/csrc/jit/runtime/profiling_graph_executor_impl.h"
+#include "torch/torch.h"
 
 #include <ATen/ATen.h>
 #include "torch/csrc/autograd/engine.h"
@@ -30,7 +34,9 @@ using test_fn_type = std::function<variable_list(const variable_list&)>;
 struct ADTestSpec {
   ADTestSpec(
       const char* name,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       var_meta_list input_meta,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       test_fn_type test_fn,
       float clampMax = -1.0f)
       : name(name),
@@ -80,10 +86,11 @@ variable_list grad(
       grad_outputs,
       true,
       false,
+      false,
       fmap(inputs, get_edge));
 }
 
-void testADFormulas() {
+TEST(AutodiffTest, ADFormulas) {
   const auto cast = [](const Variable& v) {
     return static_cast<at::Tensor>(v);
   };
@@ -174,11 +181,17 @@ void testADFormulas() {
   }
 }
 
-void testDifferentiate() {
+TEST(AutodiffTest, Differentiate) {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
+  std::vector<int64_t> sizes{2, 3, 4};
+  std::vector<int64_t> strides{12, 4, 1};
   const auto type = TensorType::create(
-      at::ScalarType::Float, at::kCPU, {2, 3, 4}, {12, 4, 1});
+      at::ScalarType::Float,
+      at::kCPU,
+      c10::VaryingShape<int64_t>{sizes},
+      c10::VaryingShape<int64_t>{strides},
+      true);
 
   // Builds graph a * b * a + b
   auto* a = graph->addInput()->setType(type);
@@ -223,7 +236,7 @@ void testDifferentiate() {
       ->run(*grad_spec.df);
 }
 
-void testDifferentiateWithRequiresGrad() {
+TEST(AutodiffTest, DifferentiateWithRequiresGrad) {
   const auto graph_string = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -269,6 +282,69 @@ void testDifferentiateWithRequiresGrad() {
   testing::FileCheck()
       .check_count("prim::GradOf[name=\"aten::mul\"]", 1, /*exactly*/ true)
       ->run(*grad_spec.df);
+}
+
+class AutodiffRemoveUnusedGradientsTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    prev_exec = getExecutorMode();
+    getExecutorMode() = true;
+    prev_profiling = getProfilingMode();
+    getProfilingMode() = true;
+    prev_inline_autodiff = getAutodiffSubgraphInlining();
+    debugSetAutodiffSubgraphInlining(false);
+  }
+  void TearDown() override {
+    getExecutorMode() = prev_exec;
+    getProfilingMode() = prev_profiling;
+    debugSetAutodiffSubgraphInlining(prev_inline_autodiff);
+  }
+
+  bool prev_exec;
+  bool prev_profiling;
+  bool prev_inline_autodiff;
+};
+
+TEST_F(AutodiffRemoveUnusedGradientsTest, Linear) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+graph(%inp.1 : Tensor,
+      %weight.1 : Tensor,
+      %bias.1 : Tensor):
+  %6 : Tensor = aten::linear(%inp.1, %weight.1, %bias.1)
+  return (%6))IR";
+  parseIR(input, graph.get());
+
+  auto inp = torch::randn({10, 10}).requires_grad_(false);
+  auto weight = torch::randn({10, 10}).requires_grad_(true);
+  auto bias = torch::randn({1, 10}).requires_grad_(true);
+  auto stack = createStack({inp, weight, bias});
+
+  ProfilingGraphExecutorImpl executor(graph, "linear");
+
+  // initial run to profile requires_grad information
+  auto plan = executor.getPlanFor(stack, 20);
+  InterpreterState is{plan.code};
+  is.run(stack);
+
+  auto optimized_plan = executor.getPlanFor(stack, 20);
+  DepthFirstGraphNodeIterator it(optimized_plan.graph);
+  Node* diff_graph_node = nullptr;
+
+  while ((diff_graph_node = it.next()) != nullptr) {
+    if (diff_graph_node->kind() == prim::DifferentiableGraph) {
+      break;
+    }
+  }
+  ASSERT_NE(nullptr, diff_graph_node);
+
+  auto backward_graph = diff_graph_node->g(attr::ReverseSubgraph);
+
+  // we expect to compute grad_weight (which requires a matmul) but we don't
+  // expect to compute grad_input. So, we expect exactly 1 matmul.
+  // Note: this could change, e.g. if mm is used instead
+  testing::FileCheck().check_count("matmul", 1, true)->run(*backward_graph);
 }
 
 } // namespace jit

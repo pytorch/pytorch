@@ -2,7 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 
 namespace at {
 namespace native {
@@ -11,8 +11,15 @@ namespace native {
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
 Tensor& set_cuda_(Tensor& result) {
-  Storage storage(result.dtype(), 0, at::cuda::getCUDADeviceAllocator(), true);
-  return result.set_(storage, 0, {0}, {});
+  caffe2::TypeMeta dtype = result.dtype();
+  Storage storage(
+      Storage::use_byte_size_t(),
+      0,
+      at::cuda::getCUDADeviceAllocator(),
+      true);
+  result.set_(storage, 0, {0}, {});
+  TORCH_INTERNAL_ASSERT(dtype == result.dtype());
+  return result;
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_

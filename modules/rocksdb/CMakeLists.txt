@@ -61,7 +61,7 @@ target_link_libraries(caffe2_rocksdb PRIVATE ${RocksDB_LIBRARIES})
 target_include_directories(caffe2_rocksdb PRIVATE ${RocksDB_INCLUDE_DIR})
 install(TARGETS caffe2_rocksdb DESTINATION lib)
 
-# ---[ Last, Append the library to Caffe2_MAIN_LIBS, if we are building with
+# ---[ Last, Append the library to Caffe2_MODULES, if we are building with
 # the main repo.
 # The purpose of this is that, for all binaries built in the Caffe2 main repo,
 # they will be built with the first class modules that are built. As a result,

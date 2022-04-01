@@ -1,5 +1,4 @@
 #include "caffe2/operators/fused_rowwise_nbit_conversion_ops.h"
-#include <fp16.h>
 #include "c10/util/Registry.h"
 
 namespace caffe2 {

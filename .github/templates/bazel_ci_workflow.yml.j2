@@ -1,0 +1,127 @@
+{%- extends "linux_ci_workflow.yml.j2" -%}
+{% import 'common_android.yml.j2' as common_android %}
+{%- set exclude_test = true -%}
+{% block name -%}
+# Template is at:    .github/templates/bazel_ci_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
+on:
+{%- if is_default %}
+  pull_request:
+{%- endif -%}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+  push:
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+
+{% block build +%}
+  # building and testing in a single job since bazel runs only small subset of tests
+  build-and-test:
+    runs-on: !{{ test_runner_type }}
+    env:
+      JOB_BASE_NAME: !{{ build_environment }}-build-and-test
+      NUM_TEST_SHARDS: !{{ num_test_shards }}
+    steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout() }}
+      !{{ common.calculate_docker_image(false) }}
+      - name: Pull Docker image
+        run: |
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Determine shm-size
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
+      - name: Output disk space left
+        run: |
+          sudo df -H
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Build
+        run: |
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT \
+            -e JOB_BASE_NAME \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e PR_LABELS \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e TORCH_CUDA_ARCH_LIST \
+            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+      !{{ common.parse_ref() }}
+      !{{ common_android.upload_androind_binary_size("", "")}}
+      - name: Test
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
+        run: |
+          # detached container should get cleaned up by teardown_ec2_linux
+          export SHARD_NUMBER=0
+          # TODO: Stop building test binaries as part of the build phase
+          # Make sure we copy test results from bazel-testlogs symlink to
+          # a regular directory ./test/test-reports
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e GITHUB_ACTIONS \
+            -e IN_CI \
+            -e SHARD_NUMBER \
+            -e NUM_TEST_SHARDS \
+            -e JOB_BASE_NAME \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e PR_LABELS \
+            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --shm-size="${SHM_SIZE}" \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      !{{ common.upload_test_reports(name='bazel') }}
+      !{{ common.upload_downloaded_files(name='bazel') }}
+      !{{ common.upload_test_statistics(build_environment) }}
+      !{{ common.teardown_ec2_linux() }}
+{%- endblock %}

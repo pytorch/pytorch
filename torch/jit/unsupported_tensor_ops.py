@@ -1,12 +1,10 @@
 import torch.jit
 from textwrap import dedent
-from torch._six import PY2
+
+from typing import Dict, Any
 
 def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
+    exec(code, glob, loc)
 
 def _gen_unsupported_methods_properties():
     tensor_attrs = set(filter(lambda x: x[0] != "_", dir(torch.Tensor)))
@@ -24,7 +22,7 @@ def _gen_unsupported_methods_properties():
     sorted_tensor_attrs = sorted(list(tensor_attrs), key=lambda x: x.lower())
     for attr in sorted_tensor_attrs:
         funcs_str = funcs_template.format(op=attr)
-        scope = {}
+        scope: Dict[str, Any] = {}
         execWrapper(funcs_str, globals(), scope)
         try:
             cu = torch.jit.CompilationUnit(funcs_str)
@@ -37,9 +35,9 @@ def _gen_unsupported_methods_properties():
             else:
                 properties.append(attr)
 
-    methods = map(lambda x: "\t*  :meth:`~torch.Tensor." + x + r"`", methods)
-    properties = map(lambda x: "\t*  :attr:`~torch.Tensor." + x + r"`", properties)
-    return "\n".join(methods), "\n".join(properties)
+    mapped_methods = ("\t*  :meth:`~torch.Tensor." + x + r"`" for x in methods)
+    mapped_properties = ("\t*  :attr:`~torch.Tensor." + x + r"`" for x in properties)
+    return "\n".join(mapped_methods), "\n".join(mapped_properties)
 
 
 def _list_unsupported_tensor_ops():
@@ -49,6 +47,7 @@ Unsupported Tensor Methods
     """
     methods, properties = _gen_unsupported_methods_properties()
     return header + "\n" + methods + """
+
 Unsupported Tensor Properties
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """ + "\n" + properties

@@ -1,7 +1,7 @@
-#include <test/cpp/jit/test_base.h>
-#include <test/cpp/jit/test_utils.h>
+#include <gtest/gtest.h>
 
 #include <ATen/core/qualified_name.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-static const auto classSrcs1 = R"JIT(
+static constexpr c10::string_view classSrcs1 = R"JIT(
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -26,7 +26,7 @@ class FooTest:
         self.x = self.class_attr.y + self.class_attr2.y
 )JIT";
 
-static const auto classSrcs2 = R"JIT(
+static constexpr c10::string_view classSrcs2 = R"JIT(
 class FooTest:
     def __init__(self, x):
       self.dx = x
@@ -36,19 +36,19 @@ static void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table) {
+    const std::vector<at::IValue>& tensor_table) {
   SourceImporter si(
       cu,
       &tensor_table,
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
-  si.loadNamedType(QualifiedName(class_name));
+  si.loadType(QualifiedName(class_name));
 }
 
-void testClassImport() {
+TEST(ClassImportTest, Basic) {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,
@@ -80,10 +80,10 @@ void testClassImport() {
   ASSERT_FALSE(c);
 }
 
-void testScriptObject() {
+TEST(ClassImportTest, ScriptObject) {
   Module m1("m1");
   Module m2("m2");
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   import_libs(
       m1._ivalue()->compilation_unit(),
       "__torch__.FooTest",
@@ -97,6 +97,7 @@ void testScriptObject() {
 
   // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
@@ -114,26 +115,26 @@ def __init__(self, x):
     return x
 )JIT";
 
-void testClassDerive() {
+TEST(ClassImportTest, ClassDerive) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
   const auto self = SimpleSelf(cls);
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  ASSERT_TRUE(cls->getMethod(method->name()));
+  ASSERT_TRUE(cls->findMethod(method->name()));
 
   // Refining a new class should retain attributes and methods
   auto newCls = cls->refine({TensorType::get()});
   ASSERT_TRUE(newCls->hasAttribute("attr"));
-  ASSERT_TRUE(newCls->getMethod(method->name()));
+  ASSERT_TRUE(newCls->findMethod(method->name()));
 
   auto newCls2 = cls->withContained({TensorType::get()})->expect<ClassType>();
   ASSERT_TRUE(newCls2->hasAttribute("attr"));
-  ASSERT_TRUE(newCls2->getMethod(method->name()));
+  ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
-static const auto torchbindSrc = R"JIT(
+static constexpr c10::string_view torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
   f : __torch__.torch.classes._TorchScriptTesting._StackString
@@ -142,9 +143,9 @@ class FooBar1234(Module):
     return (self.f).top()
 )JIT";
 
-void testSaveLoadTorchbind() {
+TEST(ClassImportTest, CustomClass) {
   auto cu1 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,

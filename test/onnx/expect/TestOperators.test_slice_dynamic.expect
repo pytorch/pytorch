@@ -1,20 +1,15 @@
-ir_version: 6
+ir_version: 5
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
-    name: "Shape_0"
-    op_type: "Shape"
-  }
-  node {
-    output: "2"
-    name: "Constant_1"
+    output: "onnx::Slice_1"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
       t {
+        dims: 1
         data_type: 7
         raw_data: "\000\000\000\000\000\000\000\000"
       }
@@ -22,55 +17,13 @@ graph {
     }
   }
   node {
-    input: "1"
-    input: "2"
-    output: "3"
-    name: "Gather_2"
-    op_type: "Gather"
-    attribute {
-      name: "axis"
-      i: 0
-      type: INT
-    }
-  }
-  node {
-    input: "0"
-    output: "4"
-    name: "Shape_3"
-    op_type: "Shape"
-  }
-  node {
-    output: "5"
-    name: "Constant_4"
+    output: "onnx::Slice_2"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
       t {
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "4"
-    input: "5"
-    output: "6"
-    name: "Gather_5"
-    op_type: "Gather"
-    attribute {
-      name: "axis"
-      i: 0
-      type: INT
-    }
-  }
-  node {
-    output: "7"
-    name: "Constant_6"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
+        dims: 1
         data_type: 7
         raw_data: "\003\000\000\000\000\000\000\000"
       }
@@ -78,26 +31,22 @@ graph {
     }
   }
   node {
-    input: "6"
-    input: "7"
-    output: "8"
-    name: "Sub_7"
-    op_type: "Sub"
-  }
-  node {
-    input: "3"
-    output: "11"
-    name: "Unsqueeze_8"
-    op_type: "Unsqueeze"
+    output: "onnx::Slice_3"
+    name: "Constant_2"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\177"
+      }
+      type: TENSOR
     }
   }
   node {
-    output: "14"
-    name: "Constant_9"
+    output: "onnx::Slice_4"
+    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -110,20 +59,33 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "11"
-    input: "17"
-    input: "18"
-    input: "14"
-    output: "15"
-    name: "Slice_10"
+    input: "onnx::Slice_0"
+    input: "onnx::Slice_2"
+    input: "onnx::Slice_3"
+    input: "onnx::Slice_1"
+    input: "onnx::Slice_4"
+    output: "onnx::Gather_5"
+    name: "Slice_4"
     op_type: "Slice"
   }
   node {
-    input: "15"
-    input: "8"
-    output: "16"
-    name: "Gather_11"
+    output: "onnx::Gather_6"
+    name: "Constant_5"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Gather_5"
+    input: "onnx::Gather_6"
+    output: "7"
+    name: "Gather_6"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -132,20 +94,8 @@ graph {
     }
   }
   name: "torch-jit-export"
-  initializer {
-    dims: 1
-    data_type: 7
-    name: "17"
-    raw_data: "\377\377\377\377\377\377\377\177"
-  }
-  initializer {
-    dims: 1
-    data_type: 7
-    name: "18"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
   input {
-    name: "0"
+    name: "onnx::Slice_0"
     type {
       tensor_type {
         elem_type: 1
@@ -161,7 +111,7 @@ graph {
     }
   }
   output {
-    name: "16"
+    name: "7"
     type {
       tensor_type {
         elem_type: 1

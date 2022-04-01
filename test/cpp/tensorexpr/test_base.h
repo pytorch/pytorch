@@ -4,9 +4,9 @@
 #include <gtest/gtest.h>
 #include <test/cpp/common/support.h>
 #else
+#include <cmath>
 #include "c10/util/Exception.h"
 #include "test/cpp/tensorexpr/gtest_assert_float_eq.h"
-#include <cmath>
 #define ASSERT_EQ(x, y, ...) TORCH_INTERNAL_ASSERT((x) == (y), __VA_ARGS__)
 #define ASSERT_FLOAT_EQ(x, y, ...) \
   TORCH_INTERNAL_ASSERT(AlmostEquals((x), (y)), __VA_ARGS__)
@@ -52,9 +52,19 @@ void ExpectAllNear(
     V threshold,
     const std::string& name = "") {
   ASSERT_EQ(v1.size(), v2.size());
-  for (int i = 0; i < v1.size(); i++) {
-    ASSERT_NEAR(
-        v1[i], v2[i], threshold, "element index: ", i, ", name: ", name);
+  for (size_t i = 0; i < v1.size(); i++) {
+    ASSERT_NEAR(v1[i], v2[i], threshold);
+  }
+}
+
+template <typename U, typename V>
+void ExpectAllNear(
+    const std::vector<U>& vec,
+    const U& val,
+    V threshold,
+    const std::string& name = "") {
+  for (size_t i = 0; i < vec.size(); i++) {
+    ASSERT_NEAR(vec[i], val, threshold);
   }
 }
 
@@ -62,6 +72,14 @@ template <typename T>
 static void assertAllEqual(const std::vector<T>& vec, const T& val) {
   for (auto const& elt : vec) {
     ASSERT_EQ(elt, val);
+  }
+}
+
+template <typename T>
+static void assertAllEqual(const std::vector<T>& v1, const std::vector<T>& v2) {
+  ASSERT_EQ(v1.size(), v2.size());
+  for (int i = 0; i < v1.size(); i++) {
+    ASSERT_EQ(v1[i], v2[i]);
   }
 }
 } // namespace tensorexpr

@@ -36,7 +36,7 @@ void param_search_greedy(
 } // namespace internal
 
 // Fake 2/4 bit quantization
-// Creeates a 2/4bit rowwise quantized blob with scales and biases in fp16
+// Creates a 2/4bit rowwise quantized blob with scales and biases in fp16
 // The storage format is 8 bit rowwise with scales and biases in fp32
 template <
     int BIT_RATE,
@@ -72,7 +72,6 @@ class FloatToFusedNBitFakeRowwiseQuantizedOp final
       CAFFE_THROW("Unsupported data type");
     }
 
-    bool use_openmp = GREEDY;
 #ifdef _OPENMP
     vector<float> tmp_vec(input_columns * (GREEDY ? omp_get_max_threads() : 1));
 #else
@@ -118,7 +117,8 @@ class FloatToFusedNBitFakeRowwiseQuantizedOp final
       output_row_scale_bias[0] = scale;
       output_row_scale_bias[1] = minimum_element;
 
-      for (size_t col = 0; col < input_columns; ++col) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      for (const auto col : c10::irange(input_columns)) {
         output_row[col] = std::max(
             0,
             std::min<int>(

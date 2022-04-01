@@ -8,6 +8,8 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 namespace utils {
 
@@ -48,6 +50,7 @@ std::vector<int> nms_cpu_upright(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (topN >= 0 && keep.size() >= topN) {
       break;
     }
@@ -130,7 +133,7 @@ std::vector<int> soft_nms_cpu_upright(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 
@@ -148,7 +151,7 @@ std::vector<int> soft_nms_cpu_upright(
     EArrX ovr = inter / (areas[i] + GetSubArray(areas, rest_indices) - inter);
 
     // Update scores based on computed IoU, overlap threshold and NMS method
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       typename Derived2::Scalar weight;
       switch (method) {
         case 1: // Linear
@@ -244,7 +247,7 @@ int rotated_rect_intersection_pts(
   // Specical case of rect1 == rect2
   bool same = true;
 
-  for (int i = 0; i < 4; i++) {
+  for (const auto i : c10::irange(4)) {
     if (fabs(pts1[i].x() - pts2[i].x()) > samePointEps ||
         (fabs(pts1[i].y() - pts2[i].y()) > samePointEps)) {
       same = false;
@@ -253,7 +256,7 @@ int rotated_rect_intersection_pts(
   }
 
   if (same) {
-    for (int i = 0; i < 4; i++) {
+    for (const auto i : c10::irange(4)) {
       intersections[i] = pts1[i];
     }
     num = 4;
@@ -262,14 +265,14 @@ int rotated_rect_intersection_pts(
 
   // Line vector
   // A line from p1 to p2 is: p1 + (p2-p1)*t, t=[0,1]
-  for (int i = 0; i < 4; i++) {
+  for (const auto i : c10::irange(4)) {
     vec1[i] = pts1[(i + 1) % 4] - pts1[i];
     vec2[i] = pts2[(i + 1) % 4] - pts2[i];
   }
 
   // Line test - test all line combos for intersection
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 4; j++) {
+  for (const auto i : c10::irange(4)) {
+    for (const auto j : c10::irange(4)) {
       // Solve for 2x2 Ax=b
 
       // This takes care of parallel lines
@@ -295,7 +298,7 @@ int rotated_rect_intersection_pts(
     const auto& DA = vec2[3];
     auto ABdotAB = AB.squaredNorm();
     auto ADdotAD = DA.squaredNorm();
-    for (int i = 0; i < 4; i++) {
+    for (const auto i : c10::irange(4)) {
       // assume ABCD is the rectangle, and P is the point to be judged
       // P is inside ABCD iff. P's projection on AB lies within AB
       // and P's projection on AD lies within AD
@@ -318,7 +321,7 @@ int rotated_rect_intersection_pts(
     const auto& DA = vec1[3];
     auto ABdotAB = AB.squaredNorm();
     auto ADdotAD = DA.squaredNorm();
-    for (int i = 0; i < 4; i++) {
+    for (const auto i : c10::irange(4)) {
       auto AP = pts2[i] - pts1[0];
 
       auto APdotAB = AP.dot(AB);
@@ -341,14 +344,13 @@ int convex_hull_graham(
     Eigen::Vector2f* q,
     bool shift_to_zero = false) {
   CAFFE_ENFORCE(num_in >= 2);
-  std::vector<int> order;
 
   // Step 1:
   // Find point with minimum y
   // if more than 1 points have the same minimum y,
   // pick the one with the mimimum x.
   int t = 0;
-  for (int i = 1; i < num_in; i++) {
+  for (const auto i : c10::irange(1, num_in)) {
     if (p[i].y() < p[t].y() || (p[i].y() == p[t].y() && p[i].x() < p[t].x())) {
       t = i;
     }
@@ -357,7 +359,7 @@ int convex_hull_graham(
 
   // Step 2:
   // Subtract starting point from every points (for sorting in the next step)
-  for (int i = 0; i < num_in; i++) {
+  for (const auto i : c10::irange(num_in)) {
     q[i] = p[i] - s;
   }
 
@@ -367,7 +369,7 @@ int convex_hull_graham(
   // Step 3:
   // Sort point 1 ~ num_in according to their relative cross-product values
   // (essentially sorting according to angles)
-  std::sort(
+  std::stable_sort(
       q + 1,
       q + num_in,
       [](const Eigen::Vector2f& A, const Eigen::Vector2f& B) -> bool {
@@ -412,8 +414,7 @@ int convex_hull_graham(
   // But if we're only interested in getting the area/perimeter of the shape
   // We can simply return.
   if (!shift_to_zero) {
-    for (int i = 0; i < m; i++)
-      q[i] += s;
+    for (const auto i : c10::irange(m))q[i] += s;
   }
 
   return m;
@@ -515,8 +516,8 @@ Eigen::ArrayXXf bbox_overlaps_rotated(
   const auto& query_boxes_areas = query_boxes.col(2) * query_boxes.col(3);
 
   Eigen::ArrayXXf overlaps(boxes.rows(), query_boxes.rows());
-  for (int i = 0; i < boxes.rows(); ++i) {
-    for (int j = 0; j < query_boxes.rows(); ++j) {
+  for (const auto i : c10::irange(boxes.rows())) {
+    for (const auto j : c10::irange(query_boxes.rows())) {
       auto inter = bbox_intersection_rotated(boxes.row(i), query_boxes.row(j));
       overlaps(i, j) = (inter == 0.0)
           ? 0.0
@@ -551,7 +552,7 @@ std::vector<int> nms_cpu_rotated(
   EArrX areas = widths * heights;
 
   std::vector<RotatedRect> rotated_rects(proposals.rows());
-  for (int i = 0; i < proposals.rows(); ++i) {
+  for (const auto i : c10::irange(proposals.rows())) {
     rotated_rects[i] = bbox_to_rotated_rect(proposals.row(i));
   }
 
@@ -559,6 +560,7 @@ std::vector<int> nms_cpu_rotated(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (topN >= 0 && keep.size() >= topN) {
       break;
     }
@@ -569,7 +571,7 @@ std::vector<int> nms_cpu_rotated(
         order.data() + 1, order.size() - 1);
 
     EArrX inter(rest_indices.size());
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       inter[j] = rotated_rect_intersection(
           rotated_rects[i], rotated_rects[rest_indices[j]]);
     }
@@ -612,7 +614,7 @@ std::vector<int> soft_nms_cpu_rotated(
   EArrX areas = widths * heights;
 
   std::vector<RotatedRect> rotated_rects(proposals.rows());
-  for (int i = 0; i < proposals.rows(); ++i) {
+  for (const auto i : c10::irange(proposals.rows())) {
     rotated_rects[i] = bbox_to_rotated_rect(proposals.row(i));
   }
 
@@ -630,7 +632,7 @@ std::vector<int> soft_nms_cpu_rotated(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 
@@ -638,7 +640,7 @@ std::vector<int> soft_nms_cpu_rotated(
     std::swap(pending(0), pending(max_pos));
     const auto& rest_indices = pending.tail(pending.size() - 1);
     EArrX inter(rest_indices.size());
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       inter[j] = rotated_rect_intersection(
           rotated_rects[i], rotated_rects[rest_indices[j]]);
     }
@@ -646,7 +648,7 @@ std::vector<int> soft_nms_cpu_rotated(
 
     // Update scores based on computed IoU, overlap threshold and NMS method
     // TODO (viswanath): Should angle info be included as well while filtering?
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       typename Derived2::Scalar weight;
       switch (method) {
         case 1: // Linear
@@ -708,7 +710,7 @@ std::vector<int> nms_cpu(
     bool legacy_plus_one = false) {
   std::vector<int> indices(proposals.rows());
   std::iota(indices.begin(), indices.end(), 0);
-  std::sort(
+  std::stable_sort(
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });

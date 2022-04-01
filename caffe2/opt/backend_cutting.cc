@@ -41,6 +41,7 @@ std::string ShowNode(NodeRef node) {
 
 
 struct VisitorContext {
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
       : predicate(func) {}
 
@@ -182,7 +183,7 @@ caffe2::NetDef ConvertToC2Net(
       net.add_op()->CopyFrom(op_def);
     }
   }
-  for (const auto kv : sub.external_input_refs) {
+  for (const auto& kv : sub.external_input_refs) {
     net.add_external_input(kv.first);
     VLOG(2) << "Adding external input: " << kv.first;
   }
@@ -253,10 +254,10 @@ void ReplaceSubgraph(
 
   // Convert new NetDef back to NNGraph
   std::unordered_map<std::string, NodeRef> tensor_map;
-  for (const auto kv : subgraph.external_input_refs) {
+  for (const auto& kv : subgraph.external_input_refs) {
     tensor_map.emplace(kv.first, kv.second);
   }
-  for (const auto kv : subgraph.external_output_refs) {
+  for (const auto& kv : subgraph.external_output_refs) {
     tensor_map.emplace(kv.first, kv.second);
   }
   for (auto& op : *net_opt.mutable_op()) {
@@ -352,10 +353,14 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
   };
 
   std::ofstream out(fname.c_str());
-  out << nom::converters::convertToDotString(g, nnprinter);
-  out.close();
+  if (out) {
+    out << nom::converters::convertToDotString(g, nnprinter);
+  } else {
+    LOG(ERROR) << "Cannot create nomnigraph dump file: " << fname;
+  }
 }
-caffe2::NetDef OptimizeForBackend(
+
+CutResult OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
     std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func,
@@ -414,6 +419,8 @@ caffe2::NetDef OptimizeForBackend(
   }
 
   // Transform needed subgraphs one by one
+  CutResult cutResult;
+  cutResult.numberOfSubnets = 0;
   std::vector<caffe2::NetDef> opt_subnets;
   opt_subnets.reserve(subs.size());
   for (auto& g : subs) {
@@ -424,7 +431,9 @@ caffe2::NetDef OptimizeForBackend(
     // Transform the subgraph protobuf def, note that we can have less external
     // inputs/outputs but not more
     opt_subnets.emplace_back(transform_func(subnet));
-
+    if (opt_subnets.back().op_size() > 0 && opt_subnets.back().op(0).type() == "Onnxifi") {
+      cutResult.numberOfSubnets++;
+    }
     ReplaceSubgraph(g, opt_subnets.back(), &dfg);
   }
 
@@ -438,7 +447,8 @@ caffe2::NetDef OptimizeForBackend(
 
   auto new_net = convertToCaffe2Proto(nn);
   new_net.set_name(net.name() + "_opt");
-  return new_net;
+  cutResult.net = std::move(new_net);
+  return cutResult;
 }
 
 } // namespace opt

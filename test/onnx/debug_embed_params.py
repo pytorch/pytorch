@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import sys
 
 import torch
@@ -14,11 +9,11 @@ import caffe2.python.onnx.backend as c2
 from test_pytorch_common import flatten
 
 
-torch.set_default_tensor_type('torch.FloatTensor')
+torch.set_default_tensor_type("torch.FloatTensor")
 try:
     import torch
 except ImportError:
-    print('Cannot import torch, hence caffe2-torch test will not run.')
+    print("Cannot import torch, hence caffe2-torch test will not run.")
     sys.exit(0)
 
 
@@ -28,9 +23,9 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
     case as well on pytorch front
     This should likely be removed from the release version of the code
     """
-    device = 'CPU'
+    device = "CPU"
     if use_gpu:
-        device = 'CUDA'
+        device = "CUDA"
     model_def = onnx.ModelProto.FromString(proto)
     onnx.checker.check_model(model_def)
     prepared = c2.prepare(model_def, device=device)
@@ -41,12 +36,7 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
         # sure our order is consistent with the model's order.
         # TODO: Even better: keyword arguments!
         for k in model.state_dict():
-            if k not in state_dict:
-                # Once PyTorch Module adds unnecessary parameter, the old pre-trained model does not have it.
-                # Just simply pass the new one.
-                # TODO: Please don't export unnecessary parameter.
-                parameters.append(model.state_dict()[k])
-            else:
+            if k in state_dict:
                 parameters.append(state_dict[k])
     else:
         parameters = list(model.state_dict().values())

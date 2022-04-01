@@ -1,5 +1,4 @@
 #include "caffe2/operators/fused_rowwise_nbitfake_conversion_ops.h"
-#include <fp16.h>
 #ifdef __AVX__
 #include <immintrin.h>
 #endif
@@ -17,17 +16,19 @@ float compress_uniform_simplified_(
     int bit_rate) {
   xmin = static_cast<at::Half>(xmin);
   float data_range = xmax - xmin;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float qmax = (1 << bit_rate) - 1;
   float scale = data_range == 0
       ? 1.0
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
   float inverse_scale = 1.0f / scale;
 
   float norm = 0.0f;
-  constexpr int VLEN = 8;
   int i = 0;
 
 #ifdef __AVX__
+  constexpr int VLEN = 8;
   // vectorized loop
   __m256 norm_v = _mm256_setzero_ps();
   for (; i < N / VLEN * VLEN; i += VLEN) {
@@ -87,7 +88,9 @@ void param_search_greedy(
     float& Xmin,
     float& Xmax,
     int bit_rate) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float stepsize = (Xmax - Xmin) / n_bins;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int min_bins = n_bins * (1 - ratio);
 
   vector<float> Xq(N);
@@ -100,6 +103,7 @@ void param_search_greedy(
   float cur_max = Xmax;
   float cur_loss = loss;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float thr = min_bins * stepsize;
   while (cur_min + thr < cur_max) {
     // move left

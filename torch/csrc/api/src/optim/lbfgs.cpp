@@ -6,6 +6,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <functional>
@@ -47,10 +48,18 @@ void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
 }
 
+double LBFGSOptions::get_lr() const {
+  return lr();
+}
+
+void LBFGSOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 template <typename T>
 bool if_container_equal(T lhs, T rhs) {
   if (!(lhs.size() == rhs.size())) return false;
-  for (size_t i = 0; i < lhs.size(); i++) {
+  for(const auto i : c10::irange(lhs.size())) {
     if (!torch::equal(lhs.at(i), rhs.at(i))) return false;
   }
   return true;
@@ -145,7 +154,7 @@ void LBFGS::_add_grad(const double step_size, const Tensor& update) {
 void LBFGS::_set_param(const std::vector<Tensor>& params_data) {
   auto& _params = param_groups_.at(0).params();
   TORCH_INTERNAL_ASSERT(params_data.size() == _params.size());
-  for (size_t i = 0; i < _params.size(); i++) {
+  for(const auto i : c10::irange(_params.size())) {
     _params.at(i).copy_(params_data.at(i));
   }
 }
@@ -161,6 +170,7 @@ std::vector<Tensor> LBFGS::_clone_param() {
 std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d) {
     _add_grad(t, d);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double loss;
     {
       torch::AutoGradMode enable_grad(true);
@@ -176,6 +186,7 @@ double _cubic_interpolate(
   c10::optional<std::tuple<double, double>> bounds = c10::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double xmin_bound, xmax_bound;
   if (bounds != c10::nullopt) {
     std::tie(xmin_bound, xmax_bound) = *bounds;
@@ -193,9 +204,11 @@ double _cubic_interpolate(
 
   auto d1 = (g1 + g2) - (3 * (f1 - f2) / (x1 - x2));
   auto d2_square = std::pow(d1, 2) - g1 * g2;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double d2;
   if (d2_square >= 0) {
     d2 = std::sqrt(d2_square);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double min_pos;
     if (x1 <= x2) {
       min_pos = x2 - ((x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2)));
@@ -219,7 +232,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
     auto d_norm = val(d.abs().max());
     g = g.clone(at::MemoryFormat::Contiguous);
     // evaluate objective and gradient using initial step
-    auto obj_func_res = obj_func(x, t, d);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double f_new;
     Tensor g_new;
     std::tie(f_new, g_new) = obj_func(x, t, d);
@@ -245,7 +258,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
         bracket_gtd = {gtd_prev, gtd_new};
         break;
       }
-      if (abs(val(gtd_new)) <= (-c2 * val(gtd))) {
+      if (std::abs(val(gtd_new)) <= (-c2 * val(gtd))) {
         bracket = {t, t};
         bracket_f = {f_new, f_new};
         bracket_g = {g_new, g_new};
@@ -271,7 +284,6 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       f_prev = f_new;
       g_prev = g_new.clone(at::MemoryFormat::Contiguous);
       gtd_prev = gtd_new;
-      obj_func_res = obj_func(x, t, d);
       std::tie(f_new, g_new) = obj_func(x, t, d);
       ls_func_evals += 1;
       gtd_new = g_new.dot(d);
@@ -289,6 +301,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
     // exact point satisfying the criteria
     bool insuf_progress = false;
     // find high and low points in bracket
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t low_pos, high_pos;
     std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1] ? std::make_tuple(0, 1) : std::make_tuple(1, 0);
     while(!done && (ls_iter < max_ls)) {
@@ -310,7 +323,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
         // interpolation close to boundary
         if (insuf_progress || (t >= bracket_max) || (t <= bracket_min)) {
           // evaluate at 0.1 away from boundary
-          t = (abs(t - bracket_max) < abs(t - bracket_min)) ? bracket_max - eps : bracket_min + eps;
+          t = (std::abs(t - bracket_max) < std::abs(t - bracket_min)) ? bracket_max - eps : bracket_min + eps;
           insuf_progress = false;
         } else {
           insuf_progress = true;
@@ -320,9 +333,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       }
 
       // Evaluate new point
-      obj_func_res = obj_func(x, t, d);
-      f_new = std::get<0>(obj_func_res);
-      g_new = std::get<1>(obj_func_res);
+      std::tie(f_new, g_new) = obj_func(x, t, d);
       ls_func_evals += 1;
       gtd_new = g_new.dot(d);
       ls_iter += 1;
@@ -336,7 +347,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
         bracket_gtd[high_pos] = gtd_new;
         std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1] ? std::make_tuple(0, 1) : std::make_tuple(1, 0);
       } else {
-        if (val(abs(gtd_new)) <= (-c2 * val(gtd))) {
+        if (val(at::abs(gtd_new)) <= (-c2 * val(gtd))) {
           // Wolfe conditions satisfied
           done = true;
         } else if ((val(gtd_new) * (bracket[high_pos] - bracket[low_pos])) >= 0) {
@@ -355,7 +366,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       }
 
       // line-search bracket is so small
-      if ((abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
+      if ((std::abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
     }
 
     // return stuff
@@ -474,7 +485,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // r/d is the final direction
       auto r = torch::mul(q, H_diag);
       d = r;
-      for (int64_t i = 0; i < num_old; i++) {
+      for(const auto i : c10::irange(num_old)) {
         auto be_i = old_dirs.at(i).dot(r) * ro.at(i);
         r.add_(old_stps.at(i), val((*al).at(i) - be_i));
       }
@@ -509,7 +520,6 @@ Tensor LBFGS::step(LossClosure closure) {
       TORCH_CHECK(*line_search_fn == "strong_wolfe", "only 'strong_wolfe' is supported");
       auto x_init = _clone_param();
       auto obj_func = [&](const std::vector<Tensor>& x, double t, const Tensor& d) { return _directional_evaluate(closure, x, t, d); };
-      auto strong_wolfe_res = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       std::tie(loss, flat_grad, t, ls_func_evals) = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       _add_grad(t, d);
       opt_cond = (val(flat_grad.abs().max()) <= tolerance_grad);
@@ -546,7 +556,7 @@ Tensor LBFGS::step(LossClosure closure) {
     // lack of progress
     if (val(d.mul(t).abs().max()) <= tolerance_change) break;
 
-    if (abs(loss - prev_loss) < tolerance_change) break;
+    if (std::abs(loss - prev_loss) < tolerance_change) break;
   }
 
   return orig_loss;

@@ -2,7 +2,7 @@
 #include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/strtod.h>
@@ -13,6 +13,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
 
 namespace torch {
 namespace jit {
@@ -79,6 +84,13 @@ namespace jit {
   _(TK_MINUS_EQ, "-=", "-=")                     \
   _(TK_TIMES_EQ, "*=", "*=")                     \
   _(TK_DIV_EQ, "/=", "/=")                       \
+  _(TK_MOD_EQ, "%=", "%=")                       \
+  _(TK_BIT_OR_EQ, "|=", "|=")                    \
+  _(TK_BIT_AND_EQ, "&=", "&=")                   \
+  _(TK_BIT_XOR_EQ, "^=", "^=")                   \
+  _(TK_LSHIFT_EQ, "<<=", "<<=")                  \
+  _(TK_RSHIFT_EQ, ">>=", ">>=")                  \
+  _(TK_POW_EQ, "**=", "**=")                     \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
   _(TK_SUBSCRIPT, "subscript", "")               \
@@ -101,12 +113,19 @@ namespace jit {
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_DICT_COMP, "dict comprehension", "")      \
   _(TK_BREAK, "break", "break")                  \
   _(TK_CONTINUE, "continue", "continue")         \
   _(TK_DELETE, "del", "del")                     \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")
+  _(TK_IMPORT, "import", "import")               \
+  _(TK_WITH, "with", "with")                     \
+  _(TK_WITH_ITEM, "withitem", "")                \
+  _(TK_AS, "as", "as")                           \
+  _(TK_PROP, "property", "")                     \
+  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")         \
+  _(TK_NONE_TYPE, "NoneType", "NoneType")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -118,8 +137,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-CAFFE2_API std::string kindToString(int kind);
-CAFFE2_API int stringToKind(const std::string& str);
+TORCH_API std::string kindToString(int kind);
+TORCH_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -152,7 +171,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct CAFFE2_API SharedParserData {
+struct TORCH_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -168,78 +187,10 @@ struct CAFFE2_API SharedParserData {
 #undef ADD_CASE
   }
 
-  // 1. skip whitespace
-  // 2. handle comment or newline
-  //
-  bool isNumber(const std::string& str, size_t start, size_t* len) {
-    char first = str[start];
-    // strtod allows numbers to start with + or - or nan or inf
-    // http://en.cppreference.com/w/cpp/string/byte/strtof
-    // but we want only the number part, otherwise 1+3 will turn into two
-    // adjacent numbers in the lexer
-    if (first == '-' || first == '+' || isalpha(first))
-      return false;
-    const char* startptr = str.c_str() + start;
-    char* endptr;
-    torch::jit::strtod_c(startptr, &endptr);
-    *len = endptr - startptr;
-    return *len > 0;
-  }
-
-  bool isCharCount(char c, const std::string& str, size_t start, int len) {
-    // count checks from [start, start + len)
-    return start + len <= str.size() &&
-        std::count(str.begin() + start, str.begin() + start + len, c) == len;
-  }
-
-  // python concatenates all adjacent strings "a" "b" == "ab"
-  // strings can be enclosed with 1 or 3 single or double quotes
-  // if enclosed with 3 quotes newlines are valid
-  // as elsewhere, backslash and new line should be ignored
-  bool isString(const std::string& str, size_t start, size_t* len) {
-    char quote = str[start];
-    if (quote != '\"' && quote != '\'')
-      return false;
-    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
-
-    // end is now set past the opening quotation marks
-    size_t end = start + quote_len;
-    while (end < str.size() && !isCharCount(quote, str, end, quote_len)) {
-      if (str[end] == '\n' && quote_len != 3) {
-        return false;
-      }
-      // handle escaped characters. advances past escaped quotation marks,
-      // escaped newlines and escaped backslashes
-      // multi-char escapes like \x1A are handled fine here because the
-      // remainder of the escape are valid string characters anyway
-      if (str[end] == '\\') {
-        end++;
-      }
-      end++;
-    }
-    // set length equal to the complete string including quotations
-    *len = end - start + quote_len;
-    // if end finished without going past the last character of the string than
-    // there is a match
-    return end < str.size();
-  }
-
-  bool isblank(int n) {
-    return isspace(n) && n != '\n';
-  }
-  // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(const std::string& str, size_t pos) {
-    const std::string type_string = "# type:";
-    if (str.size() < pos + type_string.length()) {
-      return false;
-    }
-    auto match_string = str.substr(pos, type_string.size());
-    return match_string == type_string;
-  }
   // find the longest match of str.substring(pos) against a token, return true
   // if successful filling in kind, start,and len
   bool match(
-      const std::string& str,
+      c10::string_view str,
       size_t pos,
       bool continuation, // are we inside a scope where newlines don't count
                          // (e.g. inside parens)
@@ -317,16 +268,12 @@ struct CAFFE2_API SharedParserData {
       // rather the
       // identifier 'max'
       if (cur) {
-        size_t child_offset = 0;
-        for (size_t e = cur->child_chars.size(); child_offset < e;
-             ++child_offset) {
-          if (cur->child_chars[child_offset] == str[pos + i])
-            break;
-        }
+        const auto begin_it = cur->child_chars.begin();
+        const auto end_it = cur->child_chars.end();
+        const auto ch_it = std::find(begin_it, end_it, str[pos + i]);
 
-        cur = (child_offset == cur->child_chars.size())
-            ? nullptr
-            : cur->child_tries[child_offset].get();
+        cur = (ch_it == end_it) ? nullptr
+                                : cur->child_tries[ch_it - begin_it].get();
 
         if (cur && cur->kind != 0) {
           matched = true;
@@ -337,6 +284,7 @@ struct CAFFE2_API SharedParserData {
     }
     return matched;
   }
+
   bool isUnary(int kind, int* prec);
   bool isBinary(int kind, int* prec);
   bool isRightAssociative(int kind) {
@@ -353,10 +301,86 @@ struct CAFFE2_API SharedParserData {
   bool validIdent(size_t i, char n) {
     return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
   }
+
+  // 1. skip whitespace
+  // 2. handle comment or newline
+  //
+  bool isNumber(c10::string_view str, size_t start, size_t* len) {
+    char first = str[start];
+    // strtod allows numbers to start with + or - or nan or inf
+    // http://en.cppreference.com/w/cpp/string/byte/strtof
+    // but we want only the number part, otherwise 1+3 will turn into two
+    // adjacent numbers in the lexer
+    if (first == '-' || first == '+' || isalpha(first))
+      return false;
+    const char* startptr = str.data() + start;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    char* endptr;
+    torch::jit::strtod_c(startptr, &endptr);
+    *len = endptr - startptr;
+    // check if the number is complex valued
+    // access is safe because string is assumed to be null terminated
+    if (endptr != nullptr && *endptr == 'j') {
+      *len += 1;
+    }
+    return *len > 0;
+  }
+
+  bool isCharCount(char c, c10::string_view str, size_t start, int len) {
+    // count checks from [start, start + len)
+    return start + len <= str.size() &&
+        std::count(str.begin() + start, str.begin() + start + len, c) == len;
+  }
+
+  // python concatenates all adjacent strings "a" "b" == "ab"
+  // strings can be enclosed with 1 or 3 single or double quotes
+  // if enclosed with 3 quotes newlines are valid
+  // as elsewhere, backslash and new line should be ignored
+  bool isString(c10::string_view str, size_t start, size_t* len) {
+    char quote = str[start];
+    if (quote != '\"' && quote != '\'')
+      return false;
+    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
+
+    // end is now set past the opening quotation marks
+    size_t end = start + quote_len;
+    while (end < str.size() && !isCharCount(quote, str, end, quote_len)) {
+      if (str[end] == '\n' && quote_len != 3) {
+        return false;
+      }
+      // handle escaped characters. advances past escaped quotation marks,
+      // escaped newlines and escaped backslashes
+      // multi-char escapes like \x1A are handled fine here because the
+      // remainder of the escape are valid string characters anyway
+      if (str[end] == '\\') {
+        end++;
+      }
+      end++;
+    }
+    // set length equal to the complete string including quotations
+    *len = end - start + quote_len;
+    // if end finished without going past the last character of the string than
+    // there is a match
+    return end < str.size();
+  }
+
+  bool isblank(int n) {
+    return isspace(n) && n != '\n';
+  }
+  // Make an exception ignoring comments for type annotation comments
+  bool isTypeComment(c10::string_view str, size_t pos) {
+    const std::string type_string = "# type:";
+    if (str.size() < pos + type_string.length()) {
+      return false;
+    }
+    auto match_string = str.substr(pos, type_string.size());
+    return match_string == type_string;
+  }
+
   TokenTrieRef head;
 };
 
-CAFFE2_API SharedParserData& sharedParserData();
+TORCH_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
@@ -371,8 +395,8 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(const std::shared_ptr<Source>& source)
-      : source(source),
+  explicit Lexer(std::shared_ptr<SourceView> source)
+      : source(std::move(source)),
         pos(0),
         nesting(0),
         indent_stack(),
@@ -386,7 +410,7 @@ struct Lexer {
   Token next() {
     if (next_tokens.size() == 0)
       reportError("Lexer invariant violated: empty token queue");
-    Token r = next_tokens.front();
+    Token r = std::move(next_tokens.front());
     next_tokens.erase(next_tokens.begin());
     if (next_tokens.size() == 0) {
       lex();
@@ -454,8 +478,9 @@ struct Lexer {
         break;
       case TK_WHITESPACE:
       case TK_WHITESPACE_EOF: {
-        int depth =
-            r.kind == TK_WHITESPACE_EOF ? indent_stack.front() : r.range.size();
+        const auto depth = static_cast<int64_t>(
+            r.kind == TK_WHITESPACE_EOF ? indent_stack.front()
+                                        : r.range.size());
         // note: TK_WHITESPACE_EOF is whitespace right before the EOF token
         // just like we allow the code to be indented to a particular initial
         // indent level, we allow the final indent to be anything and set
@@ -486,8 +511,11 @@ struct Lexer {
     next_tokens.push_back(std::move(r));
   }
   Token lexRaw(bool whitespace_token = false) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int kind;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t start;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t length;
     AT_ASSERT(source);
     if (!shared.match(
@@ -508,7 +536,7 @@ struct Lexer {
     return t;
   }
 
-  std::shared_ptr<Source> source;
+  std::shared_ptr<SourceView> source;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of indentation level of blocks
@@ -518,3 +546,5 @@ struct Lexer {
 };
 } // namespace jit
 } // namespace torch
+
+C10_CLANG_DIAGNOSTIC_POP()

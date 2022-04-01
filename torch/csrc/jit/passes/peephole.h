@@ -5,12 +5,16 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void PeepholeOptimize(
+// return true if graph is modified
+TORCH_API bool PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
-    bool addmm_fusion_enabled = false);
-TORCH_API void PeepholeOptimize(
+    bool disable_shape_peepholes = false);
+// return true if graph is modified
+TORCH_API bool PeepholeOptimize(
     Block* block,
-    bool addmm_fusion_enabled = false);
+    bool disable_shape_peepholes = false);
+// return true if graph is modified
+TORCH_API bool FuseAddMM(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

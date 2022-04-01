@@ -1,10 +1,10 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    output: "1"
+    output: "onnx::PRelu_1"
     name: "RandomUniformLike_0"
     op_type: "RandomUniformLike"
     attribute {
@@ -20,7 +20,7 @@ graph {
   }
   node {
     input: "input"
-    input: "1"
+    input: "onnx::PRelu_1"
     output: "2"
     name: "PRelu_1"
     op_type: "PRelu"

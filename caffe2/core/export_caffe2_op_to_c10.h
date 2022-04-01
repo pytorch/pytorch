@@ -8,6 +8,9 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <c10/core/CompileTimeFunctionPointer.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 #include <vector>
 
 namespace caffe2 {
@@ -26,8 +29,8 @@ inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
     c10::List<at::Tensor>&& outputs) {
-  Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
-  op.Run();
+  Caffe2Operator op(schema, std::move(inputs), std::move(outputs), -1);
+  op.Run(-1);
   return std::move(op).move_newstyle_outputs();
 }
 
@@ -55,7 +58,7 @@ inline void _call_caffe2_op_from_c10(
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
-          OptionalType::create(ListType::ofTensors())));
+          *OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
   const size_t num_outputs = schema.returns().size();
@@ -79,8 +82,22 @@ inline void _call_caffe2_op_from_c10(
 
   outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    torch::jit::push(*stack, outputs.extract(i));
+  bool return_tensor_list = false;
+  if (schema.returns().size() == 1) {
+    auto type = schema.returns()[0].type();
+    if (c10::ListTypePtr list_type = type->cast<c10::ListType>()) {
+      if (list_type->getElementType()->kind() == c10::TypeKind::TensorType) {
+        return_tensor_list = true;
+      }
+    }
+  }
+  if (return_tensor_list) {
+    // We should not unwrap the list if we expect tensor list in the schema.
+    torch::jit::push(*stack, outputs);
+  } else {
+    for (const auto i : c10::irange(outputs.size())) {
+      torch::jit::push(*stack, outputs.extract(i));
+    }
   }
 
   // postcondition: All inputs are cleared from the stack, there's now one
@@ -164,7 +181,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)   \
   namespace caffe2 {                                        \
   namespace _c10_ops {                                      \
-  CAFFE2_API const FunctionSchema& schema_##OperatorName(); \
+  TORCH_API const FunctionSchema& schema_##OperatorName(); \
   }                                                         \
   }
 
@@ -177,48 +194,52 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
         ::caffe2::detail::make_function_schema_for_c10(OperatorSchema);       \
     return schema;                                                            \
   }                                                                           \
+  TORCH_LIBRARY_FRAGMENT(_caffe2, m) {                                        \
+      m.def(::caffe2::detail::make_function_schema_for_c10(OperatorSchema));  \
+  }                                                                           \
   }                                                                           \
   }
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(                         \
     OperatorName, OperatorClass)                                             \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
-  static auto registry_##OperatorName##_##__COUNTER__ =                      \
-      ::c10::RegisterOperators().op(                                         \
-          ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::RegisterOperators::options()                                \
-              .kernel<&::caffe2::detail::call_caffe2_op_from_c10<            \
-                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
-                  OperatorClass>>(::c10::DispatchKey::CPUTensorId));
+    TORCH_LIBRARY_IMPL(_caffe2, CPU, m) {                                    \
+        m.impl("_caffe2::" #OperatorName,                                    \
+            torch::CppFunction::makeFromBoxedFunction<                       \
+                ::caffe2::detail::call_caffe2_op_from_c10<                   \
+                    ::caffe2::_c10_ops::schema_##OperatorName,               \
+                    OperatorClass>>());                                      \
+    }
 
-#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                \
-    OperatorName, OperatorSchema, OperatorClass)                        \
-  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                     \
+    OperatorName, OperatorSchema, OperatorClass)                             \
+  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema)      \
   C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(OperatorName, OperatorClass)
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)        \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
-  static auto registry_##OperatorName##_##__COUNTER__ =                      \
-      ::c10::RegisterOperators().op(                                         \
-          ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::RegisterOperators::options()                                \
-              .kernel<&::caffe2::detail::call_caffe2_op_from_c10<            \
-                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
-                  OperatorClass>>(::c10::DispatchKey::CUDATensorId));
+    TORCH_LIBRARY_IMPL(_caffe2, CUDA, m) {                                   \
+        m.impl("_caffe2::" #OperatorName,                                    \
+            torch::CppFunction::makeFromBoxedFunction<                       \
+                ::caffe2::detail::call_caffe2_op_from_c10<                   \
+                    ::caffe2::_c10_ops::schema_##OperatorName,               \
+                    OperatorClass>>());                                      \
+    }
+
 
 // You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
 // rewritten to C10_EXPORT_CAFFE2_OP_TO_C10_HIP by hipify .
 #define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)         \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
-  static auto registry_##OperatorName##_##__COUNTER__ =                      \
-      ::c10::RegisterOperators().op(                                         \
-          ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::RegisterOperators()                                         \
-              .options()                                                     \
-              .kernel<&::caffe2::detail::call_caffe2_op_from_c10<            \
-                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
-                  OperatorClass>>(::c10::DispatchKey::HIPTensorId));
+    TORCH_LIBRARY_IMPL(_caffe2, HIP, m) {                                    \
+        m.impl("_caffe2::" #OperatorName,                                    \
+            torch::CppFunction::makeFromBoxedFunction<                       \
+                ::caffe2::detail::call_caffe2_op_from_c10<                   \
+                    ::caffe2::_c10_ops::schema_##OperatorName,               \
+                    OperatorClass>>());                                      \
+    }
+
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size

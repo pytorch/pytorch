@@ -1,16 +1,12 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <string>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type_base.h>
+#include <ATen/core/symbol.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-
-namespace c10 {
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-} // namespace c10
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
@@ -19,22 +15,42 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
-enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, ival };
+enum class AttributeKind {
+  f,
+  fs,
+  c,
+  cs,
+  i,
+  is,
+  s,
+  ss,
+  t,
+  ts,
+  g,
+  gs,
+  ty,
+  tys,
+  ival
+};
 static inline const char* toString(AttributeKind kind) {
-  static const char* names[] = {"f",
-                                "fs",
-                                "i",
-                                "is",
-                                "s",
-                                "ss",
-                                "t",
-                                "ts",
-                                "g",
-                                "gs",
-                                "ty",
-                                "tys",
-                                "ival"};
-  AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  static const char* names[] = {
+      "f",
+      "c",
+      "cs",
+      "fs",
+      "i",
+      "is",
+      "s",
+      "ss",
+      "t",
+      "ts",
+      "g",
+      "gs",
+      "ty",
+      "tys",
+      "ival"};
+  AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(*names));
   return names[int(kind)];
 }
 
@@ -71,6 +87,7 @@ template <typename T, AttributeKind Kind>
 struct VectorAttributeValue : public AttributeValue {
   using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VectorAttributeValue(Symbol name, ConstructorType value_)
       : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
@@ -88,6 +105,10 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType value_;
 };
 
+using ComplexAttr =
+    ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
+using ComplexValsAttr =
+    VectorAttributeValue<c10::complex<double>, AttributeKind::cs>;
 using FloatAttr = ScalarAttributeValue<double, AttributeKind::f>;
 using FloatsAttr = VectorAttributeValue<double, AttributeKind::fs>;
 using IntAttr = ScalarAttributeValue<int64_t, AttributeKind::i>;
@@ -108,7 +129,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
-      : AttributeValue(name), value_(value_) {}
+      : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
     return value_;
   }
@@ -124,6 +145,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
 struct TORCH_API GraphsAttr : public AttributeValue {
   using ConstructorType = std::vector<std::shared_ptr<Graph>>;
   using ValueType = std::vector<std::shared_ptr<Graph>>;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphsAttr(Symbol name, ConstructorType value_)
       : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
@@ -138,9 +160,10 @@ struct TORCH_API GraphsAttr : public AttributeValue {
   ValueType value_;
 };
 
-struct AttributeError : public std::exception {
-  AttributeError(Symbol name, bool defined) {
+struct IRAttributeError : public std::exception {
+  IRAttributeError(Symbol name, bool defined) {
     std::stringstream ss;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!defined) {
       ss << "required keyword attribute '" << name.toUnqualString()
          << "' is undefined";

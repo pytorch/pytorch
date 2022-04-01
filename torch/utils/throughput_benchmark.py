@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch._C
 
@@ -117,7 +116,12 @@ class ThroughputBenchmark(object):
         '''
         self._benchmark.add_input(*args, **kwargs)
 
-    def benchmark(self, num_calling_threads=1, num_warmup_iters=10, num_iters=100):
+    def benchmark(
+            self,
+            num_calling_threads=1,
+            num_warmup_iters=10,
+            num_iters=100,
+            profiler_output_path=""):
         '''
         Args:
             num_warmup_iters (int): Warmup iters are used to make sure we run a module
@@ -132,6 +136,12 @@ class ThroughputBenchmark(object):
                 iterations might be slightly larger. Which is reported as
                 stats.num_iters where stats is the result of this function
 
+            profiler_output_path (string): Location to save Autograd Profiler trace.
+                If not empty, Autograd Profiler will be enabled for the main benchmark
+                execution (but not the warmup phase). The full trace will be saved
+                into the file path provided by this argument
+
+
         This function returns BenchmarkExecutionStats object which is defined via pybind11.
         It currently has two fields:
             - num_iters - number of actual iterations the benchmark have made
@@ -141,5 +151,6 @@ class ThroughputBenchmark(object):
         config.num_calling_threads = num_calling_threads
         config.num_warmup_iters = num_warmup_iters
         config.num_iters = num_iters
+        config.profiler_output_path = profiler_output_path
         c_stats = self._benchmark.benchmark(config)
         return ExecutionStats(c_stats, config)

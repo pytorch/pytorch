@@ -1,11 +1,92 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+
+#include <c10/util/irange.h>
 
 #include <tuple>
 #include <vector>
 
 namespace at {
+
+namespace meta {
+TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
+  const at::Tensor& input_,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& randomSamples
+) {
+  TORCH_CHECK(
+      pool_size.size() == 3,
+      "fractional_max_pool3d: kernel_size must either be a single Int or tuple of three Ints")
+  TORCH_CHECK(
+      output_size.size() == 3,
+      "fractional_max_pool3d: output_size must either be a single Int or tuple of three Ints")
+  int64_t outputT = output_size[0];
+  int64_t outputH = output_size[1];
+  int64_t outputW = output_size[2];
+  int64_t poolSizeT = pool_size[0];
+  int64_t poolSizeH = pool_size[1];
+  int64_t poolSizeW = pool_size[2];
+
+  int64_t numBatch = 1;
+  int64_t planeDim = 0;
+  int64_t timeDim = 1;
+  int64_t heightDim = 2;
+  int64_t widthDim = 3;
+
+  int64_t ndims = input_.ndimension();
+  TORCH_CHECK(ndims == 4 || ndims == 5,
+              "fractional_max_pool3d_out(): Expected 4D or 5D tensor, but got: ",
+              input_.sizes());
+  for (const auto i : c10::irange(1, ndims)) {
+    TORCH_CHECK(input_.size(i) > 0,
+                "fractional_max_pool3d_out(): Expected input to have non-zero size for non-batch dimensions, but got",
+                input_.sizes(), " with dimension ", i, " being empty.");
+  }
+
+  if (ndims == 5) {
+    numBatch = input_.size(0);
+    planeDim++;
+    timeDim++;
+    heightDim++;
+    widthDim++;
+  }
+
+  /* sizes */
+  int64_t numPlanes = input_.size(planeDim);
+  int64_t inputT = input_.size(timeDim);
+  int64_t inputH = input_.size(heightDim);
+  int64_t inputW = input_.size(widthDim);
+
+  TORCH_CHECK(outputT + poolSizeT - 1 < inputT,
+           "fractional_max_pool3d_out(): pool time ", poolSizeT,
+           " too large relative to input time ", inputT);
+  TORCH_CHECK(outputW + poolSizeW - 1 < inputW,
+           "fractional_max_pool3d_out(): pool width ", poolSizeW,
+           " too large relative to input width ", inputW);
+  TORCH_CHECK(outputH + poolSizeH - 1 < inputH,
+           "fractional_max_pool3d_out(): pool height ", poolSizeH,
+           " too large relative to input height ", inputH);
+
+  if (ndims == 4) {
+    /* resize output */
+    set_output(0, {numPlanes, outputT, outputH, outputW}, input_.options());
+    /* indices will contain the locations for each output point */
+    set_output(1, {numPlanes, outputT, outputH, outputW}, input_.options().dtype(kLong));
+  } else {
+    set_output(0, {numBatch, numPlanes, outputT, outputH, outputW}, input_.options());
+    /* indices will contain the locations for each output point */
+    set_output(1, {numBatch, numPlanes, outputT, outputH, outputW}, input_.options().dtype(kLong));
+  }
+
+  return TORCH_PRECOMPUTE_STRUCT(fractional_max_pool3d)().set_numBatch(numBatch).set_numPlanes(numPlanes).set_inputT(inputT).set_inputH(inputH).set_inputW(inputW)
+                                                         .set_poolSizeT(poolSizeT).set_poolSizeH(poolSizeH).set_poolSizeW(poolSizeW)
+                                                         .set_outputT(outputT).set_outputH(outputH).set_outputW(outputW);
+}
+
+} // namespace meta
+
 namespace native {
 namespace {
 
@@ -15,13 +96,15 @@ static std::vector<int> generate_intervals(
   int64_t inputSize,
   int64_t outputSize,
   int64_t poolSize) {
-  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-    static_cast<scalar_t>(outputSize - 1);
   std::vector<int> sequence(outputSize);
+  if (outputSize > 1) {
+    scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+      static_cast<scalar_t>(outputSize - 1);
 
-  for (int i = 0; i < outputSize - 1; ++i) {
-    sequence[i] =
-      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+    for (const auto i : c10::irange(outputSize - 1)) {
+      sequence[i] =
+        static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+    }
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -40,7 +123,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
   int64_t poolSizeT, int64_t poolSizeH, int64_t poolSizeW) {
 
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; ++plane) {
+    for (const auto plane : c10::irange(start, end)) {
       /* each plane contains 3 random samples,
          one for T, one for W, and one for H */
       scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
@@ -54,6 +137,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
           randomSamplesForPlane[2], inputW, outputW, poolSizeW);
 
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t t, h, w;
 
       scalar_t* inputForPlane = input + plane * inputT * inputH * inputW;
@@ -69,10 +153,10 @@ static void fractional_max_pool3d_out_single_batch_frame(
           for (w = 0; w < outputW; ++w) {
             int64_t inputWStart = sequenceW[w];
 
+            int64_t t2 = inputTStart, h2 = inputHStart, w2 = inputWStart;
             scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-            int64_t maxIndex = -1;
+            int64_t maxIndex = t2 * inputH * inputW + h2 * inputW + w2;
 
-            int64_t t2, h2, w2;
             for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
               for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
                 for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
@@ -82,16 +166,13 @@ static void fractional_max_pool3d_out_single_batch_frame(
 
                   int64_t planeIndex = t2 * inputH * inputW + h2 * inputW + w2;
                   scalar_t val = inputForPlane[planeIndex];
-                  if (val > maxVal) {
+                  if (val > maxVal || std::isnan(val)) {
                     maxVal = val;
                     maxIndex = planeIndex;
                   }
                 }
               }
             }
-
-            AT_ASSERT(maxVal != -std::numeric_limits<scalar_t>::infinity());
-            AT_ASSERT(maxIndex != -1);
 
             outputForPlane[t * outputH * outputW + h * outputW + w] = maxVal;
             indicesForPlane[t * outputH * outputW + h * outputW + w] = maxIndex;
@@ -124,7 +205,7 @@ static void fractional_max_pool3d_out_frame(
     }
 
     at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
+      for (const auto batch : c10::irange(start, end)) {
         fractional_max_pool3d_out_single_batch_frame<scalar_t>(
           input + batch * numPlanes * inputW * inputH * inputT,
           output + batch * numPlanes * outputW * outputH * outputT,
@@ -139,69 +220,28 @@ static void fractional_max_pool3d_out_frame(
     });
   }
 
-void fractional_max_pool3d_out_cpu_template(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input_,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const Tensor& randomSamples) {
+} // anonymous namespace
 
-  int64_t outputT = output_size[0];
-  int64_t outputH = output_size[1];
-  int64_t outputW = output_size[2];
-  int64_t poolSizeT = pool_size[0];
-  int64_t poolSizeH = pool_size[1];
-  int64_t poolSizeW = pool_size[2];
-
-  int64_t numBatch = 1;
-  int64_t planeDim = 0;
-  int64_t timeDim = 1;
-  int64_t heightDim = 2;
-  int64_t widthDim = 3;
-
-  int64_t ndims = input_.ndimension();
-  TORCH_CHECK(input_.numel() != 0 && (ndims == 4 || ndims == 5),
-    "fractional_max_pool3d_out(): non-empty 4D or 5D (batch mode) tensor ",
-    " expected for input, but got: ", ndims);
-
-  if (ndims == 5) {
-    numBatch = input_.size(0);
-    planeDim++;
-    timeDim++;
-    heightDim++;
-    widthDim++;
-  }
-
-  /* sizes */
-  int64_t numPlanes = input_.size(planeDim);
-  int64_t inputT = input_.size(timeDim);
-  int64_t inputH = input_.size(heightDim);
-  int64_t inputW = input_.size(widthDim);
-
-  TORCH_CHECK(outputT + poolSizeT - 1 < inputT,
-           "fractional_max_pool3d_out(): pool time ", poolSizeT,
-           " too large relative to input time ", inputT);
-  TORCH_CHECK(outputW + poolSizeW - 1 < inputW,
-           "fractional_max_pool3d_out(): pool width ", poolSizeW,
-           " too large relative to input width ", inputW);
-  TORCH_CHECK(outputH + poolSizeH - 1 < inputH,
-           "fractional_max_pool3d_out(): pool height ", poolSizeH,
-           " too large relative to input height ", inputH);
+TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
+  const at::Tensor& input_,
+  int64_t poolSizeT,
+  int64_t poolSizeH,
+  int64_t poolSizeW,
+  int64_t outputT,
+  int64_t outputH,
+  int64_t outputW,
+  const at::Tensor& randomSamples,
+  int64_t numBatch,
+  int64_t numPlanes,
+  int64_t inputT,
+  int64_t inputH,
+  int64_t inputW,
+  const at::Tensor& output,
+  const at::Tensor& indices) {
 
   /* get contiguous input */
   auto input = input_.contiguous();
 
-  if (ndims == 4) {
-    /* resize output */
-    output.resize_({numPlanes, outputT, outputH, outputW});
-    /* indices will contain the locations for each output point */
-    indices.resize_({numPlanes, outputT, outputH, outputW});
-  } else {
-    output.resize_({numBatch, numPlanes, outputT, outputH, outputW});
-    /* indices will contain the locations for each output point */
-    indices.resize_({numBatch, numPlanes, outputT, outputH, outputW});
-  }
   AT_DISPATCH_FLOATING_TYPES(
     input.scalar_type(),
     "fractional_max_pool3d_out_frame",
@@ -220,6 +260,8 @@ void fractional_max_pool3d_out_cpu_template(
   );
 }
 
+namespace {
+
 template<typename scalar_t>
 static void fractional_max_pool3d_backward_out_single_batch_frame(
   scalar_t* gradInput,
@@ -230,12 +272,13 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
   int64_t outputT, int64_t outputH, int64_t outputW) {
 
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; plane++) {
+    for (const auto plane : c10::irange(start, end)) {
       scalar_t* gradInputForPlane = gradInput + plane * inputT * inputH * inputW;
       scalar_t* gradOutputForPlane = gradOutput +
                   plane * outputT * outputH * outputW;
       int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t h, w, t;
       for (t = 0; t < outputT; ++t) {
         for (h = 0; h < outputH; ++h) {
@@ -270,7 +313,7 @@ static void fractional_max_pool3d_backward_out_frame(
     }
 
     at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
+      for (const auto batch : c10::irange(start, end)) {
         fractional_max_pool3d_backward_out_single_batch_frame<scalar_t>(
           gradInput + batch * numPlanes * inputW * inputH * inputT,
           gradOutput + batch * numPlanes * outputW * outputH * outputT,
@@ -349,49 +392,14 @@ void fractional_max_pool3d_backward_out_cpu_template(
   );
 }
 
-}// namespace
+}// anonymous namespace
 
-std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cpu(
-  at::Tensor& output,
-  at::Tensor& indices,
+Tensor& fractional_max_pool3d_backward_out_cpu(const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& randomSamples) {
-  fractional_max_pool3d_out_cpu_template(
-    output,
-    indices,
-    input,
-    pool_size,
-    output_size,
-    randomSamples);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
-
-std::tuple<Tensor, Tensor> fractional_max_pool3d_cpu(
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& randomSamples) {
-  Tensor output = at::empty(output_size, input.options());
-  Tensor indices = at::empty(output_size, at::kLong);
-  fractional_max_pool3d_out_cpu_template(
-    output,
-    indices,
-    input,
-    pool_size,
-    output_size,
-    randomSamples);
-  return std::tuple<Tensor, Tensor>(output, indices);
-}
-
-Tensor& fractional_max_pool3d_backward_out_cpu(
-  at::Tensor& gradInput,
-  const at::Tensor& gradOutput_,
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& indices) {
+  const at::Tensor& indices,
+  at::Tensor& gradInput) {
   fractional_max_pool3d_backward_out_cpu_template(
     input,
     gradOutput_,

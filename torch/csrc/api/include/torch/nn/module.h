@@ -302,7 +302,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` value of each registered parameter.
-  virtual void zero_grad();
+  virtual void zero_grad(bool set_to_none = false);
 
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
@@ -538,6 +538,11 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
       "`FORWARD_HAS_DEFAULT_ARGS` macro to do so.");
   }
 
+  /// The registered parameters of this `Module`.
+  /// Inorder to access parameters_ in ParameterDict and ParameterList
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  OrderedDict<std::string, Tensor> parameters_;
+
  private:
   // Friend classes.
 
@@ -582,9 +587,6 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// Returns a shared_ptr to `this` in a safe (checked) way.
   std::shared_ptr<Module> shared_from_this_checked() const;
-
-  /// The registered parameters of this `Module`.
-  OrderedDict<std::string, Tensor> parameters_;
 
   /// The registered buffers of this `Module`.
   OrderedDict<std::string, Tensor> buffers_;

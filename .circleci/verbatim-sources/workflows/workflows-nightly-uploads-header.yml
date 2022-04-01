@@ -1,0 +1,8 @@
+      #- binary_linux_libtorch_3.6m_cpu_test:
+      #    requires:
+      #      - binary_linux_libtorch_3.6m_cpu_build
+      #- binary_linux_libtorch_3.6m_cu90_test:
+      #    requires:
+      #      - binary_linux_libtorch_3.6m_cu90_build
+
+      # Nightly uploads

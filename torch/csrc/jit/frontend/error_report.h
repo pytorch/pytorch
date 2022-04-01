@@ -8,10 +8,10 @@ namespace jit {
 
 struct Call {
   std::string fn_name;
-  c10::optional<SourceRange> caller_range;
+  SourceRange caller_range;
 };
 
-struct CAFFE2_API ErrorReport : public std::exception {
+struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
   explicit ErrorReport(SourceRange r);
@@ -20,11 +20,11 @@ struct CAFFE2_API ErrorReport : public std::exception {
 
   const char* what() const noexcept override;
 
-  struct CAFFE2_API CallStack {
+  struct TORCH_API CallStack {
     // These functions are used to report why a function was being compiled
     // (i.e. what was the call stack of user functions at compilation time that
     // led to this error)
-    CallStack(const std::string& name);
+    CallStack(const std::string& name, const SourceRange& range);
     ~CallStack();
 
     // Change the range that is relevant for the current function (i.e. after
@@ -39,7 +39,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
   friend const ErrorReport& operator<<(const ErrorReport& e, const T& t);
 
   mutable std::stringstream ss;
-  SourceRange context;
+  OwnedSourceRange context;
   mutable std::string the_message;
   std::vector<Call> error_stack;
 };

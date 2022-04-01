@@ -1,16 +1,21 @@
-# TODO: Add ThreadPoolXNNPACK.cc when XNNPACK integration is updated
-# to pass the actual threadpool ptr instead of nullptr.
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  add_definitions(-DUSE_INTERNAL_THREADPOOL_IMPL)
+if((NOT BUILD_CAFFE2) OR (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
-    utils/threadpool/pthreadpool.cc
-    utils/threadpool/pthreadpool_impl.cc
-    utils/threadpool/pthreadpool_new_if_impl.c
     utils/threadpool/ThreadPool.cc
-    utils/threadpool/ThreadPoolMobile.cc
-    utils/threadpool/ThreadPoolXNNPACK.cc
   )
+
+  if(USE_PTHREADPOOL AND NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/threadpool/pthreadpool-cpp.cc
+      utils/threadpool/thread_pool_guard.cpp
+    )
+  endif()
+
+  if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/proto_wrap.cc
+    )
+  endif()
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
   return()
 endif()
@@ -28,23 +33,20 @@ list(APPEND Caffe2_CPU_SRCS
   utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
+  utils/threadpool/ThreadPool.cc
   utils/signal_handler.cc
   utils/smart_tensor_printer.cc
-  utils/string_utils.cc
-  utils/threadpool/ThreadPool.cc)
+  utils/string_utils.cc)
 
-# ---[ threadpool/pthreadpool* is a local modification of the NNPACK
-# pthreadpool with a very similar interface. Neither NNPACK, nor this
-# thread pool supports Windows.
-if(NOT MSVC)
-  add_definitions(-DUSE_INTERNAL_THREADPOOL_IMPL)
-  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
-          utils/threadpool/pthreadpool.cc
-          utils/threadpool/pthreadpool_impl.cc
-          utils/threadpool/pthreadpool_new_if_impl.c
-          utils/threadpool/ThreadPoolMobile.cc
-          utils/threadpool/ThreadPoolXNNPACK.cc
-          )
+if(USE_PTHREADPOOL)
+  list(APPEND Caffe2_CPU_SRCS
+    utils/threadpool/pthreadpool-cpp.cc
+    utils/threadpool/thread_pool_guard.cpp)
+  if(USE_INTERNAL_PTHREADPOOL_IMPL)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/threadpool/pthreadpool.cc
+      utils/threadpool/pthreadpool_impl.cc)
+  endif()
 endif()
 
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}

@@ -1,13 +1,24 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
+
 #include <ATen/core/jit_type.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/irange.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/operator_upgraders/utils.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
+  if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
+    return unwrapOptional(dyn->fallback());
+  }
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
     return unwrap_list_type->getElementType();
   }
@@ -28,21 +39,21 @@ static inline bool isIntOrFloatUsedAsList(
 
 /// Returns true if `type` is a Tuple in which all the elements have the
 /// same type or if it's a subtype of `list_type_`.
-inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
-  auto list_type = list_type_->cast<ListType>();
+bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
+  auto list_type = list_type_->castRaw<ListType>();
   if (!list_type) {
     return false;
   }
-  if (type->isSubtypeOf(list_type_)) {
+  if (type->isSubtypeOf(*list_type_)) {
     return true;
   }
-  if (auto tuple = type->cast<TupleType>()) {
+  if (auto tuple = type->castRaw<TupleType>()) {
     return std::all_of(
         tuple->elements().begin(),
         tuple->elements().end(),
         [&](const TypePtr& t) {
           // TODO: resolve VarType if necessary
-          return t->isSubtypeOf(list_type->getElementType());
+          return t->isSubtypeOf(*list_type->getElementType());
         });
   }
   return false;
@@ -56,19 +67,28 @@ Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
+  // treat conversion to Optional[T] as conversions to T
+  if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
+    if (value->type()->kind() != OptionalType::Kind &&
+        !value->type()->isSubtypeOf(*NoneType::get())) {
+      return tryConvertToType(
+          loc, graph, op->getElementType(), value, allow_conversions);
+    }
+  }
+
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
     if (convertibleToList(value->type(), unwrapOptional(concrete_type))) {
       auto unpacked = createTupleUnpack(value);
       auto elem_type =
-          unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
+          unwrapOptional(concrete_type)->expectRef<ListType>().getElementType();
       value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
 
     // inductively apply implicit conversions to tuples
     if (auto concrete_tuple = concrete_type->cast<TupleType>()) {
-      if (!value_tuple->isSubtypeOf(concrete_tuple) &&
+      if (!value_tuple->isSubtypeOf(*concrete_tuple) &&
           concrete_tuple->elements().size() == value_tuple->elements().size()) {
         auto unpacked = createTupleUnpack(value);
         std::vector<Value*> converted;
@@ -88,30 +108,35 @@ Value* tryConvertToType(
   // implicit conversions
   if (allow_conversions) {
     // Convert tensor or number to concrete int/float types
-    bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
+    bool value_isa_tensor = value->type()->isSubtypeOf(*TensorType::get());
     bool value_equals_number = *value->type() == *NumberType::get();
     bool concrete_float = *concrete_type == *FloatType::get();
+    bool concrete_complex = *concrete_type == *ComplexType::get();
     bool concrete_int = *concrete_type == *IntType::get();
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
-        value = graph.insert(aten::FloatImplicit, {value});
+        value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::ComplexImplicit, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::IntImplicit, {value});
+        value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
-        value = graph.insert(aten::ScalarImplicit, {value});
+        value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
       }
     } else if (value_equals_number) {
       if (concrete_float) {
-        value = graph.insert(aten::Float, {value});
+        value = graph.insert(aten::Float, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::Complex, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::Int, {value});
+        value = graph.insert(aten::Int, {value}, {}, loc);
       }
     }
 
     // Convert strings to device
-    if (value->type()->isSubtypeOf(StringType::get()) &&
-        DeviceObjType::get()->isSubtypeOf(concrete_type)) {
+    if (value->type()->isSubtypeOf(*StringType::get()) &&
+        concrete_type->isSubtypeOf(*DeviceObjType::get())) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
   }
@@ -148,8 +173,8 @@ static Value* tryMatchArgument(
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
-      err() << "Could not match type " << value->type()->python_str() << " to "
-            << arg.type()->python_str() << " in argument '" << arg.name()
+      err() << "Could not match type " << value->type()->repr_str() << " to "
+            << arg.type()->repr_str() << " in argument '" << arg.name()
             << "': " << matched.reason() << ".\n";
     }
     return nullptr;
@@ -157,9 +182,9 @@ static Value* tryMatchArgument(
   const auto concrete_type = tryEvalTypeVariables(arg.type(), type_env);
   if (!concrete_type) {
     if (failure_messages) {
-      err() << "Type variables in type " << arg.type()->python_str()
+      err() << "Type variables in type " << arg.type()->repr_str()
             << " could not be inferred from actual type "
-            << value->type()->python_str();
+            << value->type()->repr_str();
     }
     return nullptr;
   }
@@ -169,13 +194,25 @@ static Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
-          concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
+          *concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
-          << arg.formatTypeMismatchMsg(value->type()->python_str());
+          << arg.formatTypeMismatchMsg(value->type()->repr_str());
+
+      if (auto pt = value->type()->cast<TensorType>()) {
+        if (pt->isInferredType()) {
+          std::string inferred_type_hint;
+          inferred_type_hint = c10::str(
+              "Inferred the value for argument '",
+              arg.name(),
+              "' to be of type 'Tensor' ",
+              "because it was not annotated with an explicit type.\n");
+          ostream << inferred_type_hint;
+        }
+      }
 
       if (auto v = value->type()->cast<ListType>()) {
-        if (v->getElementType()->isSubtypeOf(TensorType::get())) {
+        if (v->getElementType()->isSubtypeOf(*TensorType::get())) {
           ostream << "Empty lists default to List[Tensor]. Add a variable "
                      "annotation to the assignment to create an empty list "
                      "of another type (torch.jit.annotate(List[T, []]) where T "
@@ -194,7 +231,7 @@ static Value* tryMatchArgument(
 c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs) {
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     if (kwargs[i].name() == name)
       return i;
   }
@@ -248,12 +285,17 @@ static bool varargsCanBeUsedAsList(
   bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
       schema.arguments()[arg_index + 1].kwarg_only();
 
+  auto arg_type = arg.type();
+  if (auto dyn = arg_type->castRaw<c10::DynamicType>()) {
+    arg_type = dyn->fallback();
+  }
+
   // The formal must be a list
-  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
+  bool argument_is_list = arg_type->kind() == TypeKind::ListType;
 
   // matching varargs of typevar list nyi
   bool typevar_list = argument_is_list &&
-      arg.type()->cast<ListType>()->getElementType()->cast<VarType>();
+      arg_type->castRaw<ListType>()->getElementType()->cast<VarType>();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
@@ -261,6 +303,19 @@ static bool varargsCanBeUsedAsList(
 
   return is_last_argument && argument_is_list && !arg_is_broadcasting_list &&
       !typevar_list;
+}
+
+// Note (@zasdfgbnm):
+// This is a workaround for https://github.com/pytorch/pytorch/issues/47964
+// Currently JIT does not distinguish ScalarType vs int, so there is really
+// no way to distinguish x.view(1) vs x.view(torch.int8). So we have to hardcode
+// the aten::view.dtype here to block this overload. This blocklist should be
+// removed when JIT fully suports ScalarType as its own type.
+bool isBlockListedSchema(const FunctionSchema& schema) {
+  if (schema.name() == "aten::view" && schema.overload_name() == "dtype") {
+    return true;
+  }
+  return false;
 }
 
 static c10::optional<MatchedSchema> tryMatchSchema(
@@ -272,6 +327,10 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     c10::optional<NamedValue> self,
     std::ostream* failure_messages,
     bool allow_conversions) {
+  if (isBlockListedSchema(schema)) {
+    return c10::nullopt;
+  }
+
   auto err = [&]() -> std::ostream& {
     *failure_messages << "\n" << schema << ":\n";
     return *failure_messages;
@@ -285,7 +344,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+  for (const auto schema_i : c10::irange(schema.arguments().size())) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
@@ -301,8 +360,9 @@ static c10::optional<MatchedSchema> tryMatchSchema(
         // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
-          auto formal_type =
-              unwrapOptional(arg.type())->expect<ListType>()->getElementType();
+          auto formal_type = unwrapOptional(arg.type())
+                                 ->expectRef<ListType>()
+                                 .getElementType();
 
           Value* list = tryCreateList(
               formal_type,
@@ -384,7 +444,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return c10::nullopt;
   }
   // check for unused kwargs
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     const auto& nv = kwargs[i];
     if (!used_kwarg[i]) {
       if (failure_messages) {
@@ -402,7 +462,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   auto return_types = fmap(returns, [&](const Argument& r) {
     TypePtr result = tryEvalTypeVariables(r.type(), type_env);
     TORCH_INTERNAL_ASSERT(
-        result, r.type()->python_str(), " has unbound type variables.");
+        result, r.type()->repr_str(), " has unbound type variables.");
     return result;
   });
   // Codegen does not support return of namedtuples with undefined field names.
@@ -416,9 +476,15 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return_field_names =
         fmap(returns, [&](const Argument& r) { return r.name(); });
   }
-  return MatchedSchema{std::move(positional_inputs),
-                       std::move(return_types),
-                       std::move(return_field_names)};
+
+  // construct the full name of the schema for easier look up
+  auto schema_name = getFullSchemaName(schema);
+
+  return MatchedSchema{
+      std::move(positional_inputs),
+      std::move(return_types),
+      std::move(return_field_names),
+      schema_name};
 }
 
 MatchedSchema matchSchema(
@@ -487,7 +553,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
-    for (size_t i = 0; i < schemas.size(); ++i) {
+    for (const auto i : c10::irange(schemas.size())) {
       const auto matched_schema = tryMatchSchema(
           *schemas[i],
           loc,
@@ -498,7 +564,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
           render_errors ? &failure_messages : nullptr,
           allow_conversions);
       if (matched_schema) {
-        return std::make_pair(i, std::move(*matched_schema));
+        return std::make_pair(i, *matched_schema);
       }
     }
   }
@@ -530,8 +596,8 @@ static Value* packOutputs(
   TupleTypePtr named_tuple = nullptr;
   if (field_names) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    named_tuple = TupleType::createNamed(
-        c10::nullopt, field_names.value(), std::move(types));
+    named_tuple =
+        TupleType::createNamed(c10::nullopt, field_names.value(), types);
   }
   return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
@@ -542,7 +608,8 @@ static Value* emitBuiltinNode(
     const MatchedSchema& matched_schema,
     const SourceRange& loc,
     Graph& graph,
-    Symbol name) {
+    Symbol name,
+    c10::optional<size_t> version) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
                ->setSourceRange(loc);
 
@@ -551,10 +618,23 @@ static Value* emitBuiltinNode(
   }
 
   // assert that we did indeed create an op that has implementation
-  // otherwise schema and dispatch are not in sync
-  n->getOperation();
+  // otherwise schema and dispatch are not in sync ONLY if the op is up
+  // to date with the server version
+  if (!version.has_value() ||
+      isOpSymbolCurrent(matched_schema.schema_name, version.value())) {
+    n->getOperation();
+  } else {
+    n->setHistoricSchemaName(matched_schema.schema_name);
+  }
 
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
+}
+
+std::string getFullSchemaName(const ::c10::FunctionSchema& schema) {
+  if (schema.overload_name() != "") {
+    return schema.operator_name().name + "." + schema.overload_name();
+  }
+  return schema.operator_name().name;
 }
 
 // Search for operators matching the provided symbol name and input types.
@@ -563,17 +643,68 @@ Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
+#if ENABLE_UPGRADERS
+  // first let's set the graph's version
+  auto graph_version = graph.get_op_version();
+#else
+  c10::optional<size_t> graph_version = c10::nullopt;
+#endif
+
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
+  // we append them later to schemas because
+  // parseSchema returns rvalue which can not
+  // be casted to const pointer.
+  std::vector<FunctionSchema> upgrader_schemas;
+  schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
-    schemas.push_back(&op->schema());
+    bool found_upgrader = false;
+    auto op_name = getFullSchemaName(op->schema());
+    if (graph_version.has_value()) {
+      auto version_entry = get_operator_version_map().find(op_name);
+      if (version_entry != get_operator_version_map().end()) {
+        auto old_schema_entry =
+            findUpgrader(version_entry->second, graph_version.value());
+        if (old_schema_entry.has_value()) {
+          FunctionSchema old_schema =
+              parseSchema(old_schema_entry.value().old_schema);
+          upgrader_schemas.push_back(old_schema);
+          found_upgrader = true;
+        } else {
+          if (!isOpCurrentBasedOnUpgraderEntries(
+                  version_entry->second, graph_version.value())) {
+            TORCH_INTERNAL_ASSERT(false, "Valid upgrader must be present");
+          }
+        }
+      }
+    }
+    if (!found_upgrader)
+      schemas.push_back(&op->schema());
   }
+
+  // we might have seen old historic
+  // ops that are deprecated
+  if (variants.empty()) {
+    auto oldSchemas =
+        loadPossibleHistoricOps(name.toQualString(), graph_version);
+    upgrader_schemas.reserve(oldSchemas.size());
+    for (const auto& old_schema_entry : oldSchemas) {
+      FunctionSchema old_schema = parseSchema(old_schema_entry);
+      upgrader_schemas.emplace_back(old_schema);
+    }
+  }
+
+  // TODO (tugsuu): make sure this is optimized later
+  for (const auto& schema : upgrader_schemas) {
+    schemas.push_back(&schema);
+  }
+
   for (const auto method : builtin_functions) {
     method->ensure_defined();
     schemas.push_back(&method->getSchema());
@@ -599,15 +730,17 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemas(schemas, loc, graph, inputs, attributes, self);
+  auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
-  if (matched.first < variants.size()) {
-    return emitBuiltinNode(matched.second, loc, graph, name);
+  if (matched.first < variants.size() + upgrader_schemas.size()) {
+    return emitBuiltinNode(matched.second, loc, graph, name, graph_version);
   } else {
-    Function* fn = builtin_functions[matched.first - variants.size()];
+    auto& fn = *builtin_functions[matched.first - variants.size()];
     // we inline builtin calls because they are normally very small
     // wrappers and are not useful for keeping around to debug
-    return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+    return insertGraph(
+               graph, *toGraphFunction(fn).graph(), matched.second.inputs)
+        .at(0);
   }
 }
 

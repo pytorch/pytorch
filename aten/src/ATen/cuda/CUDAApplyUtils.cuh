@@ -1,11 +1,13 @@
 #pragma once
 
+#include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/TensorUtils.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/core/TensorBase.h>
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/native/Copy.h>
 
 #include <math.h>
 
@@ -198,11 +200,6 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
   }
 }
 
-// Threads per block for our apply kernel
-// FIXME: use occupancy calculator instead
-constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
-constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
-
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to
 //  1. Initialize `remaining_steps = step`, where `step` is the template arg of
@@ -273,7 +270,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
@@ -299,14 +296,14 @@ struct ApplyOp2 {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int64_t n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
+  const IndexType aOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset = sizeof...(Offsets) < n ?
+  const IndexType bOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, remaining_steps - 1, const IndexType, Offsets...>::apply(
@@ -328,7 +325,7 @@ struct ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, 0, Offset> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int /*n*/, IndexType /*linearIndex*/,
                   Offset aOffset, Offset bOffset) {
   op(a.data[aOffset], b.data[bOffset]);
 }
@@ -356,9 +353,11 @@ template <typename Op,
           typename scalar2,
           typename IndexType,
           int ADims, int BDims,
-          int step>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+          int step,
+          int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
+          int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
 #endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
@@ -374,164 +373,19 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
   }
 }
 
-
-template <typename Op,
-          typename scalar1,
-          typename scalar2,
-          typename scalar3,
-          typename scalar4,
-          typename IndexType,
-          int ADims,
-          int BDims,
-          int CDims,
-          int DDims,
-          int remaining_steps,
-          typename... Offsets>
-struct ApplyOp4 {
-__device__ __forceinline__
-static void apply(detail::TensorInfo<scalar1, IndexType> &a,
-                  detail::TensorInfo<scalar2, IndexType> &b,
-                  detail::TensorInfo<scalar3, IndexType> &c,
-                  detail::TensorInfo<scalar4, IndexType> &d,
-                  const Op &op, int n, IndexType linearIndex,
-                  Offsets... aOffsets, Offsets... bOffsets,
-                  Offsets... cOffsets, Offsets... dOffsets) {
-  // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
-    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
-
-  // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset = sizeof...(Offsets) < n ?
-    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
-
-  // Convert `linearIndex` into an offset of `c`
-  const IndexType cOffset = sizeof...(Offsets) < n ?
-    detail::IndexToOffset<scalar3, IndexType, CDims>::get(linearIndex, c) : 0;
-
-  // Convert `linearIndex` into an offset of `d`
-  const IndexType dOffset = sizeof...(Offsets) < n ?
-    detail::IndexToOffset<scalar4, IndexType, DDims>::get(linearIndex, d) : 0;
-
-  ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
-           ADims, BDims, CDims, DDims, remaining_steps - 1, const IndexType, Offsets...>::apply(
-    a, b, c, d, op, n, linearIndex + 1, aOffsets..., aOffset, bOffsets..., bOffset,
-    cOffsets..., cOffset, dOffsets..., dOffset
-  );
-}
-};
-
-// Specialize `step=1` case (i.e., `remaining_steps=0` and `len(Offsets)=1`).
-// We don't need to pass in how many elements need to processed in this case.
-template <typename Op,
-          typename scalar1,
-          typename scalar2,
-          typename scalar3,
-          typename scalar4,
-          typename IndexType,
-          int ADims,
-          int BDims,
-          int CDims,
-          int DDims,
-          typename Offset>
-struct ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
-                ADims, BDims, CDims, DDims, 0, Offset> {
-__device__ __forceinline__
-static void apply(detail::TensorInfo<scalar1, IndexType> &a,
-                  detail::TensorInfo<scalar2, IndexType> &b,
-                  detail::TensorInfo<scalar3, IndexType> &c,
-                  detail::TensorInfo<scalar4, IndexType> &d,
-                  const Op &op, int n, IndexType linearIndex,
-                  Offset aOffset, Offset bOffset,
-                  Offset cOffset, Offset dOffset) {
-  op(a.data[aOffset], b.data[bOffset], c.data[cOffset], d.data[dOffset]);
-}
-};
-
-template <typename Op,
-          typename scalar1,
-          typename scalar2,
-          typename scalar3,
-          typename scalar4,
-          typename IndexType,
-          int ADims,
-          int BDims,
-          int CDims,
-          int DDims,
-          typename... Offsets>
-struct ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
-                ADims, BDims, CDims, DDims, 0, Offsets...> {
-__device__ __forceinline__
-static void apply(detail::TensorInfo<scalar1, IndexType> &a,
-                  detail::TensorInfo<scalar2, IndexType> &b,
-                  detail::TensorInfo<scalar3, IndexType> &c,
-                  detail::TensorInfo<scalar4, IndexType> &d,
-                  const Op &op, int n, IndexType linearIndex,
-                  Offsets... aOffsets, Offsets... bOffsets,
-                  Offsets... cOffsets, Offsets... dOffsets) {
-  op(n, a.data[aOffsets]..., b.data[bOffsets]..., c.data[cOffsets]..., d.data[dOffsets]...);
-}
-};
-
-template <typename Op,
-          typename scalar1,
-          typename scalar2,
-          typename scalar3,
-          typename scalar4,
-          typename IndexType,
-          int ADims, int BDims, int CDims, int DDims,
-          int step>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
-#endif
-__global__ void
-kernelPointwiseApply4(detail::TensorInfo<scalar1, IndexType> a,
-                      detail::TensorInfo<scalar2, IndexType> b,
-                      detail::TensorInfo<scalar3, IndexType> c,
-                      detail::TensorInfo<scalar4, IndexType> d,
-                      IndexType totalElements,
-                      const Op op) {
-  for (IndexType linearIndex = (blockIdx.x * blockDim.x + threadIdx.x) * step;
-       linearIndex < totalElements;
-       linearIndex += gridDim.x * blockDim.x * step) {
-    ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
-             ADims, BDims, CDims, DDims, step>::apply(
-      a, b, c, d, op, ::min(step, static_cast<int>(totalElements - linearIndex)), linearIndex);
-  }
-}
-
 } // namespace
 
-/**
-   Computes ceil(a / b)
-*/
-template <typename T>
-__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
-  return (a + b - 1) / b;
-}
-
-template <int step = 1>
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) {
-  if (curDevice == -1) return false;
-  uint64_t numel_per_thread = static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK) * static_cast<uint64_t>(step);
-  uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);
-  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
-  if (numBlocks > maxGridX)
-      numBlocks = maxGridX;
-  grid = dim3(numBlocks);
-  return true;
-}
-
-inline dim3 getApplyBlock() {
-  return dim3(AT_APPLY_THREADS_PER_BLOCK);
-}
-
-template <typename scalar1, typename scalar2, int step, typename Op>
-inline bool CUDA_tensor_apply2(at::Tensor a,
-                               at::Tensor b,
+template <typename scalar1, typename scalar2, int step, typename Op,
+          int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
+          int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
+inline bool CUDA_tensor_apply2(at::TensorBase a,
+                               at::TensorBase b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  checkBackend("CUDA_tensor_apply2", {a, b}, Backend::CUDA);
+  TORCH_CHECK(a.device().is_cuda() && b.device().is_cuda(),
+              "CUDA_tensor_apply2: Expected tensors to have CUDA DeviceType, but got "
+              "tensors with type ", a.device().type(), " and ", b.device().type());
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel()) {
@@ -547,12 +401,12 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     // Empty tensor; do nothing
     return true;
   }
-  const dim3 block = getApplyBlock();
+  const dim3 block = getApplyBlock(max_threads_per_block);
 
   dim3 grid;
   int64_t curDevice = current_device();
   if (curDevice == -1) return false;
-  if (!getApplyGrid<step>(totalElements, grid, curDevice)) {
+  if (!getApplyGrid<step>(totalElements, grid, curDevice, max_threads_per_block)) {
     return false;
   }
 
@@ -561,18 +415,16 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   This ensures that each element of the tensor is operated on once and only
   once.
   */
-  Tensor oldA;
-  Tensor oldB;
+  TensorBase oldA;
+  TensorBase oldB;
 
   if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
-    oldA = a;
-    a = a.contiguous();
+    oldA = std::exchange(a, a.contiguous());
   }
   if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
-    oldB = b;
-    b = b.contiguous();
+    oldB = std::exchange(b, b.contiguous());
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -588,9 +440,12 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   kernelPointwiseApply2<Op,                                            \
                         scalar1,                                       \
                         scalar2,                                       \
-                        TYPE, A, B, step>                              \
+                        TYPE, A, B, step,                              \
+                        max_threads_per_block,                         \
+                        min_blocks_per_sm>                             \
    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
-       aInfo, bInfo, static_cast<TYPE>(totalElements), op);
+       aInfo, bInfo, static_cast<TYPE>(totalElements), op);            \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \
@@ -657,274 +512,27 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 #undef HANDLE_A_CASE
 
   if (oldA.defined()) {
-    // Ignore overlaps when copying back; if we use copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldA contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::copy_ignoring_overlaps(oldA, a);
   }
 
   if (oldB.defined()) {
-    // Ignore overlaps when copying back; if we use copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldB contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
+    at::native::copy_ignoring_overlaps(oldB, b);
   }
 
   return true;
 }
 
 /* Provides default step = 1 to CUDA_tensor_apply2. */
-template <typename scalar1, typename scalar2, typename Op>
-inline bool CUDA_tensor_apply2(at::Tensor a,
-                               at::Tensor b,
+template <typename scalar1, typename scalar2, typename Op,
+          int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
+          int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
+inline bool CUDA_tensor_apply2(const at::TensorBase &a,
+                               const at::TensorBase &b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  return CUDA_tensor_apply2<scalar1, scalar2, 1, Op>(a, b, op, aType, bType);
-}
-
-
-template <typename scalar1, typename scalar2, typename scalar3, typename scalar4,
-          int step, typename Op>
-inline bool CUDA_tensor_apply4(at::Tensor a,
-                               at::Tensor b,
-                               at::Tensor c,
-                               at::Tensor d,
-                               const Op op,
-                               TensorArgType aType = TensorArgType::ReadWrite,
-                               TensorArgType bType = TensorArgType::ReadOnly,
-                               TensorArgType cType = TensorArgType::ReadOnly,
-                               TensorArgType dType = TensorArgType::ReadOnly) {
-  checkBackend("CUDA_tensor_apply4", {a, b, c, d}, Backend::CUDA);
-  int64_t totalElements = a.numel();
-
-  if (totalElements != b.numel() ||
-      totalElements != c.numel() ||
-      totalElements != d.numel()) {
-    return false;
-  }
-
-  if (a.dim() > MAX_TENSORINFO_DIMS ||
-      b.dim() > MAX_TENSORINFO_DIMS ||
-      c.dim() > MAX_TENSORINFO_DIMS ||
-      d.dim() > MAX_TENSORINFO_DIMS) {
-    return false;
-  }
-
-  if (a.numel() == 0) {
-    // Empty tensor; do nothing
-    return true;
-  }
-
-  const dim3 block = getApplyBlock();
-
-  dim3 grid;
-  int64_t curDevice = current_device();
-  if (curDevice == -1) return false;
-  if (!getApplyGrid<step>(totalElements, grid, curDevice)) {
-    return false;
-  }
-
-  /*
-  Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only
-  once.
-  */
-  Tensor oldA;
-  Tensor oldB;
-  Tensor oldC;
-  Tensor oldD;
-
-  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
-    // Must perform in contiguous space
-    oldA = a;
-    a = a.contiguous();
-  }
-  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
-    // Must perform in contiguous space
-    oldB = b;
-    b = b.contiguous();
-  }
-  if (cType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
-    // Must perform in contiguous space
-    oldC = c;
-    c = c.contiguous();
-  }
-  if (dType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
-    // Must perform in contiguous space
-    oldD = d;
-    d = d.contiguous();
-  }
-
-#define HANDLE_CASE(TYPE, A, B, C, D)                                  \
-  kernelPointwiseApply4<Op,                                            \
-                        scalar1,                                       \
-                        scalar2,                                       \
-                        scalar3,                                       \
-                        scalar4,                                       \
-                        TYPE, A, B, C, D, step>                        \
-    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
-    aInfo, bInfo, cInfo, dInfo, static_cast<TYPE>(totalElements), op);
-
-#define HANDLE_D_CASE(TYPE, A, B, C, D) {       \
-  switch (D) {                                  \
-    case 1:                                     \
-      HANDLE_CASE(TYPE, A, B, C, 1);            \
-      break;                                    \
-    case 2:                                     \
-      HANDLE_CASE(TYPE, A, B, C, 2);            \
-      break;                                    \
-    default:                                    \
-      HANDLE_CASE(TYPE, A, B, C, -1);           \
-      break;                                    \
-  }                                             \
-}
-
-#define HANDLE_C_CASE(TYPE, A, B, C, D) {       \
-  switch (C) {                                  \
-    case 1:                                     \
-      HANDLE_D_CASE(TYPE, A, B, 1, D);          \
-      break;                                    \
-    case 2:                                     \
-      HANDLE_D_CASE(TYPE, A, B, 2, D);          \
-      break;                                    \
-    default:                                    \
-      HANDLE_D_CASE(TYPE, A, B, -1, D);         \
-      break;                                    \
-  }                                             \
-}
-
-#define HANDLE_B_CASE(TYPE, A, B, C, D) {       \
-  switch (B) {                                  \
-    case 1:                                     \
-      HANDLE_C_CASE(TYPE, A, 1, C, D);          \
-      break;                                    \
-    case 2:                                     \
-      HANDLE_C_CASE(TYPE, A, 2, C, D);          \
-      break;                                    \
-    default:                                    \
-      HANDLE_C_CASE(TYPE, A, -1, C, D);         \
-      break;                                    \
-  }                                             \
-}
-
-#define HANDLE_A_CASE(TYPE, A, B, C, D) {       \
-  switch (A) {                                  \
-    case 1:                                     \
-      HANDLE_B_CASE(TYPE, 1, B, C, D);          \
-      break;                                    \
-    case 2:                                     \
-      HANDLE_B_CASE(TYPE, 2, B, C, D);          \
-      break;                                    \
-    default:                                    \
-      HANDLE_B_CASE(TYPE, -1, B, C, D);         \
-      break;                                    \
-  }                                             \
-}
-
-  if (detail::canUse32BitIndexMath(a) &&
-      detail::canUse32BitIndexMath(b) &&
-      detail::canUse32BitIndexMath(c) &&
-      detail::canUse32BitIndexMath(d)) {
-    detail::TensorInfo<scalar1, unsigned int> aInfo =
-      detail::getTensorInfo<scalar1, unsigned int>(a);
-
-    detail::TensorInfo<scalar2, unsigned int> bInfo =
-      detail::getTensorInfo<scalar2, unsigned int>(b);
-
-    detail::TensorInfo<scalar3, unsigned int> cInfo =
-      detail::getTensorInfo<scalar3, unsigned int>(c);
-
-    detail::TensorInfo<scalar4, unsigned int> dInfo =
-      detail::getTensorInfo<scalar4, unsigned int>(d);
-
-    rearrangeDims(&aInfo, &bInfo, &cInfo, &dInfo);
-    aInfo.collapseDims();
-    bInfo.collapseDims();
-    cInfo.collapseDims();
-    dInfo.collapseDims();
-
-    HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims, dInfo.dims);
-  } else {
-    detail::TensorInfo<scalar1, uint64_t> aInfo =
-      detail::getTensorInfo<scalar1, uint64_t>(a);
-
-    detail::TensorInfo<scalar2, uint64_t> bInfo =
-      detail::getTensorInfo<scalar2, uint64_t>(b);
-
-    detail::TensorInfo<scalar3, uint64_t> cInfo =
-      detail::getTensorInfo<scalar3, uint64_t>(c);
-
-    detail::TensorInfo<scalar4, uint64_t> dInfo =
-      detail::getTensorInfo<scalar4, uint64_t>(d);
-
-    rearrangeDims(&aInfo, &bInfo, &cInfo, &dInfo);
-    aInfo.collapseDims();
-    bInfo.collapseDims();
-    cInfo.collapseDims();
-    dInfo.collapseDims();
-
-    /*
-    Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
-    */
-    if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
-      HANDLE_CASE(uint64_t, 1, 1, 1, 1);
-    } else {
-      HANDLE_CASE(uint64_t, -1, -1, -1, -1);
-    }
-  }
-#undef HANDLE_CASE
-#undef HANDLE_D_CASE
-#undef HANDLE_C_CASE
-#undef HANDLE_B_CASE
-#undef HANDLE_A_CASE
-
-  if (oldA.defined()) {
-    // Ignore overlaps when copying back; if we use THCTensor_copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldA contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
-  }
-
-  if (oldB.defined()) {
-    // Ignore overlaps when copying back; if we use THCTensor_copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldB contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
-  }
-
-  if (oldC.defined()) {
-    // Ignore overlaps when copying back; if we use THCTensor_copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldC contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldC, c);
-  }
-
-  if (oldD.defined()) {
-    // Ignore overlaps when copying back; if we use THCTensor_copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldC contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldD, c);
-  }
-
-  return true;
-}
-
-/* Provides default step = 1 to CUDA_tensor_apply4. */
-template <typename scalar1, typename scalar2, typename scalar3, typename scalar4,
-          typename Op>
-inline bool CUDA_tensor_apply4(at::Tensor a,
-                               at::Tensor b,
-                               at::Tensor c,
-                               at::Tensor d,
-                               const Op op,
-                               TensorArgType aType = TensorArgType::ReadWrite,
-                               TensorArgType bType = TensorArgType::ReadOnly,
-                               TensorArgType cType = TensorArgType::ReadOnly,
-                               TensorArgType dType = TensorArgType::ReadOnly) {
-  return CUDA_tensor_apply4<scalar1, scalar2, scalar3, scalar4, 1, Op>(
-    a, b, c, d, op, aType, bType, cType);
+  return CUDA_tensor_apply2<scalar1, scalar2, 1, Op,
+                            max_threads_per_block, min_blocks_per_sm>(a, b, op, aType, bType);
 }
 
 } // cuda

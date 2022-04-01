@@ -1,11 +1,30 @@
 #!/bin/bash
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
+  pip install click mock tabulate networkx==2.0
+  pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+fi
 
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
   exit 0
+fi
+if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
+fi
+# These additional packages are needed for circleci ROCm builds.
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+    # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+    # defaults installs the most recent networkx version, so we install this lower
+    # version explicitly before scikit-image pulls it in as a dependency
+    pip install networkx==2.0
+    # click - onnx
+    pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
 fi
 
 # Find where cpp tests and Caffe2 itself are installed
@@ -26,39 +45,42 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-echo "Running C++ tests.."
-for test in $(find "$cpp_test_dir" -executable -type f); do
-  case "$test" in
-    # skip tests we know are hanging or bad
-    */mkl_utils_test|*/aten/integer_divider_test)
-      continue
-      ;;
-    */scalar_tensor_test|*/basic|*/native_test)
-      if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+# Don't run cpp tests a second time in the sharded ort_test2 job
+if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+  echo "Running C++ tests.."
+  for test in $(find "$cpp_test_dir" -executable -type f); do
+    case "$test" in
+      # skip tests we know are hanging or bad
+      */mkl_utils_test|*/aten/integer_divider_test)
         continue
-      else
-        LD_LIBRARY_PATH="$ld_library_path" "$test"
-      fi
-      ;;
-    */*_benchmark)
-      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
-      ;;
-    *)
-      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
-      # planning to migrate to gtest as the common PyTorch c++ test suite, we
-      # currently do NOT use the xml test reporter, because Catch doesn't
-      # support multiple reporters
-      # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
-      # which means that enabling XML output means you lose useful stdout
-      # output for Jenkins.  It's more important to have useful console
-      # output than it is to have XML output for Jenkins.
-      # Note: in the future, if we want to use xml test reporter once we switch
-      # to all gtest, one can simply do:
-      LD_LIBRARY_PATH="$ld_library_path" \
-          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
-      ;;
-  esac
-done
+        ;;
+      */scalar_tensor_test|*/basic|*/native_test)
+        if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+          continue
+        else
+          LD_LIBRARY_PATH="$ld_library_path" "$test"
+        fi
+        ;;
+      */*_benchmark)
+        LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+        ;;
+      *)
+        # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+        # planning to migrate to gtest as the common PyTorch c++ test suite, we
+        # currently do NOT use the xml test reporter, because Catch doesn't
+        # support multiple reporters
+        # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
+        # which means that enabling XML output means you lose useful stdout
+        # output for Jenkins.  It's more important to have useful console
+        # output than it is to have XML output for Jenkins.
+        # Note: in the future, if we want to use xml test reporter once we switch
+        # to all gtest, one can simply do:
+        LD_LIBRARY_PATH="$ld_library_path" \
+            "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+        ;;
+    esac
+  done
+fi
 
 ################################################################################
 # Python tests #
@@ -67,19 +89,25 @@ if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
 
-# if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
-  # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
-  # See comments on
-  # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
-  sudo pip -q uninstall -y hypothesis
-  # "pip install hypothesis==3.44.6" from official server is unreliable on
-  # CircleCI, so we host a copy on S3 instead
-  sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
-  sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-  sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
-# else
-#   pip install --user --no-cache-dir hypothesis==3.59.0
-# fi
+# If pip is installed as root, we must use sudo.
+# CircleCI docker images could install conda as jenkins user, or use the OS's python package.
+PIP=$(which pip)
+PIP_USER=$(stat --format '%U' $PIP)
+CURRENT_USER=$(id -u -n)
+if [[ "$PIP_USER" = root && "$CURRENT_USER" != root ]]; then
+  MAYBE_SUDO=sudo
+fi
+
+# Uninstall pre-installed hypothesis and coverage to use an older version as newer
+# versions remove the timeout parameter from settings which ideep/conv_transpose_test.py uses
+$MAYBE_SUDO pip -q uninstall -y hypothesis
+$MAYBE_SUDO pip -q uninstall -y coverage
+
+# "pip install hypothesis==3.44.6" from official server is unreliable on
+# CircleCI, so we host a copy on S3 instead
+$MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
+$MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
+$MAYBE_SUDO pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
@@ -100,6 +128,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # This test has been flaky in ROCm CI (but note the tests are
   # cpu-only so should be unrelated to ROCm)
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/blobs_queue_db_test.py")
+  # This test is skipped on Jenkins(compiled without MKL) and otherwise known flaky
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/ideep/convfusion_op_test.py")
+  # This test is skipped on Jenkins(compiled without MKL) and causing segfault on Circle
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/ideep/pool_op_test.py")
 fi
 
 # NB: Warnings are disabled because they make it harder to see what
@@ -116,35 +148,40 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   done
 fi
 
-pip install --user pytest-sugar
-"$PYTHON" \
-  -m pytest \
-  -x \
-  -v \
-  --disable-warnings \
-  --junit-xml="$pytest_reports_dir/result.xml" \
-  --ignore "$caffe2_pypath/python/test/executor_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
-  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
-  ${rocm_ignore_test[@]} \
-  "$caffe2_pypath/python" \
-  "${EXTRA_TESTS[@]}"
+# Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
+export DNNL_MAX_CPU_ISA=AVX2
+
+# Should still run even in the absence of SHARD_NUMBER
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
+  pip install --user pytest-sugar
+  "$PYTHON" \
+    -m pytest \
+    -x \
+    -v \
+    --disable-warnings \
+    --junit-xml="$pytest_reports_dir/result.xml" \
+    --ignore "$caffe2_pypath/python/test/executor_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
+    --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+    --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
+    ${rocm_ignore_test[@]} \
+    "$caffe2_pypath/python" \
+    "${EXTRA_TESTS[@]}"
+fi
 
 #####################
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install -q --user git+https://github.com/pytorch/vision.git@v0.5.0
+  # Check out torch/vision at 0.9.0-rc1 commit
+  # This hash must match one in .jenkins/pytorch/test.sh
+  pip install -q --user git+https://github.com/pytorch/vision.git@8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
-    # Fix the pip error: Couldn't find a version that satisfies the requirement
-    sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.1.0.dev1228
+    pip install -q --user flatbuffers==2.0 onnxruntime==1.9.0
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

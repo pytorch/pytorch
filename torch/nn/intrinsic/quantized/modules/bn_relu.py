@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.nn.intrinsic
@@ -45,8 +44,8 @@ class BNReLU3d(nnq.BatchNorm3d):
 
     We adopt the same interface as :class:`torch.nn.quantized.BatchNorm3d`.
 
-    .. note::
-    Attributes: Same as torch.nn.quantized.BatchNorm3d
+    Attributes:
+        Same as torch.nn.quantized.BatchNorm3d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.BNReLU3d

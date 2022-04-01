@@ -1,26 +1,27 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/core/jit_type_base.h>
 
 namespace c10 {
 struct IValue;
 template<class Key, class Value> class Dict;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace impl {
-bool shallowEquals(const IValue& lhs, const IValue& rhs);
 
 using valid_dict_key_types = guts::typelist::typelist<
   int64_t,
   std::string,
   double,
+  c10::complex<double>,
   bool,
   at::Tensor
 >;
@@ -33,9 +34,7 @@ struct DictKeyHash {
 };
 
 struct DictKeyEqualTo {
-  bool operator()(const IValue& lhs, const IValue& rhs) const {
-    return impl::shallowEquals(lhs, rhs);
-  }
+  bool operator()(const IValue& lhs, const IValue& rhs) const;
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
@@ -53,6 +52,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   DictElementTypes elementTypes;
 
   intrusive_ptr<DictImpl> copy() const;
+  friend TORCH_API bool operator==(const DictImpl& lhs, const DictImpl& rhs);
 };
 
 }
@@ -70,11 +70,11 @@ public:
   explicit DictEntryRef(Iterator iterator)
   : iterator_(std::move(iterator)) {}
 
-  Key key() const {
+  decltype(auto) key() const {
     return iterator_->first.template to<Key>();
   }
 
-  Value value() const {
+  decltype(auto) value() const {
     return iterator_->second.template to<Value>();
   }
 
@@ -173,7 +173,7 @@ private:
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
-  friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
+  friend class DictIterator<Key, Value, typename c10::detail::DictImpl::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
 };
 
@@ -239,8 +239,6 @@ public:
 
   Dict(const Dict&) = default;
   Dict& operator=(const Dict&) = default;
-  Dict(Dict&&) noexcept;
-  Dict& operator=(Dict&&) noexcept;
 
   /**
    * Create a new Dict pointing to a deep copy of the same data.
@@ -389,4 +387,4 @@ namespace torch {
   template<class Key, class Value> using Dict = c10::Dict<Key, Value>;
 }
 
-#include <ATen/core/Dict_inl.h>
+#include <ATen/core/Dict_inl.h>  // IWYU pragma: keep

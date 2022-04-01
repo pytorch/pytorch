@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import inspect
 
@@ -9,8 +9,6 @@ import numpy as np
 
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
-
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -62,6 +60,7 @@ class TestMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_matmul_axis(
         self, M, K, N, axis_a, axis_b, trans_a, trans_b, gc, dc
     ):
@@ -127,7 +126,7 @@ class TestMatMul(serial.SerializedTestCase):
 
 
 class TestBatchMatMul(serial.SerializedTestCase):
-    @settings(max_examples=30)
+    @settings(max_examples=30, deadline=None)
     @given(
         C=st.integers(min_value=0, max_value=3),  # number of batch dims
         M=st.integers(min_value=1, max_value=10),
@@ -215,7 +214,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
-    @serial.given(
+    @given(
         C_1=st.integers(min_value=0, max_value=3),  # number of batch dims
         C_2=st.integers(min_value=0, max_value=3),
         M=st.integers(min_value=1, max_value=10),
@@ -225,6 +224,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_numpy_batch_matmul(self, C_1, C_2, M, K, N, trans_a, trans_b, gc, dc):
         dtype = np.float32
         batch_dims = np.random.randint(
@@ -242,7 +242,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
 
         self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc, trans_a, trans_b)
 
-    @settings(max_examples=30)
+    @settings(max_examples=30, deadline=None)
     @given(
         K=st.integers(min_value=1, max_value=10),
         **hu.gcs
@@ -255,7 +255,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
 
         self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc)
 
-    @settings(max_examples=30)
+    @settings(max_examples=30, deadline=None)
     @given(
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
@@ -269,7 +269,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
 
         self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc)
 
-    @settings(max_examples=30)
+    @settings(max_examples=30, deadline=None)
     @given(
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),

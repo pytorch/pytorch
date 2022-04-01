@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "fp16_fma.h"
@@ -26,7 +26,6 @@ class SpatialBNFakeLoweredFp16Op : public Operator<CPUContext> {
       : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, false),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
-        OP_SINGLE_ARG(float, "momentum", momentum_, 0.9f),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(int, "num_batches", num_batches_, 1) {
@@ -35,11 +34,9 @@ class SpatialBNFakeLoweredFp16Op : public Operator<CPUContext> {
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
     CAFFE_ENFORCE_GT(epsilon_, 0);
-    CAFFE_ENFORCE_GE(momentum_, 0);
-    CAFFE_ENFORCE_LE(momentum_, 1);
   }
 
-  virtual ~SpatialBNFakeLoweredFp16Op() override = default;
+   ~SpatialBNFakeLoweredFp16Op() override = default;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
@@ -162,7 +159,7 @@ class SpatialBNFakeLoweredFp16Op : public Operator<CPUContext> {
     const int stride = C * HxW;
     const float* X_ptr = X;
     float* Y_ptr = Y;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       EigenArrayMap<float>(Y_ptr, HxW, C) =
           ConstEigenArrayMap<float>(X_ptr, HxW, C).rowwise() -
           mean_arr.transpose();
@@ -182,7 +179,6 @@ class SpatialBNFakeLoweredFp16Op : public Operator<CPUContext> {
 
   const bool is_test_;
   double epsilon_;
-  const float momentum_;
   const StorageOrder order_;
   const int num_batches_;
 
@@ -208,21 +204,18 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
   explicit SpatialBNFakeFp16Op(Args&&... args)
       : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, false),
-        OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
-        OP_SINGLE_ARG(float, "momentum", momentum_, 0.9f),
+        OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(int, "num_batches", num_batches_, 1) {
     // TODO: only support NCHW for now
     CAFFE_ENFORCE_EQ(order_, StorageOrder::NCHW);
-    CAFFE_ENFORCE(
-        (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
+    // We only support this case at the moment
+    CAFFE_ENFORCE(is_test_);
     CAFFE_ENFORCE_GT(epsilon_, 0);
-    CAFFE_ENFORCE_GE(momentum_, 0);
-    CAFFE_ENFORCE_LE(momentum_, 1);
   }
 
-  virtual ~SpatialBNFakeFp16Op() override = default;
+   ~SpatialBNFakeFp16Op() override = default;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
@@ -256,9 +249,6 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
         &beta_, {C}, at::dtype<T>().device(CPUContext::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
-
-    // We only support this case at the moment
-    CAFFE_ENFORCE(is_test_);
 
     std::vector<float> X_fp16(X.numel());
 
@@ -296,6 +286,7 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
         C,
         FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
+    // This part is run on the CPU/x86 core
     ComputeFusedParam<T>(
         C,
         scale_fp16.data(),
@@ -304,12 +295,6 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
         var_fp16.data(),
         alpha_data,
         beta_data);
-
-    fbgemm::RoundToFloat16(
-        alpha_data, alpha_data, C, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-    fbgemm::RoundToFloat16(
-        beta_data, beta_data, C, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-
     AffineChannel_NCHW(N, C, HxW, X_fp16.data(), alpha_data, beta_data, Y_data);
 
     fbgemm::RoundToFloat16(
@@ -328,13 +313,32 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
       const T* var,
       T* alpha,
       T* beta) {
+    // alpha = scale / sqrt(var + epsilon)
+    // beta = bias - alpha * mean
     EigenVectorArrayMap<T> alpha_arr(alpha, C);
     EigenVectorArrayMap<T> beta_arr(beta, C);
-    alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) *
-        (ConstEigenVectorArrayMap<T>(var, C) + static_cast<T>(epsilon_))
-            .rsqrt();
+
+    std::vector<T> tmp(C, 0.0);
+    EigenVectorArrayMap<T> tmp_arr(tmp.data(), C);
+    tmp_arr = ConstEigenVectorArrayMap<T>(var, C) + static_cast<T>(epsilon_);
+
+    // sqrt using intrinsics
+    int i = 0;
+    constexpr int blockSize = 8;
+    for (i = 0; i + blockSize <= C; i += blockSize) {
+      __m256 t = _mm256_loadu_ps(&tmp[i]);
+      _mm256_storeu_ps(&tmp[i], _mm256_sqrt_ps(t));
+    }
+    for (; i < C; i++) {
+      tmp[i] = sqrt(tmp[i]);
+    }
+
+    alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) / tmp_arr;
     beta_arr = ConstEigenVectorArrayMap<T>(bias, C) -
         alpha_arr * ConstEigenVectorArrayMap<T>(mean, C);
+    fbgemm::RoundToFloat16(
+        alpha, alpha, C, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+    fbgemm::RoundToFloat16(beta, beta, C, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
   }
 
   void AffineChannel_NCHW(
@@ -352,9 +356,9 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
     float* Y_ptr = Y;
 
     // Do Y = X * scale + bias
-    for (int i = 0; i < N; i++) {
-      for (int j = 0; j < C; j++) {
-        for (int k = 0; k < HxW; k++) {
+    for (const auto i : c10::irange(N)) {
+      for (const auto j : c10::irange(C)) {
+        for (const auto k : c10::irange(HxW)) {
           Y_ptr[HxW * j + k] = bias[j];
         }
 
@@ -370,8 +374,7 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
   }
 
   const bool is_test_;
-  double epsilon_;
-  const float momentum_;
+  float epsilon_;
   const StorageOrder order_;
   const int num_batches_;
 

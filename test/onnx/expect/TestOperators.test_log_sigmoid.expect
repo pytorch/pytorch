@@ -1,22 +1,22 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
+    input: "onnx::Sigmoid_0"
+    output: "onnx::Log_1"
     name: "Sigmoid_0"
     op_type: "Sigmoid"
   }
   node {
-    input: "1"
+    input: "onnx::Log_1"
     output: "2"
     name: "Log_1"
     op_type: "Log"
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "onnx::Sigmoid_0"
     type {
       tensor_type {
         elem_type: 1

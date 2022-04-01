@@ -1,13 +1,16 @@
 import torch
 import warnings
 
+from typing import Any
+
 class detect_anomaly(object):
     r"""Context-manager that enable anomaly detection for the autograd engine.
 
     This does two things:
+
     - Running the forward pass with detection enabled will allow the backward
-    pass to print the traceback of the forward operation that created the failing
-    backward function.
+      pass to print the traceback of the forward operation that created the failing
+      backward function.
     - Any backward computation that generate "nan" value will raise an error.
 
     .. warning::
@@ -35,7 +38,7 @@ class detect_anomaly(object):
         >>> out.backward()
             Traceback (most recent call last):
               File "<stdin>", line 1, in <module>
-              File "/your/pytorch/install/torch/tensor.py", line 93, in backward
+              File "/your/pytorch/install/torch/_tensor.py", line 93, in backward
                 torch.autograd.backward(self, gradient, retain_graph, create_graph)
               File "/your/pytorch/install/torch/autograd/__init__.py", line 90, in backward
                 allow_unreachable=True)  # allow_unreachable flag
@@ -54,7 +57,7 @@ class detect_anomaly(object):
                 out = MyFunc.apply(a)
             Traceback (most recent call last):
               File "<stdin>", line 4, in <module>
-              File "/your/pytorch/install/torch/tensor.py", line 93, in backward
+              File "/your/pytorch/install/torch/_tensor.py", line 93, in backward
                 torch.autograd.backward(self, gradient, retain_graph, create_graph)
               File "/your/pytorch/install/torch/autograd/__init__.py", line 90, in backward
                 allow_unreachable=True)  # allow_unreachable flag
@@ -65,18 +68,17 @@ class detect_anomaly(object):
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.prev = torch.is_anomaly_enabled()
         warnings.warn('Anomaly Detection has been enabled. '
                       'This mode will increase the runtime '
-                      'and should only be enabled for debugging.')
+                      'and should only be enabled for debugging.', stacklevel=2)
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         torch.set_anomaly_enabled(True)
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         torch.set_anomaly_enabled(self.prev)
-        return False
 
 
 class set_detect_anomaly(object):
@@ -88,19 +90,18 @@ class set_detect_anomaly(object):
 
     See ``detect_anomaly`` above for details of the anomaly detection behaviour.
 
-    Arguments:
+    Args:
         mode (bool): Flag whether to enable anomaly detection (``True``),
                      or disable (``False``).
 
     """
 
-    def __init__(self, mode):
+    def __init__(self, mode: bool) -> None:
         self.prev = torch.is_anomaly_enabled()
         torch.set_anomaly_enabled(mode)
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         torch.set_anomaly_enabled(self.prev)
-        return False

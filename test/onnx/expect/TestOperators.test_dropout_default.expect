@@ -1,11 +1,23 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "x"
-    output: "1"
-    name: "ReduceMax_0"
+    output: "onnx::ReduceMax_1"
+    output: "2"
+    name: "Dropout_0"
+    op_type: "Dropout"
+    attribute {
+      name: "ratio"
+      f: 0.5
+      type: FLOAT
+    }
+  }
+  node {
+    input: "onnx::ReduceMax_1"
+    output: "3"
+    name: "ReduceMax_1"
     op_type: "ReduceMax"
     attribute {
       name: "keepdims"
@@ -31,7 +43,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "3"
     type {
       tensor_type {
         elem_type: 1

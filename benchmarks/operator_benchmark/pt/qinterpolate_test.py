@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 
@@ -34,6 +29,7 @@ qinterpolate_short_configs = op_bench.config_list(
         [32, 32, 32, torch.quint8, 'bilinear', 0.5, True],  # Downsample
         [32, 32, 32, torch.quint8, 'nearest', 2.0, True],  # Upsample
         [32, 32, 32, torch.quint8, 'bilinear', 2.0, True],  # Upsample
+        [3, 720, 1280, torch.quint8, 'bilinear', 0.83333, True],  # Downsample
     ],
     tags=['short'],
 )
@@ -49,15 +45,18 @@ class QInterpolateBenchmark(op_bench.TorchBenchmarkBase):
                                                  dtype=dtype)
         if not contig:
             permute_dims = list(range(q_input.ndim))[::-1]
-            self.q_input_a = self.q_input_a.permute(permute_dims)
+            self.q_input = self.q_input.permute(permute_dims)
 
-        self.mode = mode
-        self.scale_factor = scale
+        self.inputs = {
+            "q_input": self.q_input,
+            "scale_factor": scale,
+            "mode": mode
+        }
         self.set_module_name('q_interpolate')
 
-    def forward(self):
-        return torch.nn.quantized.functional.interpolate(
-            self.q_input, scale_factor=self.scale_factor, mode=self.mode)
+    def forward(self, q_input, scale_factor: float, mode: str):
+        return torch.nn.functional.interpolate(
+            q_input, scale_factor=scale_factor, mode=mode)
 
 
 op_bench.generate_pt_test(qinterpolate_short_configs + qinterpolate_long_configs,

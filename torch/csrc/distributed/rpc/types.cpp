@@ -13,6 +13,14 @@ bool getAllowJitRRefPickle() {
   return allowJitRRefPickle;
 }
 
+void enableJitRRefPickle() {
+  allowJitRRefPickle = true;
+}
+
+void disableJitRRefPickle() {
+  allowJitRRefPickle = false;
+}
+
 static_assert(
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
@@ -49,7 +57,10 @@ at::IValue GloballyUniqueId::toIValue() const {
 }
 
 GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
-  auto ivalues = ivalue.toTuple()->elements();
+  TORCH_INTERNAL_ASSERT(
+      ivalue.isTuple(),
+      "GloballyUniqueId::fromIValue expected ivalue to be a tuple.");
+  const auto& ivalues = ivalue.toTupleRef().elements();
   TORCH_CHECK(
       ivalues.size() == 2,
       "Constructing GloballyUniqueId from ivalue "
@@ -72,8 +83,8 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
 }
 
 std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
-  return os << "GloballyUniqueId(" << globalId.createdOn_ << ", "
-            << globalId.localId_ << ")";
+  return os << "GloballyUniqueId(created_on=" << globalId.createdOn_
+            << ", local_id=" << globalId.localId_ << ")";
 }
 
 ///////////////////////////  SerializedPyObj   ///////////////////////////

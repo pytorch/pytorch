@@ -15,7 +15,7 @@ namespace caffe2 {
  * and this Transform will find subgraphs which fit the pattern net,
  * and replace it with the replace net.
  */
-class CAFFE2_API PatternNetTransform : public Transform {
+class TORCH_API PatternNetTransform : public Transform {
  public:
   PatternNetTransform(const NetDef& pattern_net, const NetDef& replace_net)
       : p_(transform::Graph(pattern_net)), r_(transform::Graph(replace_net)) {
@@ -28,7 +28,7 @@ class CAFFE2_API PatternNetTransform : public Transform {
         "External outputs do not match!");
     ordered_ops_ = GetPatternTraversalOrder(p_);
     inverse_ops_.resize(ordered_ops_.size());
-    for (size_t i = 0; i < ordered_ops_.size(); i++) {
+    for (const auto i : c10::irange(ordered_ops_.size())) {
       inverse_ops_[ordered_ops_[i]] = i;
     }
   }

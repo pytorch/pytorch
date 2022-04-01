@@ -1,12 +1,13 @@
 #pragma once
 
 #include <assert.h>
-#include <cuda_fp16.h>
 #include <cfloat>
 #include <limits>
 #include <stdint.h>
 #include <cuda_fp16.h>
 #include <c10/macros/Macros.h>
+
+#include <ATen/cuda/DeviceUtils.cuh>
 
 namespace {
 
@@ -54,15 +55,18 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // CUDA warp size is 32 for all existing GPU architectures, but there is no guarantee this will not change for future arch.
 // ROCm warp size is 64 for all currently ROCm-supported GPU architectures, but this may change for future archs.
 // is_log_softmax is a flag indicating whether SoftMax or LogSoftMax should be computed.
+// is_masked is a flag indicating whether SoftMax or MaskedSoftMax should be computed.
 // The template can be instantiated with any floating point type for the type arguments input_t, output_t and acc_t.
 // This allows SoftMax to be fused with a cast immediately following the SoftMax.
+// The mask should have the same shape as input, with a boolean indicate if the value is masked.
+// The head_chunk_size is only used for transformer mask softmax, equals to H * D * D.
 // For instance:
 // input_t=half,  acc_t=float, output_t=half  => read half tensor, float accumulators, write half tensor.
 // input_t=half,  acc_t=float, output_t=float => read half tensor, float accumulators, write float tensor.
 // input_t_float, acc_t=float, output_t=half  => read float tensor, float accumulators, write half tensor.
 
-template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax>
-__global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count)
+template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax, bool is_masked>
+__global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count, const bool *mask = nullptr, const int head_chunk_size = -1, bool is_transformer_mask = false)
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_forward_kernel.
     constexpr int next_power_of_two = 1 << log2_elements;
@@ -80,10 +84,16 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
 
     // there might be multiple batches per warp. compute the index within the batch
     int local_idx = threadIdx.x;
+    int idx_offset = first_batch * stride + local_idx;
 
-    src += first_batch * stride + local_idx;
-    dst += first_batch * stride + local_idx;
+    src += idx_offset;
+    dst += idx_offset;
 
+    if (is_transformer_mask) {
+        mask += (idx_offset / head_chunk_size) * stride + local_idx;
+    } else {
+        mask += idx_offset;
+    }
     // The nested loops over WARP_BATCH and then WARP_ITERATIONS can be simplified to one loop,
     // but I think doing so would obfuscate the logic of the algorithm, thus I chose to keep
     // the nested loops.
@@ -107,10 +117,27 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     acc_t max_value[WARP_BATCH];
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
+        bool is_meaningful_max = false;
         max_value[i] = elements[i][0];
         #pragma unroll
-        for (int it = 1;  it < WARP_ITERATIONS;  ++it) {
-            max_value[i] = (max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
+        for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
+            if (is_masked) {
+                int idx = it*WARP_SIZE;
+                if (!is_transformer_mask) {
+                    idx += i*element_count;
+                }
+                if (mask[idx]) {
+                    max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
+                    is_meaningful_max = true;
+                }
+            } else {
+                max_value[i] = max_value[i] > elements[i][it] ? max_value[i] : elements[i][it];
+            }
+        }
+        if (is_masked) {
+            if (!is_meaningful_max) {
+                max_value[i] = -std::numeric_limits<acc_t>::infinity();
+            }
         }
     }
     warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Max>(max_value);
@@ -120,11 +147,27 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
-            if (is_log_softmax) {
-              sum[i] += std::exp(elements[i][it] - max_value[i]);
+            if (!is_masked) {
+                if (is_log_softmax) {
+                    sum[i] += std::exp(elements[i][it] - max_value[i]);
+                } else {
+                    elements[i][it] = std::exp(elements[i][it] - max_value[i]);
+                    sum[i] += elements[i][it];
+                }
             } else {
-              elements[i][it] = std::exp(elements[i][it] - max_value[i]);
-              sum[i] += elements[i][it];
+                int idx = it*WARP_SIZE;
+                if (!is_transformer_mask) {
+                    idx += i*element_count;
+                }
+
+                if (mask[idx]) {
+                    if (is_log_softmax) {
+                        sum[i] += std::exp(elements[i][it] - max_value[i]);
+                    } else {
+                        elements[i][it] = std::exp(elements[i][it] - max_value[i]);
+                        sum[i] += elements[i][it];
+                    }
+                }
             }
         }
     }
@@ -135,13 +178,23 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         if (i >= local_batches)
             break;
-        if (is_log_softmax) sum[i] = max_value[i] + std::log(sum[i]);
+        if (is_log_softmax) sum[i] = std::log(sum[i]);
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
+                if (is_masked) {
+                    int idx = it*WARP_SIZE;
+                    if (!is_transformer_mask) {
+                        idx += i*element_count;
+                    }
+                    if (!mask[idx]) {
+                        dst[i*element_count+it*WARP_SIZE] = 0;
+                        continue;
+                    }
+                }
                 if (is_log_softmax) {
-                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - sum[i];
+                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - max_value[i] - sum[i];
                 } else {
                     dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
                 }
@@ -233,8 +286,8 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 
 } // end of anonymous namespace
 
-template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax>
-void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count)
+template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, bool is_masked>
+void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count, const bool *mask = nullptr, int chunk_size = -1, bool is_transformer_mask = false)
 {
     TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
     if (softmax_elements == 0) {
@@ -258,50 +311,24 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
         dim3 threads(warp_size, warps_per_block, 1);
         // Launch code would be more elegant if C++ supported FOR CONSTEXPR
         switch (log2_elements) {
-            case 0: // 1
-                softmax_warp_forward<input_t, output_t, acc_t, 0, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 1: // 2
-                softmax_warp_forward<input_t, output_t, acc_t, 1, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 2: // 4
-                softmax_warp_forward<input_t, output_t, acc_t, 2, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 3: // 8
-                softmax_warp_forward<input_t, output_t, acc_t, 3, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 4: // 16
-                softmax_warp_forward<input_t, output_t, acc_t, 4, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 5: // 32
-                softmax_warp_forward<input_t, output_t, acc_t, 5, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 6: // 64
-                softmax_warp_forward<input_t, output_t, acc_t, 6, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 7: // 128
-                softmax_warp_forward<input_t, output_t, acc_t, 7, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 8: // 256
-                softmax_warp_forward<input_t, output_t, acc_t, 8, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 9: // 512
-                softmax_warp_forward<input_t, output_t, acc_t, 9, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 10: // 1024
-                softmax_warp_forward<input_t, output_t, acc_t, 10, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
-                break;
+            #define LAUNCH_SOFTMAX_WARP_FORWARD(L2E) case L2E:                    \
+            softmax_warp_forward<input_t, output_t, acc_t, L2E, is_log_softmax, is_masked>   \
+                <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst,   \
+                    src, batch_count, softmax_elements_stride, softmax_elements, mask, chunk_size, is_transformer_mask); \
+            C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
+            break;
+
+            LAUNCH_SOFTMAX_WARP_FORWARD(0);  // 1
+            LAUNCH_SOFTMAX_WARP_FORWARD(1);  // 2
+            LAUNCH_SOFTMAX_WARP_FORWARD(2);  // 4
+            LAUNCH_SOFTMAX_WARP_FORWARD(3);  // 8
+            LAUNCH_SOFTMAX_WARP_FORWARD(4);  // 16
+            LAUNCH_SOFTMAX_WARP_FORWARD(5);  // 32
+            LAUNCH_SOFTMAX_WARP_FORWARD(6);  // 64
+            LAUNCH_SOFTMAX_WARP_FORWARD(7);  // 128
+            LAUNCH_SOFTMAX_WARP_FORWARD(8);  // 256
+            LAUNCH_SOFTMAX_WARP_FORWARD(9);  // 512
+            LAUNCH_SOFTMAX_WARP_FORWARD(10); ; // 1024
             default:
                 break;
         }
@@ -333,53 +360,27 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
         dim3 threads(warp_size, warps_per_block, 1);
         // Launch code would be more elegant if C++ supported FOR CONSTEXPR
         switch (log2_elements) {
-            case 0: // 1
-                softmax_warp_backward<input_t, output_t, acc_t, 0, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 1: // 2
-                softmax_warp_backward<input_t, output_t, acc_t, 1, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 2: // 4
-                softmax_warp_backward<input_t, output_t, acc_t, 2, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 3: // 8
-                softmax_warp_backward<input_t, output_t, acc_t, 3, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 4: // 16
-                softmax_warp_backward<input_t, output_t, acc_t, 4, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 5: // 32
-                softmax_warp_backward<input_t, output_t, acc_t, 5, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 6: // 64
-                softmax_warp_backward<input_t, output_t, acc_t, 6, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 7: // 128
-                softmax_warp_backward<input_t, output_t, acc_t, 7, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 8: // 256
-                softmax_warp_backward<input_t, output_t, acc_t, 8, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 9: // 512
-                softmax_warp_backward<input_t, output_t, acc_t, 9, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
-            case 10: // 1024
-                softmax_warp_backward<input_t, output_t, acc_t, 10, is_log_softmax>
-                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
-                break;
+            #define LAUNCH_SOFTMAX_WARP_BACKWARD(L2E) case L2E:                      \
+            softmax_warp_backward<input_t, output_t, acc_t, L2E, is_log_softmax> \
+                <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>       \
+                (grad_input, grad, output, batch_count, softmax_elements_stride, \
+                softmax_elements);                                              \
+            C10_CUDA_KERNEL_LAUNCH_CHECK();                                      \
+            break;
+
+            LAUNCH_SOFTMAX_WARP_BACKWARD(0); // 1
+            LAUNCH_SOFTMAX_WARP_BACKWARD(1); // 2
+            LAUNCH_SOFTMAX_WARP_BACKWARD(2); // 4
+            LAUNCH_SOFTMAX_WARP_BACKWARD(3); // 8
+            LAUNCH_SOFTMAX_WARP_BACKWARD(4); // 16
+            LAUNCH_SOFTMAX_WARP_BACKWARD(5); // 32
+            LAUNCH_SOFTMAX_WARP_BACKWARD(6); // 64
+            LAUNCH_SOFTMAX_WARP_BACKWARD(7); // 128
+            LAUNCH_SOFTMAX_WARP_BACKWARD(8); // 256
+            LAUNCH_SOFTMAX_WARP_BACKWARD(9); // 512
+            LAUNCH_SOFTMAX_WARP_BACKWARD(10); // 1024
             default:
                 break;
         }
     }
 }
-

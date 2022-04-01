@@ -1,33 +1,42 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/MathConstants.h>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_exp c10::cuda::compat::exp
+#define compat_ceil c10::cuda::compat::ceil
 #define compat_floor c10::cuda::compat::floor
 #define compat_log c10::cuda::compat::log
 #define compat_pow c10::cuda::compat::pow
 #define compat_sqrt c10::cuda::compat::sqrt
 #define compat_tan c10::cuda::compat::tan
+#define compat_abs c10::cuda::compat::abs
+#define compat_log1p c10::cuda::compat::log1p
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
 #define compat_exp c10::hip::compat::exp
+#define compat_ceil c10::hip::compat::ceil
 #define compat_floor c10::hip::compat::floor
 #define compat_log c10::hip::compat::log
 #define compat_pow c10::hip::compat::pow
 #define compat_sqrt c10::hip::compat::sqrt
 #define compat_tan c10::hip::compat::tan
+#define compat_abs c10::hip::compat::abs
+#define compat_log1p c10::hip::compat::log1p
 #else
 #define compat_exp std::exp
+#define compat_ceil std::ceil
 #define compat_floor std::floor
 #define compat_log std::log
 #define compat_pow std::pow
 #define compat_sqrt std::sqrt
 #define compat_tan std::tan
+#define compat_abs std::abs
+#define compat_log1p std::log1p
 #endif
 
 namespace {
@@ -35,7 +44,7 @@ namespace {
 #if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
-#define isnan std::isnan
+using std::isnan;
 #endif
 
 // Here sampler_t should be function type scalar_t(void). For gpu
@@ -108,22 +117,141 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
   }
 }
 
-template <typename scalar_t>
-C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], size_t len) {
-  scalar_t result = 0;
-  for (size_t i = 0; i <= len; i++) {
-    result = result * x + A[i];
+/* the functions stirling_approx_tail, binomial_inversion, and btrs are adapted
+ * from TensorFlow's random_binomial_op.cc implementation. That code is under
+ * copyright: 2019 The TensorFlow Authors.
+ *
+ * It was released under the Apache License, Version 2.0 (the "License"), available at:
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+template<typename scalar_t>
+C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
+  const static scalar_t kTailValues[] = {
+    0.0810614667953272,
+    0.0413406959554092,
+    0.0276779256849983,
+    0.02079067210376509,
+    0.0166446911898211,
+    0.0138761288230707,
+    0.0118967099458917,
+    0.0104112652619720,
+    0.00925546218271273,
+    0.00833056343336287
+  };
+  if (k <= 9) {
+    return kTailValues[static_cast<size_t>(k)];
   }
-  return result;
+  scalar_t kp1sq = (k + 1) * (k + 1);
+  return (1.0 / 12 - (1.0 / 360 - 1.0 / 1260 / kp1sq) / kp1sq) / (k + 1);
 }
 
 
+template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
+C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+  accscalar_t U;
+  accscalar_t geom_sum = 0;
+  scalar_t num_geom = 0;
+
+  accscalar_t logprob = compat_log1p(-prob);
+
+  while (1) {
+    U = standard_uniform.sample();
+    accscalar_t geom = compat_ceil(compat_log(U) / logprob);
+    geom_sum += geom;
+    if (geom_sum > count) {
+      break;
+    }
+    num_geom = num_geom + 1;
+  }
+  return num_geom;
+}
+
+template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
+C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+  scalar_t k;
+  accscalar_t U, V, us;
+
+  // This is spq in the paper.
+  const accscalar_t stddev = compat_sqrt(count * prob * (1 - prob));
+
+  // Other coefficients for Transformed Rejection sampling.
+  const accscalar_t b = 1.15 + 2.53 * stddev;
+  const accscalar_t a = -0.0873 + 0.0248 * b + 0.01 * prob;
+  const accscalar_t c = count * prob + 0.5;
+  const accscalar_t v_r = 0.92 - 4.2 / b;
+  const accscalar_t r = prob / (1 - prob);
+
+  const accscalar_t alpha = (2.83 + 5.1 / b) * stddev;
+  const accscalar_t m = compat_floor((count + 1) * prob);
+
+  while (1) {
+    U = standard_uniform.sample() - 0.5;
+    V = standard_uniform.sample();
+
+    us = 0.5 - compat_abs(U);
+    k = static_cast<scalar_t>(compat_floor((2 * a / us + b) * U + c));
+
+    // Reject non-sensical answers.
+    if (k < 0 || k > count) {
+      continue;
+    }
+    // Region for which the box is tight, and we can return our calculated value.
+    // This should happen 0.86 * v_r times. In the limit as n * p is large,
+    // the acceptance rate converges to ~79% (and in the lower regime it is ~24%).
+    if (us >= 0.07 && V <= v_r) {
+      return k;
+    }
+
+    // This deviates from Hormann's BTRS algorithm, as there is a log missing.
+    // For all (u, v) pairs outside of the bounding box, this calculates the
+    // transformed-reject ratio.
+    V = compat_log(V * alpha / (a / (us * us) + b));
+    accscalar_t upperbound =
+        ((m + 0.5) * compat_log((m + 1) / (r * (count - m + 1))) +
+         (count + 1) * compat_log((count - m + 1) / (count - k + 1)) +
+         (k + 0.5) * compat_log(r * (count - k + 1) / (k + 1)) +
+         stirling_approx_tail<accscalar_t>(m) + stirling_approx_tail<accscalar_t>(count - m) -
+         stirling_approx_tail<accscalar_t>(k) - stirling_approx_tail<accscalar_t>(count - k));
+
+    if (V <= upperbound) {
+      return k;
+    }
+  }
+}
+
+template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
+C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+  if (count <= 0.0 || prob <= 0.0) {
+    return 0;
+  } else if (prob >= 1.0) {
+    return count;
+  } else if (prob <= 0.5) {
+    if (count * prob >= 10.0) {
+      // btrs
+      return btrs<scalar_t, accscalar_t, uniform_sampler_t>(count, prob, standard_uniform);
+    } else {
+      // binomial inversion
+      return binomial_inversion<scalar_t, accscalar_t, uniform_sampler_t>(count, prob, standard_uniform);
+    }
+  } else if (prob > 0.5) {
+    scalar_t qprob = 1.0 - prob;
+    if (count * qprob >= 10.0) {
+      // btrs
+      return count - btrs<scalar_t, accscalar_t, uniform_sampler_t>(count, qprob, standard_uniform);
+    } else {
+      // count - binomial inversion
+      return count - binomial_inversion<scalar_t, accscalar_t, uniform_sampler_t>(count, qprob, standard_uniform);
+    }
+  } else {
+    // prob is nan?
+    return static_cast<scalar_t>(NAN);
+  }
+}
+
 /*
- * The following function comes with the following copyright notice.
- * It has been released under the BSD license.
- *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library] in ATen/native/Math.h.
  */
 template<typename scalar_t, typename accscalar_t>
 C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
@@ -139,8 +267,8 @@ C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
     }
     // it is more standard to write this as recursion, but
     // nvcc does not like that
-    additional_summand = -static_cast<accscalar_t>(M_PI) /
-        compat_tan(static_cast<accscalar_t>(M_PI) * x);
+    additional_summand = -c10::pi<scalar_t> /
+        compat_tan(c10::pi<scalar_t> * x);
     x = 1 - x;
   }
 

@@ -1,16 +1,16 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::Erf_0"
     output: "1"
     name: "Erf_0"
     op_type: "Erf"
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "onnx::Erf_0"
     type {
       tensor_type {
         elem_type: 1

@@ -4,7 +4,7 @@ set -ex
 
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  BASE_URL="https://repo.continuum.io/miniconda"
+  BASE_URL="https://repo.anaconda.com/miniconda"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
 
@@ -24,13 +24,20 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   mkdir /opt/conda
   chown jenkins:jenkins /opt/conda
 
+  # Work around bug where devtoolset replaces sudo and breaks it.
+  if [ -n "$DEVTOOLSET_VERSION" ]; then
+    SUDO=/bin/sudo
+  else
+    SUDO=sudo
+  fi
+
   as_jenkins() {
     # NB: unsetting the environment variables works around a conda bug
     # https://github.com/conda/conda/issues/6576
     # NB: Pass on PATH and LD_LIBRARY_PATH to sudo invocation
     # NB: This must be run from a directory that jenkins has access to,
     # works around https://github.com/conda/conda-package-handling/pull/34
-    sudo -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
+    $SUDO -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
   }
 
   pushd /tmp
@@ -49,10 +56,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   pushd /opt/conda
 
   # Track latest conda update
-  as_jenkins conda update -n base conda
+  as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  as_jenkins conda install python="$ANACONDA_PYTHON_VERSION"
+  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python
@@ -62,31 +69,62 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.5, but
-  # we want to pin to version 3.5.
-  conda_install numpy pyyaml mkl mkl-include setuptools cffi typing future six
-  if [[ "$CUDA_VERSION" == 9.0* ]]; then
-    conda_install magma-cuda90 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.1* ]]; then
-    conda_install magma-cuda91 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.2* ]]; then
-    conda_install magma-cuda92 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.0* ]]; then
-    conda_install magma-cuda100 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.1* ]]; then
-    conda_install magma-cuda101 -c pytorch
+  # DO NOT install cmake here as it would install a version newer than 3.10, but
+  # we want to pin to version 3.10.
+  SCIPY_VERSION=1.1.0
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
+    SCIPY_VERSION=1.6.0
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.7" ]; then
+    # DO NOT install dataclasses if installing python-3.7, since its part of python-3.7 core packages
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six typing_extensions
+  else
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
+  fi
+
+  # Magma package names are concatenation of CUDA major and minor ignoring revision
+  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
+  if [ -n "$CUDA_VERSION" ]; then
+    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
 
-  # Install some other packages
+  # Install some other packages, including those needed for Python test reporting
   # TODO: Why is scipy pinned
-  # numba & llvmlite is pinned because of https://github.com/numba/numba/issues/4368
-  # scikit-learn is pinned because of
-  # https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5
-  # only)
-  as_jenkins pip install --progress-bar off pytest scipy==1.1.0 scikit-learn==0.20.3 scikit-image librosa>=0.6.2 psutil numba==0.46.0 llvmlite==0.30.0
+  # Pin MyPy version because new errors are likely to appear with each release
+  # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  as_jenkins pip install --progress-bar off pytest \
+    scipy==$SCIPY_VERSION \
+    scikit-image \
+    psutil \
+    unittest-xml-reporting \
+    boto3==1.16.34 \
+    hypothesis==4.53.2 \
+    expecttest==0.1.3 \
+    mypy==0.812 \
+    tb-nightly
+
+  # Install numba only on python-3.8 or below
+  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
+  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
+    as_jenkins pip install --progress-bar off numba==0.54.1 "librosa>=0.6.2,<0.9.0"
+  else
+    as_jenkins pip install --progress-bar off numba==0.49.0 "librosa>=0.6.2,<0.9.0"
+  fi
+
+  # Update scikit-learn to a python-3.8 compatible version
+  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
+    as_jenkins pip install --progress-bar off -U scikit-learn
+  else
+    # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
+    as_jenkins pip install --progress-bar off scikit-learn==0.20.3
+  fi
 
   popd
 fi

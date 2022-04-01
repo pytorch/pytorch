@@ -1,6 +1,9 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/string_view.h>
 #include <string>
 #include <utility>
 #include <ostream>
@@ -14,13 +17,54 @@ struct OperatorName final {
   OperatorName(std::string name, std::string overload_name)
       : name(std::move(name)), overload_name(std::move(overload_name)) {}
 
-  void setNamespaceIfNotSet(const char* ns) {
-    // TODO: slow!  Fix internal data structures so I don't have to paste the
-    // names together
-    std::ostringstream oss;
-    if (name.find("::") == std::string::npos) {
-      oss << ns << "::" << name;
-      name = oss.str();
+  // TODO: These two functions below are slow!  Fix internal data structures so
+  // I don't have to manually reconstruct the namespaces!
+
+  // Return the namespace of this OperatorName, if it exists.  The
+  // returned string_view is only live as long as the OperatorName
+  // exists and name is not mutated
+  c10::optional<c10::string_view> getNamespace() const {
+    auto pos = name.find("::");
+    if (pos == std::string::npos) {
+      return c10::nullopt;
+    } else {
+      return c10::make_optional(c10::string_view(name.data(), pos));
+    }
+  }
+
+  // Returns true if we successfully set the namespace
+  bool setNamespaceIfNotSet(const char* ns) {
+    if (!getNamespace().has_value()) {
+      const auto ns_len = strlen(ns);
+      const auto old_name_size = name.size();
+      name.resize(ns_len + 2 + old_name_size);
+      // Shift current value of name to the end of the new space.
+      name.replace(name.size() - old_name_size, old_name_size, name, 0, old_name_size);
+      name.replace(0, ns_len, ns, ns_len);
+      name[ns_len] = ':';
+      name[ns_len + 1] = ':';
+      return true;
+    } else {
+      return false;
+    }
+  }
+};
+
+// Non-owning view of an OperatorName.  Unlike OperatorName, most of
+// its functions are constexpr, so it can be used for compile time
+// computations
+struct OperatorNameView final {
+  c10::string_view name;
+  c10::string_view overload_name;
+  constexpr OperatorNameView(c10::string_view name, c10::string_view overload_name)
+    : name(name), overload_name(overload_name) {}
+  // Parses strings like "foo.overload" and also "foo"
+  constexpr static OperatorNameView parse(c10::string_view full_name) {
+    auto i = full_name.find('.');
+    if (i == c10::string_view::npos) {
+      return OperatorNameView(full_name, c10::string_view());
+    } else {
+      return OperatorNameView(full_name.substr(0, i), full_name.substr(i + 1));
     }
   }
 };
@@ -33,8 +77,8 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
 }
 
-CAFFE2_API std::string toString(const OperatorName& opName);
-CAFFE2_API std::ostream& operator<<(std::ostream&, const OperatorName&);
+TORCH_API std::string toString(const OperatorName& opName);
+TORCH_API std::ostream& operator<<(std::ostream&, const OperatorName&);
 
 } // namespace c10
 

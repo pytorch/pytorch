@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -14,7 +14,7 @@
 namespace torch {
 namespace autograd {
 
-struct TORCH_CUDA_API Scatter : public Node {
+struct TORCH_CUDA_CU_API Scatter : public Node {
   explicit Scatter(
       std::vector<at::Device> devices,
       const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
@@ -33,7 +33,7 @@ struct TORCH_CUDA_API Scatter : public Node {
   bool unsqueeze_scalars_;
 };
 
-struct TORCH_CUDA_API Gather : public Node {
+struct TORCH_CUDA_CU_API Gather : public Node {
   explicit Gather(const at::Device& destination_device, int64_t dim = 0);
   ~Gather() override;
 

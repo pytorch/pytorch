@@ -1,4 +1,6 @@
-#include "test/cpp/tensorexpr/test_base.h"
+#include <gtest/gtest.h>
+
+#include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
@@ -6,8 +8,7 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
-void testTypeTest01() {
-  KernelScope kernel_scope;
+TEST(Type, Test01) {
   {
     Dtype dt1 = kInt;
     ASSERT_EQ(dt1, kInt);
@@ -41,83 +42,161 @@ void testTypeTest01() {
   }
 }
 
-void testTypePropagation() {
+TEST(Type, BitCasting) {
+  {
+    VarHandle x("x", kFloat);
+    ExprHandle y = bitcast<int32_t>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    ASSERT_EQ(y.dtype(), kInt);
+  }
+  {
+    VarHandle x("x", kInt);
+    ExprHandle y = bitcast<float>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    ASSERT_EQ(y.dtype(), kFloat);
+  }
+  {
+    VarHandle x("x", kShort);
+    ExprHandle y = bitcast<at::Half>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    ASSERT_EQ(y.dtype(), kHalf);
+  }
+  {
+    VarHandle x("x", kHalf);
+    ExprHandle y = bitcast<int16_t>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    ASSERT_EQ(y.dtype(), kShort);
+  }
+
+  constexpr int16_t ref16 = 1337;
+  constexpr int32_t ref32 = 1337;
+  constexpr int64_t ref64 = 1337;
+  at::Half reff16 = 1337.0f;
+  constexpr float reff32 = 1337.0f;
+  constexpr double reff64 = 1337.0f;
+  using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
+  // this is broken
+  /*{
+    at::Half k_;
+    at::Half* k = &k_;
+    *reinterpret_cast<int16_t*>(k) = ref16;
+    auto a = HalfImm::make(*k);
+    auto b = BitCast::make(kShort, a);
+    SimpleIRExprEval cg(b);
+    ASSERT_EQ(cg.value<int16_t>(), ref16);
+  }*/
+
+  {
+    float k = raw_bitcast<float>(ref32);
+    auto a = FloatImm::make(k);
+    auto b = BitCast::make(kInt, a);
+    SimpleIRExprEval cg(b);
+    ASSERT_EQ(cg.value<int32_t>(), ref32);
+  }
+
+  {
+    double k = raw_bitcast<double>(ref64);
+    auto a = DoubleImm::make(k);
+    auto b = BitCast::make(kLong, a);
+    SimpleIRExprEval cg(b);
+    ASSERT_EQ(cg.value<int64_t>(), ref64);
+  }
+
+  {
+    int64_t k = raw_bitcast<int64_t>(reff64);
+    auto a = LongImm::make(k);
+    auto b = BitCast::make(kDouble, a);
+    SimpleIRExprEval cg(b);
+    ASSERT_EQ(cg.value<double>(), reff64);
+  }
+
+  {
+    int32_t k = raw_bitcast<int32_t>(reff32);
+    auto a = IntImm::make(k);
+    auto b = BitCast::make(kFloat, a);
+    SimpleIRExprEval cg(b);
+    ASSERT_EQ(cg.value<float>(), reff32);
+  }
+
+  // This segfaults :(
+  /*{
+    VarHandle x("x", kDouble);
+    ASSERT_ANY_THROW(ExprHandle y = bitcast<int32_t>(x));
+  }
+  {
+    VarHandle x("x", kFloat);
+    ASSERT_ANY_THROW(ExprHandle y = bitcast<int64_t>(x));
+  }
+  {
+    VarHandle x("x", kLong);
+    ASSERT_ANY_THROW(ExprHandle y = bitcast<float>(x));
+  }
+  {
+    VarHandle x("x", kShort);
+    ASSERT_ANY_THROW(ExprHandle y = bitcast<float>(x));
+  }
+  {
+    VarHandle x("x", kInt);
+    ASSERT_ANY_THROW(ExprHandle y = bitcast<at::Half>(x));
+  }*/
+}
+
+TEST(Type, Propagation) {
   // Same types:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
     ExprHandle body = FloatImm::make(2.f) +
         (x * FloatImm::make(3.f) + FloatImm::make(4.f) * y);
-    ExprHandle e1 = Let::make(x, FloatImm::make(3.f), body);
-    ExprHandle e2 = Let::make(y, FloatImm::make(6.f), e1);
-    ASSERT_EQ(e2.dtype(), kFloat);
+    ASSERT_EQ(body.dtype(), kFloat);
   }
   // Int to bigger int:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kShort);
     VarHandle y("y", kLong);
     ExprHandle body =
         ShortImm::make(2.f) + (x * ShortImm::make(3) + ShortImm::make(4) * y);
-    ExprHandle e1 = Let::make(x, ShortImm::make(3), body);
-    ExprHandle e2 = Let::make(y, LongImm::make(6), e1);
-    ASSERT_EQ(e2.dtype(), kLong);
+    ASSERT_EQ(body.dtype(), kLong);
   }
   // Float to bigger float:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     VarHandle y("y", kDouble);
     ExprHandle body =
         HalfImm::make(2.f) + (x * HalfImm::make(3) + HalfImm::make(4) * y);
-    ExprHandle e1 = Let::make(x, HalfImm::make(3), body);
-    ExprHandle e2 = Let::make(y, DoubleImm::make(6), e1);
-    ASSERT_EQ(e2.dtype(), kDouble);
+    ASSERT_EQ(body.dtype(), kDouble);
   }
   // Int to Float:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kInt);
     ExprHandle body =
         IntImm::make(2) + (x * IntImm::make(3) + IntImm::make(4) * y);
-    ExprHandle e1 = Let::make(x, FloatImm::make(3.f), body);
-    ExprHandle e2 = Let::make(y, IntImm::make(6), e1);
-    ASSERT_EQ(e2.dtype(), kFloat);
+    ASSERT_EQ(body.dtype(), kFloat);
   }
   // Smaller float, bigger Int:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     VarHandle y("y", kLong);
     ExprHandle body =
         HalfImm::make(2) + (x * HalfImm::make(3) + HalfImm::make(4) * y);
-    ExprHandle e1 = Let::make(x, HalfImm::make(3), body);
-    ExprHandle e2 = Let::make(y, LongImm::make(6), e1);
-    ASSERT_EQ(e2.dtype(), kHalf);
+    ASSERT_EQ(body.dtype(), kHalf);
   }
   // Bigger float, smaller Int:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kChar);
     VarHandle y("y", kDouble);
     ExprHandle body =
         CharImm::make(2) + (x * CharImm::make(3) + CharImm::make(4) * y);
-    ExprHandle e1 = Let::make(x, CharImm::make(3), body);
-    ExprHandle e2 = Let::make(y, DoubleImm::make(6), e1);
-    ASSERT_EQ(e2.dtype(), kDouble);
+    ASSERT_EQ(body.dtype(), kDouble);
   }
   // Sign change char/byte upgrades to short:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kChar);
     VarHandle y("y", kByte);
     ExprHandle body =
         CharImm::make(2) + (x * CharImm::make(3) + CharImm::make(4) * y);
-    ExprHandle e1 = Let::make(x, CharImm::make(3), body);
-    ExprHandle e2 = Let::make(y, ByteImm::make(6), e1);
-    ASSERT_EQ(e2.dtype(), kShort);
+    ASSERT_EQ(body.dtype(), kShort);
   }
 }
 } // namespace jit

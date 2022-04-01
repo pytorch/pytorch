@@ -1,11 +1,18 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <fmt/format.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -16,9 +23,78 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <c10/util/irange.h>
+
+using namespace torch::autograd::profiler;
+
 namespace torch {
 namespace distributed {
 namespace rpc {
+namespace {
+void processRemoteProfiledEvents(
+    autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
+  // Check if the profiler is enabled
+  auto enabled = profilerEnabled();
+  TORCH_CHECK(
+      enabled,
+      "Profiler was expected to be enabled. This can happen in callback "
+      " continutations that run in different threads, and the TLS of the "
+      " profiler was not propagated.");
+  std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
+  const auto& profilingId = rpcWithProfilingResp.getProfilingId();
+  auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
+  auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
+  remoteProfilerManager.eraseKey(profilingId);
+  auto keyPrefixStr = key + rpc::REMOTE_PROFILING_KEY_PREFIX;
+  std::for_each(
+      events.begin(), events.end(), [&keyPrefixStr](LegacyEvent& event) {
+        std::string name = keyPrefixStr + std::string(event.name());
+        event.setName(at::StringView(name));
+      });
+  // Add event list to the thread local profiler.
+  addEventList(std::move(events));
+}
+
+} // namespace
+
+const std::string kRPCErrorPrefix = std::string("RPCErr");
+
+RPCErrorType getRPCErrorType(const JitFuture& jitFuture) {
+  TORCH_INTERNAL_ASSERT(
+      jitFuture.hasError(),
+      "JitFuture of Message passed to getRPCErrorType does not have an error.");
+
+  // Attempt to parse for error string given by makeRPCError, otherwise return
+  // unknown error.
+  // Note that this function expects errors formatted with makeRPCError().
+  auto err = jitFuture.tryRetrieveErrorMessage();
+  size_t pos = err.find(kRPCErrorPrefix);
+  if (pos != std::string::npos) {
+    // Parse the RPCErrorType.
+    auto errStartIdx =
+        pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
+    auto errEndIdx = err.find(':', errStartIdx);
+    if (errEndIdx == std::string::npos) {
+      // Indicates error was not formatted correctly.
+      return RPCErrorType::UNKNOWN_ERROR;
+    }
+    auto errStr = err.substr(errStartIdx, errEndIdx - errStartIdx);
+    auto errType = static_cast<RPCErrorType>(std::stoi(errStr));
+    return errType;
+  } else {
+    return RPCErrorType::UNKNOWN_ERROR;
+  }
+}
+
+std::string makeRPCError(
+    const std::string& rpcErrorStr,
+    RPCErrorType errorType) {
+  return fmt::format(
+      "{}:{}:{}",
+      torch::distributed::rpc::kRPCErrorPrefix,
+      errorType,
+      rpcErrorStr);
+}
 
 std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   switch (request.type()) {
@@ -58,6 +134,12 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      return autograd::RpcWithProfilingReq::fromMessage(request);
+    }
+    case MessageType::RREF_BACKWARD_REQ: {
+      return autograd::RRefBackwardReq::fromMessage(request);
+    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -93,11 +175,19 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       RpcCommandBase& rpc = *rpcPtr;
       auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
 
+      // Need to reverse the device map for the backward pass of distributed
+      // autograd.
+      DeviceMap reverseDeviceMap;
+      for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+        reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+      }
+
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
+          rpcWithAutograd.fromWorkerId(),
+          reverseDeviceMap);
 
       wrappedMsgType = rpcWithAutograd.wrappedMessageType();
 
@@ -108,6 +198,22 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
+    }
+    case MessageType::RUN_WITH_PROFILING_RESP: {
+      std::unique_ptr<RpcCommandBase> rpcPtr =
+          autograd::RpcWithProfilingResp::fromMessage(response);
+      RpcCommandBase& rpc = *rpcPtr;
+      auto& rpcWithProfilingResp =
+          static_cast<autograd::RpcWithProfilingResp&>(rpc);
+      // Process remotely profiled events.
+      processRemoteProfiledEvents(rpcWithProfilingResp);
+
+      wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
+      auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
+      return wrappedRPC;
+    }
+    case MessageType::RREF_BACKWARD_RESP: {
+      return autograd::RRefBackwardResp::fromMessage(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -173,7 +279,7 @@ parseWireSections(const void* data, size_t data_size) {
     }
     // Parse name
     const char* namePtr = ptr;
-    while (*ptr != ' ' && ptr != endp) {
+    while (ptr != endp && *ptr != ' ') {
       ptr++;
     }
     if (ptr == endp) {
@@ -185,7 +291,7 @@ parseWireSections(const void* data, size_t data_size) {
     }
     // Parse size
     const char* sizePtr = ptr;
-    while (*ptr != '\n' && ptr != endp) {
+    while (ptr != endp && *ptr != '\n') {
       ptr++;
     }
     if (ptr == endp) {
@@ -196,7 +302,7 @@ parseWireSections(const void* data, size_t data_size) {
     ++ptr; // past the '\n'
   }
   if (!ok) {
-    throw std::runtime_error("failed parse");
+    TORCH_CHECK(false, "failed parse");
   }
 
   std::unordered_map<std::string, std::pair<const char*, size_t>> out;
@@ -205,7 +311,7 @@ parseWireSections(const void* data, size_t data_size) {
     ptr += headerEnt.second;
   }
   if (ptr != endp) {
-    throw std::runtime_error("failed bounds");
+    TORCH_CHECK(false, "failed bounds");
   }
   return out;
 }
@@ -223,7 +329,7 @@ c10::List<at::Tensor> cloneSparseTensors(
     if (!t.has_storage()) {
       return false; // avoid throwing below.
     }
-    auto storageSize = t.storage().elementSize() * t.storage().numel();
+    auto storageSize = t.storage().nbytes();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;
     constexpr size_t kMinRecopyBytes = 8 * 1024;
@@ -257,29 +363,35 @@ std::string wireSerialize(
   };
   std::vector<Ent> entries;
   std::string metaEntry;
-  std::vector<jit::WriteableTensorData> tensorData;
+  std::vector<at::Tensor> tensorData;
 
   if (!payload.empty()) {
     entries.push_back({kPayload, payload.data(), payload.size()});
   }
 
   if (!tensors.empty()) {
-    torch::jit::Pickler pickler(
-        [&](const void* buf, size_t sz) -> size_t {
-          metaEntry.append(static_cast<const char*>(buf), sz);
-          return sz;
-        },
-        nullptr);
+    torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
+      metaEntry.append(static_cast<const char*>(buf), sz);
+      return sz;
+    });
     pickler.protocol();
     pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();
-    // tensorData is in function scope so that the data() pointers stay valid.
     tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < tensorData.size(); i++) {
-      entries.push_back({c10::to_string(i),
-                         tensorData[i].data(),
-                         tensorData[i].sizeInBytes()});
+    for (const auto i : c10::irange(tensorData.size())) {
+      // Construct WritableTensorData for each tensor in the pickler tensorData
+      // Since tensorData is in function scope, and getWritableTensorData just
+      // record the tensors, the data() pointers stay valid for CPU tensors
+      // Note that RPC serde doesn't support CUDA tensors yet, if we should
+      // support CUDA tensor, we need to be careful since getWritableTensorData
+      // converts CUDA tensor to cpu and data() might get destructed as we go
+      // out of scope of this loop.
+      auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
+      entries.push_back(
+          {c10::to_string(i),
+           writeableTensorData.data(),
+           writeableTensorData.sizeInBytes()});
     }
   }
 
@@ -333,7 +445,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     auto sectionReadFunc = [&](const std::string& ename) -> at::DataPtr {
       auto it = sections.find(ename);
       if (it == sections.end()) {
-        throw std::runtime_error("Couldn't find entity " + ename);
+        TORCH_CHECK(false, "Couldn't find entity " + ename);
       }
       const auto& idat = it->second;
       auto dptr = at::getCPUAllocator()->allocate(idat.second);
@@ -353,6 +465,118 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     }
   }
   return {std::move(payload), std::move(tensors)};
+}
+
+void writeWrappedPayload(
+    std::vector<char>& originalPayload,
+    std::vector<char>& additionalPayload) {
+  originalPayload.insert(
+      originalPayload.end(),
+      additionalPayload.begin(),
+      additionalPayload.end());
+
+  // Add size of the additional payload
+  int64_t indexToWrite = originalPayload.size();
+  originalPayload.resize(originalPayload.size() + sizeof(int64_t));
+  const int64_t additionalPayloadSize = additionalPayload.size();
+  torch::utils::THP_encodeInt64Buffer(
+      reinterpret_cast<uint8_t*>(originalPayload.data()) + indexToWrite,
+      &additionalPayloadSize,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
+      1);
+}
+
+std::vector<at::IValue> readWrappedPayload(
+    std::vector<char>& payload,
+    const rpc::Message& message) {
+  // Read the additional payload remove it from the payload.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t additionalPayloadSize;
+  size_t indexToRead = payload.size() - sizeof(int64_t);
+  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
+  torch::utils::THP_decodeInt64Buffer(
+      &additionalPayloadSize,
+      reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
+      1);
+  payload.resize(indexToRead);
+
+  TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      payload.size() > additionalPayloadSize,
+      "Wrong payload sizes: payload.size() is ",
+      payload.size(),
+      " but additional payload size is ",
+      additionalPayloadSize);
+  auto wrappedPayloadBegin =
+      static_cast<const char*>(message.payload().data()) + payload.size() -
+      additionalPayloadSize;
+  std::vector<torch::Tensor> tensorTable;
+  IValue tuple = jit::unpickle(
+      wrappedPayloadBegin,
+      additionalPayloadSize,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      tensorTable);
+  std::vector<at::IValue> tupleElements = tuple.toTupleRef().elements().vec();
+  payload.resize(payload.size() - additionalPayloadSize);
+  return tupleElements;
+}
+
+void populateRemoteProfiledEvents(
+    std::vector<LegacyEvent>& profiledEvents,
+    const ProfilerConfig& profilingConfig,
+    const std::vector<std::vector<LegacyEvent>>& eventLists) {
+  // Gather all events into a vector
+  for (auto& l : eventLists) {
+    for (auto& e : l) {
+      profiledEvents.push_back(e);
+    }
+  }
+  // find __start_profile event
+  bool cudaProfilingEnabled = profilingConfig.state == ProfilerState::CUDA;
+  const LegacyEvent* profilerStart = nullptr;
+
+  for (auto& e : profiledEvents) {
+    if (std::string(e.name()) == "__start_profile") {
+      profilerStart = &e;
+      break;
+    }
+  }
+  // We should always find __start_profile.
+  TORCH_CHECK(
+      profilerStart != nullptr, "Expected to find __start_profile event.");
+
+  if (cudaProfilingEnabled) {
+    // Deserialized events don't have the corresponding CUDA events, making it
+    // impossible to use cudaEventElapsedTime the receiving end. To avoid this,
+    // find all push/pop pairs of CUDA events and set the corresponding CUDA
+    // time to zero for the push event and to the elapsed time for the pop
+    // event, to be used later for the elapsed CUDA time computation.
+    std::unordered_map<at::RecordFunctionHandle, const LegacyEvent*>
+        startEvents;
+    for (auto& e : profiledEvents) {
+      if (e.hasCuda()) {
+        if (e.kind() == EventKind::PushRange) {
+          startEvents[e.handle()] = &e;
+        }
+      }
+    }
+    for (auto& e : profiledEvents) {
+      if (e.hasCuda()) {
+        if (e.kind() == EventKind::PopRange) {
+          auto it = startEvents.find(e.handle());
+          if (it != startEvents.end()) {
+            e.setCudaUs(it->second->cudaElapsedUs(e));
+          } else {
+            TORCH_WARN("Found a pop event without a corresponding push event");
+            e.setCudaUs(0);
+          }
+        } else {
+          e.setCudaUs(0);
+        }
+      }
+    }
+  }
 }
 
 } // namespace rpc
