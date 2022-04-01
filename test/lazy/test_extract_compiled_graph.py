@@ -1,4 +1,4 @@
-# Owner(s): ["module: lazy"]
+# Owner(s): ["oncall: jit"]
 
 import unittest
 
