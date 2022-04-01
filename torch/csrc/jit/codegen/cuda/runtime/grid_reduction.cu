@@ -272,6 +272,3 @@ __device__ void gridReduce(
 }
 
 } // namespace reduction
-
-#undef isize
-#undef ioffset

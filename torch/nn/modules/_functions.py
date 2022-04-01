@@ -158,11 +158,8 @@ class SyncBatchNorm(Function):
                 torch.distributed.all_reduce(
                     combined, torch.distributed.ReduceOp.SUM, process_group, async_op=False)
 
-                # input is empty, we can skip batch_norm_backward_elemt
-                grad_input = torch.zeros_like(saved_input)
-
-            # Leave grad_weight and grad_bias as None, which will be interpreted
-            # by the autograd engine as Tensors full of zeros.
+            # Leave grad_input, grad_weight and grad_bias as None, which will be
+            # interpreted by the autograd engine as Tensors full of zeros.
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
