@@ -2,6 +2,8 @@ import torch
 import torch.nn.qat as nnqat
 import operator
 from .observation_type import ObservationType
+from ...observer import default_affine_fixed_qparams_observer
+from ...fake_quantize import FixedQParamsFakeQuantize
 
 def _get_default_op_backend_config(op, dtype_configs):
     return {
@@ -91,6 +93,15 @@ _ADD_CONFIG = {
     ],
 }
 
+_HARDSIGMOID_MODULE_CONFIG = {
+    "pattern": torch.nn.Hardsigmoid,
+    "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+    "overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer),
+    "overwrite_output_observer": default_affine_fixed_qparams_observer,
+    "dtype_configs": [
+        weighted_op_int8_dtype_config,
+    ],
+}
 
 def get_native_backend_config_dict():
     """ Get backend for PyTorch Native backend_config_dict (fbgemm/qnnpack)
@@ -102,5 +113,6 @@ def get_native_backend_config_dict():
             _LINEAR_MODULE_CONFIG,
             *_DEFAULT_OP_INT8_CONFIGS,
             _ADD_CONFIG,
+            _HARDSIGMOID_MODULE_CONFIG,
         ],
     }

@@ -239,7 +239,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
     """
     pass
 
-@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer)
 @register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
 @register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_observer)
 @register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_observer)
