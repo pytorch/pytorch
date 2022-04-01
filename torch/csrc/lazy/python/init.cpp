@@ -216,6 +216,7 @@ void initLazyBindings(PyObject* module){
           }
           return std::make_pair(tensor_ids, ivalues);
         #else
+          TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE builds");
           return std::make_pair(std::vector<int64_t>(), std::vector<at::IValue>());
         #endif
         });
