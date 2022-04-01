@@ -313,7 +313,6 @@ ENABLE_PR_HISTORY_REORDERING = bool(
 )
 
 JIT_EXECUTOR_TESTS = [
-    "test_jit_cuda_fuser",
     "test_jit_profiling",
     "test_jit_legacy",
     "test_jit_fuser_legacy",
