@@ -21,9 +21,12 @@ class SyncBatchNorm(Function):
             # calculate mean/invstd for input.
             mean, invstd = torch.batch_norm_stats(input, eps)
 
-            count = torch.full((1,), input.numel() // input.size(1),
-                            dtype=mean.dtype,
-                            device=mean.device)
+            count = torch.full(
+                (1,),
+                input.numel() // input.size(1),
+                dtype=mean.dtype,
+                device=mean.device
+            )
 
             # C, C, 1 -> (2C + 1)
             combined = torch.cat([mean, invstd, count], dim=0)
@@ -142,8 +145,8 @@ class SyncBatchNorm(Function):
             # This process got an empty input tensor in the forward pass.
             # Although this process can directly set grad_input as an empty
             # tensor of zeros, it still needs to participate in the collective
-            # communication to unblock its peers, as other processes might
-            # recieved non-empty inputs.
+            # communication to unblock its peers, as other peer processes might
+            # have recieved non-empty inputs.
             num_channels = saved_input.shape[1]
             if self.needs_input_grad[0]:
                 # launch all_reduce to unblock other peer processes
