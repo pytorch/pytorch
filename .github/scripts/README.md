@@ -30,6 +30,14 @@ Workflows can be generated / regenerated using the following command:
 .github/regenerate.sh
 ```
 
+### Adding a new generated binary workflow
+
+New generated binary workflows can be added in the `.github/scripts/generate_ci_workflows.py` script. You can reference
+examples from that script in order to add the workflow to the stream that is relevant to what you particularly
+care about.
+
+Different parameters can be used to acheive different goals, i.e. running jobs on a cron, running only on trunk, etc.
+
 #### ciflow (trunk)
 
 The label `ciflow/trunk` can be used to run `trunk` only workflows. This is especially useful if trying to re-land a PR that was
