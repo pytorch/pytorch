@@ -185,16 +185,7 @@ def main() -> None:
         # directory so that code generation below can see it as local
         # files.
         autograd_dir = pathlib.Path(autograd_dir_str)
-        copy_resource_to_dir("tools.autograd", "deprecated.yaml", autograd_dir)
-        copy_resource_to_dir("tools.autograd", "derivatives.yaml", autograd_dir)
-
-        templates_dir = autograd_dir / "templates/"
-        templates_dir.mkdir()
-        for template_name in pkg_resources.resource_listdir("tools.autograd", "templates"):
-            if pkg_resources.resource_isdir("tools.autograd.templates", template_name):
-                # Only copy one level deep.
-                continue
-            copy_resource_to_dir("tools.autograd.templates", template_name, templates_dir)
+        copy_resources_to_dir(autograd_dir)
 
         generate_code(
             options.ninja_global,
@@ -225,6 +216,7 @@ def main() -> None:
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
+                            backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
                             impl_path=ts_native_functions,
@@ -233,6 +225,19 @@ def main() -> None:
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
                             per_operator_headers=options.per_operator_headers)
+
+
+def copy_resources_to_dir(autograd_dir: pathlib.Path) -> None:
+    copy_resource_to_dir("tools.autograd", "deprecated.yaml", autograd_dir)
+    copy_resource_to_dir("tools.autograd", "derivatives.yaml", autograd_dir)
+
+    templates_dir = autograd_dir / "templates/"
+    templates_dir.mkdir()
+    for template_name in pkg_resources.resource_listdir("tools.autograd", "templates"):
+        if pkg_resources.resource_isdir("tools.autograd.templates", template_name):
+            # Only copy one level deep.
+            continue
+        copy_resource_to_dir("tools.autograd.templates", template_name, templates_dir)
 
 
 def copy_resource_to_dir(package: str, name: str, dest_dir: pathlib.Path) -> None:
