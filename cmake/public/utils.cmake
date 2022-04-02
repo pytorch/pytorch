@@ -459,6 +459,7 @@ function(torch_compile_options libname)
         -Wno-type-limits
         -Wno-array-bounds
         -Wno-unknown-pragmas
+        -Wno-sign-compare
         -Wno-strict-overflow
         -Wno-strict-aliasing
         -Wno-error=deprecated-declarations
@@ -466,10 +467,6 @@ function(torch_compile_options libname)
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces
         )
-      if(HAS_WERROR_SIGN_COMPARE AND WERROR)
-        list(APPEND private_compile_options
-          -Werror=sign-compare)
-      endif()
       if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         list(APPEND private_compile_options
           -Wno-range-loop-analysis)
