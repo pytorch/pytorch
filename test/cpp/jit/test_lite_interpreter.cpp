@@ -655,10 +655,7 @@ void backportAllVersionCheck(
     AT_ASSERT(backPortSuccess);
 
     // Check backport model version
-    auto before = oss.tellg();
     auto backport_version = _get_model_bytecode_version(oss);
-    auto after = oss.tellg();
-    AT_ASSERT(before == after);
     backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 

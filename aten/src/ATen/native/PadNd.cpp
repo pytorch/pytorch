@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/PadNd.h>
 
 #include <c10/util/irange.h>
 
@@ -151,6 +152,63 @@ Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
   }
 
   return out;
+}
+
+Tensor _pad_enum(const Tensor &self, IntArrayRef pad, int64_t mode_int, c10::optional<double> value) {
+  const auto input_dim = self.dim();
+  TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
+  TORCH_CHECK(static_cast<int64_t>(pad.size()) <= input_dim * 2, "Padding length too large");
+  auto mode = static_cast<at::padding_mode>(mode_int);
+
+  if (mode == at::padding_mode::constant) {
+    return at::constant_pad_nd(self, pad, value.value_or(0.0));
+  }
+  TORCH_CHECK(
+      !value.has_value(), "Padding mode \"",
+      padding_mode_string(mode),
+      "\" doesn't take in value argument");
+
+  if (pad.size() == 2 && (input_dim == 2 || input_dim == 3)) {
+    switch (mode) {
+      case at::padding_mode::reflect: return at::reflection_pad1d(self, pad);
+      case at::padding_mode::replicate: return at::replication_pad1d(self, pad);
+      case at::padding_mode::circular: return at::_pad_circular(self, pad);
+      default: {}
+    }
+  } else if(pad.size() == 4 && (input_dim == 3 || input_dim == 4)) {
+    switch (mode) {
+      case at::padding_mode::reflect: return at::reflection_pad2d(self, pad);
+      case at::padding_mode::replicate: return at::replication_pad2d(self, pad);
+      case at::padding_mode::circular: return at::_pad_circular(self, pad);
+      default: {}
+    }
+  } else if (pad.size() == 6 && (input_dim == 4 || input_dim == 5)) {
+    switch (mode) {
+      case at::padding_mode::reflect: return at::reflection_pad3d(self, pad);
+      case at::padding_mode::replicate: return at::replication_pad3d(self, pad);
+      case at::padding_mode::circular: return at::_pad_circular(self, pad);
+      default: {}
+    }
+  }
+  C10_THROW_ERROR(NotImplementedError,
+      "Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now");
+}
+
+Tensor pad(const Tensor &self, IntArrayRef pad, c10::string_view mode, c10::optional<double> value) {
+  const auto mode_enum = [&] {
+    if (mode == "reflect") {
+      return at::padding_mode::reflect;
+    } else if (mode == "constant") {
+      return at::padding_mode::constant;
+    } else if (mode == "replicate") {
+      return at::padding_mode::replicate;
+    } else if (mode == "circular") {
+      return at::padding_mode::circular;
+    }
+    C10_THROW_ERROR(NotImplementedError,
+                    c10::str("Unrecognised padding mode ", mode));
+  }();
+  return at::native::_pad_enum(self, pad, static_cast<int64_t>(mode_enum), value);
 }
 
 }}  // namespace at::native

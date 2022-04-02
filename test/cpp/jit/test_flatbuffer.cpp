@@ -257,7 +257,7 @@ TEST(FlatbufferTest, GetByteCodeVersion) {
       return input + 1
   )");
   std::stringstream ss;
-  m._save_for_mobile(ss, {}, false, true);
+  m._save_for_mobile(ss, {}, false, /*use_flatbuffer=*/true);
   auto version = _get_model_bytecode_version(ss);
   AT_ASSERT(version == caffe2::serialize::kProducedBytecodeVersion);
   ss.seekg(0, ss.beg);
