@@ -59,9 +59,11 @@ class FoldedGraphModule(torch.fx.GraphModule):
         # Tuple[Tensor,].
         folded_attrs = self.const_subgraph_module()
         params = (
-            torch.nn.ParameterList([torch.nn.Parameter(i) for i in folded_attrs])
+            torch.nn.ParameterList([torch.nn.Parameter(
+                i if not isinstance(i, int) else torch.Tensor([i]).cuda()) for i in folded_attrs])
             if isinstance(folded_attrs, tuple)
-            else torch.nn.Parameter(folded_attrs)
+            else torch.nn.Parameter(
+                folded_attrs if not isinstance(folded_attrs, int) else torch.Tensor([folded_attrs]).cuda())
         )
         setattr(self, self.fx_const_folded_attrs_name, params)
 
