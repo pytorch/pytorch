@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "tensor"
+    input: "onnx::Split_0"
     output: "1"
     output: "2"
     output: "3"
@@ -24,7 +24,7 @@ graph {
   }
   name: "torch_jit"
   input {
-    name: "tensor"
+    name: "onnx::Split_0"
     type {
       tensor_type {
         elem_type: 1
