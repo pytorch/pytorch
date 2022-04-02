@@ -138,7 +138,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
-#if defined(ENABLE_FLATBUFFER)
+#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
 TEST(FlatbufferTest, FlatbufferBackPortTest) {
   Module m("m");
   m.define(R"(
@@ -149,11 +149,10 @@ TEST(FlatbufferTest, FlatbufferBackPortTest) {
   m._save_for_mobile(ss, {}, false, true);
 
   std::stringstream oss;
-  bool backPortSuccess = _backport_for_mobile(
-      ss, oss, caffe2::serialize::kMinSupportedBytecodeVersion + 1);
+  bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
   ASSERT_TRUE(backPortSuccess);
 }
-#endif // defined(ENABLE_FLATBUFFER)
+#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
 
 TEST(FlatbufferTest, ExtraFiles) {
   const auto script = R"JIT(
