@@ -57,9 +57,9 @@ def _pre_load_state_dict_hook(
     *args: Any,
 ) -> None:
     """
-    _post_state_dict_hook() is called before the _load_from_state_dict() is
-    This API pre-processes the keys of the state_dict to add the
-    FlattenParamsWrapper internal prefix
+    _pre_load_state_dict_hook() is called before the _load_from_state_dict() is
+    executed. This API pre-processes the keys of the state_dict to add the
+    FlattenParamsWrapper internal prefix.
     """
     # Push everything down to FPW_MODULE level.
     _replace_by_prefix(state_dict, prefix, prefix + f"{FPW_MODULE}.")
@@ -105,7 +105,7 @@ class FlatParameter(nn.Parameter):
     ) -> "FlatParameter":
         """Make an object using the parent's __new__ function."""
 
-        # A empty of non-list input doesn't make sense.
+        # A empty or non-list input doesn't make sense.
         if not isinstance(params, (list, tuple)) or len(params) == 0:
             raise ValueError("An non-empty list or tuple argument is needed")
 
@@ -226,6 +226,18 @@ class FlatParameter(nn.Parameter):
         )
 
     @property
+    def _num_unflattened_params(self) -> int:
+        """Returns the number of unflattened parameters that comprise this
+        flattened parameter."""
+        assert hasattr(self, "_param_infos"), \
+            "`_param_infos` has not been set, meaning this `FlatParameter` " \
+            "has not been initialized yet"
+        num_unflat_params = len(self._param_infos)
+        assert num_unflat_params > 0, "`FlatParameter` corresponding to 0 " \
+            "unflattened parameters"
+        return num_unflat_params
+
+    @property
     def _param_names(self):
         return [".".join([m, n]) if m else n for (m, _, n) in self._param_infos]
 
@@ -238,9 +250,8 @@ class FlatParameter(nn.Parameter):
     ) -> ShardMetadata:
         """
         Return tuple of (names, shapes, numels) metadata for the sharded parameter
-        metada of this flat parameter.
+        metadata of this flat parameter.
         """
-        names = [".".join([m, n]) if m else n for (m, _, n) in self._param_infos]
         return ShardMetadata(
             self._param_names[self._offset_to_slice()],
             self._param_shapes[self._offset_to_slice()],
@@ -275,6 +286,14 @@ class FlattenParamsWrapper(nn.Module):
         self._fpw_module = module
         self.flat_param = None
 
+        # Register hook to be called after state_dict() to remove the
+        # "_fpw_module." prefix and before load_state_dict() to add it back.
+        # The hooks must be registered even if the target param_list is empty as
+        # all submodules in FlattenParamsWrapper should be pre/post processed by
+        # the hooks.
+        self._register_state_dict_hook(_post_state_dict_hook)
+        self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
+
         if len(param_list) == 0:
             return
 
@@ -294,6 +313,7 @@ class FlattenParamsWrapper(nn.Module):
         self.flat_param = FlatParameter(params, params[0].requires_grad)
         self.flat_param._param_infos = param_infos
         self.flat_param._shared_param_infos = shared_param_infos
+
         # This attribute is used to remember the flat_param inside the unflatten_params()
         # context. With this attribute, FSDP can access the flat parameter metadata
         # even if flat_param is temporarily deleted.
@@ -304,11 +324,6 @@ class FlattenParamsWrapper(nn.Module):
         # Sanity check for the string constants.
         assert getattr(self, FPW_MODULE) is self._fpw_module
         assert getattr(self, FLAT_PARAM) is self.flat_param
-
-        # Register hook to be called after state_dict() to remove the
-        # "_fpw_module." prefix and before load_state_dict() to add it back.
-        self._register_state_dict_hook(_post_state_dict_hook)
-        self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
 
     @property
     def module(self) -> Any:
