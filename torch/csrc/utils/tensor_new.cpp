@@ -826,24 +826,31 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 
 void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
+  enum {
+    ARG_CROW_INDICES = 0,
+    ARG_COL_INDICES,
+    ARG_VALUES,
+    ARG_SIZE,
+    ARG_LAYOUT,
+    ARGS_COUNT
+  };
   static PythonArgParser parser({
     "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, Layout? layout=None)",
   });
 
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<ARGS_COUNT> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   Tensor values = internal_new_from_data(
-      options, scalar_type, c10::nullopt, r.pyobject(2),
+      options, scalar_type, c10::nullopt, r.pyobject(ARG_VALUES),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
   // See Note [Ensuring sparse values and indices match devices]
   Tensor crow_indices = internal_new_from_data(
-      values.options(), kInt, c10::nullopt, r.pyobject(0),
+      values.options(), kInt, c10::nullopt, r.pyobject(ARG_CROW_INDICES),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
   Tensor col_indices = internal_new_from_data(
-      values.options(), kInt, c10::nullopt, r.pyobject(1),
+      values.options(), kInt, c10::nullopt, r.pyobject(ARG_COL_INDICES),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
-  c10::optional<c10::Layout> layout = r.layoutOptional(4);
-  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3), layout);
+  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(ARG_SIZE), r.layoutOptional(ARG_LAYOUT));
 }
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
