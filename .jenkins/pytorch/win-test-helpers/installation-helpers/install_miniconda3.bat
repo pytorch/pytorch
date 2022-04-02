@@ -22,7 +22,7 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
   call conda install -y -q python=%PYTHON_VERSION% numpy cffi pyyaml boto3 libuv
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
-  call conda install -y -q -c conda-forge cmake
+  call conda install -y -q -c conda-forge cmake=3.22.3
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
 )

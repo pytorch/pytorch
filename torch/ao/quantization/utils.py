@@ -326,10 +326,6 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             assert (
                 0 < qrange_len <= 2**31
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
-        if dtype == torch.qint8:
-            quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
-        else:
-            quant_min, quant_max = 0, qrange_len - 1
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
