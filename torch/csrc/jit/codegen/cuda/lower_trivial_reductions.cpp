@@ -18,6 +18,7 @@ namespace {
 
 bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id);
 
+// Checks the producer of tv to see if the
 bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
   TORCH_INTERNAL_ASSERT(
       root_id->definition() == nullptr, "Not root IterDomain: ", root_id);
@@ -29,6 +30,7 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
 
   const auto& inputs = tv->definition()->inputs();
 
+  // Check the reduction expression that produces tv
   if (inputs.size() != 1 || !inputs[0]->isA<TensorView>() ||
       (tv->definition()->getExprType() != ExprType::ReductionOp &&
        tv->definition()->getExprType() != ExprType::WelfordOp)) {
@@ -63,8 +65,10 @@ bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
       continue;
     }
     // If not possible to prove the root ID is trivial, see if the ID
-    // is derived from a rfactor tensor and, if so, continue the
-    // analysis at the rfactor tensor.
+    // is derived from a rfactor tensor. This may mean that the iteration domain
+    // was merged or split in another expression through rfactor. Trace back
+    // through rfactor expressions to find original roots and determine there if
+    // trivial.
     if (!traverseToRFactorTensor(tv, root_id)) {
       return false;
     }

@@ -8,6 +8,8 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from typing import cast, Any, Callable, Dict, List, Optional, Tuple, Union
 from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
+from functools import lru_cache
+from warnings import warn
 
 
 GH_GET_PR_INFO_QUERY = """
@@ -215,6 +217,25 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
+# This query needs read-org permission
+GH_GET_TEAM_MEMBERS_QUERY = """
+query($org: String!, $name: String!, $cursor: String) {
+  organization(login: $org) {
+    team(slug: $name) {
+      members(first: 100, after: $cursor) {
+        nodes {
+          login
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -278,6 +299,21 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
 def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
     return rc["data"]["repository"]["pullRequest"]
+
+
+@lru_cache(maxsize=None)
+def gh_get_team_members(org: str, name: str) -> List[str]:
+    rc: List[str] = []
+    team_members: Dict[str, Any] = {"pageInfo": {"hasNextPage": "true", "endCursor": None}}
+    while bool(team_members["pageInfo"]["hasNextPage"]):
+        query = gh_graphql(GH_GET_TEAM_MEMBERS_QUERY, org=org, name=name, cursor=team_members["pageInfo"]["endCursor"])
+        team = query["data"]["organization"]["team"]
+        if team is None:
+            warn(f"Requested non-existing team {org}/{name}")
+            return []
+        team_members = team["members"]
+        rc += [member["login"] for member in team_members["nodes"]]
+    return rc
 
 
 def parse_args() -> Any:
@@ -387,7 +423,6 @@ class GitHubPR:
     def get_committer_author(self, num: int = 0) -> str:
         node = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]
         return f"{node['name']} <{node['email']}>"
-
 
     def get_checkrun_conclusions(self) -> Dict[str, str]:
         """ Returns list of checkrun / conclusions """
@@ -579,20 +614,45 @@ def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
     return cast(List[MergeRule], rc)
 
 
-
 def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
     rules = read_merge_rules(repo)
+    reject_reason = f"PR {pr.pr_num} does not match merge rules"
+    #  Used to determine best rejection reason
+    # Score 0 to 10K - how many files rule matched
+    # Score 10K - matched all files, but no overlapping approvers
+    # Score 20K - matched all files and approvers, but lacks mandatory checks
+    reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
-        rule_approvers_set = set(rule.approved_by)
+        rule_approvers_set = set()
+        for approver in rule.approved_by:
+            if "/" in approver:
+                org, name = approver.split("/")
+                rule_approvers_set.update(gh_get_team_members(org, name))
+            else:
+                rule_approvers_set.add(approver)
         patterns_re = patterns_to_regex(rule.patterns)
         approvers_intersection = approved_by.intersection(rule_approvers_set)
+        non_matching_files = []
+        for fname in changed_files:
+            if not patterns_re.match(fname):
+                non_matching_files.append(fname)
+        if len(non_matching_files) > 0:
+            num_matching_files = len(changed_files) - len(non_matching_files)
+            if num_matching_files > reject_reason_score:
+                reject_reason_score = num_matching_files
+                reject_reason = (f"{num_matching_files} files matched rule {rule_name}, but there are still non-matching files: " +
+                                 f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}")
+            continue
         # If rule requires approvers but they aren't the ones that reviewed PR
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
-            print(f"Skipping rule {rule_name} due to no approvers overlap")
+            if reject_reason_score < 10000:
+                reject_reason_score = 10000
+                reject_reason = (f"Matched rule {rule_name}, but it was not reviewed yet by any of:" +
+                                 f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
             pass_checks = True
@@ -600,25 +660,18 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -
             # HACK: We don't want to skip CLA check, even when forced
             for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
                 if checkname not in checks or checks[checkname] != "SUCCESS":
-                    if checkname not in checks:
-                        print(f"Skipping rule {rule_name} as mandatory check {checkname} is not in {checks.keys()}")
-                    else:
-                        print(f"Skipping rule {rule_name} as mandatory check {checkname} failed")
+                    if reject_reason_score < 20000:
+                        reject_reason_score = 20000
+                        reject_reason = f"Refusing to merge as mandatory check {checkname} "
+                        reject_reason += "has not been run" if checkname not in checks else "failed"
+                        reject_reason += f" for rule {rule_name}"
                     pass_checks = False
             if not pass_checks:
                 continue
-        non_matching_files = []
-        for fname in changed_files:
-            if not patterns_re.match(fname):
-                non_matching_files.append(fname)
-        if len(non_matching_files) > 0:
-            print(f"Skipping rule {rule_name} due to non-matching files: {non_matching_files}")
-            continue
-        print(f"Matched rule {rule_name} for {pr.pr_num}")
         if pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
-    raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
+    raise RuntimeError(reject_reason)
 
 
 def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
@@ -691,7 +744,7 @@ def main() -> None:
         return
 
     try:
-        pr.merge_into(repo, dry_run=args.dry_run)
+        pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
     except Exception as e:
         msg = f"Merge failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
