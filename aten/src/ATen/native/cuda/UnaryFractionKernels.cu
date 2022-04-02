@@ -111,7 +111,7 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
         };
 
         auto either_inf = [](T real, T imag) {
-	  return ::isinf(real) || ::isinf(imag);
+          return ::isinf(real) || ::isinf(imag);
         };
 
         auto either_nan = [](T real, T imag) {
@@ -121,7 +121,7 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
         if (either_nan(v.real(), v.imag()) || both_inf(v.real(), v.imag())) {
           // If either is Nan or both are infinite, return {nan, nan}
           return {std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN()};
-	} else if (either_inf(v.real(), v.imag())) {
+        } else if (either_inf(v.real(), v.imag())) {
           // If either is Inf, return {0, 0}
           return {0, 0};
         }
@@ -143,7 +143,7 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
     });
   });
 #endif
-  } else { 
+  } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       dtype, "reciprocal_cuda",
