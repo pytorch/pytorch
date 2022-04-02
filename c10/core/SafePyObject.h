@@ -21,16 +21,20 @@ namespace c10 {
 struct C10_API SafePyObject {
   // Steals a reference to type_object
   SafePyObject(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
-    : data_(data), pyinterpreter_(pyinterpreter)  {}
+      : data_(data), pyinterpreter_(pyinterpreter) {}
 
   // In principle this could be copyable if we add an incref to PyInterpreter
   // but for now it's easier to just disallow it.
   SafePyObject(SafePyObject const&) = delete;
   SafePyObject& operator=(SafePyObject const&) = delete;
 
-  ~SafePyObject() { pyinterpreter_->decref(data_, /*is_tensor*/ false); }
+  ~SafePyObject() {
+    pyinterpreter_->decref(data_, /*is_tensor*/ false);
+  }
 
-  c10::impl::PyInterpreter* pyinterpreter() const { return pyinterpreter_; }
+  c10::impl::PyInterpreter* pyinterpreter() const {
+    return pyinterpreter_;
+  }
   PyObject* ptr(const c10::impl::PyInterpreter*) const;
 
  private:

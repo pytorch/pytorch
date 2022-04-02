@@ -1,9 +1,9 @@
-#include <torch/csrc/autograd/python_mode.h>
-#include <torch/csrc/python_headers.h>
-#include <torch/csrc/autograd/python_variable.h>
 #include <ATen/core/PythonModeTLS.h>
-#include <c10/core/TensorImpl.h>
 #include <c10/core/SafePyObject.h>
+#include <c10/core/TensorImpl.h>
+#include <torch/csrc/autograd/python_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/python_headers.h>
 
 namespace torch { namespace autograd {
 
@@ -16,7 +16,8 @@ void PythonMode::enter(PyObject* type) {
   }
   // SafePyObject steals a reference, See NOTE [What is SafePyObject?]
   Py_INCREF(type);
-  at::impl::PythonModeTLS::set_state(std::make_shared<c10::SafePyObject>(type, getPyInterpreter()));
+  at::impl::PythonModeTLS::set_state(
+      std::make_shared<c10::SafePyObject>(type, getPyInterpreter()));
 }
 
 void PythonMode::exit() {
