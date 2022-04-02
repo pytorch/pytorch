@@ -1,25 +1,25 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/python_stub.h>
 #include <c10/util/intrusive_ptr.h>
-#include <vector>
+#include <c10/util/python_stub.h>
 #include <string>
+#include <vector>
 
 // Forward declarations
 
 namespace c10 {
-  struct IValue;
-  class OperatorHandle;
-  struct TensorImpl;
-  struct TorchDispatchTypeObject;
-}
+struct IValue;
+class OperatorHandle;
+struct TensorImpl;
+struct TorchDispatchTypeObject;
+} // namespace c10
 
 namespace torch {
-  namespace jit {
-  using Stack = std::vector<c10::IValue>;
-  }
+namespace jit {
+using Stack = std::vector<c10::IValue>;
 }
+} // namespace torch
 
 // Actual implementation
 

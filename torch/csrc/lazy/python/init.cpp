@@ -11,9 +11,9 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
-#ifndef FBCODE_CAFFE2
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
-#endif // FBCODE_CAFFE2
+#endif // FBCODE_CAFFE2 || OVRSOURCE
 #include <string>
 #include <vector>
 
@@ -161,10 +161,10 @@ void initLazyBindings(PyObject* module){
   lazy_ts_backend.def(
     "_init",
     []() {
-#ifndef FBCODE_CAFFE2
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
       torch::lazy::InitTorchScriptBackend();
 #else
-      TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE builds");
+      TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds");
 #endif // FBCODE_CAFFE2
     });
 
