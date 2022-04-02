@@ -10,10 +10,9 @@ from torch.testing._internal.common_utils import \
     (run_tests, TestCase,)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
-     toleranceOverride, tol, onlyCPU,)
-from torch.testing._internal.common_dtype import (
-    get_all_dtypes,
-)
+     toleranceOverride, tol,)
+from torch.testing._internal.common_dtype import \
+    (get_all_dtypes, get_all_fp_dtypes,)
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -179,32 +178,32 @@ class TestScatterGather(TestCase):
         self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
         self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
-    @onlyCPU
-    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
+    # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
+    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                 is_scalar=False, reduction='sum', unique_indices=False)
 
-    @onlyCPU
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_prod(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                 is_scalar=False, reduction='prod', unique_indices=False)
 
-    @onlyCPU
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
+    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_mean(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                 is_scalar=False, reduction='mean', unique_indices=False)
 
-    @onlyCPU
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
+    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_amax(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                 is_scalar=False, reduction='amax', unique_indices=False)
 
-    @onlyCPU
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
+    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_amin(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                 is_scalar=False, reduction='amin', unique_indices=False)
