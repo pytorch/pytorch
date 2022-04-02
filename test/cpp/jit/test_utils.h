@@ -17,15 +17,21 @@ static inline void trim(std::string& s) {
           [](unsigned char ch) { return !std::isspace(ch); })
           .base(),
       s.end());
-  for (size_t i = 0; i < s.size(); ++i) {
-    while (i < s.size() && s[i] == '\n') {
+  for (int64_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\n') {
       s.erase(i, 1);
+      i--;
     }
   }
-  for (size_t i = 0; i < s.size(); ++i) {
+  for (int64_t i = 0; i < s.size(); ++i) {
     if (s[i] == ' ') {
-      while (i + 1 < s.size() && s[i + 1] == ' ') {
-        s.erase(i + 1, 1);
+      for (int64_t j = i + 1; j < s.size(); j++) {
+        if (s[j] == ' ') {
+          s.erase(j, 1);
+          j--;
+        } else {
+          break;
+        }
       }
     }
   }
