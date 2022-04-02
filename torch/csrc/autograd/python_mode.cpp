@@ -13,10 +13,9 @@ void PythonMode::enter(PyObject* type) {
         "python mode has already been set. We do not yet support nested python ",
         "mode. Please file us an issue and reset it before setting it again.")
   }
-  // TorchDispatchTypeObject steals a reference, See NOTE [What is TorchDispatchTypeObject?]
+  // SafePyObject steals a reference, See NOTE [What is SafePyObject?]
   Py_INCREF(type);
-  auto state = std::make_shared<c10::TorchDispatchTypeObject>(type, getPyInterpreter());
-  at::impl::PythonModeTLS::set_state(state);
+  at::impl::PythonModeTLS::set_state(std::make_shared<c10::SafePyObject>(type, getPyInterpreter()));
 }
 
 void PythonMode::exit() {

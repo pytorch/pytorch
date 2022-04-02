@@ -102,7 +102,7 @@ void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type);
+    const std::shared_ptr<SafePyObject>& type);
 
 class PyInterpreterHolder {
  public:
@@ -1684,7 +1684,7 @@ void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
+    const std::shared_ptr<SafePyObject>& type) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1769,7 +1769,7 @@ void concrete_dispatch_fn(
   py::dict kwargs;
 
   if (type) {
-    append_overloaded_type(&overloaded_args, type->ptr());
+    append_overloaded_type(&overloaded_args, type->ptr(getPyInterpreter()));
   }
 
   // Find overloaded tensors

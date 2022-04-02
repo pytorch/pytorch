@@ -1,6 +1,7 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonModeTLS.h>
+#include <c10/core/SafePyObject.h>
 
 #include <stack>
 

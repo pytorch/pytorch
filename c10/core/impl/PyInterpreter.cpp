@@ -24,7 +24,7 @@ static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
+    const std::shared_ptr<SafePyObject>& type) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
