@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <ATen/core/PythonModeTLS.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/SafePyObject.h>
 
 namespace torch { namespace autograd {
 
