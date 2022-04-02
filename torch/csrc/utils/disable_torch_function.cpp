@@ -165,17 +165,17 @@ PyObject* THPModule_skip_one_hop_torch_function(PyObject */*self*/, PyObject *a)
     TORCH_CHECK_TYPE(PyDict_Check(kwargs), "kwargs must be a dictionary");
   }
 
-  // These are all C-API calls so no exceptions will be raised
-  // and therefore no need for RAII approach to storing
-  // the old value.
+  // PyObject_Call is a C-API calls so no exceptions will be raised
+  // and therefore no need for RAII approach to storing the old value.
   TORCH_CHECK(
     !at::impl::PythonTorchFunctionTLS::peek_skip_next(),
     "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
   at::impl::PythonTorchFunctionTLS::exchange_skip_next(true);
-  PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
-  TORCH_CHECK(!at::impl::PythonTorchFunctionTLS::exchange_skip_next(false),
-              "skip_one_hop_torch_function called on a function that doesn't use has_torch_function! ");
-  return result;
+  auto result = py::reinterpret_steal<py::object>(PyObject_Call(func, py_args.ptr(), kwargs));
+  bool prev_skip = at::impl::PythonTorchFunctionTLS::exchange_skip_next(false);
+  TORCH_CHECK(!prev_skip || !result, "skip_one_hop_torch_function called on a "
+              "function that doesn't use has_torch_function! ");
+  return result.release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
