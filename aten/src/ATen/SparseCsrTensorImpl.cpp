@@ -65,9 +65,11 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
-  TORCH_CHECK(layout_ == kSparseCsr, "resize_: layout ", layout_, " is not yet supported");
-  auto rows = size[0];
-  auto cols = size[1];
+  TORCH_CHECK((layout_ == kSparseCsr || layout_ == kSparseBsr), "resize_: layout ", layout_, " is not yet supported");  // TODO
+  auto row_index = size.size() - ((layout_ == kSparseCsr || layout_ == kSparseBsr) ? 2 : 1);
+  auto col_index = size.size() - ((layout_ == kSparseCsr || layout_ == kSparseBsr) ? 1 : 2);
+  auto rows = size[row_index];
+  auto cols = size[col_index];
   auto old_crow_indices_size = crow_indices_.size(-1);
   crow_indices_.resize_({rows + 1});
   if (rows + 1 >= old_crow_indices_size) {
