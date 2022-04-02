@@ -932,6 +932,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
     'at::Tensor',
+    'c10::optional<at::Tensor>',
     '::std::tuple<at::Tensor,at::Tensor>',
     '::std::tuple<at::Tensor,at::Tensor,at::Tensor>',
     '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>',

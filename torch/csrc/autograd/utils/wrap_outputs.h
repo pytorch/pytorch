@@ -68,6 +68,11 @@ inline PyObject* wrap(at::Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
+inline PyObject* wrap(c10::optional<at::Tensor> opt_tensor) {
+  TORCH_INTERNAL_ASSERT(opt_tensor.has_value(), "return cannot be c10::nullopt");
+  return THPVariable_Wrap(Variable(std::move(opt_tensor.value())));
+}
+
 inline PyObject* wrap(const at::Scalar& scalar) {
   return wrap(scalar_to_tensor(scalar));
 }

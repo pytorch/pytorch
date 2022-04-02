@@ -46,6 +46,7 @@ DONT_RECORD_TRACE = {
     'rnn_tanh_cell', 'rnn_relu_cell',
     # FIXME: figure out a better way when we support sparse tensors in jit
     '_coalesced',
+    '_autocast_to_full_precision', '_autocast_to_reduced_precision',
 }
 
 def should_trace(f: NativeFunction) -> bool:

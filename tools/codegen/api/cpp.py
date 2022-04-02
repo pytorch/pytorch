@@ -147,6 +147,21 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
                 return BaseCType(tensorT)
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
+    elif isinstance(t, OptionalType):
+        if str(t.elem) == 'Tensor':
+            if mutable:
+                if local.use_const_ref_for_mutable_tensors():
+                    return ConstRefCType(OptionalCType(BaseCType(tensorT)))
+                else:
+                    return MutRefCType(OptionalCType(BaseCType(tensorT)))
+            else:
+                return OptionalCType(BaseCType(tensorT))
+        # elif str(t.elem) == 'Scalar':
+        #     return ConstRefCType(OptionalCType(BaseCType(scalarT)))
+        # elif isinstance(t.elem, ListType) and str(t.elem.elem) == 'int':
+        #     return NamedCType(binds, BaseCType(optionalIntArrayRefT))
+        # elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
+        # return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         elem = returntype_type(t.elem, mutable=mutable)
         assert t.size is None, f"fixed size list returns not supported: {t}"
