@@ -79,20 +79,6 @@ _DEFAULT_OP_INT8_CONFIGS = [
         torch.nn.functional.instance_norm,
         torch.nn.functional.leaky_relu,
         torch.nn.functional.dropout,
-    ]]
-
-_DEFAULT_OP_FP16_CONFIGS = [
-    _get_default_op_backend_config(op, [default_op_fp16_dtype_config]) for op in [
-        torch.nn.SiLU,
-        torch.nn.Mish,
-        torch.nn.functional.silu,
-        torch.nn.functional.mish,
-        torch.sum,
-    ]]
-
-_DEFAULT_OP_INT8_OR_FP16_CONFIGS = [
-    _get_default_op_backend_config(op, [default_op_quint8_dtype_config, default_op_fp16_dtype_config]) for op in [
-        torch.nn.LayerNorm,
         torch.nn.functional.layer_norm,
     ]]
 
@@ -309,8 +295,6 @@ def get_native_backend_config_dict():
         "name": "native",
         "configs": [
             *_DEFAULT_OP_INT8_CONFIGS,
-            *_DEFAULT_OP_FP16_CONFIGS,
-            *_DEFAULT_OP_INT8_OR_FP16_CONFIGS,
             *_get_linear_configs(),
             *_get_conv_configs(),
         ],
