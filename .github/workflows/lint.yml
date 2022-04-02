@@ -405,10 +405,12 @@ jobs:
 
           python3 -m tools.linter.clang_tidy \
             --paths \
+              torch/csrc/cuda \
               torch/csrc/fx \
               torch/csrc/utils \
               torch/csrc/generic \
               torch/csrc/deploy \
+              torch/csrc/onnx \
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
@@ -493,7 +495,7 @@ jobs:
           set -eux
           time python3 -mtools.generate_torch_version --is_debug=false
           time python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
-          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --tags-path aten/src/ATen/native/tags.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
         env:
           MYPY_FORCE_COLOR: 1
