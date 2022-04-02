@@ -95,7 +95,6 @@ void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
       src.values().options(),
       src.values().suggest_memory_format());
   sizes_and_strides_.set_sizes(src.sizes());
-
   refresh_numel();
 }
 
@@ -119,7 +118,6 @@ void SparseCsrTensorImpl::set_member_tensors(
   values_ = values;
 
   sizes_and_strides_.set_sizes(size);
-
   refresh_numel();
 }
 } // namespace at

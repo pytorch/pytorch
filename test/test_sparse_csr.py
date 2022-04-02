@@ -210,6 +210,7 @@ class TestSparseCSR(TestCase):
                                        [1, 2, 3, 4],
                                        size=(2, 10),
                                        dtype=dtype,
+                                       layout=torch.sparse_csr,
                                        device=device)
 
             self.assertEqual((2, 10), sparse.shape)
@@ -705,7 +706,7 @@ class TestSparseCSR(TestCase):
 
                 # a_batched is a regular CSR tensor but with a batch dimension in the shape
                 a_batched = torch._sparse_csr_tensor_unsafe(
-                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k), layout=torch.sparse_csr)
 
                 b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
@@ -738,7 +739,7 @@ class TestSparseCSR(TestCase):
 
                 # a_batched is a regular CSR tensor but with a batch dimension in the shape
                 a_batched = torch._sparse_csr_tensor_unsafe(
-                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k), layout=torch.sparse_csr)
 
                 b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
@@ -783,7 +784,7 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(),
-                                                    a_data, (m * block_size, k * block_size))
+                                                    a_data, (m * block_size, k * block_size), layout=torch.sparse_csr)
             b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for op_b, op_out in itertools.product([True, False], repeat=2):
@@ -809,7 +810,7 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(),
-                                                    a_data, (m * block_size, k * block_size))
+                                                    a_data, (m * block_size, k * block_size), layout=torch.sparse_csr)
             b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
@@ -866,7 +867,7 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(),
-                                                    a_data, (m * block_size, m * block_size))
+                                                    a_data, (m * block_size, m * block_size), layout=torch.sparse_csr)
             b = make_tensor((m * block_size, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
 
             for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):

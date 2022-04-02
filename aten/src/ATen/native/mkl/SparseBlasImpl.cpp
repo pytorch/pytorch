@@ -67,7 +67,6 @@ c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_mkl(
 }
 
 void inline indices_to_mkl_compatible_inplace(const Tensor& input) {
-
 #ifdef MKL_ILP64
   // ILP64 is a 64-bit API version of MKL
   // Indices tensor must have ScalarType::Long type
