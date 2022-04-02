@@ -380,6 +380,7 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"size of a CSR tensor must be of length 2, but got: 3"):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values),
                                     size=(2, 10, 2),
+                                    layout=torch.sparse_csr,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError, r"crow_indices must have dim\=1 but got crow_indices\.dim\(\)\=2"):
@@ -387,6 +388,7 @@ class TestSparseCSR(TestCase):
                                     torch.tensor(col_indices),
                                     torch.tensor(values),
                                     size,
+                                    layout=torch.sparse_csr,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError, r"col_indices must have dim\=1 but got col_indices\.dim\(\)\=2"):
@@ -394,6 +396,7 @@ class TestSparseCSR(TestCase):
                                     torch.tensor(col_indices).repeat(2, 1),
                                     torch.tensor(values),
                                     size,
+                                    layout=torch.sparse_csr,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError, r"values must have dim\=1 but got values\.dim\(\)\=2"):
@@ -401,11 +404,13 @@ class TestSparseCSR(TestCase):
                                     torch.tensor(col_indices),
                                     torch.tensor(values).repeat(2, 1),
                                     size,
+                                    layout=torch.sparse_csr,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"crow_indices\.numel\(\) must be size\(0\) \+ 1, but got: 3"):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), (1, 1),
+                                    layout=torch.sparse_csr,
                                     device=device)
 
 
@@ -413,6 +418,7 @@ class TestSparseCSR(TestCase):
                                     r"col_indices and values must have equal sizes, " +
                                     r"but got col_indices\.numel\(\): 3, values\.numel\(\): 4"):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 1, 0]), torch.tensor(values), size,
+                                    layout=torch.sparse_csr,
                                     device=device)
 
     def test_factory_indices_invariants_check(self, device):

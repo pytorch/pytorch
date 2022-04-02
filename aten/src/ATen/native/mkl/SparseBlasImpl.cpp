@@ -76,8 +76,7 @@ void inline indices_to_mkl_compatible_inplace(const Tensor& input) {
           input.crow_indices().to(kLong),
           input.col_indices().to(kLong),
           input.values(),
-          input.sizes(),
-          input.layout());
+          input.sizes());
 #else
   // LP64 is a 32-bit API version of MKL
   // Indices tensor must have ScalarType::Int type
@@ -86,8 +85,7 @@ void inline indices_to_mkl_compatible_inplace(const Tensor& input) {
           input.crow_indices().to(kInt),
           input.col_indices().to(kInt),
           input.values(),
-          input.sizes(),
-          input.layout());
+          input.sizes());
 #endif
 }
 
@@ -97,8 +95,7 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
           input.crow_indices(),
           input.col_indices().resize_({nnz}),
           input.values().resize_({nnz}),
-          input.sizes(),
-          input.layout());
+          input.sizes());
 }
 
 /*

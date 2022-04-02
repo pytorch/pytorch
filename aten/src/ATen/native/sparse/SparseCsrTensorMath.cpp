@@ -418,7 +418,17 @@ Tensor& addmm_out_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
+  switch (mat1.layout()) {
+  case kSparseCsr:
+    break;
+  case kSparseCsc:
+  case kSparseBsr:
+  case kSparseBsc:
+    TORCH_CHECK(false, "addmm_out_sparse_csr_cpu: layout ", mat1.layout(), " is not yet supported");
+    break;
+  default:
+    TORCH_CHECK(false, "addmm_out_sparse_csr_cpu: layout ", mat1.layout(), " is not supported");
+  }
 
   // TODO: remove this, there are no codegenerated checks for devices yet
   TORCH_CHECK(

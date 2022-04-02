@@ -103,8 +103,7 @@ void SparseCsrTensorImpl::set_member_tensors(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
-    IntArrayRef size,
-    Layout layout) {
+    IntArrayRef size) {
 
   // CSR Type Invariants
   TORCH_CHECK(
@@ -120,7 +119,6 @@ void SparseCsrTensorImpl::set_member_tensors(
   values_ = values;
 
   sizes_and_strides_.set_sizes(size);
-  set_layout(layout);
 
   refresh_numel();
 }

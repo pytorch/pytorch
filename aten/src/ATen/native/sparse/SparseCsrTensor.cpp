@@ -49,6 +49,7 @@ Layout get_layout_from_members(const Tensor& crow_indices, const Tensor& col_ind
 
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size, c10::optional<Layout> layout) {
   Layout layout_ = layout.value_or(get_layout_from_members(crow_indices, col_indices, values));
+  const std::string LAYOUT = (layout_ == kSparseCsr ? "CSR" : (layout_ == kSparseCsc ? "CSC" : "BSR|BSC"));
 
   // Layout Invariants
   TORCH_CHECK(
@@ -63,26 +64,37 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       values.layout() == kStrided && values.is_contiguous(),
       "expected values to be a strided and contiguous tensor");
 
-  TORCH_CHECK(layout_ == kSparseCsr, "_validate_sparse_csr_tensor_args: layout ", layout_, " is not yet supported");
-
   // Shape and Strides invariants
-  TORCH_CHECK(
-      size.size() == 2,
-      "size of a CSR tensor must be of length 2, but got: ",
-      size.size());
-  TORCH_CHECK(
-      crow_indices.dim() == 1,
-      "crow_indices must have dim=1 but got crow_indices.dim()=",
-      crow_indices.dim());
-  TORCH_CHECK(
-      col_indices.dim() == 1,
-      "col_indices must have dim=1 but got col_indices.dim()=",
-      col_indices.dim());
-  TORCH_CHECK(
-      values.dim() == 1,
-      "values must have dim=1 but got values.dim()=",
-      values.dim());
+  switch (layout_) {
+  case kSparseCsr:
+  case kSparseCsc:
+    TORCH_CHECK(
+                size.size() == 2,
+                "size of a ", LAYOUT, " tensor must be of length 2, but got: ",
+                size.size());
+    TORCH_CHECK(
+                crow_indices.dim() == 1,
+                "crow_indices must have dim=1 but got crow_indices.dim()=",
+                crow_indices.dim());
+    TORCH_CHECK(
+                col_indices.dim() == 1,
+                "col_indices must have dim=1 but got col_indices.dim()=",
+                col_indices.dim());
+    TORCH_CHECK(
+                values.dim() == 1,
+                "values must have dim=1 but got values.dim()=",
+                values.dim());
+    break;
+  case kSparseBsr:
+  case kSparseBsc:
+    TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout_, " is not yet supported");
+    break;
+  default:
+    TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout_, " is not supported");
+  }
+
   // Note, this check also enforces `crow_indices.numel() >= 1`
+  // TODO: for BSR|BSC we cannot use numel
   TORCH_CHECK(
       crow_indices.numel() == (size[0] + 1),
       "crow_indices.numel() must be size(0) + 1, but got: ",
@@ -98,21 +110,28 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
     Tensor crow_indices_cpu = crow_indices.to(kCPU);
     auto crow_indices_accessor = crow_indices_cpu.accessor<index_t, 1>();
-    TORCH_CHECK(
-        crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
-
-    TORCH_CHECK(
-        crow_indices_accessor[crow_indices.numel() - 1] == col_indices.numel(),
-        "last value of crow_indices should be equal to the length of col_indices.");
-
-    for (int i =  1; i <= size[0]; i++) {
+    switch (layout_) {
+    case kSparseCsr:
+    case kSparseCsc:
       TORCH_CHECK(
-          crow_indices_accessor[i - 1] <= crow_indices_accessor[i],
-          "at position i = ", i, ", this condition crow_indices[i - 1] <= crow_indices[i] fails");
-    }
-    if (col_indices.numel() > 0) {
-      TORCH_CHECK(0 <= col_indices.min().item<index_t>(), "col_indices.min() should be greater or equal to zero");
-      TORCH_CHECK(size[1] > col_indices.max().item<index_t>(), "size(1) should be greater than col_indices.max()");
+                  crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
+      TORCH_CHECK(
+                  crow_indices_accessor[crow_indices.numel() - 1] == col_indices.numel(),
+                  "last value of crow_indices should be equal to the length of col_indices.");
+      for (int i =  1; i <= size[0]; i++) {
+        TORCH_CHECK(
+                    crow_indices_accessor[i - 1] <= crow_indices_accessor[i],
+                    "at position i = ", i, ", this condition crow_indices[i - 1] <= crow_indices[i] fails");
+      }
+      if (col_indices.numel() > 0) {
+        TORCH_CHECK(0 <= col_indices.min().item<index_t>(), "col_indices.min() should be greater or equal to zero");
+        TORCH_CHECK(size[1] > col_indices.max().item<index_t>(), "size(1) should be greater than col_indices.max()");
+      }
+      break;
+    case kSparseBsr:
+    case kSparseBsc:
+    default:
+      TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout_, " is not yet supported");
     }
   });
 
@@ -174,16 +193,28 @@ Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_i
     const Tensor& values,
     IntArrayRef size,
     c10::optional<ScalarType> dtype,
+    Layout layout,  // unsafe requires explicit layout
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  SparseCsrTensor self = new_csr_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size);
+  return self;
+}
+
+Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
+    const Tensor& values,
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  Layout layout_ = layout.value_or(get_layout_from_members(crow_indices, col_indices, values));
-
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
-
-  SparseCsrTensor self = new_csr_tensor(options);  // default layout is SparseCsr
-  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size, layout_);  // resets layout
-  return self;
+  // TODO: Currently, block CSR support uses kSparseCsr layout. When
+  // switching to kSparseBsr, replace layout.value_or(kSparseCsr) with
+  // layout.value_or(get_layout_from_members(crow_indices,
+  // col_indices, values))
+  return _sparse_csr_tensor_unsafe(crow_indices, col_indices, values, size, dtype, layout.value_or(kSparseCsr), device, pin_memory);
 }
 
 // TODO: This constructor should probably use an ATen abstract method in order
@@ -211,7 +242,7 @@ Tensor sparse_csr_tensor(
       values,
       size,
       optTypeMetaToScalarType(options.dtype_opt()),
-      options.layout_opt(),
+      layout_,
       options.device_opt(),
       options.pinned_memory_opt());
 }
@@ -227,13 +258,30 @@ Tensor sparse_csr_tensor(
   Layout layout_ = layout.value_or(get_layout_from_members(crow_indices, col_indices, values));
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  TORCH_CHECK(layout_ == kSparseCsr, "sparse_csr_tensor: layout ", layout_, " is not yet supported");
-  std::array<int64_t, 2> size = {0, 0};
-  if (col_indices.numel() > 0) {
-    AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
-      size[0] = crow_indices.numel() - 1;
-      size[1] = col_indices.max().item<index_t>() + 1;
-    });
+  std::array<int64_t, 2> size = {0, 0};  // TODO: extend for BSR|BSC
+  switch (layout_) {
+  case kSparseCsr:
+    if (col_indices.numel() > 0) {
+      AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
+                                                                                  size[0] = crow_indices.numel() - 1;
+                                                                                  size[1] = col_indices.max().item<index_t>() + 1;
+                                                                                });
+    }
+    break;
+  case kSparseCsc:
+    if (col_indices.numel() > 0) {
+      AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csc_construct_check", [&] {
+                                                                                  size[1] = crow_indices.numel() - 1;
+                                                                                  size[0] = col_indices.max().item<index_t>() + 1;
+                                                                                });
+    }
+    break;
+  case kSparseBsr:
+  case kSparseBsc:
+    TORCH_CHECK(false, "sparse_csr_tensor: layout ", layout_, " is not yet supported");
+    break;
+  default:
+    TORCH_CHECK(false, "sparse_csr_tensor: layout ", layout_, " is not supported");
   }
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size, layout_);
@@ -244,7 +292,7 @@ Tensor sparse_csr_tensor(
       values,
       size,
       optTypeMetaToScalarType(options.dtype_opt()),
-      options.layout_opt(),
+      layout_,
       options.device_opt(),
       options.pinned_memory_opt());
 }
@@ -288,8 +336,10 @@ const Tensor& resize_sparse_csr_(
   check_size_nonnegative(size);
   switch (self.layout()) {
   case kSparseCsr:
+    TORCH_CHECK(size.size() == 2, "torch.resize_: Only 2D sparse CSR tensors are supported.");
+    break;
   case kSparseCsc:
-    TORCH_CHECK(size.size() == 2, "torch.resize_: Only 2D sparse CSR|CSC tensors are supported.");
+    TORCH_CHECK(size.size() == 2, "torch.resize_: Only 2D sparse CSC tensors are supported.");
     break;
   case kSparseBsr:
   case kSparseBsc:
@@ -401,7 +451,7 @@ SparseCsrTensor clone_sparse_csr(
                                                self.values().clone(),
                                                self.sizes(),
                                                optTypeMetaToScalarType(options.dtype_opt()),
-                                               options.layout_opt(),
+                                               options.layout(),
                                                options.device_opt(),
                                                options.pinned_memory_opt());
 }

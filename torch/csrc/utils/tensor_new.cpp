@@ -623,7 +623,7 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     col_indices_dtype_attr.get())->scalar_type : kInt;
 
   if (r.idx == 0) {
-    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
+    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, LAYOUT_ARG = 5, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
     const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
@@ -642,9 +642,9 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
       /*type_inference=*/true);
 
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
-                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
+                                 values.options().layout(r.layoutOptional(LAYOUT_ARG))).set_requires_grad(r.toBool(REQ_GRAD_ARG));
   } else if (r.idx == 1) {
-    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 5, REQ_GRAD_ARG = 7;
+    const int TYPE_INFERENCE_ARG = 3, LAYOUT_ARG = 4, DEVICE_TYPE_ARG = 5, REQ_GRAD_ARG = 7;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
     const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
@@ -661,7 +661,7 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
       r.pyobject(COL_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
     return at::sparse_csr_tensor(crow_indices, col_indices, values,
-                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
+                                 values.options().layout(r.layoutOptional(LAYOUT_ARG))).set_requires_grad(r.toBool(REQ_GRAD_ARG));
   }
   throw std::runtime_error("sparse_csr_tensor(): invalid arguments");
 }
@@ -675,12 +675,13 @@ Tensor _sparse_csr_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
     ARG_VALUES,
     ARG_SIZE,
     ARG_TYPE,
+    ARG_LAYOUT,
     ARG_DEVICE,
     ARG_REQUIRES_GRAD,
     ARGS_COUNT
   };
   static PythonArgParser parser({
-    "_sparse_csr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "_sparse_csr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<ARGS_COUNT> parsed_args;
@@ -701,7 +702,7 @@ Tensor _sparse_csr_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/true);
 
-  return at::_sparse_csr_tensor_unsafe(crow_indices, col_indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+  return at::_sparse_csr_tensor_unsafe(crow_indices, col_indices, values, r.intlist(ARG_SIZE), values.options().layout(r.layoutOptional(ARG_LAYOUT))).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
 
 // Note [Ensuring sparse values and indices match devices]
@@ -826,10 +827,10 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   static PythonArgParser parser({
-    "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, Layout? layout)",
+    "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, Layout? layout=None)",
   });
 
-  ParsedArgs<4> parsed_args;
+  ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   Tensor values = internal_new_from_data(
       options, scalar_type, c10::nullopt, r.pyobject(2),
@@ -841,8 +842,8 @@ void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   Tensor col_indices = internal_new_from_data(
       values.options(), kInt, c10::nullopt, r.pyobject(1),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
-
-  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3), c10::kSparseCsr);
+  c10::optional<c10::Layout> layout = r.layoutOptional(4);
+  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3), layout);
 }
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
