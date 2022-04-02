@@ -51,8 +51,6 @@ def run_autogen() -> None:
             "tools/setup_helpers/generate_code.py",
             "--native-functions-path",
             "aten/src/ATen/native/native_functions.yaml",
-            "--nn-path",
-            "aten/src",
             "--gen_lazy_ts_backend",
         ]
     )
