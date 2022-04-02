@@ -39,8 +39,8 @@ static ReduceAdd reduce_add;
 class ReduceMean {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   }
 };
 static ReduceMean reduce_mean;
@@ -48,8 +48,9 @@ static ReduceMean reduce_mean;
 class ReduceMinimum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMin(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMin(self_data_start + index, *src_data);
   }
 };
 static ReduceMinimum reduce_minimum;
@@ -57,8 +58,9 @@ static ReduceMinimum reduce_minimum;
 class ReduceMaximum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMax(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMax(self_data_start + index, *src_data);
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -265,7 +267,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, f
+          iter, index_size, index_stride, self.numel(), f
         );
       }
     );
