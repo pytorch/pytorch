@@ -77,7 +77,7 @@ jobs:
 
       - name: Test
         run: |
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
           export COMMIT_MESSAGES
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
