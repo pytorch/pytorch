@@ -4,20 +4,18 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 
+#include <ATen/PythonTorchFunctionTLS.h>
+
 namespace torch {
-  static thread_local bool enable_torch_function = true;
-  static thread_local bool skip_next_torch_function = false;
   PyObject* disabled_torch_function = nullptr;
   PyObject* disabled_torch_dispatch = nullptr;
 
   bool torch_function_enabled() {
-      return enable_torch_function;
+      return !at::impl::PythonTorchFunctionTLS::is_disabled();
   }
 
   bool should_skip_torch_function() {
-    const bool ret = skip_next_torch_function;
-    skip_next_torch_function = false;
-    return ret;
+    return at::impl::PythonTorchFunctionTLS::exchange_skip_next(false);
   }
 
   PyObject* disabled_torch_function_impl() {
@@ -44,18 +42,18 @@ typedef struct {
 } DisableTorchFunction;
 
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject *unused) {
-    ((DisableTorchFunction*)self)->old_state = torch::enable_torch_function;
-    torch::enable_torch_function = false;
+    ((DisableTorchFunction*)self)->old_state = at::impl::PythonTorchFunctionTLS::is_disabled();
+    at::impl::PythonTorchFunctionTLS::set_disabled(true);
     Py_RETURN_NONE;
 }
 
 PyObject* DisableTorchFunction__exit(PyObject* self, PyObject *unused) {
-    torch::enable_torch_function = ((DisableTorchFunction*)self)->old_state;
+    at::impl::PythonTorchFunctionTLS::set_disabled(((DisableTorchFunction*)self)->old_state);
     Py_RETURN_NONE;
 }
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused) {
-    if (torch::enable_torch_function) {
+    if (torch::torch_function_enabled()) {
         Py_RETURN_TRUE;
     } else
     {
@@ -138,11 +136,11 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   // These are all C-API calls so no exceptions will be raised
   // and therefore no need for RAII approach to storing
   // the old value.
-  bool old_value = torch::enable_torch_function;
-  torch::enable_torch_function = false;
+  bool old_value = at::impl::PythonTorchFunctionTLS::is_disabled();
+  at::impl::PythonTorchFunctionTLS::set_disabled(true);
   // kwargs can safely be nullptr here.
   PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
-  torch::enable_torch_function = old_value;
+  at::impl::PythonTorchFunctionTLS::set_disabled(old_value);
   return result;
   END_HANDLE_TH_ERRORS
 }
@@ -170,15 +168,13 @@ PyObject* THPModule_skip_one_hop_torch_function(PyObject */*self*/, PyObject *a)
   // These are all C-API calls so no exceptions will be raised
   // and therefore no need for RAII approach to storing
   // the old value.
-  TORCH_CHECK(!torch::skip_next_torch_function,
-              "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
-  torch::skip_next_torch_function = true;
+  TORCH_CHECK(
+    !at::impl::PythonTorchFunctionTLS::peek_skip_next(),
+    "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
+  at::impl::PythonTorchFunctionTLS::exchange_skip_next(true);
   PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
-  if (C10_UNLIKELY(torch::skip_next_torch_function)) {
-    torch::skip_next_torch_function = false;
-    TORCH_CHECK(false,
-                "skip_one_hop_torch_function called on a function that doesn't use has_torch_function! ");
-  }
+  TORCH_CHECK(!at::impl::PythonTorchFunctionTLS::exchange_skip_next(false),
+              "skip_one_hop_torch_function called on a function that doesn't use has_torch_function! ");
   return result;
   END_HANDLE_TH_ERRORS
 }
