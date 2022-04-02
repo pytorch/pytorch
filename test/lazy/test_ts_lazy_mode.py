@@ -58,7 +58,6 @@ def test_lazy_mode():
 
         # but z is still a cuda tensor, so + has to handle multi-device
         # This line errs on cuda but not cpu:
-        # RuntimeError: !tensor.device().has_index() INTERNAL ASSERT FAILED at "/home/whc/pytorch/torch/csrc/lazy/core/lazy_mode.cpp":102
         out = temp + z
 
     # This line causes torch.testing to raise

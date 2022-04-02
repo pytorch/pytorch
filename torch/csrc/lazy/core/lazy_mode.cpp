@@ -100,7 +100,6 @@ at::Tensor PrepareTensorForMetaKernel(at::Tensor tensor, BackendDevice lazy_devi
     // before calling meta kernels, we need to make sure all tensors are on the same device
     if(tensor.device().type() == c10::kLazy) {
         LOG(INFO) << "PrepareTensorForMetaKernel skip move for already-lazy tensor on " << tensor.device();
-        TORCH_INTERNAL_ASSERT(!tensor.device().has_index());
         return tensor;
     } else {
         TORCH_INTERNAL_ASSERT(tensor.device().type() != c10::kLazy);
