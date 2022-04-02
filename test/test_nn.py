@@ -16158,6 +16158,7 @@ class TestNNDeviceType(NNTestCase):
                 mask = mask.cuda()
             mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
             native_res = torch._masked_softmax(input, mask)
+            mask = ~mask
             mask = mask.float()
 
             def slow_masked_softmax(input, mask):
@@ -16181,6 +16182,7 @@ class TestNNDeviceType(NNTestCase):
         mask = mask.bool()
         native_res = torch._masked_softmax(input, mask)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
+        mask = ~mask
         mask = mask.float()
 
         def slow_masked_softmax(input, mask):
