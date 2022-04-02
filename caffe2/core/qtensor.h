@@ -60,7 +60,8 @@ class C10_EXPORT QTensor {
   void Resize(at::ArrayRef<int> dim_source) {
     if (dims_ != dim_source) {
       const auto source_size = c10::multiply_integers(dim_source);
-      if (static_cast<size_t>(source_size * (precision_ + signed_)) > capacity_) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      if ((source_size * (precision_ + signed_)) > capacity_) {
         data_ptr_.clear();
         capacity_ = 0;
       }
