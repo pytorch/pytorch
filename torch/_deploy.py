@@ -50,7 +50,8 @@ def _save_storages(importer, obj):
     pickler.dump(obj)
     data_value = data_buf.getvalue()
 
-    assert (not importer or isinstance(importer.zip_reader, TorchScriptPackageZipFileReader)), f'importer {importer}\'s zip reader is of type {type(importer.zip_reader)} not TorchScriptPackageZipFileReader'
+    assert (not importer or isinstance(importer.zip_reader, TorchScriptPackageZipFileReader)), \
+        f'importer {importer}\'s zip reader is of type {type(importer.zip_reader)} not TorchScriptPackageZipFileReader'
     return data_value, serialized_storages, serialized_dtypes, importer.zip_reader.zip_reader if importer else None
 
 def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dtypes):
