@@ -62,13 +62,13 @@ class TorchScriptPackageZipFileReader(PackageZipFileReader):
     #       the attributes of PyTorchFileReader, so it'll call an error. Strangely, this error
     #       doesn't have an error code which is why it's ignored
     def has_record(self, path: str) -> bool:
-        return self.zip_reader.has_record(path)  # type: ignore
+        return self.zip_reader.has_record(path)  # type: ignore[attr-defined]
 
     def get_all_records(self) -> List[str]:
-        return self.zip_reader.get_all_records()  # type: ignore
+        return self.zip_reader.get_all_records()  # type: ignore[attr-defined]
 
     def get_storage_from_record(self, name: str, numel: int, dtype: torch.dtype) -> _HasStorage:
-        return self.zip_reader.get_storage_from_record(name, numel, dtype)  # type: ignore
+        return self.zip_reader.get_storage_from_record(name, numel, dtype)  # type: ignore[attr-defined]
 
     def get_filename(self) -> str:
         return self.filename
