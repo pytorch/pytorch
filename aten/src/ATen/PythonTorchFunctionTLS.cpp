@@ -14,6 +14,10 @@ const std::shared_ptr<c10::SafePyObject>& PythonTorchFunctionTLS::get_mode() {
   return pythonTorchFunctionState.mode_;
 }
 
+void PythonTorchFunctionTLS::swap_mode(std::shared_ptr<c10::SafePyObject>& mode) {
+  pythonTorchFunctionState.mode_.swap(mode);
+}
+
 void PythonTorchFunctionTLS::set_disabled(bool disabled) {
   pythonTorchFunctionState.disabled_ = disabled;
 }

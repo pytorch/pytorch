@@ -1617,12 +1617,7 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         pass
 
     def __torch_function__(self, func, types, args, kwargs):
-        old = _get_torch_function_mode()
-        _set_torch_function_mode(None)
-        try:
-            return func(*args, **kwargs)
-        finally:
-            _set_torch_function_mode(old)
+        return func(*args, **kwargs)
 
 
 @contextlib.contextmanager

@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -247,16 +248,14 @@ auto handle_torch_function_no_python_arg_parser(
   py::object ret;
   PyObject* mode_obj = nullptr;
   if (torch_function_name == TorchFunctionName::TorchFunction) {
-    auto maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
+    const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
     if (maybe_mode) {
       mode_obj = maybe_mode->ptr(getPyInterpreter());
       TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
       TORCH_INTERNAL_ASSERT(args != nullptr);
       // Disable mode on the inside; this makes for a more user-friendly
       // experience if you try to, e.g., print your tensors.
-      // Not using RAII here because only CPython calls which cannot raise
-      // exceptions
-      at::impl::PythonTorchFunctionTLS::set_mode(nullptr);
+      torch::overrides::no_torch_function_mode g;
       // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
       // because the nullptr terminates the argument list ick ick ick.
       if (kwargs == nullptr) {
@@ -272,7 +271,6 @@ auto handle_torch_function_no_python_arg_parser(
             args,
             kwargs));
       }
-      at::impl::PythonTorchFunctionTLS::set_mode(maybe_mode);
       if (ret.ptr() == nullptr) {
         throw python_error();
       }
