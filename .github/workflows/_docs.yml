@@ -36,18 +36,24 @@ jobs:
         docs_type: [cpp, python]
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ inputs.docker-image }}
 
-      - uses: ./.github/actions/download-build-artifacts
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
 
@@ -101,7 +107,8 @@ jobs:
           )
           docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
 
-      - uses: ./.github/actions/chown-workspace
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Upload Python Docs Preview
