@@ -222,10 +222,10 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     scale_v = grad / nb_max;
   } else if (p < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(p - 1);
-    scale_v = grad / norm.pow(p - 1);
     if (p < 1.0) {
       self_scaled.masked_fill_(self == 0, 0);
     }
+    scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
