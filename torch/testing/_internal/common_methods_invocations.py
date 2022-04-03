@@ -10233,9 +10233,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
            )),
-    # NB: linalg.norm has two variants, the additional OpInfo variant for linalg.norm tests subgradients
-    #     at zero. It needs a separate variant because norm's vjp and jvp are not well-conditioned near
-    #     zero and currently it is not possible to skip a test for a particular test case
+    # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -10278,10 +10276,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=[torch.complex128]),
 
-               # Test dtypes tries to run backward with integer types, maybe we shouldn't?
+               # [NEW] Skips specifically for sample inputs at zero
+               # Test dtypes tries to run backward with integer types (maybe we shouldn't do that?)
                # This leads to a division by zero on ASAN
                DecorateInfo(unittest.skip, "TestCommon", 'test_dtypes'),
-
                # norm's vjp/jvp are not well-conditioned near zero
                DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_gradgrad'),
                DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad')
