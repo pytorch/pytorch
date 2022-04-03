@@ -2,17 +2,23 @@ name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
-inputs:
-  github-secret:
-    description: GitHub token
-    required: true
-
 runs:
   using: composite
   steps:
     - name: Display EC2 information
       shell: bash
-      run: .github/scripts/display_ec2_info.sh
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+        echo "system info $(uname -a)"
 
     - name: Start docker if docker deamon is not running
       shell: bash
@@ -34,11 +40,6 @@ runs:
         retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
         retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
             --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-
-    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-      uses: seemethere/add-github-ssh-key@v1
-      with:
-        GITHUB_TOKEN: ${{ inputs.github-secret }}
 
     - name: Preserve github env variables for use in docker
       shell: bash
