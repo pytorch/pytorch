@@ -281,13 +281,21 @@ auto handle_torch_function_no_python_arg_parser(
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
-      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
-          torch_function.ptr(),
-          torch_api_function,
-          py_types.ptr(),
-          args,
-          kwargs,
-          NULL));
+      auto inner = [&]() {
+        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+            torch_function.ptr(),
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs,
+            NULL));
+      };
+      if (torch_function_name == TorchFunctionName::TorchFunction) {
+        torch::overrides::no_torch_function_mode g;
+        inner();
+      } else {
+        inner();
+      }
       if (ret.ptr() != Py_NotImplemented) {
         // Return the reference to the result. This also covers the case where
         // ret is NULL and __torch_function__ raised an exception, which we
