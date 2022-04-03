@@ -649,6 +649,302 @@ class TestIndexing(TestCase):
         self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
+    _advancedindex_input1 = [
+        [[0., 1.],
+         [2., 3.],
+         [4., 5.]],
+
+        [[6., 7.],
+         [8., 9.],
+         [10., 11.]],
+
+        [[12., 13.],
+         [14., 15.],
+         [16., 17.]],
+
+        [[18., 19.],
+         [20., 21.],
+         [22., 23.]]
+    ]
+
+    _advancedindex_input2 = [
+        [[24., 25.],
+         [26., 27.],
+         [28., 29.]],
+
+        [[30., 31.],
+         [32., 33.],
+         [34., 35.]],
+
+        [[36., 37.],
+         [38., 39.],
+         [40., 41.]],
+
+        [[42., 43.],
+         [44., 45.],
+         [46., 47.]]
+    ]
+
+    # one mask tensor (2d)
+    @dtypes(torch.float)
+    def test_advancedindex_dim_1m_2d(self, device, dtype):
+        t = self._advancedindex_input1
+
+        values = (
+            # tensor, mask, result
+            # case 0: everything
+            (t,
+
+             [[1., 1., 1.],
+              [1., 1., 1.],
+              [1., 1., 1.],
+              [1., 1., 1.]],
+
+             # 0   1   2   3   4   5    6    7    8    9    10   11
+             [0., 2., 4., 6., 8., 10., 12., 14., 16., 18., 20., 22.]),
+
+            # case 1: nothing
+            (t,
+
+             [[0., 0., 0.],
+              [0., 0., 0.],
+              [0., 0., 0.],
+              [0., 0., 0.]],
+
+             []),
+
+            # case 2: random
+            (t,
+
+             [[0., 0., 1.],   # 0  1  2
+              [0., 1., 0.],   # 3  4  5
+              [0., 0., 0.],   # 6  7  8
+              [0., 0., 1.]],  # 9 10 11
+
+             [4., 8., 22.]),
+        )
+
+        for tv, mv, rv in values:
+            t = torch.tensor(tv, device=device, dtype=dtype)
+            m = torch.tensor(mv, device=device, dtype=dtype) > 0
+            r = torch.tensor(rv, device=device, dtype=dtype)
+
+            nt = np.array(tv)
+            nm = np.array(mv) > 0
+            nr = np.array(rv)
+
+            # https://github.com/pytorch/pytorch/issues/71673
+            # check 0: compositionality
+            self.assertEqual(t[m, 0], t[:, :, 0][m])
+            # check 1: expected result
+            self.assertEqual(t[m, 0], r)
+
+            # check 2: numpy works as expected
+            self.assertEqual(nt[nm, 0], nr)
+            # check 3: expected result against numpy
+            self.assertEqual(
+                t[m, 0],
+                torch.tensor(nr, device=device, dtype=dtype))
+            # check 4: numpy compositionality
+            self.assertEqual(nt[nm, 0], nt[:, :, 0][nm])
+
+    # one mask tensor (2d), mask is not the very first index
+    @dtypes(torch.float)
+    def test_advancedindex_dim_1m_2d_2(self, device, dtype):
+        t = [
+            self._advancedindex_input1,
+            self._advancedindex_input2,
+        ]
+
+        values = (
+            # tensor, mask, result
+            # case 0: everything
+            (t,
+
+             [[1., 1., 1.],
+              [1., 1., 1.],
+              [1., 1., 1.],
+              [1., 1., 1.]],
+
+             # 0    1    2    3    4    5    6    7    8    9    10   11
+             [24., 26., 28., 30., 32., 34., 36., 38., 40., 42., 44., 46]),
+
+            # case 1: nothing
+            (t,
+
+             [[0., 0., 0.],
+              [0., 0., 0.],
+              [0., 0., 0.],
+              [0., 0., 0.]],
+
+             []),
+
+            # case 2: random
+            (t,
+
+             [[0., 0., 1.],   # 0  1  2
+              [0., 1., 0.],   # 3  4  5
+              [0., 0., 0.],   # 6  7  8
+              [0., 0., 1.]],  # 9 10 11
+
+             [28., 32., 46.]),
+        )
+
+        for tv, mv, rv in values:
+            t = torch.tensor(tv, device=device, dtype=dtype)
+            m = torch.tensor(mv, device=device, dtype=dtype) > 0
+            r = torch.tensor(rv, device=device, dtype=dtype)
+
+            nt = np.array(tv)
+            nm = np.array(mv) > 0
+            nr = np.array(rv)
+
+            # https://github.com/pytorch/pytorch/issues/71673
+            # check 0: compositionality
+            self.assertEqual(t[1, m, 0], t[1, :, :, 0][m])
+            # check 1: expected result
+            self.assertEqual(t[1, m, 0], r)
+
+            # check 2: numpy works as expected
+            self.assertEqual(nt[1, nm, 0], nr)
+            # check 3: expected result against numpy
+            self.assertEqual(
+                t[1, m, 0],
+                torch.tensor(nr, device=device, dtype=dtype))
+            # check 4: numpy compositionality
+            self.assertEqual(nt[1, nm, 0], nt[1, :, :, 0][nm])
+
+    # one mask tensor (3d)
+    @dtypes(torch.float)
+    def test_advancedindex_dim_1m_3d(self, device, dtype):
+        t = [
+            self._advancedindex_input1,
+            self._advancedindex_input2,
+        ]
+
+        values = (
+            # tensor, mask, result
+            # case 0: everything
+            (t,
+
+             [[[1., 1., 1.], [1., 1., 1.], [1., 1., 1.], [1., 1., 1.]],
+              [[1., 1., 1.], [1., 1., 1.], [1., 1., 1.], [1., 1., 1.]]],
+
+             # 0  1   2   3   4   5    6    7    8    9    10   11
+             [0., 2., 4., 6., 8., 10., 12., 14., 16., 18., 20., 22.,
+              # 12 13   14   15   16   17   18   19   20   21   22   23
+              24., 26., 28., 30., 32., 34., 36., 38., 40., 42., 44., 46.]),
+
+            # case 1: nothing
+            (t,
+
+             [[[0., 0., 0.], [0., 0., 0.], [0., 0., 0.], [0., 0., 0.]],
+              [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.], [0., 0., 0.]]],
+
+             []),
+
+            # case 2: random
+            (t,
+
+             [[[1., 0., 1.], [0., 1., 1.], [0., 0., 0.], [1., 1., 1.]],
+              [[0., 1., 0.], [1., 1., 0.], [0., 0., 1.], [0., 0., 0.]]],
+
+             [0., 4., 8., 10., 18., 20., 22., 26., 30., 32., 40.]),
+        )
+
+        for tv, mv, rv in values:
+            t = torch.tensor(tv, device=device, dtype=dtype)
+            m = torch.tensor(mv, device=device, dtype=dtype) > 0
+            r = torch.tensor(rv, device=device, dtype=dtype)
+
+            nt = np.array(tv)
+            nm = np.array(mv) > 0
+            nr = np.array(rv)
+
+            # https://github.com/pytorch/pytorch/issues/71673
+            # check 0: compositionality
+            self.assertEqual(t[m, 0], t[:, :, :, 0][m])
+            # check 1: expected result
+            self.assertEqual(t[m, 0], r)
+
+            # check 2: numpy works as expected
+            self.assertEqual(nt[nm, 0], nr)
+            # check 3: expected result against numpy
+            self.assertEqual(
+                t[m, 0],
+                torch.tensor(nr, device=device, dtype=dtype))
+            # check 4: numpy compositionality
+            self.assertEqual(nt[nm, 0], nt[:, :, :, 0][nm])
+
+    # two mask tensors (1d)
+    @dtypes(torch.float)
+    def test_advancedindex_dim_2m_1d(self, device, dtype):
+        t = [
+            self._advancedindex_input1,
+            self._advancedindex_input2,
+        ]
+
+        values = (
+            # tensor, mask1, mask2, result
+            (t,
+             [0., 1.],
+             [1., 0., 1.],
+             [25., 29.]),
+        )
+
+        for tv, mv, nv, rv in values:
+            t = torch.tensor(tv, device=device, dtype=dtype)
+            m = torch.tensor(mv, device=device, dtype=dtype) > 0
+            n = torch.tensor(nv, device=device, dtype=dtype) > 0
+            r = torch.tensor(rv, device=device, dtype=dtype)
+
+            nt = np.array(tv)
+            nm = np.array(mv) > 0
+            nn = np.array(nv) > 0
+            nr = np.array(rv)
+
+            # https://github.com/pytorch/pytorch/issues/71673
+            # check 0: compositionality
+            self.assertEqual(t[m, 0, n, 1], t[:, 0, :, 1][m, n])
+            # check 1: expected result
+            self.assertEqual(t[m, 0, n, 1], r)
+
+            # check 2: numpy works as expected
+            self.assertEqual(nt[nm, 0, nn, 1], nr)
+            # check 3: expected result against numpy
+            self.assertEqual(
+                t[m, 0, n, 1],
+                torch.tensor(nr, device=device, dtype=dtype))
+            # check 4: numpy compositionality
+            self.assertEqual(nt[nm, 0, nn, 1], nt[:, 0, :, 1][nm, nn])
+
+    # one mask tensor (0d), invalid
+    @dtypes(torch.float)
+    def test_advancedindex_dim_1m_0d_invalid(self, device, dtype):
+        tv = self._advancedindex_input1
+        mv = 42.
+
+        t = torch.tensor(tv, device=device, dtype=dtype)
+        m = torch.tensor(mv, device=device, dtype=dtype)
+
+        nt = np.array(tv)
+        nm = np.array(mv)
+
+        terr = r"tensors used as indices must be long, byte or bool tensors"
+        nerr = r"arrays used as indices must be of integer \(or boolean\) type"
+
+        # torch
+        with self.assertRaisesRegex(IndexError, terr):
+            t[m, 0]
+        with self.assertRaisesRegex(IndexError, terr):
+            t[:, :, 0][m]
+
+        # numpy
+        with self.assertRaisesRegex(IndexError, nerr):
+            nt[nm, 0]
+        with self.assertRaisesRegex(IndexError, nerr):
+            nt[:, :, 0][nm]
+
     def test_single_int(self, device):
         v = torch.randn(5, 7, 3, device=device)
         self.assertEqual(v[4].shape, (7, 3))

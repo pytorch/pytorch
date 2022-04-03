@@ -141,6 +141,7 @@ static inline Variable applySlicing(
     int64_t specified_dims) {
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
+  int64_t prev_tensor_dim = -1;
 
   if (specified_dims > (int64_t)self_sizes.size()) {
     throw IndexError("too many indices for tensor of dimension %d", (int)(self_sizes.size()));
@@ -197,6 +198,7 @@ static inline Variable applySlicing(
       })(),
       /*dim_ptr=*/&dim,
       /*specified_dims_ptr=*/&specified_dims,
+      /*prev_tensor_dim_ptr=*/&prev_tensor_dim,
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
       // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
