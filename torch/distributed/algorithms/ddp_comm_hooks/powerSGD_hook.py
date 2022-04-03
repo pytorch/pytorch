@@ -15,9 +15,10 @@ def _orthogonalize(matrix, epsilon=0):
     Decide between Gram-Schmidt or QR factorization to orthogonalize the matrix.
     QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
     """
-    assert len(matrix.shape) == 2 and matrix.shape[1] <= matrix.shape[0]
+    assert len(matrix.shape) == 3 and matrix.shape[2] <= matrix.shape[1]
 
-    rank = matrix.shape[1]
+    batch_size = matrix.shape[0]
+    rank = matrix.shape[2]
     dtype = matrix.dtype
     if rank <= 2 or dtype in [torch.float16, torch.bfloat16]:
         _orthogonalize_gram_schmidt(matrix, epsilon=epsilon)
@@ -26,26 +27,26 @@ def _orthogonalize(matrix, epsilon=0):
             matrix,
             out=(
                 matrix,
-                torch.empty(rank, rank, device=matrix.device, dtype=dtype)
+                torch.empty(batch_size, rank, rank, device=matrix.device, dtype=dtype)
             )
         )
 
 def _orthogonalize_gram_schmidt(matrix, epsilon=0):
     """
-    Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor.
+    Applies Gram-Schmidt procedure to orthogonalize a given 3D tensor (batch of matrices).
     If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
     """
-    num_cols = matrix.shape[1]
+    num_cols = matrix.shape[2]
     for i in range(num_cols):
         # Normalize the i'th column.
-        col = matrix[:, i : i + 1]
+        col = matrix[:, :, i : i + 1]
         # If no epsilon is added here, division by zero may be caused by vanishing gradients.
         # This epsilon is not needed if the input matrix covers the gradients of at least one entire layer in the neural network.
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
             try:
-                col /= torch.norm(col)
+                col /= torch.norm(col, dim=1, keepdim=True)
             except ZeroDivisionError:
                 logger.error(
                     "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
@@ -54,11 +55,11 @@ def _orthogonalize_gram_schmidt(matrix, epsilon=0):
                 # Recover the values from NaNs to 0s.
                 col.fill_(0.0)
         else:
-            col /= torch.norm(col) + epsilon
+            col /= torch.norm(col, dim=1, keepdim=True) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
-            rest = matrix[:, i + 1 :]
-            rest -= torch.sum(col * rest, dim=0) * col
+            rest = matrix[:, :, i + 1 :]
+            rest -= torch.sum(col * rest, dim=1, keepdim=True) * col
 
 
 def _should_compress(
@@ -431,26 +432,40 @@ def powerSGD_hook(
             total_Qs_size, device=device, dtype=dtype
         )
 
+    # Batch tensors to compress by shape.
+    shape_to_tensors = {}
+    for tensor in tensors_to_compress:
+        if tensor.shape not in shape_to_tensors:
+            shape_to_tensors[tensor.shape] = []
+        shape_to_tensors[tensor.shape].append(tensor)
+
     # Create Ps and Qs that point to the allocated memory.
+    batched_tensors_to_compress = []
     ps = []
     qs = []
     p_idx = 0
     q_idx = 0
-    for tensor in tensors_to_compress:
-        n, m = tensor.shape
+    for shape, tensors in shape_to_tensors.items():
+        batch_size = len(tensors)
+        n, m = shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
+        if batch_size == 1:
+            # Use the original tensor to avoid copy.
+            batched_tensors_to_compress.append(tensors[0].unsqueeze(0))
+        else:
+            batched_tensors_to_compress.append(torch.stack(tensors))
         ps.append(
             state.p_memory_dict[bucket_index][
-                p_idx : p_idx + n * matrix_approximation_rank
-            ].view(n, matrix_approximation_rank)
+                p_idx : p_idx + batch_size * n * matrix_approximation_rank
+            ].view(batch_size, n, matrix_approximation_rank)
         )
         qs.append(
             state.q_memory_dict[bucket_index][
-                q_idx : q_idx + m * matrix_approximation_rank
-            ].view(m, matrix_approximation_rank)
+                q_idx : q_idx + batch_size * m * matrix_approximation_rank
+            ].view(batch_size, m, matrix_approximation_rank)
         )
-        p_idx += n * matrix_approximation_rank
-        q_idx += m * matrix_approximation_rank
+        p_idx += batch_size * n * matrix_approximation_rank
+        q_idx += batch_size * m * matrix_approximation_rank
 
     # If warm-start is enabled, reuse Qs from the previous iteration if possible and skip filling random values.
     # The exception is the first iteration when PowerSGD is applied.
@@ -476,8 +491,8 @@ def powerSGD_hook(
                 _orthogonalize(q, state.orthogonalization_epsilon)
 
     # Compute Ps.
-    for tensor, q, p in zip(tensors_to_compress, qs, ps):
-        torch.matmul(tensor, q, out=p)
+    for batched_tensor, q, p in zip(batched_tensors_to_compress, qs, ps):
+        torch.bmm(batched_tensor, q, out=p)
 
     # This allreduce is only applied to uncompressed tensors,
     # so it should have been kicked off before the above computation on the compressed tensors to hide more communication costs.
@@ -510,8 +525,8 @@ def powerSGD_hook(
             _orthogonalize(p, state.orthogonalization_epsilon)
 
         # Compute Qs.
-        for tensor, p, q in zip(tensors_to_compress, ps, qs):
-            torch.matmul(tensor.t(), p, out=q)
+        for batched_tensor, p, q in zip(batched_tensors_to_compress, ps, qs):
+            torch.bmm(batched_tensor.transpose(1, 2), p, out=q)
 
         # TODO: The above procedure does two matmul+allreduce steps per iteration --
         # one left multiplication and one right multiplication.
@@ -529,8 +544,18 @@ def powerSGD_hook(
     def decompress(fut):
         state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
 
-        for p, q, tensor in zip(ps, qs, tensors_to_compress):
-            torch.matmul(p, q.t(), out=tensor)
+        for p, q, batched_tensor in zip(ps, qs, batched_tensors_to_compress):
+            torch.bmm(p, q.transpose(1, 2), out=batched_tensor)
+
+        # Copy batched tensors back to original buffer.
+        for batched_tensor in batched_tensors_to_compress:
+            if batched_tensor.shape[0] == 1:
+                # Skip tensor with batch_size == 1 since itself is the original tensor.
+                continue
+            original_tensors = shape_to_tensors[batched_tensor.shape[1:]]
+            for i, tensor in enumerate(original_tensors):
+                tensor.copy_(batched_tensor[i])
+
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
 
