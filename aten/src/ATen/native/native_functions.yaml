@@ -8224,8 +8224,7 @@
   variants: method, function
   dispatch:
     CPU: argsort_cpu_stable
-    # CUDA: argsort_stable_cuda
-    # QuantizedCPU: argsort_quantized_cpu_stable
+    CUDA: argsort_stable_cuda
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
