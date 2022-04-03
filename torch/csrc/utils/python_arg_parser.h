@@ -803,7 +803,7 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
 enum class TorchFunctionName { TorchFunction, TorchDispatch };
 
 auto TORCH_API handle_torch_function_no_python_arg_parser(
-    const std::vector<py::handle>& overloaded_args,
+    at::ArrayRef<py::handle> overloaded_args,
     PyObject* args,
     PyObject* kwargs,
     const char* func_name,

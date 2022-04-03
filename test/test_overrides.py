@@ -14,7 +14,8 @@ from torch.overrides import (
     has_torch_function,
     get_overridable_functions,
     get_testing_overrides,
-    is_tensor_method_or_property
+    is_tensor_method_or_property,
+    TorchFunctionMode
 )
 
 Tensor = torch.Tensor
@@ -1067,15 +1068,20 @@ class TestTorchFunctionWarning(TestCase):
 
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
-        class A:
+        class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
                 return -1
         # NB: factory functions get overridden too!
         x = torch.randn(1)
-        with torch.overrides.enable_torch_function_mode(A()):
+        with torch.overrides.push_torch_function_mode(A):
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
             self.assertEqual(torch.split(None, [2]), -1)  # python side
+
+    def test_enable_torch_function_mode(self):
+        x = torch.randn(1)
+        with torch.overrides.enable_torch_function_mode(SubTensor):
+            self.assertEqual(torch.mm(x, x), -1)
 
 if __name__ == '__main__':
     run_tests()
