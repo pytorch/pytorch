@@ -188,7 +188,7 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
-  return handle_torch_function_no_python_arg_parser(overloaded_args, args_.ptr(), kwargs, func_name.c_str(), torch_api_function, module_name.c_str(), TorchFunctionName::TorchFunction);
+  return handle_torch_function_no_python_arg_parser(overloaded_args, args_.ptr(), kwargs, func_name.c_str(), torch_api_function.ptr(), module_name.c_str(), TorchFunctionName::TorchFunction);
 }
 
 // Note: [Overloaded args]
