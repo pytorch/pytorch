@@ -1065,5 +1065,17 @@ class TestTorchFunctionWarning(TestCase):
             # This needs to be a function that handle torch_function on the python side
             torch.split(a, (2))
 
+class TestTorchFunctionMode(TestCase):
+    def test_basic(self):
+        class A:
+            def __torch_function__(self, *args, **kwargs):
+                return -1
+        # NB: factory functions get overridden too!
+        x = torch.randn(1)
+        with torch.overrides.enable_torch_function_mode(A()):
+            self.assertEqual(torch.randn(3), -1)
+            self.assertEqual(torch.add(x, x), -1)
+            self.assertEqual(torch.split(None, [2]), -1)  # python side
+
 if __name__ == '__main__':
     run_tests()

@@ -26,12 +26,13 @@ import collections
 import functools
 import types
 import warnings
-from typing import Dict, Set, List, Any, Callable, Iterable, Type
+from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator
 
 import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
-    _has_torch_function_variadic, _add_docstr)
+    _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
+import contextlib
 
 __all__ = [
     "get_ignored_functions",
@@ -1384,6 +1385,14 @@ def handle_torch_function(
     # overloaded_args already have unique types.
     types = tuple(map(type, overloaded_args))
 
+    # Check for __torch_function__ mode.
+    mode = _get_torch_function_mode()
+    if mode is not None:
+        # NB: unlike on tensors, modes are instances
+        result = mode.__torch_function__(public_api, types, args, kwargs)
+        if result is not NotImplemented:
+            return result
+
     # Call overrides
     for overloaded_arg in overloaded_args:
         # This call needs to become a classmethod call in the future.
@@ -1402,9 +1411,13 @@ def handle_torch_function(
             return result
 
     func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
-    raise TypeError("no implementation found for '{}' on types that implement "
-                    '__torch_function__: {}'
-                    .format(func_name, [type(arg) for arg in overloaded_args]))
+    msg = (
+        "no implementation found for '{}' on types that implement "
+        '__torch_function__: {}'
+    ).format(func_name, [type(arg) for arg in overloaded_args])
+    if mode is not None:
+        msg += f" nor in mode {mode}"
+    raise TypeError(msg)
 
 has_torch_function = _add_docstr(
     _has_torch_function,
@@ -1587,3 +1600,17 @@ def is_tensor_like(inp):
     True
     """
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+
+@contextlib.contextmanager
+def enable_torch_function_mode(obj) -> Iterator[None]:
+    if not hasattr(obj, '__torch_function__'):
+        raise ValueError(
+            'The argument passed to enable_torch_function_mode must implement '
+            '__torch_function__'
+        )
+    old = _get_torch_function_mode()
+    _set_torch_function_mode(obj)
+    try:
+        yield
+    finally:
+        _set_torch_function_mode(old)
