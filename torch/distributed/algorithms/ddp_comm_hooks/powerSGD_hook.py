@@ -1,5 +1,6 @@
 import logging
 import math
+from typing import Dict, List
 
 import numpy as np
 import torch
@@ -433,7 +434,7 @@ def powerSGD_hook(
         )
 
     # Batch tensors to compress by shape.
-    shape_to_tensors = {}
+    shape_to_tensors: Dict[torch.Size, List[torch.Tensor]] = {}
     for tensor in tensors_to_compress:
         if tensor.shape not in shape_to_tensors:
             shape_to_tensors[tensor.shape] = []
