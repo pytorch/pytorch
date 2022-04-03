@@ -222,30 +222,6 @@ struct C10_API NamedTensorMetaInterface {
   };
 };
 
-// NOTE [What is TorchDispatchTypeObject?]
-// A TorchDispatchTypeObject represents the type of a Tensor subclass that has
-// a __torch_dispatch__ classmethod. Concretely, it holds the class as a
-// PyObject* and a PyInterpreter* that says which python interpreter the class
-// came from.
-//
-// See NOTE [dispatch_fn's type argument] for more details
-struct C10_API TorchDispatchTypeObject {
-  // Steals a reference to type_object
-  TorchDispatchTypeObject(
-      PyObject* type_object,
-      c10::impl::PyInterpreter* pyinterpreter);
-
-  // Releases the stolen reference to type_object
-  ~TorchDispatchTypeObject();
-
-  c10::impl::PyInterpreter* pyinterpreter() const;
-  PyObject* ptr() const;
-
- private:
-  PyObject* data_;
-  c10::impl::PyInterpreter* pyinterpreter_;
-};
-
 // NOTE [ Version Counter Sharing ]
 //
 // Every Tensor has a version counter. Version counters are incremented whenever

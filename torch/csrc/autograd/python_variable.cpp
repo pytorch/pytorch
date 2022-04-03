@@ -1,34 +1,34 @@
-#include <torch/csrc/THP.h>
+#include <ATen/NamedTensorUtils.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/SafePyObject.h>
+#include <c10/util/DeadlockDetection.h>
+#include <c10/util/irange.h>
+#include <pybind11/pybind11.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/Size.h>
+#include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_variable_indexing.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/jit/frontend/tracer.h>
-#include <ATen/NamedTensorUtils.h>
-#include <c10/core/DeviceType.h>
-#include <c10/util/DeadlockDetection.h>
-#include <c10/util/irange.h>
-
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -102,7 +102,7 @@ void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type);
+    const std::shared_ptr<SafePyObject>& type);
 
 class PyInterpreterHolder {
  public:
@@ -1684,7 +1684,7 @@ void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
+    const std::shared_ptr<SafePyObject>& type) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1769,7 +1769,7 @@ void concrete_dispatch_fn(
   py::dict kwargs;
 
   if (type) {
-    append_overloaded_type(&overloaded_args, type->ptr());
+    append_overloaded_type(&overloaded_args, type->ptr(getPyInterpreter()));
   }
 
   // Find overloaded tensors
