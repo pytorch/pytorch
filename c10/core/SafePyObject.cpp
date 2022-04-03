@@ -1,4 +1,5 @@
 #include <c10/core/SafePyObject.h>
+#include <c10/core/TensorImpl.h>
 
 namespace c10 {
 
