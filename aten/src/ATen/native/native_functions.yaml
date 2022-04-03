@@ -8219,7 +8219,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
 
-- func: argsort.stable(Tensor self, *, bool? stable=True, int dim=-1, bool descending=False) -> Tensor
+- func: argsort.stable(Tensor self, *, bool stable=True, int dim=-1, bool descending=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
