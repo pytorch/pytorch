@@ -209,13 +209,22 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
     mode_obj = maybe_mode->ptr(getPyInterpreter());
     // TODO: is PyObject_CallMethodObjArgs faster? Don't conveniently have
     // PyObject for torch_function_mode_name
-    ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-        mode_obj,
-        torch_function_mode_name,
-        "OOO",
-        py_types.ptr(),
-        args_,
-        kwargs));
+    if (kwargs == nullptr) {
+      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+          mode_obj,
+          torch_function_mode_name,
+          "OO",
+          py_types.ptr(),
+          args_.ptr()));
+    } else {
+      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+          mode_obj,
+          torch_function_mode_name,
+          "OOO",
+          py_types.ptr(),
+          args_.ptr(),
+          kwargs));
+    }
     if (ret.ptr() == nullptr) {
       throw python_error();
     }

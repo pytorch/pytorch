@@ -1,17 +1,18 @@
 #include <ATen/core/PythonModeTLS.h>
+#include <c10/core/SafePyObject.h>
 
 namespace at { namespace impl {
 
 thread_local std::shared_ptr<SafePyObject> pythonModeState;
 
 void PythonModeTLS::set_state(std::shared_ptr<SafePyObject> state) {
-  pythonModeState = std::move(state);
   if (state) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, true);
   } else {
     PythonModeTLS::reset_state();
   }
+  pythonModeState = std::move(state);
 }
 
 const std::shared_ptr<SafePyObject>& PythonModeTLS::get_state() {
