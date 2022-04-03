@@ -404,7 +404,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
         s_ipc_event_handle.c_str());
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaEvent_t event;
-    AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
+    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
     AT_CUDA_CHECK(
         cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
   }

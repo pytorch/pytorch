@@ -78,7 +78,6 @@ from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
-from jit.test_dataclasses import TestDataclasses  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -14884,6 +14883,12 @@ dedent """
 
         with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
             a = torch.jit.script(W2())
+
+    def test_narrow_copy(self):
+        def foo(a):
+            return a.narrow_copy(0, 0, 5)
+
+        self.checkScript(foo, [torch.rand(10)])
 
     def test_select_after_chunk(self):
         def foo(x):
