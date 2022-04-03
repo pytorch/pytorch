@@ -193,76 +193,12 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
 // be passed aroudn in this way).
 const char* torch_function_mode_name = "__torch_function__";
 
-// TODO: Make this call handle_torch_function_no_python_arg_parser, if
-// possible
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* kwargs, PyObject* torch_api, const std::string& module_name) -> PyObject* {
+  std::vector<py::handle> overloaded_args{self};
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
-  py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
-
-  py::object ret;
-
-  PyObject* mode_obj = nullptr;
-  const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
-  if (maybe_mode) {
-    mode_obj = maybe_mode->ptr(getPyInterpreter());
-    // TODO: is PyObject_CallMethodObjArgs faster? Don't conveniently have
-    // PyObject for torch_function_mode_name
-    if (kwargs == nullptr) {
-      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj,
-          torch_function_mode_name,
-          "OO",
-          py_types.ptr(),
-          args_.ptr()));
-    } else {
-      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj,
-          torch_function_mode_name,
-          "OOO",
-          py_types.ptr(),
-          args_.ptr(),
-          kwargs));
-    }
-    if (ret.ptr() == nullptr) {
-      throw python_error();
-    }
-  }
-
-  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-  if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
-    py::object torch_function =
-        PyObject_FastGetAttrString(self, "__torch_function__");
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
-        torch_function.ptr(),
-        torch_api_function.ptr(),
-        py_types.ptr(),
-        args_.ptr(),
-        kwargs));
-  }
-  if (ret.ptr() == nullptr) {
-    // if an exception occurred in a user's implementation of
-    // __torch_function__, throw it
-    throw python_error();
-  }
-  if (ret.ptr() == Py_NotImplemented) {
-    std::stringstream ss;
-    ss << "no implementation found for " << module_name << "." << func_name
-       << "' on types that implement __torch_function__: ["
-       << self->ob_type->tp_name << "]";
-    if (mode_obj != nullptr) {
-      // See Note [Paranoid check mode is same]
-      const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
-      TORCH_INTERNAL_ASSERT(mode_obj == maybe_mode->ptr(getPyInterpreter()));
-      ss << " nor was it found on the currently active mode "
-         << PyObject_Repr(mode_obj);
-    }
-    const std::string& error_msg = ss.str();
-    PyErr_SetString(PyExc_TypeError, error_msg.c_str());
-    throw python_error();
-  }
-  return ret.release().ptr();
+  return handle_torch_function_no_python_arg_parser(overloaded_args, args_.ptr(), kwargs, func_name.c_str(), torch_api_function, module_name.c_str(), TorchFunctionName::TorchFunction);
 }
 
 // Note: [Overloaded args]
