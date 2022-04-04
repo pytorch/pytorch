@@ -6,7 +6,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
                                      tensorT, scalarT, intArrayRefT, dimnameListT,
                                      optionalTensorRefT, optionalScalarRefT,
-                                     optionalIntArrayRefT)
+                                     optionalIntArrayRefT, iTensorListRefT)
 
 from tools.codegen.api import cpp
 from tools.codegen.utils import assert_never
@@ -44,11 +44,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
-            raise AssertionError(
-                "list of tensor not supported by structured yet; to implement this "
-                "resolve torch::List issue, see "
-                "https://fb.workplace.com/groups/894363187646754/permalink/1149276442155426"
-            )
+            return NamedCType(binds, BaseCType(iTensorListRefT))
         # TODO: delete these special cases; see tools.codegen.api.cpp--these
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
