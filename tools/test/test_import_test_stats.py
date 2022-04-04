@@ -34,14 +34,16 @@ class TestGetDisabledIssues(unittest.TestCase):
 
     # test strange spacing
     def test_spacing(self) -> None:
-        pr_body = 'resolve #123,resolveS #143eee'
-        commit_messages = 'Resolved #345\nRESOLVES #10283Fixed #2348fixes https://github.com/pytorch/pytorch/issues/75123resolveS #2134'
+        pr_body = 'resolve #123,resolveS #143Resolved #345\nRESOLVES #10283'
+        commit_messages = 'Fixed #2348fixes https://github.com/pytorch/pytorch/issues/75123resolveS #2134'
         self.run_assert_disabled_issues(pr_body, commit_messages, ['123', '143', '345', '10283', '2348', '75123', '2134'])
 
     # test bad things
     def test_not_accepted(self) -> None:
-        pr_body = 'resolve 234, resolves  #45, resolving #123 fixes189 fixeshttps://github.com/pytorch/pytorch/issues/75123 closedhttps://githubcom/pytorch/pytorch/issues/75123 '
-        commit_messages = 'fix 234, fixes # 45, fixing #123, close 234, closes#45, closing #123'
+        pr_body = 'fixes189 fixeshttps://github.com/pytorch/pytorch/issues/75123 ' \
+            'closedhttps://githubcom/pytorch/pytorch/issues/75123'
+        commit_messages = 'fix 234, fixes # 45, fixing #123, close 234, closes#45, closing #123 resolve 234, ' \
+            'resolves  #45, resolving #123'
         self.run_assert_disabled_issues(pr_body, commit_messages, [])
 
 
