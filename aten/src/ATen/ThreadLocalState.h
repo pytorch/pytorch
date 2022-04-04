@@ -55,7 +55,7 @@ class TORCH_API ThreadLocalState {
   AutogradState autograd_tls_;
 
   // TLS for enable_python_mode (__torch_dispatch__)
-  std::shared_ptr<TorchDispatchTypeObject> python_mode_state_;
+  std::shared_ptr<SafePyObject> python_mode_state_;
 
   // TLS for __torch_function__ (mode and disable_torch_function)
   at::impl::PythonTorchFunctionTLS python_torch_function_state_;
