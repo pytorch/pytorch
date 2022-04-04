@@ -699,7 +699,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # operator is in the related op set directly
                 if not _op_in_base_sets_of_related_ops(base_op):
                     raise AssertionError(
-                        f"handing for {qhandler_cls} for op {base_op} not implemented")
+                        f"handling for {qhandler_cls} for op {base_op} not implemented")
 
     @skipIfNoFBGEMM
     def test_user_defined_function(self):
