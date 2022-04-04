@@ -42,15 +42,31 @@ struct CommonExpressionHoister {
       Node* true_b_node = *matching_elem;
 
       // Check if a move to the front of the block is valid
-      // If both of the moves are valid, then we know we can move the item out
-      // of the if blocks entirely.
       AliasDb& aliasDb = getOrCreateAliasDb();
-      bool true_moveable = aliasDb.couldMoveAfterTopologically(
+      bool true_moveable = aliasDb.couldMoveBeforeTopologically(
           true_b_node, true_block->nodes().front());
-      bool false_moveable = aliasDb.couldMoveAfterTopologically(
+      bool false_moveable = aliasDb.couldMoveBeforeTopologically(
           false_b_node, false_block->nodes().front());
 
       if (!true_moveable || !false_moveable) {
+        continue;
+      }
+
+      bool did_move_true = aliasDb.moveBeforeTopologicallyValid(
+          true_b_node, true_block->nodes().front());
+      bool did_move_false = aliasDb.moveBeforeTopologicallyValid(
+          false_b_node, false_block->nodes().front());
+
+      TORCH_INTERNAL_ASSERT(
+          did_move_true && did_move_false,
+          "Wasn't able to move nodes to the beginning of the if blocks");
+
+      // Even though we moved the node before the original first node in the
+      // block, we might have also moved other nodes in front of the target
+      // node. If it ended up at the very beginning of the if block, then it's
+      // safe to move it outside.
+      if (true_b_node != true_block->nodes().front() ||
+          false_b_node != false_block->nodes().front()) {
         continue;
       }
 

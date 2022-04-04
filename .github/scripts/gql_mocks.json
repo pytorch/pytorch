@@ -7776,5 +7776,61 @@
         }
       }
     }
+  },
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
+    "data": {
+      "organization": {
+        "team": {
+          "members": {
+            "nodes": [
+              {
+                "login": "kit1980"
+              },
+              {
+                "login": "b0noI"
+              },
+              {
+                "login": "seemethere"
+              },
+              {
+                "login": "malfet"
+              },
+              {
+                "login": "tenpercent"
+              },
+              {
+                "login": "atalman"
+              },
+              {
+                "login": "musebc"
+              },
+              {
+                "login": "vtsyvina"
+              },
+              {
+                "login": "amwat"
+              },
+              {
+                "login": "janeyx99"
+              },
+              {
+                "login": "clee2000"
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": false,
+              "endCursor": "Y3Vyc29yOnYyOpHOAqnOlw=="
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=qwertyuiop org=pytorch": {
+    "data": {
+      "organization": {
+        "team": null
+      }
+    }
   }
 }
