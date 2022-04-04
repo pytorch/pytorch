@@ -3251,7 +3251,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.kl_div', ''),
         xfail('multinomial', ''),
-        xfail('scatter_reduce', '', device_type='cpu'),
         xfail('column_stack', ''),
         xfail('pca_lowrank', ''),
         xfail('normal', ''),
