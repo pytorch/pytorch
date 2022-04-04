@@ -22,6 +22,7 @@ class PackageImporter(DefaultPackageImporter):
         assert isinstance(self.zip_reader, (TorchScriptDirectoryReader, TorchScriptPackageZipFileReader))
 
         def load_tensor(dtype, size, key, location, restore_location):
+            assert self.loaded_storages is not None
             name = f"{key}.storage"
 
             if self.storage_context.has_storage(name):
@@ -38,7 +39,7 @@ class PackageImporter(DefaultPackageImporter):
         if typename == "storage":
             storage_type, key, location, size = data
             dtype = storage_type.dtype
-
+            assert self.loaded_storages is not None
             if key not in self.loaded_storages:
                 load_tensor(
                     dtype,
