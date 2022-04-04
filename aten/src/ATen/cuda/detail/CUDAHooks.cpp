@@ -139,16 +139,14 @@ bool CUDAHooks::hasCuSOLVER() const {
 #endif
 }
 
-#if !defined(USE_ROCM)
 #if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
 }
-#else
+#elif !defined(USE_ROCM)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, &at::cuda::detail::lazyNVRTC);
 }
-#endif
 #else
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
 #if defined(_WIN32)

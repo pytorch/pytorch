@@ -209,7 +209,7 @@ cmake_dependent_option(
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_BREAKPAD "Use breakpad crash dump library" ON)
-option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
+option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -313,12 +313,15 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+  USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
+    "USE_C10D_NCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
@@ -337,6 +340,9 @@ cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation"
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
+cmake_dependent_option(
+    BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
+    "NOT INTERN_BUILD_MOBILE" OFF)
 
 
 if(USE_CCACHE)
@@ -551,6 +557,8 @@ endif(NOT MSVC)
 # purpose.
 if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
+  message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
+  set(BUILD_LAZY_TS_BACKEND OFF)
 
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in

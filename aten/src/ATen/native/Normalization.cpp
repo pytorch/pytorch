@@ -26,7 +26,7 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
   TORCH_CHECK(maxnorm.toDouble() >= 0.0,
               "renorm: expected maxnorm to be >= 0 but got ", maxnorm.toDouble());
   const auto ndim = self.dim();
-  TORCH_CHECK(ndim > 1, "renorm: input needs at least 2 dimensions, got ", ndim, "dimensions");
+  TORCH_CHECK(ndim > 1, "renorm: input needs at least 2 dimensions, got ", ndim, " dimensions");
   set_output(self.sizes(), self.options());
 }
 

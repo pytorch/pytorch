@@ -40,6 +40,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
   {"c10::string_view", ParameterType::STRING},
+  {"SymInt", ParameterType::SYM_INT},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
@@ -186,21 +187,7 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
-  py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
-  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-  py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
-  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs));
-  if (ret.ptr() == nullptr) {
-    // if an exception occurred in a user's implementation of
-    // __torch_function__, throw it
-    throw python_error();
-  }
-  if (ret.ptr() == Py_NotImplemented) {
-    std::string error_msg = "no implementation found for " + module_name + "." + func_name + "' on types that implement __torch_function__: [" + self->ob_type->tp_name + "]";
-    PyErr_SetString(PyExc_TypeError, error_msg.c_str());
-    throw python_error();
-  }
-  return ret.release().ptr();
+  return handle_torch_function_no_python_arg_parser({py::handle(self)}, args_.ptr(), kwargs, func_name.c_str(), torch_api_function.ptr(), module_name.c_str(), "__torch_function__");
 }
 
 // Note: [Overloaded args]
@@ -219,7 +206,7 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
 }
 
 // See Note: [Overloaded args] for what they hold
-auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
+auto handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
   // overloaded_args already all have unique types
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(overloaded_args.size());
@@ -467,12 +454,23 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+    return (
+      THPUtils_checkIndex(item.ptr()) ||
+      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+      // in an intlist argument. Even float or complex scalar tensors.
+      (jit::tracer::isTracing() && THPVariable_Check(item.ptr())));
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
   return broadcast_size > 0 && THPUtils_checkLong(obj);
+}
+
+static bool is_int_or_symbolic_or_concrete_int(PyObject* obj) {
+  if (THPUtils_checkLong(obj)) {
+      return true;
+  }
+
+  // TODO: test if it's the Python binding for SymbolicIntNode
+  return false;
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -541,6 +539,9 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::SCALAR_LIST: {
       return is_scalar_list(obj);
     }
+    case ParameterType::SYM_INT: {
+      return is_int_or_symbolic_or_concrete_int(obj);
+    }
   }
 }
 
@@ -549,6 +550,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::TENSOR: return "Tensor";
     case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
+    case ParameterType::SYM_INT: return "SymInt";
     case ParameterType::DOUBLE: return "float";
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";

@@ -51,5 +51,5 @@ jobs:
           files: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
-  group: create-release-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
