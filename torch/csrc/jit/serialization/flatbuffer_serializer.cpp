@@ -789,6 +789,14 @@ Module load_jit_module_from_file(
       std::move(std::get<0>(data)), std::get<1>(data), device);
 }
 
+Module load_jit_module_from_stream(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  auto data = get_stream_content(in);
+  return parse_and_initialize_jit_module(
+      std::move(std::get<0>(data)), std::get<1>(data), device);
+}
+
 void save_jit_module(
     const Module& module,
     const std::string& filename,
