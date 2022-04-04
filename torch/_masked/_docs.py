@@ -593,6 +593,74 @@ Example::
             [   nan,    nan,    nan]])
 """
 
+std_docstring = """std(input, dim, unbiased, *, keepdim=False, dtype=None, mask=None) -> Tensor
+Returns standard_deviation of all the elements in the :attr:`input`
+tensor along the given dimension(s) :attr:`dim` while the :attr:`input`
+elements are masked out according to the boolean tensor
+:attr:`mask`.
+The identity value of sample standard deviation operation is undefined. The
+elements of output tensor with strided layout, that correspond to
+fully masked-out elements, have ``nan`` values.
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of
+size 1. Otherwise, :attr:`dim` is squeezed (see
+:func:`torch.squeeze`), resulting in the output tensor having 1 (or
+``len(dim)``) fewer dimension(s).
+
+The boolean tensor :attr:`mask` defines the "validity" of
+:attr:`input` tensor elements: if :attr:`mask` element is True
+then the corresponding element in :attr:`input` tensor will be
+included in standard_deviation computation, otherwise the element is
+ignored.
+
+When all elements of :attr:`input` along the given dimension
+:attr:`dim` are ignored (fully masked-out), the corresponding element
+of the output tensor will have undefined value: it may or may not
+correspond to the identity value of standard_deviation operation; the
+choice may correspond to the value that leads to the most efficient
+storage of :attr:`output` tensor.
+
+The mask of the output tensor can be computed as
+``torch.any(torch.broadcast_to(mask, input.shape), dim, keepdim=keepdim,
+dtype=torch.bool)``.
+
+The shapes of the :attr:`mask` tensor and the :attr:`input` tensor
+don't need to match, but they must be :ref:`broadcastable
+<broadcasting-semantics>` and the dimensionality of the :attr:`mask`
+tensor must not be greater than of the :attr:`input` tensor.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+      Default: None that is equivalent to ``tuple(range(input.ndim))``.
+    unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+      the uncorrected sample variance.
+
+Keyword args:
+    keepdim (bool, optional): whether the output tensor has
+      :attr:`dim` retained or not. Default: False.
+    dtype (:class:`torch.dtype`, optional): the desired data type
+      of returned tensor.  If specified, the input tensor is
+      casted to :attr:`dtype` before the operation is
+      performed. Default: None.
+    mask (:class:`torch.Tensor`, optional): the boolean tensor
+      containing the binary mask of validity of input tensor
+      elements.
+      Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
+Example::
+
+    >>> input = tensor([[-3, -2, -1], [ 0, 1, 2]])
+    >>> input
+    tensor([[-3, -2, -1],
+            [ 0,  1,  2]])
+    >>> mask = tensor([[ True, False, True], [False, False, False]])
+    >>> mask
+    tensor([[ True, False,  True],
+            [False, False, False]])
+    >>> torch._masked.std(input, 1, False, mask=mask)
+    tensor([1., nan])
+"""
+
 sum_docstring = """sum(input, dim, *, keepdim=False, dtype=None, mask=None) -> Tensor
 
 Returns sum of all the elements in the :attr:`input`
