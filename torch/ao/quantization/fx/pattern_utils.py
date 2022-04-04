@@ -63,3 +63,10 @@ def get_default_output_activation_post_process_map(is_training) -> Dict[Pattern,
 #     def __init__(...):
 #         ...
 #
+
+def sorted_patterns_dict(patterns_dict: Dict[Pattern, QuantizeHandler]) -> Dict[Pattern, QuantizeHandler]:
+    """
+    Return a sorted version of the patterns dictionary such that longer patterns are matched first,
+    e.g. match (F.relu, F.linear) before F.relu.
+    """
+    return OrderedDict(sorted(patterns_dict.items(), key=lambda kv: -len(kv[0]) if isinstance(kv[0], tuple) else 1))
