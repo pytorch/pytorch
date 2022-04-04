@@ -315,7 +315,7 @@ class InverseWishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            + (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            - (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + 0.5 * p * (p + 1) * _log_2
             + torch.mvlgamma(0.5 * nu, p=p)
             - 0.5 * (nu + p + 1) * _mvdigamma(0.5 * nu, p=p)
