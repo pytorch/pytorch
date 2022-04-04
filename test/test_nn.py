@@ -35,7 +35,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtypes, get_all_math_dtypes
+from torch.testing._internal.common_dtype import integral_types, floating_types_and, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, \
@@ -6381,8 +6381,6 @@ class TestNN(NNTestCase):
             output = deconv(inputs)
             output.mean().backward()
 
-
-    @skipIfRocm
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     def test_Conv2d_groups_nobias(self):
@@ -6422,7 +6420,6 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
-    @skipIfRocm
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -9978,10 +9975,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
             F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "expected 4D or 5D input"):
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
             F.grid_sample(input[0], grid, align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "grid with same number of dimensions"):
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
             F.grid_sample(input, torch.empty(1, 1, 1, 1, 3), align_corners=False)
 
         with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
@@ -9997,7 +9994,7 @@ class TestNN(NNTestCase):
             F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
 
         if TEST_CUDA:
-            with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
 
     def test_affine_grid_error_checking(self):
@@ -13104,7 +13101,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_deterministic_cudnn(self, device, dtype):
         inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
@@ -13123,7 +13120,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_large_workspace(self, device, dtype):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
         # reasonable algorithm that does not run out of memory
@@ -13248,7 +13245,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to(device, dtype)
@@ -14923,6 +14920,31 @@ class TestNNDeviceType(NNTestCase):
         test_unequal_when_beta_is_less_than_one()
         test_unequal_when_beta_is_greater_than_one()
 
+    @onlyCPU
+    def test_smooth_l1_loss_bfloat16(self, device):
+        def test_dtype(fn, input, target, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            target = target.detach().clone().to(dtype=dtype)
+            target2 = target.detach().clone().float()
+            out = fn(input, target)
+            out.sum().backward()
+            out2 = fn(input2, target2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, exact_dtype=False)
+
+        def func(device):
+            return nn.SmoothL1Loss().to(device=device)
+
+        shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 128, 128]]
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            t = torch.randn(shape, device=device)
+            test_dtype(func(device), x, t, torch.bfloat16)
+
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def test_nonlinearity_propagate_nan(self, device):
@@ -16158,6 +16180,7 @@ class TestNNDeviceType(NNTestCase):
                 mask = mask.cuda()
             mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
             native_res = torch._masked_softmax(input, mask)
+            mask = ~mask
             mask = mask.float()
 
             def slow_masked_softmax(input, mask):
@@ -16181,6 +16204,7 @@ class TestNNDeviceType(NNTestCase):
         mask = mask.bool()
         native_res = torch._masked_softmax(input, mask)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
+        mask = ~mask
         mask = mask.float()
 
         def slow_masked_softmax(input, mask):
@@ -17064,7 +17088,7 @@ class TestNNDeviceType(NNTestCase):
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtypes[1]))
             self.assertEqual(output, torch.zeros_like(output))
 
-    @skipCUDAIf(True, "cuda assert is not recovarable.")
+    @skipCUDAIf(True, "no out-of-bounds check on CUDA for perf.")
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
     @parametrize_test("padding_idx", [None, 0])
     @parametrize_test("mode", ["sum", "mean", "max"])
@@ -17602,7 +17626,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
@@ -17970,37 +17994,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -18165,7 +18189,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18179,7 +18203,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
