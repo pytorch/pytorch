@@ -1,5 +1,5 @@
-
 #include <torch/csrc/jit/passes/autocast.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/autocast_mode.h>
 #include <c10/core/ScalarType.h>
@@ -148,12 +148,19 @@ void castTensorInputs(
   const auto graph = node->owningGraph();
 
   std::unordered_set<Value*> casted_inputs;
+  std::unordered_set<Value*> casted_optional;
   // need to also keep the inputs in order, otherwise tracing fails
   // sanity checks because casting ops are inserted in random order
   std::vector<Value*> casted_inputs_ordered;
   for (auto input : node->inputs()) {
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
+    // retrieve tensor type from optional tensor;
+    if (auto opt_input_type = input->type()->cast<OptionalType>()) {
+      input_tensor_type = opt_input_type->getElementType()->cast<TensorType>();
+      casted_optional.insert(input);
+    }
+    // casting on tensor;
     if (input_tensor_type && input->node()->kind() != cast_op) {
       auto has_inserted = casted_inputs.insert(input);
       if (has_inserted.second) {
@@ -165,15 +172,16 @@ void castTensorInputs(
   WithInsertPoint insert_point(node);
 
   for (auto input : casted_inputs_ordered) {
+    Value* new_input = nullptr;
     if (cast_op == aten::_autocast_to_full_precision) {
-      const auto new_input = graph->insert(
+      new_input = graph->insert(
           cast_op,
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled))});
       node->replaceInputWith(input, new_input);
     } else if (cast_op == aten::_autocast_to_reduced_precision) {
-      const auto new_input = graph->insert(
+      new_input = graph->insert(
           cast_op,
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
@@ -184,6 +192,13 @@ void castTensorInputs(
     } else {
       TORCH_INTERNAL_ASSERT(
           false, "unrecognized cast_op symbol: ", cast_op.toQualString());
+    }
+    if (new_input != nullptr) {
+      if (casted_optional.count(input) != 0) {
+        new_input->setType(OptionalType::create(TensorType::get()));
+      } else {
+        new_input->setType(TensorType::get());
+      }
     }
   }
 }
@@ -481,6 +496,50 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
+
+RegisterOperators reg_autocast_to_reduced_precision_optional({
+    Operator(
+        "aten::_autocast_to_reduced_precision.optional(Tensor? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor?",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto cpu_dtype = pop(stack).toScalarType();
+            auto cuda_dtype = pop(stack).toScalarType();
+            auto cpu_enabled = pop(stack).toBool();
+            auto cuda_enabled = pop(stack).toBool();
+            auto self = pop(stack).toOptional<at::Tensor>();
+
+            c10::optional<at::Tensor> ret = c10::nullopt;
+
+            if (self.has_value()) {
+              ret = at::_autocast_to_reduced_precision(self.value(), cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype);
+            }
+            push(stack, IValue(ret));
+          };
+        },
+        // TODO: need to update alias info on Tensor?
+        aliasAnalysisFromSchema()),
+});
+
+RegisterOperators reg_autocast_to_full_precision_optional({
+    Operator(
+        "aten::_autocast_to_full_precision.optional(Tensor? self, bool cuda_enabled, bool cpu_enabled) -> Tensor?",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto cpu_enabled = pop(stack).toBool();
+            auto cuda_enabled = pop(stack).toBool();
+            auto self = pop(stack).toOptional<at::Tensor>();
+
+            c10::optional<at::Tensor> ret = c10::nullopt;
+
+            if (self.has_value()) {
+              ret = at::_autocast_to_full_precision(self.value(), cuda_enabled, cpu_enabled);
+            }
+            push(stack, IValue(ret));
+          };
+        },
+        // TODO: need to update alias info on Tensor?
+        aliasAnalysisFromSchema()),
+});
 
 } // namespace jit
 } // namespace torch
