@@ -125,6 +125,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0 required to use git merge-base)
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Run clang-format
@@ -305,6 +306,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       # [see note: pytorch repo ref]
+      # fetch-depth 2 required to allow us to use github.event.pull_request.head.sha
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Prepare output dir with HEAD commit SHA
@@ -367,6 +369,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
       # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) to allow tools/linter/clang_tidy.py to do its thing
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Prepare output dir with HEAD commit SHA
@@ -528,6 +531,7 @@ jobs:
           python-version: 3.8
           architecture: x64
       # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
@@ -557,6 +561,7 @@ jobs:
           python-version: 3.8
           architecture: x64
       # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install torch
