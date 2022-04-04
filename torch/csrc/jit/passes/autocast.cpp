@@ -511,7 +511,7 @@ RegisterOperators reg_autocast_to_reduced_precision_optional({
             c10::optional<at::Tensor> ret = c10::nullopt;
 
             if (self.has_value()) {
-              ret = at::_autocast_to_reduced_precision(self.value(), cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype);
+              ret = at::native::_autocast_to_reduced_precision(self.value(), cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype);
             }
             push(stack, IValue(ret));
           };
@@ -532,7 +532,7 @@ RegisterOperators reg_autocast_to_full_precision_optional({
             c10::optional<at::Tensor> ret = c10::nullopt;
 
             if (self.has_value()) {
-              ret = at::_autocast_to_full_precision(self.value(), cuda_enabled, cpu_enabled);
+              ret = at::native::_autocast_to_full_precision(self.value(), cuda_enabled, cpu_enabled);
             }
             push(stack, IValue(ret));
           };
