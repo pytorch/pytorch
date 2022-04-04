@@ -1,5 +1,6 @@
 import argparse
 import collections
+import os
 from pprint import pformat
 
 from tools.codegen.model import Variant
@@ -8,7 +9,7 @@ from tools.codegen.api.python import (PythonSignatureGroup,
                                       returns_named_tuple_pyi)
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.utils import FileManager
-from typing import Sequence, List, Dict
+from typing import Sequence, List, Dict, cast
 
 from tools.autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
 
@@ -35,6 +36,15 @@ Here's our general strategy:
 There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
+
+def res(path: str) -> str:
+    # Open Source and buck1 builds can find the path directly.
+    if os.path.exists(path):
+        return path
+    # Buck2 is more picky in how it accepts input paths.
+    # This is a FB-specific internal library that provides buck2 compatible paths.
+    from libfb.py import parutil  # type: ignore[import]
+    return cast(str, parutil.get_file_path(path[path.rfind("/") + 1:], pkg=__package__))
 
 def get_py_torch_functions(
         python_funcs: Sequence[PythonSignatureNativeFunctionPair],
@@ -255,7 +265,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     # so, we don't export then to it
     from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
-    fm.write_with_template('torch/_C/_nn.pyi', 'torch/_C/_nn.pyi.in', lambda: {
+    fm.write_with_template('torch/_C/_nn.pyi', res('torch/_C/_nn.pyi.in'), lambda: {
         'imported_hints': import_code,
         'dispatched_hints': dispatch_code,
     })
@@ -606,19 +616,19 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'dtype_class_hints': dtype_class_hints,
         'all_directive': all_directive
     }
-    fm.write_with_template('torch/_C/__init__.pyi', 'torch/_C/__init__.pyi.in', lambda: {
+    fm.write_with_template('torch/_C/__init__.pyi', res('torch/_C/__init__.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/__init__.pyi.in',
         **env,
     })
-    fm.write_with_template('torch/_C/_VariableFunctions.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
+    fm.write_with_template('torch/_C/_VariableFunctions.pyi', res('torch/_C/_VariableFunctions.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
         **env,
     })
-    fm.write_with_template('torch/_VF.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
+    fm.write_with_template('torch/_VF.pyi', res('torch/_C/_VariableFunctions.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
         **env,
     })
-    fm.write_with_template('torch/return_types.pyi', 'torch/_C/return_types.pyi.in', lambda: {
+    fm.write_with_template('torch/return_types.pyi', res('torch/_C/return_types.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/return_types.pyi',
         **env,
     })
