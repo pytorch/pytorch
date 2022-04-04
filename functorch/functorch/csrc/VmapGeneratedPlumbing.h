@@ -15695,24 +15695,6 @@ at::Tensor scatter_add_dimname_generated_plumbing(const at::Tensor & self, at::D
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor scatter_reduce_two_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, c10::string_view reduce, c10::optional<int64_t> output_size) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(index, cur_level)) {
-    return at::_ops::scatter_reduce_two::call(self, dim, index, reduce, output_size);
-  }
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor index_value;
-  optional<int64_t> index_bdim;
-  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
-  auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, reduce, output_size);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor & eq__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
