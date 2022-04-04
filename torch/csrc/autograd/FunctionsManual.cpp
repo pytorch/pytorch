@@ -190,6 +190,8 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
 }
 
 Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: zero entries of `norm` (and in one case, `self`) are replaced with something
+  // arbitrary (such as ones) to avoid division by zero.
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -206,7 +208,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
-    scale_v = grad / norm;
+    scale_v = grad / at::where(norm == 0, 1., norm);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
@@ -221,14 +223,17 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     }
     scale_v = grad / nb_max;
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow(p - 1);
     if (p < 1.0) {
+      // We must create a ones tensor here in case self is complex
+      self_scaled = self.sgn() * at::where(self == 0, at::ones({}, self.options()), self).abs().pow(p - 1);
       self_scaled.masked_fill_(self == 0, 0);
+    } else {
+      self_scaled = self.sgn() * self.abs().pow(p - 1);
     }
-    scale_v = grad / norm.pow(p - 1);
+    scale_v = grad / at::where(norm == 0, 1., norm).pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
-    scale_v = grad / norm.pow(p - 1);
+    scale_v = grad / at::where(norm == 0, 1., norm).pow(p - 1);
   }
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
