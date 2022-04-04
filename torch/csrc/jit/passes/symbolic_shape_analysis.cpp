@@ -175,15 +175,6 @@ bool symbolicShapeAnalysisTestModeEnabled() {
 
 namespace {
 
-IValue tensor_sizes_from_tensor_list(const IValue& iv) {
-  c10::List<c10::List<int64_t>> tensor_sizes;
-  auto tensor_list = iv.toTensorVector();
-  for (const auto& ten : tensor_list) {
-    tensor_sizes.push_back(c10::List<int64_t>(ten.sizes()));
-  }
-  return tensor_sizes;
-}
-
 bool isListOfInts(const TypePtr& type) {
   return type->cast<ListType>() &&
       type->cast<ListType>()->getElementType()->cast<IntType>();
@@ -288,7 +279,7 @@ struct SymbolicShapeOpAnalyzer {
   // subsititute optional types for their component types
   // if the type is known. This doesn't need to be done
   // for known IValues.
-  void substituteOptionalTypes(const Node* parent_graph_node) {
+  void refineInputUnionTypes(const Node* parent_graph_node) {
     for (size_t op_in_index = 0;
          op_in_index < shape_compute_graph_->inputs().size();
          op_in_index++) {
@@ -618,7 +609,6 @@ SsaArgument tensorShapeArg(Value* tensor_v) {
 std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
   // TODO: fix the List of integers implementation, and
   // extract out the shape changes, otherwise this is complete
-  Node* node_ = n;
   // NB: shape compute graphs may have less inputs than their node
   // counterparts to allow e.g. sharing one single unary definition
   // so iterate on # of shape inputs
@@ -627,19 +617,24 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
   std::vector<SsaArgument> input_shapes = std::vector<SsaArgument>();
 
   for (size_t node_index = 0; node_index < n->inputs().size(); ++node_index) {
-    auto type = node_->input(node_index)->type();
+    auto type = n->input(node_index)->type();
 
     if (auto tt = type->castRaw<TensorType>()) {
-      input_shapes.push_back(tensorShapeArg(node_->input(node_index)));
+      input_shapes.push_back(tensorShapeArg(n->input(node_index)));
       continue;
     }
     if (isListOfTensors(type)) {
       // waiting for more use cases to decide on best generalization
-      TORCH_INTERNAL_ASSERT(
-          node_->kind() == aten::cat, "TODO: generalize logic");
-      if (node_->input(node_index)->node()->kind() == prim::ListConstruct &&
-          !db.hasWriters(node_->input(node_index))) {
-        auto li_construct_node = node_->input(node_index)->node();
+      TORCH_INTERNAL_ASSERT(n->kind() == aten::cat, "TODO: generalize logic");
+      if (n->input(node_index)->node()->kind() == prim::Constant) {
+        auto ival = toIValue(n->input(node_index));
+        for (const auto& ten : ival->toTensorVector()) {
+          input_shapes.emplace_back(c10::List<int64_t>(ten.sizes()));
+        }
+      } else if (
+          n->input(node_index)->node()->kind() == prim::ListConstruct &&
+          !db.hasWriters(n->input(node_index))) {
+        auto li_construct_node = n->input(node_index)->node();
         for (size_t j = 0; j < li_construct_node->inputs().size(); ++j) {
           input_shapes.push_back(tensorShapeArg(li_construct_node->input(j)));
         }
@@ -648,15 +643,15 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
       }
       continue;
     }
-    if (auto ival = toIValue(node_->input(node_index))) {
+    if (auto ival = toIValue(n->input(node_index))) {
       input_shapes.emplace_back(*ival);
       continue;
     }
     if (type->cast<ListType>() &&
         type->cast<ListType>()->getElementType()->cast<IntType>()) {
-      auto input_src_node = node_->input(node_index)->node();
+      auto input_src_node = n->input(node_index)->node();
       if (input_src_node->kind() == prim::ListConstruct &&
-          !db.hasWriters(node_->input(node_index))) {
+          !db.hasWriters(n->input(node_index))) {
         // it is a very common in graphs to see patterns like:
         // z = x.view(y.size())
         // or:
@@ -665,7 +660,7 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
         // from y to z. To do this we try to associate symbolic dimensions
         // or concrete sizes with the integer list inputs that have a
         // constructor taken from constants or y.size() or y.size(0)
-        auto list_construct = node_->input(node_index)->node();
+        auto list_construct = n->input(node_index)->node();
         std::vector<ShapeArg> shape;
         for (Value* v : list_construct->inputs()) {
           if (auto constant = constant_as<int64_t>(v)) {
@@ -695,7 +690,7 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
         continue;
       }
       if (input_src_node->kind() == aten::size &&
-          !db.hasWriters(node_->input(node_index))) {
+          !db.hasWriters(n->input(node_index))) {
         auto ten_inp = input_src_node->input();
         auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
         input_shapes.emplace_back(ss);
@@ -704,7 +699,7 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
     }
     GRAPH_DEBUG(
         "Unhandled input: ",
-        node_->kind().toDisplayString(),
+        n->kind().toDisplayString(),
         " arg num: ",
         node_index);
     input_shapes.emplace_back(c10::SymbolicShape());
@@ -743,7 +738,7 @@ std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
     return nullptr;
   }
   auto input_shapes = getNodeInputShapes(n, db);
-  op_analyzer.substituteOptionalTypes(n);
+  op_analyzer.refineInputUnionTypes(n);
 
   if (auto output_shapes = op_analyzer.run(input_shapes)) {
     applyOutputShapeToGraph(n, *output_shapes);
