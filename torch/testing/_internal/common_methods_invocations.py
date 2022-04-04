@@ -14028,6 +14028,7 @@ op_db: List[OpInfo] = [
                wrapper_set_seed(torch.Tensor.multinomial, inp, *args, **kwargs),
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_multinomial,
            error_inputs_func=error_inputs_multinomial,
