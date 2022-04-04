@@ -11,7 +11,7 @@ class SamplingOpsModule(torch.nn.Module):
         a = torch.empty(3, 3).uniform_(0.0, 1.0)
         size = (1, 4)
         weights = torch.tensor([0, 10, 3, 0], dtype=torch.float)
-        return (
+        return len(
             # torch.seed(),
             # torch.manual_seed(0),
             torch.bernoulli(a),
