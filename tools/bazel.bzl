@@ -21,6 +21,7 @@ rules = struct(
     filegroup = native.filegroup,
     glob = native.glob,
     if_cuda = if_cuda,
+    py_binary = native.py_binary,
     py_library = _py_library,
     requirement = _requirement,
     requires_cuda_enabled = requires_cuda_enabled,
