@@ -67,7 +67,7 @@ class PackageImporter(Importer):
         """
         self.zip_reader: Any
         # TODO: @sahanp delete type ignore
-        self.zip_reader = zip_file_reader_type(file_or_buffer)  # type: ignore
+        self.zip_reader = zip_file_reader_type(file_or_buffer)  # type: ignore[arg-type]
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
