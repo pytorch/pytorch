@@ -412,11 +412,11 @@ def squeeze(li: List[int], dim: int):
 
 def LOWER_BOUND__nonzero(input: List[int]):
     assert len(input) >= 1
-    return [len(input), 0]
+    return [0, len(input)]
 
 def UPPER_BOUND__nonzero(input: List[int]):
     assert len(input) >= 1
-    return [len(input), numel(input)]
+    return [numel(input), len(input)]
 
  ####    SHAPE COMPUTE FUNCTIONS END   ###
 ### DO NOT REMOVE THIS STRING!!! #

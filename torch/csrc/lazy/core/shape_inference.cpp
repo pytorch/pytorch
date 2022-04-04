@@ -256,7 +256,7 @@ std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
   for (auto dim_size : t.sizes()) {
     max_elements *= dim_size;
   }
-  return {Shape(at::kLong, {(int64_t)t.sizes().size(), max_elements})};
+  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
 }
 
 std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
