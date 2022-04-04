@@ -131,6 +131,9 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
       return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
     case Activation::GELU:
       return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
+    default:
+      TORCH_CHECK(false);
+      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
   }
 }
 #endif
