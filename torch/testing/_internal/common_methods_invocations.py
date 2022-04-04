@@ -8692,7 +8692,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
            )),
     OpInfo('addmv',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            # dtypesIfROCM=floating_types_and(torch.half),
@@ -8776,7 +8776,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            assert_autodiffed=True,
@@ -8785,7 +8785,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
            backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, *[torch.bfloat16]
                                                            if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
@@ -10567,7 +10566,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('matmul',
            aliases=('linalg.matmul',),
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if ((SM53OrLater and CUDA11OrLater)
                                                                              or TEST_WITH_ROCM) else []),
@@ -12603,7 +12602,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,),
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16,
                                            *[torch.bfloat16] if ((SM53OrLater and CUDA11OrLater)
                                                                  or TEST_WITH_ROCM) else [],
