@@ -83,7 +83,9 @@ _DEFAULT_OP_INT8_CONFIGS = [
 _ADD_CONFIG = {
     "pattern": operator.add,
     "num_tensor_args_to_observation_type": {
-        # TODO: maybe change this to NO_OBSERVER
+        # TODO: this is not used right now since we have extra check in prepare
+        # will need to change this to NO_OBSERVER later after we implemented
+        # Tensor dtype inference properly
         0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
