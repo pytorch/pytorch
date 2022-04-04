@@ -4830,7 +4830,10 @@ for shape in [(1,), ()]:
         self.assertIsInstance(out.grad_fn._saved_output_size[0], int)
         self.assertEqual(out.grad_fn._saved_align_corners, False)         # bool -> bool
         self.assertIsInstance(out.grad_fn._saved_align_corners, bool)
-        self.assertIsNone(out.grad_fn._saved_scale_factors)               # c10::optional<ArrayRef<double>> -> float[]?
+        if hasattr(out.grad_fn, '_saved_scale_factors'):
+            self.assertIsNone(out.grad_fn._saved_scale_factors)           # c10::optional<ArrayRef<double>> -> float[]?
+        else:
+            self.assertIsNone(out.grad_fn._saved_scales)                  # c10::optional<ArrayRef<double>> -> float[]?
 
         out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
         self.assertIsNone(out.grad_fn._saved_output_size)
@@ -6669,13 +6672,16 @@ class TestAutogradForwardMode(TestCase):
             def __new__(cls, data=None):
                 return torch.Tensor._make_subclass(cls, data)
 
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
-                    with no_dispatch():
-                        return MySubclass(torch.ops.aten.alias(*args))
+                    # Make sure autograd is not disabled here
+                    foo = torch.rand(1, requires_grad=True)
+                    self.assertIsNotNone(foo.exp().grad_fn)
 
                 with no_dispatch():
                     return func(*args, **kwargs)
@@ -6684,10 +6690,11 @@ class TestAutogradForwardMode(TestCase):
         s = MySubclass(a)
 
         with fwAD.dual_level():
+            # Only the primal has "alias" called on it
             fwAD.make_dual(s, torch.rand_like(s))
             self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
-            self.assertEqual(counter[0], 2)
+            self.assertEqual(counter[0], 1)
 
     def test_print(self):
         with fwAD.dual_level() as level:

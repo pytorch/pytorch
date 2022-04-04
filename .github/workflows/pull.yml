@@ -16,14 +16,14 @@ concurrency:
 jobs:
   linux-xenial-py3_7-gcc5_4-build:
     name: linux-xenial-py3.7-gcc5.4
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
 
   linux-xenial-py3_7-gcc5_4-test:
     name: linux-xenial-py3.7-gcc5.4
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-py3_7-gcc5_4-build
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
@@ -40,7 +40,7 @@ jobs:
 
   linux-docs:
     name: linux-docs
-    uses: pytorch/pytorch/.github/workflows/_docs.yml@master
+    uses: ./.github/workflows/_docs.yml
     needs: linux-xenial-py3_7-gcc5_4-build
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
@@ -48,14 +48,14 @@ jobs:
 
   linux-xenial-py3_7-gcc7-build:
     name: linux-xenial-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
 
   linux-xenial-py3_7-gcc7-test:
     name: linux-xenial-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-py3_7-gcc7-build
     with:
       build-environment: linux-xenial-py3.7-gcc7
@@ -68,14 +68,14 @@ jobs:
 
   linux-xenial-py3_7-clang7-asan-build:
     name: linux-xenial-py3.7-clang7-asan
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-clang7-asan
       docker-image-name: pytorch-linux-xenial-py3-clang7-asan
 
   linux-xenial-py3_7-clang7-asan-test:
     name: linux-xenial-py3.7-clang7-asan
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-py3_7-clang7-asan-build
     with:
       build-environment: linux-xenial-py3.7-clang7-asan
@@ -89,21 +89,21 @@ jobs:
 
   linux-xenial-py3_7-gcc7-no-ops:
     name: linux-xenial-py3.7-gcc7-no-ops
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
 
   linux-xenial-py3_7-clang7-onnx-build:
     name: linux-xenial-py3.7-clang7-onnx
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-clang7-onnx
       docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
 
   linux-xenial-py3_7-clang7-onnx-test:
     name: linux-xenial-py3.7-clang7-onnx
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-py3_7-clang7-onnx-build
     with:
       build-environment: linux-xenial-py3.7-clang7-onnx
@@ -116,14 +116,14 @@ jobs:
 
   linux-bionic-py3_7-clang9-build:
     name: linux-bionic-py3.7-clang9
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-py3.7-clang9
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
 
   linux-bionic-py3_7-clang9-test:
     name: linux-bionic-py3.7-clang9
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-py3_7-clang9-build
     with:
       build-environment: linux-bionic-py3.7-clang9
@@ -137,14 +137,14 @@ jobs:
 
   linux-vulkan-bionic-py3_7-clang9-build:
     name: linux-vulkan-bionic-py3.7-clang9
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-vulkan-bionic-py3.7-clang9
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
 
   linux-vulkan-bionic-py3_7-clang9-test:
     name: linux-vulkan-bionic-py3.7-clang9
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-vulkan-bionic-py3_7-clang9-build
     with:
       build-environment: linux-vulkan-bionic-py3.7-clang9
@@ -156,14 +156,14 @@ jobs:
 
   linux-xenial-cuda11_3-py3_7-gcc7-build:
     name: linux-xenial-cuda11.3-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
   linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-cuda11_3-py3_7-gcc7-build
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7
@@ -177,14 +177,14 @@ jobs:
 
   linux-bionic-rocm4_5-py3_7-build:
     name: linux-bionic-rocm4.5-py3.7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-rocm4.5-py3.7
       docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
 
   linux-bionic-rocm4_5-py3_7-test:
     name: linux-bionic-rocm4.5-py3.7
-    uses: pytorch/pytorch/.github/workflows/_rocm-test.yml@master
+    uses: ./.github/workflows/_rocm-test.yml
     needs: linux-bionic-rocm4_5-py3_7-build
     with:
       build-environment: linux-bionic-rocm4.5-py3.7
@@ -197,7 +197,7 @@ jobs:
 
   linux-xenial-py3-clang5-mobile-build:
     name: linux-xenial-py3-clang5-mobile-build
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3-clang5-mobile-build
       docker-image-name: pytorch-linux-xenial-py3-clang5-asan
@@ -205,23 +205,22 @@ jobs:
 
   linux-xenial-py3-clang5-mobile-custom-build-static:
     name: linux-xenial-py3-clang5-mobile-custom-build-static
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3-clang5-mobile-custom-build-static
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       build-generates-artifacts: false
 
   pytorch-xla-linux-bionic-py3_7-clang8-build:
-    if: ${{ false }}
     name: pytorch-xla-linux-bionic-py3.7-clang8
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: pytorch-xla-linux-bionic-py3.7-clang8
       docker-image-name: xla_base
 
   pytorch-xla-linux-bionic-py3_7-clang8-test:
     name: pytorch-xla-linux-bionic-py3.7-clang8
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: pytorch-xla-linux-bionic-py3_7-clang8-build
     with:
       build-environment: pytorch-xla-linux-bionic-py3.7-clang8
@@ -233,14 +232,14 @@ jobs:
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
-    uses: pytorch/pytorch/.github/workflows/_win-build.yml@master
+    uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
 
   win-vs2019-cpu-py3-test:
     name: win-vs2019-cpu-py3
-    uses: pytorch/pytorch/.github/workflows/_win-test.yml@master
+    uses: ./.github/workflows/_win-test.yml
     needs: win-vs2019-cpu-py3-build
     with:
       build-environment: win-vs2019-cpu-py3
@@ -253,14 +252,14 @@ jobs:
 
   win-vs2019-cuda11_3-py3-build:
     name: win-vs2019-cuda11.3-py3
-    uses: pytorch/pytorch/.github/workflows/_win-build.yml@master
+    uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.3-py3
       cuda-version: "11.3"
 
   win-vs2019-cuda11_3-py3-test:
     name: win-vs2019-cuda11.3-py3
-    uses: pytorch/pytorch/.github/workflows/_win-test.yml@master
+    uses: ./.github/workflows/_win-test.yml
     needs: win-vs2019-cuda11_3-py3-build
     with:
       build-environment: win-vs2019-cuda11.3-py3
@@ -274,28 +273,28 @@ jobs:
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
-    uses: pytorch/pytorch/.github/workflows/_bazel-build-test.yml@master
+    uses: ./.github/workflows/_bazel-build-test.yml
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-    uses: pytorch/pytorch/.github/workflows/_android-build-test.yml@master
+    uses: ./.github/workflows/_android-build-test.yml
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
-    uses: pytorch/pytorch/.github/workflows/_android-build-test.yml@master
+    uses: ./.github/workflows/_android-build-test.yml
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
   linux-xenial-py3_7-gcc5_4-mobile-lightweight-dispatch-build:
     name: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
@@ -303,14 +302,14 @@ jobs:
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-build:
     name: deploy-linux-xenial-cuda11.3-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: ./.github/workflows/_linux-test.yml
     needs: deploy-linux-xenial-cuda11_3-py3_7-gcc7-build
     with:
       build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7

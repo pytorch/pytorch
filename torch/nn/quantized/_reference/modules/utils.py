@@ -50,25 +50,28 @@ class ReferenceQuantizedModule(torch.nn.Module):
         model
         """
         # suppress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
-        # assert isinstance(self.weight_qscheme, torch.qscheme)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
         return _quantize_and_dequantize_weight(
-            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
+            self.weight,  # type: ignore[arg-type]
+            self.weight_qscheme,
+            self.weight_dtype,
+            self.weight_scale,
             self.weight_zero_point, self.weight_axis)
 
     def get_quantized_weight(self):
         # suppress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
-        # assert isinstance(self.weight_qscheme, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
         return _quantize_weight(
-            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
-            self.weight_zero_point, self.weight_axis)
+            self.weight,  # type: ignore[arg-type]
+            self.weight_qscheme,
+            self.weight_dtype,
+            self.weight_scale,
+            self.weight_zero_point,
+            self.weight_axis)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)

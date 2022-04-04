@@ -1360,6 +1360,25 @@ class FullyShardedDataParallel(nn.Module):
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
 
+    def named_buffers(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.Tensor]]:
+        """
+        Overrides :meth:`named_buffers()` to intercept buffer names and
+        remove all occurrences of the FSDP-specific flattened buffer prefix
+        when inside the :meth:`summon_full_params` context manager.
+        """
+        in_summon_full_params = getattr(self, "training_state", None) == \
+            TrainingState_.SUMMON_FULL_PARAMS
+        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
+            if in_summon_full_params:
+                # Remove any instances of the FSDP-specific prefix; there can
+                # be multiple in the case of nested FSDP modules
+                buffer_name = buffer_name.replace(FSDP_PREFIX, "")
+            yield (buffer_name, buffer)
+
     def named_parameters(
         self,
         *args,
