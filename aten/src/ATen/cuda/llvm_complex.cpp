@@ -734,6 +734,34 @@ log2(const complex<_Tp>& __x)
     return log(__x) / log(_Tp(2));
 }
 
+// reciprocal
+
+template<class _Tp>
+inline
+complex<_Tp>
+reciprocal(const complex<_Tp>& __x)
+{
+    auto both_inf = [](T real, T imag) {
+        return ::isinf(real) && ::isinf(imag);
+    }
+
+    auto either_inf = [](T real, T imag) {
+        return ::isinf(real) || ::isinf(imag);
+    }
+
+    auto either_nan = [](T real, T imag) {
+        return ::isnan(real) || ::isnan(imag);
+    }
+
+    if (either_nan(__x.real(), __x.imag()) || both_inf(__x.real(), __x.imag())) {
+        return {std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN()};
+    } else if (either_inf(__x.real(), __x.imag())) {
+        return {0, 0};
+    }
+    const c10::complex<T> one = c10::complex<T>(1.0, 0);
+    return one/__x;
+}
+
 // sqrt
 
 template<class _Tp>
