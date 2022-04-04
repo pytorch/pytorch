@@ -45,6 +45,7 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
+
     modules: Dict[str, types.ModuleType]
 
     def __init__(
@@ -62,9 +63,11 @@ class PackageImporter(Importer):
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
             zip_file_reader_type: A subclass of PackageZipFileReader which would be used to instantiate the zip file reader
+
         Raises:
             ImportError: If the package will use a disallowed module.
         """
+
         self.zip_reader: Any
         # TODO: @sahanp delete type ignore
         self.zip_reader = zip_file_reader_type(file_or_buffer)  # type: ignore[arg-type]
