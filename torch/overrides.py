@@ -1653,12 +1653,12 @@ class TorchFunctionModeMeta(type):
     compositional, and the wrapping here makes the obvious code do the
     right thing (aka, this is why there is a metaclass).
     """
-    def __new__(cls, name, bases, dct):
+    def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
             dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
-        return super().__new__(cls, name, bases, dct)
+        return super().__new__(metacls, name, bases, dct)
 
 
 class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
@@ -1695,12 +1695,14 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     def __init__(self):
         pass
 
-    def __torch_function__(self, func, types, args, kwargs):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
 
 class BaseTorchFunctionMode(TorchFunctionMode):
-    def __torch_function__(self, func, types, args, kwargs):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
         return func(*args, **kwargs)
 
 
