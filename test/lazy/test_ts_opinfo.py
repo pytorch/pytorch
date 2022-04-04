@@ -47,6 +47,7 @@ def init_lists():
         'bernoulli',  # incorrect results
         'pow',  # incorrect results
         'addcdiv',  # incorrect results (on CI not locally?)
+        # 'nonzero',  # Test expects exact Tensor sizes whereas we instead return upper bound sizes
     ])
 
     return (LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST)
