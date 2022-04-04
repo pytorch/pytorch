@@ -4263,6 +4263,8 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
+# NOTE: Do not edit. This code will be removed once the forward-compatibility
+#       period is over for PR #73431
 def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", value: Union[int, float] = 0.0) -> Tensor:
     r"""Pads tensor.
 
@@ -4998,9 +5000,11 @@ def _scaled_dot_product_attention(
     B, Nt, E = q.shape
     q = q / math.sqrt(E)
     # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-    attn = torch.bmm(q, k.transpose(-2, -1))
     if attn_mask is not None:
-        attn += attn_mask
+        attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+    else:
+        attn = torch.bmm(q, k.transpose(-2, -1))
+
     attn = softmax(attn, dim=-1)
     if dropout_p > 0.0:
         attn = dropout(attn, p=dropout_p)
