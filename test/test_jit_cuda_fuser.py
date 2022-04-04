@@ -31,7 +31,7 @@ from torch.autograd.gradcheck import gradcheck
 
 from typing import List
 
-RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
+RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
