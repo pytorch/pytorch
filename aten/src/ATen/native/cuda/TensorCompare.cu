@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <c10/core/Scalar.h>
 
 
@@ -11,14 +12,42 @@ namespace at { namespace native {
 
 namespace {
 
+const char where_name[] = "where_kernel";
 void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.dtype(), "where_cuda", [&] {
+  auto dtype = iter.dtype();
+  if (at::isComplexType(dtype)) {
+#if AT_USE_JITERATOR()
+  static const auto where_string = jiterator_stringify(
+      template <typename T>
+      T where_kernel(T cond_val, T self_val, T other_val) {
+        return cond_val ? self_val : other_val;
+      }
+  ); // where_string
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "where_cuda", [&] {
+      jitted_gpu_kernel<
+        /*name=*/ where_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 3>(iter, where_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "where_cuda", [&] {
+      gpu_kernel(
+        iter,
+        [=] GPU_KERNEL (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+          return cond_val ? self_val : other_val;
+        });
+  });
+#endif
+  } else {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, dtype, "where_cuda", [&] {
       gpu_kernel(
         iter,
         [=] GPU_LAMBDA (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
   });
+  }
 }
 
 void isposinf_kernel_impl(TensorIteratorBase &iter) {
