@@ -189,6 +189,7 @@ def find_matches(
                         pattern,
                         quantize_handler,
                         qconfig_map[node.name])
+                    break
 
     # add custom module instances to the match result
     assert modules is not None
