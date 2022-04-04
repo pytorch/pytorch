@@ -2,7 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
@@ -120,9 +120,10 @@ IValue pickle_load(const std::vector<char>& data) {
 IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
     TypeResolver type_resolver,
-    c10::ArrayRef<at::Tensor> tensor_table) {
+    c10::ArrayRef<at::Tensor> tensor_table,
+    c10::TypePtr (*type_parser)(const std::string&)) {
   Unpickler unpickler(
-      std::move(reader), std::move(type_resolver), tensor_table);
+      std::move(reader), std::move(type_resolver), tensor_table, type_parser);
   return unpickler.parse_ivalue();
 }
 
@@ -130,7 +131,8 @@ IValue unpickle(
     const char* data,
     size_t size,
     TypeResolver type_resolver,
-    c10::ArrayRef<at::Tensor> tensor_table) {
+    c10::ArrayRef<at::Tensor> tensor_table,
+    c10::TypePtr (*type_parser)(const std::string&)) {
   size_t bytes_read = 0;
   return unpickle(
       [&](char* buffer, size_t len) -> size_t {
@@ -145,7 +147,8 @@ IValue unpickle(
         return len;
       },
       std::move(type_resolver),
-      tensor_table);
+      tensor_table,
+      type_parser);
 }
 
 } // namespace jit

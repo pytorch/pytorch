@@ -12,6 +12,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 #ifdef USE_FBGEMM
@@ -28,6 +29,9 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
+      self.sizes().equals(src.sizes()) &&
+      self.is_neg() == src.is_neg() &&
+      self.is_conj() == src.is_conj() &&
       self.numel() >= MIN_SZ;
 }
 
@@ -45,7 +49,10 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+  // The code below is implemented with the assumption that sizes are equal
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kHalf, kBool, kBFloat16, kComplexHalf, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
@@ -61,16 +68,16 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         int nc = std::min(NC - C, BLOCK_SZ);
 
         // 1. copy columns from src to buf
-        for (int c = 0; c < nc; c++) {
+        for (const auto c : c10::irange(nc)) {
           memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
         }
 
         // 2. transpose buf in place
         int rc_max = std::max(nr, nc);
         int rc_min = std::min(nr, nc);
-        for (int r = 0; r < rc_max; r++) {
+        for (const auto r : c10::irange(rc_max)) {
           int end = std::min(r, rc_min);
-          for (int c = 0; c < end; c++) {
+          for (const auto c : c10::irange(end)) {
             scalar_t tmp = bp[r + BLOCK_SZ * c];
             bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
             bp[r * BLOCK_SZ + c] = tmp;
@@ -78,7 +85,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         }
 
         // 3. copy rows from buf to dst
-        for (int r = 0; r < nr; r++) {
+        for (const auto r : c10::irange(nr)) {
           memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
         }
       }
@@ -111,7 +118,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
          (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
-        !self.is_sparse() && !src.is_sparse() &&
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
@@ -151,13 +157,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       return self;
     }
   #endif
-
-  if (self.is_sparse() && src.is_sparse()) {
-    return at::copy_sparse_to_sparse_(self, src, non_blocking);
-  } else if (self.is_sparse() || src.is_sparse()) {
-    AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.toString(), " and src type = ", src.toString());
-  }
 
   if (self.is_same(src)) {
     return self;
@@ -247,10 +246,32 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
+    if (self._is_zerotensor()) {
+     TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
+    }
+    if (src._is_zerotensor()) {
+      return self.zero_();
+    }
     copy_impl(self, src, non_blocking);
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
+}
+
+void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
+  // Called when we are copying into an overlapping index `dst`, but we don't
+  // care which writer wins. Hacky but it works. This is only used by
+  // CUDA_tensor_apply2 in case that there are write overlaps.
+  // FIXME: really, overlapping writes should be illegal/an error in Torch
+  auto iter = TensorIteratorConfig()
+      .add_output(dst)
+      .add_input(src)
+      .resize_outputs(false)
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(true)
+      .check_all_same_device(true)
+      .build();
+  copy_stub(iter.device_type(), iter, /*non_blocking=*/false);
 }
 
 DEFINE_DISPATCH(copy_stub);

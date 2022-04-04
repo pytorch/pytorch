@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <sstream>
@@ -42,16 +42,25 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
     Verbose, // Includes all values and dead definitions
   };
 
+  using ExprColorMap = std::unordered_map<const Expr*, size_t>;
+
  public:
   static void print(
       const Fusion* fusion,
       const char* filename,
-      DetailLevel detail_level = DetailLevel::Basic);
+      DetailLevel detail_level = DetailLevel::Basic,
+      ExprColorMap* expr_color_map = nullptr);
 
-  static std::string toGraphviz(const Fusion* fusion, DetailLevel detail_level);
+  static std::string toGraphviz(
+      const Fusion* fusion,
+      DetailLevel detail_level,
+      ExprColorMap* expr_color_map = nullptr);
 
  private:
-  IrGraphGenerator(const Fusion* fusion, DetailLevel detail_level);
+  IrGraphGenerator(
+      const Fusion* fusion,
+      DetailLevel detail_level,
+      ExprColorMap* expr_color_map = nullptr);
   ~IrGraphGenerator() override = default;
 
   std::string generate();
@@ -68,8 +77,7 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const IterDomain*) override;
 
   void handle(const Bool*) override;
-  void handle(const Float*) override;
-  void handle(const Half*) override;
+  void handle(const Double*) override;
   void handle(const Int*) override;
   void handle(const NamedScalar*) override;
 
@@ -108,6 +116,7 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
   std::vector<const TensorView*> tensor_views_;
   std::vector<std::string> arcs_;
   int next_id_ = 1;
+  ExprColorMap* expr_color_map_ = nullptr;
 };
 
 } // namespace cuda

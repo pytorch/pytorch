@@ -8,7 +8,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
@@ -172,6 +172,7 @@ class TORCH_API Pickler {
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
+  void pushLiteralSparseTensor(const at::Tensor& tensor);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);

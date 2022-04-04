@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import unittest
 import torch
 import torch.utils.cpp_extension
@@ -109,21 +111,54 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 h = self.relu(h)
                 return h
 
-        def symbolic_pythonop(g, n, *args, **kwargs):
+        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+            n = ctx.cur_node
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], min_f=args[1])
+                return g.op("Clip", args[0], min_f=args[1], outputs=n.outputsSize())
             elif name == "MyRelu":
-                return g.op("Relu", args[0])
+                return g.op("Relu", args[0], outputs=n.outputsSize())
             else:
                 return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
 
         from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic("::prim_PythonOp", symbolic_pythonop, 1)
+        register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
         run_model_test(self, model, input=(x, ))
+
+class TestExportAsContribOps(unittest.TestCase):
+    opset_version = 14
+    keep_initializers_as_inputs = False
+    onnx_shape_inference = True
+
+    def test_contrib_op_with_loop(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gelu = torch.nn.GELU(approximate='none')
+
+            def forward(self, x):
+                res = []
+                res2 = []
+                for i in range(x.size(0)):
+                    if len(res) > 0:
+                        res2.append(res[0])
+                    else:
+                        res2.append(self.gelu(x[0]))
+                    res.append(x[0])
+                return torch.stack(res), torch.stack(res2)
+
+        def symbolic_custom_gelu(g, input, approximate):
+            return g.op("com.microsoft::Gelu", input).setType(input.type())
+
+        from torch.onnx import register_custom_op_symbolic
+        register_custom_op_symbolic("::gelu", symbolic_custom_gelu, 1)
+
+        x = torch.randn(3, 3, 4, requires_grad=True)
+        model = torch.jit.script(M())
+        run_model_test(self, model, input=(x,))
 
 if __name__ == "__main__":
     unittest.main()

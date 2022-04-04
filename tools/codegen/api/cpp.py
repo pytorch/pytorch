@@ -1,13 +1,15 @@
 from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
                                  FunctionSchema, ListType, NativeFunction,
                                  OptionalType, Return, SelfArgument,
-                                 TensorOptionsArguments, Type, assert_never)
+                                 TensorOptionsArguments, Type)
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType, NamedCType, CType,
                                      MutRefCType, ArrayCType, ListCType, VectorCType, ArrayRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
-                                     tensorListT, dimnameListT, tensorT, voidT,
-                                     BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
+                                     tensorListT, dimnameListT, tensorT, voidT, longT,
+                                     BaseTypeToCppMapping, intArrayRefT, optionalIntArrayRefT,
+                                     tensorOptionsT)
 from tools.codegen import local
+from tools.codegen.utils import assert_never
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -40,10 +42,13 @@ def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False)
 # Translation of "value types" in JIT schema to C++ API type.  Value
 # types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
-def valuetype_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
+def valuetype_type(t: Type, *, binds: ArgName, remove_non_owning_ref_types: bool = False) -> Optional[NamedCType]:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
+        if remove_non_owning_ref_types:
+            if t.name == BaseTy.str:
+                raise AssertionError("string ref->value conversion: not implemented yet")
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
@@ -61,9 +66,12 @@ def valuetype_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translation of types occuring in JIT arguments to a C++ argument type.
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
+# If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
+# For example, we'll return std::vector<int> instead of IntArrayRef.
+# See Note [translation from C++ reference to value types]
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
     # If it's a value type, do the value type translation
-    r = valuetype_type(t, binds=binds)
+    r = valuetype_type(t, binds=binds, remove_non_owning_ref_types=remove_non_owning_ref_types)
     if r is not None:
         return r
 
@@ -85,12 +93,17 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
                 return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
         elif str(t.elem) == 'Scalar':
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
+        elif isinstance(t.elem, ListType) and str(t.elem.elem) == 'int':
+            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
         if str(t.elem) == 'int':
-            return NamedCType(binds, BaseCType(intArrayRefT))
+            if remove_non_owning_ref_types:
+                return NamedCType(binds, VectorCType(BaseCType(longT)))
+            else:
+                return NamedCType(binds, BaseCType(intArrayRefT))
         elif str(t.elem) == 'Tensor':
             return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == 'Scalar':

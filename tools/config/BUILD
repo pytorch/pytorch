@@ -13,7 +13,6 @@ selects.config_setting_group(
     name = "cuda_enabled_and_capable",
     match_all = [
         ":cuda",
-        "//tools/toolchain:is_cuda_capable",
     ],
 )
 

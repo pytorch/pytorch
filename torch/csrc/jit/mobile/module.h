@@ -36,7 +36,11 @@ class CompilationUnit {
   std::vector<std::unique_ptr<Function>>& methods() {
     return methods_;
   }
+  const std::vector<std::unique_ptr<Function>>& methods() const {
+    return methods_;
+  }
   Function* find_function(const c10::QualifiedName& qn);
+  const Function* find_function(const c10::QualifiedName& qn) const;
 
  private:
   std::vector<std::unique_ptr<Function>> methods_;
@@ -78,7 +82,9 @@ class TORCH_API Module {
   }
   const std::vector<at::Tensor> parameters() const;
   const std::map<std::string, at::Tensor> named_parameters() const;
-  std::string get_forward_method_debug_info(size_t pc) const;
+  std::string get_forward_method_debug_info(int64_t debug_handle) const;
+  std::string getModuleHierarchy(const int64_t debug_handle) const;
+  std::string getCallStack(const int64_t debug_handle) const;
   /// Enables "training" mode.
   void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
@@ -113,11 +119,31 @@ class TORCH_API Module {
     return debug_table_;
   }
 
+  void setHasDebugHandles(bool has_debug_handles) {
+    has_debug_handles_ = has_debug_handles;
+  }
+
+  bool hasDebugHandles() const {
+    return has_debug_handles_;
+  }
+
+  const CompilationUnit& compilation_unit() const {
+    return *cu_.get();
+  }
+
+  void set_delete_memory(std::shared_ptr<char> delete_mem) {
+    mem_to_delete_ = delete_mem;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
+  bool has_debug_handles_ = false;
+
+  // Extra handle for the module to delete when itself is deleted
+  std::shared_ptr<char> mem_to_delete_;
 };
 } // namespace mobile
 } // namespace jit

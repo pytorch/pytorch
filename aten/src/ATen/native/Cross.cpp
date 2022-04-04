@@ -1,53 +1,66 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
+#include <ATen/ExpandUtils.h>
 
 #include <ATen/native/Cross.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_PRECOMPUTE_META_FUNC(linalg_cross)
+(const Tensor & input, const Tensor & other, const int64_t dimension) {
+  auto out_size = infer_size(input.sizes(), other.sizes());
+  Tensor input_broadcasted = input.expand(out_size);
+  Tensor other_broadcasted = other.expand(out_size);
+
+  int64_t dim = maybe_wrap_dim(dimension, input.dim()); // default dim = -1
+  TORCH_CHECK(input_broadcasted.size(dim) == 3, "dimension ", dimension, " does not have size 3");
+
+  set_output(out_size, input.options());
+  return TORCH_PRECOMPUTE_STRUCT(linalg_cross)().set_dim(dim);
+}
+
+}
+namespace native {
 
 DEFINE_DISPATCH(cross_stub);
 
+int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, IntArrayRef sizes) {
+  // If dimension is not given, it defaults to the first dimension found with the size 3.
+  // Note that this behaviour might be unexpected.
+  // _default_cross_dim is called internally inside the cross implementation to calculate
+  // the dim and finally cross delegates to the linalg_cross implementation with this dim
+  if(dimension.has_value()) {
+    return *dimension;
+  }
+
+  for(auto i : c10::irange(sizes.size())) {
+    if(sizes[i] == 3) {
+      return i;
+    }
+  }
+  TORCH_CHECK(false, "no dimension of size 3 in input");
+}
+
 Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  Tensor out = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  native::cross_out(input, other, dimension, out);
-  return out;
+  auto dim = _default_cross_dim(dimension, input.sizes());
+  return at::linalg_cross(input, other, dim);
 }
 
 Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension, Tensor & out) {
-  auto device_res = input.device().type();
-  TORCH_CHECK(device_res == kCPU || device_res == kCUDA, "cross only supports CPU and CUDA devices, out got: ", device_res);
-  auto device1 = input.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cross only supports CPU and CUDA devices, input got: ", device1);
-  auto device2 = other.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cross only supports CPU and CUDA devices, other got: ", device2);
-  TORCH_CHECK(device_res == device1, "out and input must have the same device type. out: ", device_res, " input: ", device1);
-  TORCH_CHECK(device1 == device2, "input and other must have the same device type. input: ", device1, " other: ", device2);
-  TORCH_CHECK(!out.is_cuda() || out.get_device() == input.get_device(), "device of out (", input.get_device(), ") must match device of input (", other.get_device(), ")");
-  TORCH_CHECK(!input.is_cuda() || input.get_device() == other.get_device(), "device of input (", input.get_device(), ") must match device of other (", other.get_device(), ")");
-  TORCH_CHECK(input.dim() == other.dim(), "inconsistent tensors dimensions input: ", input.dim(), " other: ", other.dim());
-  TORCH_CHECK(input.sizes() == other.sizes(), "inconsistent tensors sizes input: ", input.sizes(), " other: ", other.sizes());
+  auto dim = _default_cross_dim(dimension, input.sizes());
+  return at::linalg_cross_out(out, input, other, dim);
+}
 
-  int64_t dim = -1;
-  if(!dimension.has_value()) {
-    for(int64_t i = 0; i < input.dim(); i++) {
-      if(input.size(i) == 3) {
-        dim = i;
-        break;
-      }
-    }
-    TORCH_CHECK(dim >= 0, "no dimension of size 3 in input");
-  } else {
-    dim = maybe_wrap_dim(dimension.value(), input.dim());
-    TORCH_CHECK(input.size(dim) == 3, "dimension ", dimension.value(), " does not have size 3");
-  }
+TORCH_IMPL_FUNC(linalg_cross_out)
+(const Tensor & input, const Tensor & other, const int64_t dim, const Tensor & out) {
+  auto out_size = infer_size(input.sizes(), other.sizes());
+  Tensor input_broadcasted = input.expand(out_size);
+  Tensor other_broadcasted = other.expand(out_size);
 
-  if (out.sizes() != input.sizes()) {
-    out.resize_as_(input);
-  }
-
-  cross_stub(device1, out, input, other, dim);
-  return out;
+  cross_stub(input.device().type(), out, input_broadcasted, other_broadcasted, dim);
 }
 
 }} // namespace at::native

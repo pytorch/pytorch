@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 /*
@@ -19,10 +19,10 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-TORCH_CUDA_CU_API bool isFusableCudaFusionGroup(const Node* node);
+TORCH_CUDA_CU_API bool isFusibleCudaFusionGroup(const Node* node);
 
 // consider if `node` could be fused into `fusion`
-TORCH_CUDA_CU_API bool isFusableCudaFusionGroup(
+TORCH_CUDA_CU_API bool isFusibleCudaFusionGroup(
     const Node* fusion,
     const Node* node);
 

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/api/support.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <cmath>
@@ -263,7 +264,7 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   tensor = at::tensor(v);
   ASSERT_EQ(tensor.numel(), v.size());
   ASSERT_EQ(tensor.dtype(), at::kInt);
-  for (size_t i = 0; i < v.size(); ++i) {
+  for (const auto i : c10::irange(v.size())) {
     ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
   }
 
@@ -271,7 +272,7 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   tensor = at::tensor(w);
   ASSERT_EQ(tensor.numel(), w.size());
   ASSERT_EQ(tensor.dtype(), at::kDouble);
-  for (size_t i = 0; i < w.size(); ++i) {
+  for (const auto i : c10::irange(w.size())) {
     ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
   }
 
@@ -282,7 +283,7 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   tensor = at::tensor(x);
   ASSERT_EQ(tensor.numel(), x.size());
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
-  for (size_t i = 0; i < x.size(); ++i) {
+  for (const auto i : c10::irange(x.size())) {
     ASSERT_TRUE(almost_equal(tensor[i], x.at(i)));
   }
 }
@@ -913,8 +914,8 @@ TEST(TensorTest, FromBlobWithStrides) {
   ASSERT_EQ(tensor.numel(), 9);
   const std::vector<int64_t> expected_strides = {1, 3};
   ASSERT_EQ(tensor.strides(), expected_strides);
-  for (int64_t i = 0; i < tensor.size(0); ++i) {
-    for (int64_t j = 0; j < tensor.size(1); ++j) {
+  for (const auto i : c10::irange(tensor.size(0))) {
+    for (const auto j : c10::irange(tensor.size(1))) {
       // NOTE: This is column major because the strides are swapped.
       EXPECT_EQ(tensor[i][j].item<int32_t>(), 1 + (j * tensor.size(1)) + i);
     }

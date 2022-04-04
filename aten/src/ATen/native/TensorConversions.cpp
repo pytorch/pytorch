@@ -91,6 +91,26 @@ static inline bool is_null_or_equal_to(const c10::optional<T>& test, const T& va
   return test.value() == value;
 }
 
+// NOTE: static runtime's to_maybe_copy_out relies on details of this
+// check; if you change how it works, please update static runtime as
+// well.
+bool to_will_alias(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+
+  return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
+    is_null_or_equal_to(layout, self.layout()) &&
+    is_null_or_equal_to(device, self.device()) &&
+    !copy &&
+    (memory_format == MemoryFormat::Preserve ||
+     self.suggest_memory_format() == memory_format);
+}
+
 static inline Tensor to_impl(
     const Tensor& self,
     c10::optional<ScalarType> dtype,
@@ -100,20 +120,50 @@ static inline Tensor to_impl(
     bool non_blocking,
     bool copy,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
   // fast path
-  if (is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
-      is_null_or_equal_to(layout, self.layout()) &&
-      is_null_or_equal_to(device, self.device()) &&
-      !copy &&
-      (memory_format == MemoryFormat::Preserve ||
-       self.suggest_memory_format() == memory_format)) {
+  if (to_will_alias(self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
   }
-
   return at::_to_copy(
       self, dtype, layout, device, pin_memory, non_blocking, optional_memory_format);
+}
+
+// If input tensor is fp32, cast it to fp16, otherwise leave it alone.
+// (this is intended to be used internally by the JIT autocast implementation)
+Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) {
+  if (self.dtype() == at::ScalarType::Float &&
+      ((self.device().is_cuda() && cuda_enabled) ||
+      (self.device().is_cpu() && cpu_enabled))
+      ) {
+    at::ScalarType target = at::ScalarType::Undefined;
+    if (self.device().is_cuda()) {
+      target = cuda_dtype;
+    } else if (self.device().is_cpu()) {
+      target = cpu_dtype;
+    }
+
+    TORCH_INTERNAL_ASSERT(target != at::ScalarType::Undefined, "_autocast_to_reduced_precision requires legit ScalarType argument for given device");
+
+    return to_impl(
+        self, target, c10::nullopt, c10::nullopt, c10::nullopt, false, false, c10::nullopt);
+  } else {
+    return self;
+  }
+}
+
+// If input tensor is fp16, cast it to fp32, otherwise leave it alone.
+// (this is intended to be used internally by the JIT autocast implementation)
+Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled) {
+  if ((self.dtype() == at::ScalarType::Half || self.dtype() == at::ScalarType::BFloat16) &&
+      ((self.device().is_cuda() && cuda_enabled) ||
+      (self.device().is_cpu() && cpu_enabled))
+      ) {
+    return to_impl(
+        self, at::ScalarType::Float, c10::nullopt, c10::nullopt, c10::nullopt, false, false, c10::nullopt);
+  } else {
+    return self;
+  }
 }
 
 Tensor to(
@@ -190,11 +240,14 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
-  } else if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn(input_.scalar_type());
-  } else {
-    AT_ERROR("Unsupported input layout: ", input_.layout());
   }
+  if (input_.layout() == c10::kMkldnn) {
+    return grad.to_mkldnn(input_.scalar_type());
+  }
+  if (input_.layout() == c10::kStrided) {
+    return grad.to_dense();
+  }
+  AT_ERROR("Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
@@ -202,24 +255,186 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+  if (tensor.layout() == c10::kSparse) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kSparseCsr) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kMkldnn) {
+    return tensor._to_dense(dtype);
+  }
+  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
+  if (dtype) {
+    return tensor.to(*dtype);
+  }
+  return tensor;
+}
+
+Tensor sparse_to_dense(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+  return dst.add_(self);
+}
+
+Tensor sparse_csr_to_dense(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+  return dst.add_(self);
+}
+
+// Computes the strides for view_dtype output when the view dtype is
+// smaller than the original dtype
+inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+  const int64_t ndim = old_strides.size();
+
+  TORCH_CHECK(
+    old_strides[ndim - 1] == 1,
+    "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
+    " (different element sizes), but got ", old_strides[ndim - 1]);
+
+  DimVector new_strides(ndim);
+  for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
+    new_strides[dim_idx] = old_strides[dim_idx] * size_ratio;
+  }
+  new_strides[ndim - 1] = 1;
+  return new_strides;
+}
+
+// Computes the strides for view_dtype output when the view dtype is
+// larger than the original dtype
+inline DimVector compute_strides_for_view_dtype_upsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+  const int64_t ndim = old_strides.size();
+  TORCH_CHECK(
+    old_strides[ndim - 1] == 1,
+    "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
+    " (different element sizes), but got ", old_strides[ndim - 1]);
+
+  DimVector new_strides(ndim);
+  for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
+    TORCH_CHECK(
+      (old_strides[dim_idx] % size_ratio) == 0,
+      "self.stride(", dim_idx, ") must be divisible by ", size_ratio,
+      " to view ", old_dtype, " as ", new_dtype, " (different element sizes), ",
+      "but got ", old_strides[dim_idx]);
+
+    new_strides[dim_idx] = old_strides[dim_idx] / size_ratio;
+  }
+  new_strides[ndim - 1] = 1;
+  return new_strides;
+}
+
 Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   if (self.scalar_type() == dtype) {
     return self;
   }
   const auto type_meta = c10::scalarTypeToTypeMeta(dtype);
-  TORCH_CHECK(self.element_size() == static_cast<int64_t>(type_meta.itemsize()),
-    "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   TORCH_CHECK(!self.is_conj(),
     "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.");
   TORCH_CHECK(!self.is_neg(),
     "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.");
+
+  int64_t self_element_size = self.element_size();
+  int64_t new_element_size = static_cast<int64_t>(type_meta.itemsize());
+
   Storage storage = self.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(
       std::move(storage), self.key_set(), type_meta);
   auto* impl = new_tensor.unsafeGetTensorImpl();
-  impl->set_storage_offset(self.storage_offset());
-  impl->set_sizes_and_strides(self.sizes(), self.strides());
+
+  if (self_element_size == new_element_size) {
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+
+  } else if (self.dim() == 0) {
+    TORCH_CHECK(false,
+      "self.dim() cannot be 0 to view ", self.scalar_type(), " as ",
+      dtype, " (different element sizes)");
+
+  } else if (self_element_size > new_element_size) {
+    // Downsizing element size
+
+    int64_t size_ratio = self_element_size / new_element_size;
+    auto new_strides = compute_strides_for_view_dtype_downsize(
+      self.strides(), size_ratio, self.scalar_type(), dtype);
+
+    auto old_sizes = self.sizes();
+    DimVector new_sizes(self.dim());
+    std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
+    new_sizes[self.dim() - 1] *= size_ratio;
+
+    auto new_storage_offset = size_ratio * self.storage_offset();
+
+    impl->set_storage_offset(new_storage_offset);
+    impl->set_sizes_and_strides(new_sizes, new_strides);
+
+  } else {
+    // Upsizing element size
+
+    int64_t size_ratio = new_element_size / self_element_size;
+
+    TORCH_CHECK(
+      (self.size(-1) % size_ratio) == 0,
+      "self.size(-1) must be divisible by ", size_ratio, " to view ",
+      self.scalar_type(), " as ", dtype, " (different element sizes), ",
+      "but got ", self.size(-1));
+
+    TORCH_CHECK(
+      (self.storage_offset() % size_ratio) == 0,
+      "self.storage_offset() must be divisible by ", size_ratio, " to view ",
+      self.scalar_type(), " as ", dtype, " (different element sizes), but got ",
+      self.storage_offset());
+
+    auto new_strides = compute_strides_for_view_dtype_upsize(
+      self.strides(), size_ratio, self.scalar_type(), dtype);
+
+    auto old_sizes = self.sizes();
+    DimVector new_sizes(self.dim());
+    std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
+    new_sizes[self.dim() - 1] /= size_ratio;
+
+    auto new_storage_offset = self.storage_offset() / size_ratio;
+
+    impl->set_storage_offset(new_storage_offset);
+    impl->set_sizes_and_strides(new_sizes, new_strides);
+  }
+
   return new_tensor;
+}
+
+Tensor dense_to_sparse_csr(const Tensor& self) {
+  return self.to_sparse().to_sparse_csr();
+}
+
+Tensor csr_to_sparse_csr(const Tensor& self) {
+  return self;
+}
+
+Tensor coo_to_sparse_csr(const Tensor& self) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.coalesce();
+  auto row_indices = coalesced_self.indices()[0];
+  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, self.size(0), out_int32);
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      coalesced_self.indices()[1].contiguous(),
+      coalesced_self.values(),
+      coalesced_self.sizes(),
+      coalesced_self.scalar_type(),
+      c10::kSparseCsr,
+      coalesced_self.device());
 }
 
 }} // namespace at::native

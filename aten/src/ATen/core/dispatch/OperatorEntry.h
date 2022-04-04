@@ -17,6 +17,10 @@
 #include <list>
 #include <array>
 
+#ifdef C10_MOBILE
+#define C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
+#endif
+
 namespace c10 {
 
 class Dispatcher;
@@ -101,6 +105,13 @@ public:
     return name_;
   }
 
+#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
+  using AnnotatedKernelContainer = std::array<AnnotatedKernel, 1>;
+#else
+  using AnnotatedKernelContainer = std::list<AnnotatedKernel>;
+#endif
+  using AnnotatedKernelContainerIterator = AnnotatedKernelContainer::iterator;
+
   // Why are kernels and fallback asymmetric?  It has to do with ownership.
   // Kernels and the computed dispatch tables for them are canonically
   // owned by OperatorEntry, but backend fallbacks are specified once
@@ -114,7 +125,7 @@ public:
 
   // Precondition: Dispatcher::mutex_ is held
   // Postcondition: caller is responsible for disposing of the kernel
-  std::list<AnnotatedKernel>::iterator registerKernel(
+  AnnotatedKernelContainerIterator registerKernel(
     const Dispatcher& dispatcher,
     c10::optional<DispatchKey> dispatch_key,
     KernelFunction kernel,
@@ -127,7 +138,7 @@ public:
   void deregisterKernel_(
     const Dispatcher& dispatcher,
     c10::optional<DispatchKey> dispatch_key,
-    std::list<AnnotatedKernel>::iterator kernel
+    AnnotatedKernelContainerIterator kernel
   );
 
   // Precondition: Dispatcher::mutex_ is held
@@ -150,16 +161,24 @@ public:
 
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
-  void assertSignatureIsCorrect() {
-    if (C10_UNLIKELY(cpp_signature_.has_value() && (CppSignature::make<FuncType>() != cpp_signature_->signature))) {
-      reportSignatureError(CppSignature::make<FuncType>().name());
+  inline void assertSignatureIsCorrect() {
+    assertSignatureIsCorrect(CppSignature::make<FuncType>());
+  }
+
+  void assertSignatureIsCorrect(const CppSignature call_signature) {
+    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
+      reportSignatureError(call_signature);
     }
   }
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
   const KernelFunction& lookup(DispatchKey k) const {
-    const auto& kernel = dispatchTable_[static_cast<uint8_t>(k)];
+    const auto idx = getDispatchTableIndexForDispatchKey(k);
+    if (C10_UNLIKELY(idx == -1)) {
+      reportError(k);
+    }
+    const auto& kernel = dispatchTable_[idx];
     // A valid kernel *always* has a boxed kernel and *may* have an
     // unboxed kernel. However, we typically do unboxed calls in at::
     // APIs, where the kernel 1) will very likely be valid and 2)
@@ -176,12 +195,23 @@ public:
 
   std::string listAllDispatchKeys() const;
 
+  // Returns true if kernel_ has entry for any key in ks.
+  //
+  // Invariant: There are no alias keys in the passed-in dispatch key set.
+  // Note [No Alias Keys in DispatchKeySet]
+  // Alias keys should be checked using `hasKernelForDispatchKey`
+  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
+  // have a value > 63 (causing overflow).
+  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
+  // Returns true if kernel_ has entry for a particular key.
+  bool hasKernelForDispatchKey(DispatchKey k) const;
+
 private:
 
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
 
-  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> dispatchTable_;
+  std::array<KernelFunction, c10::getDispatchTableIndexForDispatchKey(DispatchKey::NumDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
@@ -215,7 +245,14 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
+  ska::flat_hash_map<DispatchKey,
+#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
+                     // On mobile, we needn't worry about Jupyter notebooks.
+                     std::array<AnnotatedKernel, 1>
+#else
+                     std::list<AnnotatedKernel>
+#endif
+                     > kernels_;
 
   const AnnotatedKernel& missingKernel() const;
   const AnnotatedKernel& ambiguousAutogradOtherKernel() const;
@@ -236,7 +273,7 @@ private:
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
 
-  [[noreturn]] void reportSignatureError(std::string name) const;
+  [[noreturn]] void reportSignatureError(CppSignature call_signature) const;
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
@@ -248,19 +285,8 @@ private:
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
-
-  // Returns true if kernel_ has entry for any key in ks.
-  //
-  // Invariant: There are no alias keys in the passed-in dispatch key set.
-  // Note [No Alias Keys in DispatchKeySet]
-  // Alias keys should be checked using `hasKernelForDispatchKey`
-  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
-  // have a value > 63 (causing overflow).
-  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
-  // Returns true if kernel_ has entry for a particular key.
-  bool hasKernelForDispatchKey(DispatchKey k) const;
   // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
-  c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
+  const AnnotatedKernel* getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
 } // namespace impl

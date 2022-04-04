@@ -1,12 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/div_rtn.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/IndexingUtils.h>
-#include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/_conv_depthwise2d_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -69,11 +79,11 @@ __global__ void conv_depthwise2d_forward_kernel(
 
     acc_t value = biasEnabled ? static_cast<acc_t>(bias.data()[c]) : acc_t(0);
     const index_t offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
@@ -125,17 +135,17 @@ __global__ void conv_depthwise2d_backward_kernel(
 
     acc_t value(0);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #pragma unroll
 #endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
@@ -275,7 +285,6 @@ void conv_depthwise2d_forward_out(
 
   // Following the behavior of other THCUNN functions, we shape the output
   // Tensor ourselves
-  int64_t batchSize = in_sizes[0];
   int64_t height = in_sizes[2];
   int64_t width = in_sizes[3];
   int64_t outputChannels = w_sizes[0];
@@ -442,7 +451,7 @@ void conv_depthwise2d_backward_out(
 int getGradParamsNumThreads(int batchSize) {
   //warp per item in a batch, up to a maximum
   constexpr int MAX_BLOCK_SIZE = 256;
-  return std::min(batchSize * C10_WARP_SIZE, MAX_BLOCK_SIZE);
+  return std::min(batchSize * at::cuda::warp_size(), MAX_BLOCK_SIZE);
 }
 
 void conv_depthwise2d_grad_weight_out(
@@ -498,8 +507,9 @@ void conv_depthwise2d_grad_weight_out(
     const auto input_a = input.packed_accessor32<scalar_t, 4>();
     const auto grad_weight_a = grad_weight.packed_accessor32<scalar_t, 4>();
     using acc_t = at::acc_type<scalar_t, true>;
-    TORCH_INTERNAL_ASSERT(block.x % C10_WARP_SIZE == 0);
-    int smem = (block.x  / C10_WARP_SIZE) * sizeof(acc_t);
+    int warp_size = at::cuda::warp_size();
+    TORCH_INTERNAL_ASSERT(block.x % warp_size == 0);
+    int smem = (block.x  / warp_size) * sizeof(acc_t);
     conv_depthwise2d_grad_weight_kernel<<<grid, block, smem, stream>>>(
         grad_output_a, input_a, grad_weight_a, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
@@ -567,10 +577,10 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
     IntArrayRef dilation,
     Tensor & grad_input,
     Tensor & grad_weight) {
-  auto self = self_.expect_contiguous();
   auto grad_output = grad_output_.expect_contiguous();
 
   if (grad_weight.defined()) {
+    auto self = self_.expect_contiguous();
     conv_depthwise2d_grad_weight_out(
         *self, *grad_output, grad_weight,
         kernel_size[1], kernel_size[0],
@@ -582,7 +592,7 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
   if (grad_input.defined()) {
     auto weight = weight_.expect_contiguous();
     conv_depthwise2d_backward_out(
-        *self, *grad_output, grad_input, *weight,
+        self_, *grad_output, grad_input, *weight,
         kernel_size[1], kernel_size[0],
         stride[1], stride[0],
         padding[1], padding[0],
@@ -621,6 +631,8 @@ std::tuple<Tensor, Tensor> conv_depthwise2d_backward_cuda(
       grad_input,
       grad_weight);
 }
+
+REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda);
 
 } // namespace native
 } // namespace at
