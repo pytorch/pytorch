@@ -24,7 +24,7 @@ TORCH_API void parseIR(
 
 /** \brief Parse IR from \p STR constructing the corresponding IR in\ GRAPH.
  *
- * O\p VMAP is filled with String to Value pairs allowing to index Values in the
+ * \p VMAP is filled with String to Value pairs allowing to index Values in the
  * newly created graph by their name in the original IR string.
  * if parse_tensor_constants is true will construct empty tensors
  * for Tensor constants with random or unitialized contents, otherwise will

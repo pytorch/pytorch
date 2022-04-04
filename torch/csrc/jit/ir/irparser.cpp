@@ -67,7 +67,7 @@ class IRParser {
   std::unordered_map<std::string, Value*>& vmap;
   SchemaTypeParser type_parser;
   bool parse_tensor_constants_;
-  std::unordered_set<Node*> deferred_tensor_value_initializations_;
+  std::vector<Node*> deferred_tensor_value_initializations_;
 };
 
 struct ParsedLiteral {
@@ -216,7 +216,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       L.expect('>');
       // these values will be set with randomly initialized data in
       // a post processing pass;
-      deferred_tensor_value_initializations_.insert(n);
+      deferred_tensor_value_initializations_.push_back(n);
       r.k = AttributeKind::t;
       return r;
     }
