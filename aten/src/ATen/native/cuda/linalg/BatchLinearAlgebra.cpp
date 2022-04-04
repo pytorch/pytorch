@@ -2368,6 +2368,37 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::stri
 #endif
 }
 
+torch::TensorBase qr_orthogonalization_cuda(const torch::Tensor& A, torch::Tensor& Q, const float epsilon){
+    TORCH_CHECK(A.device().is_cuda(), #A " must be a CUDA tensor")
+    TORCH_CHECK(A.is_contiguous(), #A " must be contiguous")
+    TORCH_CHECK(A.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
+    
+    const uint m = A.size(0);
+    const uint n = A.size(1);
+
+    if (Q.size(0) == 0) {
+      Q = torch::empty({m, n}, A.options());
+    }
+    else{
+        TORCH_CHECK(Q.device().is_cuda(), #Q " must be a CUDA tensor")
+        TORCH_CHECK(Q.is_contiguous(), #Q " must be contiguous")
+        TORCH_CHECK(A.sizes() == Q.sizes(), "Output and input tensors must have same sizes.");
+    }
+        
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+    A.scalar_type(), "qr_orthogonalization_cuda", ([&] {
+        if (n < 512)
+            qr_main<256, scalar_t>(A, Q, m, n, epsilon);
+        else if (n < 1024)
+            qr_main<512, scalar_t>(A, Q, m, n, epsilon);
+        else
+            qr_main<1024, scalar_t>(A, Q, m, n, epsilon);
+    })
+    );
+
+    return Q;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
