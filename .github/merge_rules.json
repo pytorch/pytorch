@@ -15,83 +15,109 @@
          "torch/onnx/**"
       ],
       "approved_by": ["BowenBao", "garymm"],
-      "mandatory_checks_name": ["Facebook CLA Check"]
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "NVFuser",
       "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
       "approved_by": ["csarofeen", "ngimel"],
-      "mandatory_checks_name": ["Facebook CLA Check"]
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "OSS CI",
       "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
-      "approved_by": ["janeyx99", "ezyang", "atalman"],
-      "mandatory_checks_name": ["Facebook CLA Check"]
+      "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
       "approved_by": ["mruberry", "ngimel", "janeyx99"],
-      "mandatory_checks_name": ["Facebook CLA Check"]
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
-      "name": "Android",
-      "patterns": ["android/**", "test/mobile/**"],
-      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
-      "mandatory_checks_name": ["Facebook CLA Check"]
-   },
-   {
-      "name": "iOS",
-      "patterns": ["ios/**", "test/mobile/**"],
-      "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
-      "mandatory_checks_name": ["Facebook CLA Check"]
+      "name": "Mobile",
+      "patterns": ["ios/**", "android/**", "test/mobile/**"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "dreiss"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": [
+        "aaronenyeshi",
+        "alanwaketan",
         "albanD",
+        "angelayi",
+        "anijain2305",
         "anjali411",
+        "ansley",
         "awgu",
+        "bertmaher",
         "bdhirsh",
         "cbalioglu",
+        "Chillee",
         "cpuhrsch",
         "dagitses",
+        "davidberard98",
+        "desertfire",
+        "eellison",
         "ejguan",
         "ezyang",
         "fduwjj",
+        "Gamrix",
         "gchanan",
         "george-qi",
+        "gmagogsfm",
+        "hlu1",
+        "huiguoo",
         "H-Huang",
         "jaceyca",
+        "jamesr66a",
+        "jansel",
         "jbschlosser",
         "jiayisuse",
+        "Krovatkin",
         "kumpera",
         "kwen2501",
         "malfet",
         "mikaylagawarecki",
+        "mikeiovine",
         "mingzhe09088",
         "mrshenli",
         "mruberry",
+        "navahgar",
         "ngimel",
+        "NicolasHug",
+        "nikithamalgifb",
         "NivekT",
         "osalpekar",
+        "PaliC",
         "pbelevich",
         "pritamdamania87",
+        "qihqi",
+        "robieta",
         "rohan-varma",
         "saketh-are",
         "samdow",
         "seemethere",
+        "SherlockNoMad",
+        "shunting314",
         "soulitzer",
         "suo",
+        "tugsbayasgalan",
         "VitalyFedyunin",
+        "vmoens",
         "wanchaol",
+        "wconstab",
         "wenleix",
         "yaroslavvb",
+        "zdevito",
         "zhaojuanmao",
+        "zhxchen17",
+        "ZolotukhinM",
         "zou3519"
       ],
-      "mandatory_checks_name": ["Facebook CLA Check"]
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    }
 ]
