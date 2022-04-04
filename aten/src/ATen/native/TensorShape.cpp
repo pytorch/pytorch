@@ -1487,7 +1487,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       const auto thread_offsets = compressed_int_counts.cumsum(0);
       const auto res_len = compressed_int_counts.sum().item<int64_t>();
 
-      // Short-circuit if emtpy intersection
+      // Short-circuit if empty intersection
       if (!res_len) {
         auto empty_idx = at::empty({0}, src.options());
         return std::make_tuple(empty_idx, empty_idx);
@@ -1613,9 +1613,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
               dim_indices_unique, dim_indices_counts, n_unique_dim_indices
             );
       }
-
-      std::cout << "nnz2: " << res_nnz << std::endl;
-      std::cout << std::endl;
 
       const auto compute_offsets = [](const Tensor& counts, int64_t len) {
         const auto narrowed_counts = counts.narrow(-1, 0, len);
