@@ -7780,6 +7780,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: ROCm set LD_LIBRARY_PATH for without-deps testing
+        run: |
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -8604,6 +8607,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: ROCm set LD_LIBRARY_PATH for without-deps testing
+        run: |
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -9428,6 +9434,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: ROCm set LD_LIBRARY_PATH for without-deps testing
+        run: |
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
@@ -10252,6 +10261,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: ROCm set LD_LIBRARY_PATH for without-deps testing
+        run: |
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
           retry () {
