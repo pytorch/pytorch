@@ -10,14 +10,13 @@ namespace impl {
 
 // Returns true if all entries of self are zero
 // TODO: This has potential to be a generic helper
-inline bool _is_all_zero(const Tensor& self) {
+inline bool _is_sparse_and_zero(const Tensor& self) {
   if (self.is_sparse_csr() || self.is_sparse()) {
     if (self._nnz() == 0) {
       return true;
     }
-    return (self.values().count_nonzero().item<int64_t>() == 0);
   }
-  return (self.count_nonzero().item<int64_t>() == 0);
+  return false;
 }
 
 inline void _check_is_cpu(const Tensor& self, c10::string_view name) {
