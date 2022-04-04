@@ -26,7 +26,7 @@
    {
       "name": "OSS CI",
       "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
-      "approved_by": ["janeyx99", "ezyang", "atalman"],
+      "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
@@ -36,15 +36,9 @@
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
-      "name": "Android",
-      "patterns": ["android/**", "test/mobile/**"],
-      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
-   },
-   {
-      "name": "iOS",
-      "patterns": ["ios/**", "test/mobile/**"],
-      "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
+      "name": "Mobile",
+      "patterns": ["ios/**", "android/**", "test/mobile/**"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "dreiss"],
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
@@ -94,6 +88,7 @@
         "mruberry",
         "navahgar",
         "ngimel",
+        "NicolasHug",
         "nikithamalgifb",
         "NivekT",
         "osalpekar",
@@ -112,6 +107,7 @@
         "suo",
         "tugsbayasgalan",
         "VitalyFedyunin",
+        "vmoens",
         "wanchaol",
         "wconstab",
         "wenleix",
