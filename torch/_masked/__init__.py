@@ -582,8 +582,8 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
        sparse :attr:`input` tensor.
 
     """
-    if input.layout not in {torch.strided, torch.sparse_coo}:
-        raise ValueError(f'_input_mask expects strided or sparse COO tensor but got {input.layout}')
+    if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:
+        raise ValueError(f'_input_mask expects strided or sparse COO or sparse CSR tensor but got {input.layout}')
 
     mask = kwargs.get('mask')
 
@@ -597,15 +597,26 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
             raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
         if mask.layout == torch.strided:
             mask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-        else:
+        elif mask.layout == torch.sparse_coo:
             mask = torch._sparse_broadcast_to(mask, input.shape)
+        else:
+            assert mask.layout == torch.sparse_csr
+            # Broadcasting of CSR tensors is not implemented. Working
+            # around by using COO layout.
+            mask = torch._sparse_broadcast_to(mask.to_sparse(), input.shape).to_sparse_csr()
 
     # mask layout must match with input layout
     if mask.layout != input.layout:
         if input.layout == torch.strided:
             mask = mask.to_dense()
+        elif input.layout == torch.sparse_coo:
+            if mask.layout == torch.strided:
+                mask = mask.to_sparse(input.sparse_dim())
+            else:
+                mask = mask.to_sparse()
         else:
-            mask = mask.to_sparse(input.sparse_dim())
+            assert input.layout == torch.sparse_csr
+            mask = mask.to_sparse_csr()
 
     # sparse mask must be coalesced
     if mask.layout == torch.sparse_coo:
@@ -648,11 +659,7 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
     canonical_mask = _input_mask(input, mask=mask)
     if callable(op):
         fill_value = _reduction_identity(op.__name__, input, *args)
-        if input.layout == torch.strided:
-            return torch.where(canonical_mask, input, fill_value.expand(input.shape))
-        else:
-            assert input.layout == torch.sparse_coo
-            return _sparse_coo_where(canonical_mask, input, fill_value)
+        return _where(canonical_mask, input, fill_value)
     else:
         raise ValueError(f'_combine_input_and_mask expected masked operation (got {type(op).__name__} object)')
 
@@ -699,8 +706,11 @@ def sum(input: Tensor,
             result = torch.sparse_coo_tensor(indices, result._values(), shape, dtype=result.dtype, device=result.device)
 
         return result
+
+    elif input.layout == torch.sparse_csr:
+        return torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
     else:
-        raise ValueError(f'masked sum expects strided or sparse_coo tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked sum expects strided, sparse_coo, or sparse_csr tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
