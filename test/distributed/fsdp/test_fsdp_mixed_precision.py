@@ -6,6 +6,7 @@ from functools import partial
 from itertools import product
 
 import torch
+import torch.cuda.nccl as nccl
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import (
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+from torch.testing._internal.common_cuda import CUDA11OrLater
 
 
 if not dist.is_available():
@@ -41,17 +43,23 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # Various mixed precision configs to test under.
 default_mp = MixedPrecision()
-mp_diff_reduce = MixedPrecision(reduce_dtype=torch.bfloat16)
-mp_diff_buffer = MixedPrecision(buffer_dtype=torch.bfloat16)
-mp_diff_buffer_and_reduce = MixedPrecision(
-    buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32
+
+nccl_supports_bf16 = (
+    CUDA11OrLater and dist.is_nccl_available() and nccl.version() >= (2, 10)
 )
+
+mp_configs = [default_mp]
+
+if nccl_supports_bf16:
+    mp_configs.extend([
+        MixedPrecision(reduce_dtype=torch.bfloat16),
+        MixedPrecision(buffer_dtype=torch.bfloat16),
+        MixedPrecision(buffer_dtype=torch.bfloat16, reduce_type=torch.float32)
+    ])
+
 # Buffer original dtype, which can differ from model params.
 buffer_orig_dtype = torch.float64
 
-mp_configs = [
-    default_mp, mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce
-]
 params = "mp_config,cpu_offload,backward_prefetch,full_precision_param_dtype"
 cpu_offload_config = [
     CPUOffload(offload_params=True), CPUOffload(offload_params=False)
