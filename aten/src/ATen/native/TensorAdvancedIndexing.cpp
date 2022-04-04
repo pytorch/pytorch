@@ -1201,10 +1201,10 @@ static void scatter_reduce_exclude_self_helper(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,
-  SCATTER_GATHER_OP op) {
+  const SCATTER_GATHER_OP& op) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
-    self.scalar_type(), "cuda_scatter_reduce_exclude_input_init", [&] {
+    self.scalar_type(), "scatter_reduce_exclude_input_init", [&] {
     scalar_t init_val;
     switch (op) {
       case SCATTER_GATHER_OP::REDUCE_ADD:
