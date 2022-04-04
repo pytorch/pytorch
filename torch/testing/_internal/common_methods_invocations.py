@@ -10253,11 +10253,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=partial(sample_inputs_linalg_norm, variant='subgradient_at_zero'),
-           supports_forward_ad=True,
-           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
-           # Could not allocate memory to change Tensor SizesAndStrides!
-           check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True,
            aten_name='linalg_norm',
            skips=(
                # Copied from above
@@ -10266,16 +10261,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            dtypes=[torch.complex128]),
 
                # [NEW] Skips specifically for sample inputs at zero
-               # Test dtypes tries to run backward with integer types (maybe we shouldn't do that?)
-               # This leads to a division by zero on ASAN
-               DecorateInfo(unittest.skip("Skipped!"), "TestCommon", 'test_dtypes'),
                # norm's vjp/jvp are not well-conditioned near zero
                DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_gradgrad'),
-               DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad')
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
