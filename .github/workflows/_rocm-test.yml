@@ -29,6 +29,7 @@ jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
+    timeout-minutes: 270
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -36,20 +37,20 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master@${{ github.sha }}
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
 
       - name: Setup ROCm
-        uses: pytorch/pytorch/.github/actions/setup-rocm@${{ github.sha }}
+        uses: ./.github/actions/setup-rocm
 
       - name: Pull docker image
-        uses: pytorch/pytorch/.github/actions/pull-docker-image@${{ github.sha }}
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@${{ github.sha }}
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
 
@@ -131,14 +132,15 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@${{ github.sha }}
+        uses: ./.github/actions/get-workflow-job-id
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts-github@${{ github.sha }}
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
+          use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload test statistics
@@ -164,7 +166,7 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: pytorch/pytorch/.github/actions/teardown-linux@${{ github.sha }}
+        uses: ./.github/actions/teardown-linux
         if: always()
         with:
-          wait-ssh: false
+          skip-wait-ssh: true

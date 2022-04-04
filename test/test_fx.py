@@ -461,6 +461,19 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         self.assertEqual(gm(3, 4), 14)
 
+    def test_concrete_arg_none_assert(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, val=None):
+                return x if val is None else x + val
+
+        f = Foo()
+        traced = torch.fx.symbolic_trace(f, concrete_args={'val' : None})
+        with self.assertRaisesRegex(AssertionError, 'val has been specialized to have value None'):
+            traced(torch.randn(5), torch.randn(5))
+
+        x = torch.randn(5)
+        torch.testing.assert_close(traced(x), f(x))
+
     def test_graph_unique_names(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -3408,6 +3421,38 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         transformed_gm = Transformer(nf).transform()
         self.assertEqual(nf(vals), transformed_gm(vals))
+
+    def test_interpreter_with_codegen(self):
+        class ListCodeGen(CodeGen):
+            def gen_fn_def(self, free_vars, maybe_return_annotation):
+                lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list"""
+                return lst_unpack
+
+            def additional_globals(self):
+                return [('List', typing.List)]
+
+            def process_inputs(self, *inputs):
+                assert(len(inputs) == 1)
+                return inputs[0]
+
+            def generate_output(self, output_args):
+                return f'return list({repr(output_args)})'
+
+            def process_outputs(self, outputs):
+                return list(outputs)
+
+        def f(a, b):
+            a = a + b
+            b = a + b
+            return a, b
+
+        nf = symbolic_trace(f)
+        vals = [torch.randn(3), torch.randn(3)]
+        nf.graph.set_codegen(ListCodeGen())
+        nf.recompile()
+        self.assertEqual(Interpreter(nf).run(vals), nf(vals))
 
     def test_imul_code_print(self):
         graph = torch.fx.Graph()

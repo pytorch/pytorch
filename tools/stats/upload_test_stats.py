@@ -167,7 +167,7 @@ if __name__ == "__main__":
         test_cases.extend(parse_xml_report(xml_report, int(args.workflow_run_id)))
 
     # Write the JSON to rockset
-    print(f"Writing {len(test_cases)} test reports to Rockset")
+    print(f"Writing {len(test_cases)} test cases to Rockset")
     client = rockset.Client(
         api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )

@@ -1407,6 +1407,10 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
+        # Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_ds.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_ds))
+
     def test_zip_iterdatapipe(self):
 
         # Functional Test: raises TypeError when an input is not of type `IterDataPipe`

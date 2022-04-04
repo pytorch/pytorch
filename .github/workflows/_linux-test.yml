@@ -32,15 +32,18 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master@${{ github.sha }}
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@${{ github.sha }}
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull docker image
-        uses: pytorch/pytorch/.github/actions/pull-docker-image@${{ github.sha }}
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ inputs.docker-image }}
 
@@ -56,7 +59,7 @@ jobs:
             echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@${{ github.sha }}
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
 
@@ -138,17 +141,17 @@ jobs:
           docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
 
       - name: Chown workspace
-        uses: pytorch/pytorch/.github/actions/chown-workspace@${{ github.sha }}
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Get workflow job id
         id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@${{ github.sha }}
+        uses: ./.github/actions/get-workflow-job-id
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts-s3@${{ github.sha }}
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -160,7 +163,8 @@ jobs:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
           retention-days: 14
           if-no-files-found: ignore
-          path: ./**/core.[1-9]*
+          path:
+            ./**/core.[1-9]*
 
       - name: Upload test statistics
         if: always()
@@ -185,5 +189,5 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: pytorch/pytorch/.github/actions/teardown-linux@${{ github.sha }}
+        uses: ./.github/actions/teardown-linux
         if: always()

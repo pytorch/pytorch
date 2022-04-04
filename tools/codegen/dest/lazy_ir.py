@@ -251,7 +251,7 @@ class GenLazyNativeFuncDefinition:
         meta_str += f"""
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
-        node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
+        node_str = f"""auto node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
         first_tensor_name = value_types_names[0]
         bridge_str = """auto result = torch::lazy::CreateAtenFromLtcTensor(

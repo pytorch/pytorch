@@ -59,6 +59,9 @@ TORCH_API void parseExtraFiles(
 TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_file_content(
     const char* filename);
 
+TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
+    std::istream& in);
+
 class TORCH_API FlatbufferLoader {
  public:
   FlatbufferLoader();

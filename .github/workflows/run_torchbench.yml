@@ -50,7 +50,7 @@ jobs:
           conda activate pr-ci
           PR_BODY_FILE=/tmp/pr-body.txt
           echo "$PR_BODY" > ${PR_BODY_FILE}
-          python pytorcpytorch/pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch@${{ github.sha }}
+          python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -68,7 +68,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          python3 pytorcpytorch/pytorch/.github/scripts/run_torchbench.py \@${{ github.sha }}
+          python3 pytorch/.github/scripts/run_torchbench.py \
                   --pr-body "$PR_BODY_FILE" \
                   run \
                   --pytorch-path "${HOME}"/pytorch \

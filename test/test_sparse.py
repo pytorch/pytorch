@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (sparse_unary_ufuncs)
+    (sparse_unary_ufuncs, sparse_masked_reduction_ops)
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
 )
@@ -315,6 +315,10 @@ class TestSparse(TestCase):
             self.assertEqual(res, dense_x)
             self.assertEqual(res, safe_dense_x)
 
+            # Only run autograd test for float64
+            if x.dtype != torch.float64:
+                return
+
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
@@ -346,6 +350,7 @@ class TestSparse(TestCase):
             ], dtype=dtype, device=device)
 
             test_tensor(x, res)
+            test_tensor(res, res)
 
             i = self.index_tensor([
                 [0, 1, 2, 2],
@@ -3547,8 +3552,47 @@ class TestSparseUnaryUfuncs(TestCase):
                 fast_mode=op.gradcheck_fast_mode))
 
 
+class TestSparseMaskedReductions(TestCase):
+    exact_dtype = True
+
+    @ops(sparse_masked_reduction_ops)
+    def test_future_empty_dim(self, device, dtype, op):
+        """Currently, `dim=()` in reductions operations means "reduce over
+        all dimensions" while in future, it will read "no reduce". See
+        https://github.com/pytorch/pytorch/issues/29137
+
+        For sparse masked reductions, we'll implement the current behavior.
+
+        For testing, we'll use samples with `dim=0` and map it to
+        `dim=()` until
+        torch.testing._internal.common_methods_invocations._generate_reduction_kwargs
+        is made to generate samples with `dim=()` for non-scalar
+        inputs. With this and after gh-29137 is resolved, this test
+        can be deleted. See also `torch._masked._canonical_dim`
+        implementation about changing the `dim=()` behavior.
+        """
+
+        samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        for sample_input in samples:
+            if sample_input.kwargs.get('dim') != 0:
+                continue
+            sample_input_kwargs = dict(sample_input.kwargs)
+            sample_input_kwargs['dim'] = ()    # reduce over all dimensions
+
+            t = sample_input.input
+            mask = sample_input_kwargs.get('mask')
+            sparse_op_kwargs = dict(sample_input_kwargs)
+            actual = op(t.to_sparse(), *sample_input.args, **sample_input_kwargs)
+            self.assertEqual(actual.layout, torch.sparse_coo)
+
+            expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
+            self.assertEqual(actual, expected)
+
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
+
+instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals(), except_for='meta')

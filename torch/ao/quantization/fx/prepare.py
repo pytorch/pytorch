@@ -701,9 +701,7 @@ def maybe_insert_output_observer_for_node(
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
-    should_insert_observer = \
-        qhandler.should_insert_observer_for_output(
-            qconfig, is_qat) and dtype not in DO_NOT_OBS_DTYPE_LIST + [torch.float]
+    should_insert_observer = dtype not in DO_NOT_OBS_DTYPE_LIST + [torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -845,7 +843,7 @@ def maybe_propagate_dtype_for_node(
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if qhandler is not None and qhandler.is_general_tensor_shape_op():
+    if qhandler is not None and qhandler.is_general_tensor_value_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
@@ -1199,9 +1197,6 @@ def insert_observers_for_model(
                     is_general_tensor_value_op = \
                         (qhandler is not None and qhandler.is_general_tensor_value_op())
 
-                    is_general_tensor_shape_op = \
-                        (qhandler is not None and qhandler.is_general_tensor_shape_op())
-
                     is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
@@ -1237,7 +1232,7 @@ def insert_observers_for_model(
                             # to make all inputs and outputs use the first input's
                             # observer
                             if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
-                                    is_general_tensor_shape_op or is_reuse_input_qconfig_:
+                                    is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
