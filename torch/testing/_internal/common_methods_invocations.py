@@ -11822,6 +11822,29 @@ op_db: List[OpInfo] = [
         'nn.functional.silu',
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_out=False,
+        inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-3, rtol=1e-3),
+                    torch.bfloat16: tol(atol=1e-4, rtol=1e-4)
+                }),
+                'TestUnaryUfuncs', device_type='cuda',
+            ), ],
+    ),
+    # TODO: combine this with the nn.functional.silu OpInfo when
+    # complex autodiff for silu is supported.
+    UnaryUfuncInfo(
+        'nn.functional.silu',
+        variant_test_name='complex',
+        ref=lambda x, inplace=False:
+            x / (1 + np.exp(-x)),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=False,
