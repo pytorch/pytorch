@@ -1443,7 +1443,7 @@ else:
 
             # Expects 2d input, on CUDA.
             # Doesn't work on CPU and ROCm.
-            if device != 'cpu' and TEST_CUDNN:
+            if device != 'cpu' and TEST_CUDNN and not TEST_WITH_ROCM:
                 with self.assertRaisesRegex(RuntimeError, err):
                     torch.cudnn_grid_sampler(input, grid)
 
