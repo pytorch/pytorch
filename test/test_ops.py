@@ -752,6 +752,22 @@ class TestCompositeCompliance(TestCase):
             kwargs = sample.kwargs
             composite_compliance.check_backward_formula(op, args, kwargs)
 
+    # # There are some weird unexpected successe here that imply rocm goes down
+    # # a different path than CUDA sometimes. There's not an easy way to describe
+    # # this in OpInfo so we're just going to skip all ROCM tests...
+    # @unittest.skipIf(TEST_ROCM, "The CUDA tests give sufficient signal")
+    # @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
+    # @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    # def test_forward_composite(self, device, dtype, op):
+    #     if not op.supports_forward_ad:
+    #         unittest.skip("Does not support forward_ad")
+    #         return
+    #     samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+    #     for sample in samples:
+    #         args = [sample.input] + list(sample.args)
+    #         kwargs = sample.kwargs
+    #         composite_compliance.check_forward_formula(op, args, kwargs)
 
 class TestMathBits(TestCase):
     # Tests that
