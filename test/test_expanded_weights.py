@@ -1,7 +1,7 @@
 # Owner(s): ["module: nn"]
 
 from functools import partial
-from itertools import product
+from itertools import product, chain
 import unittest
 
 import torch
@@ -251,6 +251,9 @@ class TestExpandedWeightFunctional(TestCase):
 class TestExpandedWeightModule(TestCase):
     def _do_test(self, module, input):
         batch_size = input.shape[0]
+        diff_input = input.dtype == torch.float or input.dtype == torch.double
+        if diff_input:
+            input.requires_grad_()
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager
             actual_res = call_for_per_sample_grads(module, batch_size, input).sum()
@@ -259,13 +262,21 @@ class TestExpandedWeightModule(TestCase):
             for param in module.parameters():
                 actual_grads.append(param.grad_sample)
                 del param.grad_sample
+            if diff_input:
+                actual_grads.append(input.grad.clone())
+                input.grad = torch.zeros_like(input.grad)
 
             # get per sample grads with a for loop
             expected_res = torch.tensor(0., device=input.device, dtype=torch.double)
             expected_grads = []
             for i in range(batch_size):
-                res = module(input[i].unsqueeze(0)).sum()
-                expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
+                input_slice = input[i]
+                diff_params = module.parameters()
+                if diff_input:
+                    diff_params = chain(diff_params, (input_slice,))
+                res = module(input_slice.unsqueeze(0)).sum()
+                out_grads = torch.autograd.grad(res, diff_params, torch.ones_like(res), allow_unused=True)
+                expected_grads.append(out_grads)
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
         self.assertEqual(actual_res, expected_res)
@@ -281,6 +292,9 @@ class TestExpandedWeightModule(TestCase):
                 return self.module(input) + self.module(input)
 
         batch_size = input.shape[0]
+        diff_input = input.dtype == torch.float or input.dtype == torch.double
+        if diff_input:
+            input.requires_grad_()
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager, calling .backward() twice
             test_module = TestModule(module)
@@ -290,13 +304,23 @@ class TestExpandedWeightModule(TestCase):
             for param in module.parameters():
                 actual_grads.append(param.grad_sample)
                 del param.grad_sample
+            if diff_input:
+                actual_grads.append(input.grad.clone())
+                input.grad = torch.zeros_like(input.grad)
+
 
             # get per sample grads with a for loop, running over the input twice
             expected_grads = []
             for i in range(batch_size):
-                res = module(input[i].unsqueeze(0)).sum()
-                expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
-            expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
+                input_slice = input[i]
+                diff_params = module.parameters()
+                if diff_input:
+                    diff_params = chain(diff_params, (input_slice,))
+                res = module(input_slice.unsqueeze(0)).sum()
+                out_grads = torch.autograd.grad(res, diff_params, torch.ones_like(res), allow_unused=True)
+                expected_grads.append(out_grads)
+        expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
+        expected_grads = tuple(expected_grad for expected_grad in expected_grads if expected_grad is not None)
         assert [self.assertEqual(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def test_per_sample_api_failing(self):
@@ -346,7 +370,7 @@ class ContextManagerTests(TestBase):
 
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
-supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding']
+supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding', 'LayerNorm']
 supported_tests = [t for t in module_tests + new_module_tests if 'module_name' in t and t['module_name'] in supported_modules]
 for test_param in supported_tests:
     if 'constructor' not in test_param:
