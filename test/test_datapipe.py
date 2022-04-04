@@ -1407,6 +1407,10 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
+        # Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_ds.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_ds))
+
     def test_zip_iterdatapipe(self):
 
         # Functional Test: raises TypeError when an input is not of type `IterDataPipe`
@@ -2003,6 +2007,27 @@ class TestGraph(TestCase):
                                   dp1_upd: {dp1: {dp1.main_datapipe: {dp1.main_datapipe.main_datapipe: {}}}},
                                   dp2: {dp2.main_datapipe: {dp2.main_datapipe.main_datapipe: {}}}}}
         self.assertEqual(expected, graph)
+
+
+class TestCircularSerialization(TestCase):
+
+    class _CustomIterDataPipe(IterDataPipe):
+        def noop(self, x):
+            return x + 1
+
+        def __init__(self):
+            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.noop)
+
+        def __iter__(self):
+            yield from self._dp
+
+    def test_circular_serialization_with_pickle(self):
+        assert list(self._CustomIterDataPipe()) == list(pickle.loads(pickle.dumps(self._CustomIterDataPipe())))
+
+    # TODO: Ensure this works with `dill` installed
+    # @skipIfNoDill
+    # def test_circular_serialization_with_dill(self):
+    #     assert list(self._CustomIterDataPipe()) == list(dill.loads(dill.dumps(self._CustomIterDataPipe())))
 
 
 class TestSharding(TestCase):

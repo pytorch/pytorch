@@ -214,6 +214,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -233,6 +234,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_type_hints",
@@ -311,7 +313,6 @@ ENABLE_PR_HISTORY_REORDERING = bool(
 )
 
 JIT_EXECUTOR_TESTS = [
-    "test_jit_cuda_fuser",
     "test_jit_profiling",
     "test_jit_legacy",
     "test_jit_fuser_legacy",

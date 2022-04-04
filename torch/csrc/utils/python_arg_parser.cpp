@@ -40,6 +40,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
   {"c10::string_view", ParameterType::STRING},
+  {"SymInt", ParameterType::SYM_INT},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
@@ -467,12 +468,23 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+    return (
+      THPUtils_checkIndex(item.ptr()) ||
+      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+      // in an intlist argument. Even float or complex scalar tensors.
+      (jit::tracer::isTracing() && THPVariable_Check(item.ptr())));
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
   return broadcast_size > 0 && THPUtils_checkLong(obj);
+}
+
+static bool is_int_or_symbolic_or_concrete_int(PyObject* obj) {
+  if (THPUtils_checkLong(obj)) {
+      return true;
+  }
+
+  // TODO: test if it's the Python binding for SymbolicIntNode
+  return false;
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -541,6 +553,9 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::SCALAR_LIST: {
       return is_scalar_list(obj);
     }
+    case ParameterType::SYM_INT: {
+      return is_int_or_symbolic_or_concrete_int(obj);
+    }
   }
 }
 
@@ -549,6 +564,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::TENSOR: return "Tensor";
     case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
+    case ParameterType::SYM_INT: return "SymInt";
     case ParameterType::DOUBLE: return "float";
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";

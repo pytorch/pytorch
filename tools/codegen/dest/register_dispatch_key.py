@@ -193,6 +193,10 @@ class RegisterDispatchKey:
     # all of the existing kernel signatures scattered across aten/src/ATen/native.
     class_method_name: Optional[str]
 
+    # Only set to true in lightweight dispatch. If lightweight dispatch is enabled we are registering
+    # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
+    skip_dispatcher_op_registration: bool
+
     @staticmethod
     def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
         if type == DeviceCheckType.NoCheck:
@@ -284,6 +288,7 @@ class RegisterDispatchKey:
             self.rocm,
             self.cpp_namespace,
             self.class_method_name,
+            self.skip_dispatcher_op_registration,
             g
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -418,7 +423,7 @@ namespace {{
 """
 
             elif self.target is Target.REGISTRATION:
-                if f.manual_kernel_registration:
+                if f.manual_kernel_registration or self.skip_dispatcher_op_registration:
                     return None
                 else:
                     payload = f"TORCH_FN({name})"

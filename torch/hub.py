@@ -283,7 +283,7 @@ def set_dir(d):
         d (string): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
-    _hub_dir = d
+    _hub_dir = os.path.expanduser(d)
 
 
 def list(github, force_reload=False, skip_validation=False):
