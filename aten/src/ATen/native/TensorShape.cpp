@@ -1463,23 +1463,23 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
       at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
           const auto tid = at::get_thread_num();
-          auto* ptr_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-          auto* ptr_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-          auto* ptr_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+          auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
+          auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+          auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
           const auto* ptr_src = src.data_ptr<int64_t>() + start;
 
           for (const auto i : c10::irange(start, end)) {
             const auto src_val = *ptr_src++;
             const auto src_val_lb = std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
             if (*src_val_lb != src_val) continue;
-            const auto src_val_up = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+            const auto src_val_ub = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
 
-            const int64_t count = src_val_up - src_val_lb;
-            const int64_t j = src_val_up - ptr_sorted_start;
+            const int64_t count = src_val_ub - src_val_lb;
+            const int64_t j = src_val_ub - ptr_sorted_start;
 
-            *ptr_src_int_idx++ = i;
-            *ptr_sorted_int_idx++ = j;
-            *ptr_int_counts++ = count;
+            *ptr_tid_src_int_idx++ = i;
+            *ptr_tid_sorted_int_idx++ = j;
+            *ptr_tid_int_counts++ = count;
           }
       });
 
