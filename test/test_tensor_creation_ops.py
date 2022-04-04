@@ -2665,6 +2665,15 @@ class TestTensorCreation(TestCase):
             y = torch.empty(tuple(size_ones_instead_of_zeros), device=device)
             self.assertEqual(x.stride(), y.stride())
 
+    @onlyNativeDeviceTypes
+    def test_empty_overflow(self, device):
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty([2, 4, 2**29, 2**29], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
+
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             if dtype == torch.bfloat16:

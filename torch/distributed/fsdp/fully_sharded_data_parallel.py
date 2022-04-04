@@ -2056,7 +2056,8 @@ class FullyShardedDataParallel(nn.Module):
         contained in ``model`` are mapped back to their unflattened parameters.
 
         .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used.
+            primitives are used. However, the state dict is only populated on
+            rank 0. All other ranks return an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -2087,7 +2088,8 @@ class FullyShardedDataParallel(nn.Module):
             full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
                 state for ``model`` 's original unflattened parameters and
                 including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict`.
+                convention of :meth:`torch.optim.Optimizer.state_dict` if on
+                rank 0, and an empty :class:`dict` otherwise.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
