@@ -651,9 +651,7 @@ void all2all_single_equal_split(at::Tensor& input,
   auto* recvbuff = reinterpret_cast<char *>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
 #if defined(USE_ROCM) && ROCM_VERSION >= 50000
-  NCCL_CHECK(ncclGroupStart());
   NCCL_CHECK(ncclAllToAll(sendbuff , recvbuff , count,  type, comm, stream));
-  NCCL_CHECK(ncclGroupEnd());
 #else
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
