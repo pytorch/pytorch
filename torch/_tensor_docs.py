@@ -3377,6 +3377,9 @@ Example::
 add_docstr_all('scatter_reduce_', r"""
 scatter_reduce_(dim, index, src, reduce, *, include_self=True) -> Tensor
 
+.. warning::
+    scatter_reduce_ is in beta and may change in the near future.
+
 Reduces all values from the :attr:`src` tensor to the indices specified in
 the :attr:`index` tensor in the :attr:`self` tensor using the applied reduction
 defined via the :attr:`reduce` argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`,
