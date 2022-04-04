@@ -302,30 +302,31 @@ void Adapter::return_queue(Adapter::Queue& compute_queue) {
   }
 }
 
-std::ostream& operator<<(std::ostream& os, const Adapter& adapter) {
-  VkPhysicalDeviceProperties props = adapter.properties_;
-  uint32_t v_major = VK_VERSION_MAJOR(props.apiVersion);
-  uint32_t v_minor = VK_VERSION_MINOR(props.apiVersion);
-  std::string device_type = get_device_type_str(props.deviceType);
-  VkPhysicalDeviceLimits limits = props.limits;
+std::string Adapter::stringize() const {
+  std::stringstream ss;
 
-  os << "{";
-  os << "  Physical Device Info {" << std::endl;
-  os << "    apiVersion:    " << v_major << "." << v_minor << std::endl;
-  os << "    driverversion: " << props.driverVersion << std::endl;
-  os << "    deviceType:    " << device_type << std::endl;
-  os << "    deviceName:    " << props.deviceName << std::endl;
+  uint32_t v_major = VK_VERSION_MAJOR(properties_.apiVersion);
+  uint32_t v_minor = VK_VERSION_MINOR(properties_.apiVersion);
+  std::string device_type = get_device_type_str(properties_.deviceType);
+  VkPhysicalDeviceLimits limits = properties_.limits;
+
+  ss << "{" << std::endl;
+  ss << "  Physical Device Info {" << std::endl;
+  ss << "    apiVersion:    " << v_major << "." << v_minor << std::endl;
+  ss << "    driverversion: " << properties_.driverVersion << std::endl;
+  ss << "    deviceType:    " << device_type << std::endl;
+  ss << "    deviceName:    " << properties_.deviceName << std::endl;
 
 #define PRINT_LIMIT_PROP(name) \
-  os << "      " << std::left << std::setw(36) << #name << limits.name << std::endl;
+  ss << "      " << std::left << std::setw(36) << #name << limits.name << std::endl;
 
 #define PRINT_LIMIT_PROP_VEC3(name) \
-  os << "      " << std::left << std::setw(36) << #name \
+  ss << "      " << std::left << std::setw(36) << #name \
   << limits.name[0] << "," \
   << limits.name[1] << "," \
   << limits.name[2] << std::endl;
 
-  os << "    Physical Device Limits {" << std::endl;
+  ss << "    Physical Device Limits {" << std::endl;
   PRINT_LIMIT_PROP(maxImageDimension1D);
   PRINT_LIMIT_PROP(maxImageDimension2D);
   PRINT_LIMIT_PROP(maxImageDimension3D);
@@ -337,41 +338,46 @@ std::ostream& operator<<(std::ostream& os, const Adapter& adapter) {
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupCount);
   PRINT_LIMIT_PROP(maxComputeWorkGroupInvocations);
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupSize);
-  os << "    }" << std::endl;
-  os << "  }" << std::endl;;
+  ss << "    }" << std::endl;
+  ss << "  }" << std::endl;;
 
-  VkPhysicalDeviceMemoryProperties mem_props = adapter.memory_properties_;
-  os << "  Memory Info {" << std::endl;
-  os << "    Memory Types [" << std::endl;
+  const VkPhysicalDeviceMemoryProperties& mem_props = memory_properties_;
+  ss << "  Memory Info {" << std::endl;
+  ss << "    Memory Types [" << std::endl;
   for (int i = 0; i < mem_props.memoryTypeCount; ++i) {
-  os << "      " << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
+  ss << "      " << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
                << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
                << std::endl;
   }
-  os << "    ]" << std::endl;
-  os << "    Memory Heaps [" << std::endl;
+  ss << "    ]" << std::endl;
+  ss << "    Memory Heaps [" << std::endl;
   for (int i = 0; i < mem_props.memoryHeapCount; ++i) {
-  os << "      " << mem_props.memoryHeaps[i].size << std::endl;
+  ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
   }
-  os << "    ]" << std::endl;
-  os << "  }" << std::endl;
+  ss << "    ]" << std::endl;
+  ss << "  }" << std::endl;
 
-  os << "  Queue Families {" << std::endl;
-  for (const VkQueueFamilyProperties& queue_family_props : adapter.queue_families_) {
-  os << "    (" << queue_family_props.queueCount << " Queues) "
+  ss << "  Queue Families {" << std::endl;
+  for (const VkQueueFamilyProperties& queue_family_props : queue_families_) {
+  ss << "    (" << queue_family_props.queueCount << " Queues) "
      << get_queue_family_properties_str(queue_family_props.queueFlags) << std::endl;
   }
-  os << "  }" << std::endl;
-  os << "  VkDevice: " << adapter.handle_ << std::endl;
-  os << "  Compute Queues [" << std::endl;
-  for (const Adapter::Queue& compute_queue : adapter.queues_) {
-  os << "    Family " << compute_queue.family_index
+  ss << "  }" << std::endl;
+  ss << "  VkDevice: " << handle_ << std::endl;
+  ss << "  Compute Queues [" << std::endl;
+  for (const Adapter::Queue& compute_queue : queues_) {
+  ss << "    Family " << compute_queue.family_index
      << ", Queue " << compute_queue.queue_index
      << ": " << compute_queue.handle << std::endl;;
   }
-  os << "  ]" << std::endl;
-  os << "}";
+  ss << "  ]" << std::endl;
+  ss << "}";
 
+  return ss.str();
+}
+
+std::ostream& operator<<(std::ostream& os, const Adapter& adapter) {
+  os << adapter.stringize() << std::endl;
   return os;
 }
 

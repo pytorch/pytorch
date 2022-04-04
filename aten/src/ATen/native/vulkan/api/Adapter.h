@@ -94,6 +94,7 @@ class Adapter final {
     return { 4u, 4u, 4u, };
   }
 
+  std::string stringize() const;
   friend std::ostream& operator<<(std::ostream& os, const Adapter& adapter);
 
 };
