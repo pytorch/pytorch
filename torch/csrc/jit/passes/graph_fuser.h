@@ -33,5 +33,13 @@ TORCH_API void CustomFuseGraph(
     Symbol kind,
     size_t arg_limit = std::numeric_limits<size_t>::max());
 
+// A modified version of CustomFuseGraph.
+// It supports multi-output operators.
+TORCH_API void SimpleFuseGraph(
+    std::shared_ptr<Graph>& graph,
+    const std::function<bool(Node*)>& fn,
+    Symbol kind,
+    size_t arg_limit = std::numeric_limits<size_t>::max());
+
 } // namespace jit
 } // namespace torch

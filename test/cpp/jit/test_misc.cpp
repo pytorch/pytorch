@@ -490,6 +490,179 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
+void CheckFusionNumericalResult(
+    // TorchScript graph in string format.
+    const char* ir_string,
+    // Return true if the node "n" is fusable and false
+    // otherwise.
+    const std::function<bool(Node* n)>& fusion_selector,
+    // Inputs of graph.
+    torch::jit::Stack stack,
+    // It's a output of this function.
+    // Graph represented by ir_string.
+    // after fusion.
+    std::shared_ptr<Graph>& g) {
+  // Create graph from string.
+  torch::jit::parseIR(ir_string, g.get());
+
+  // Run graph before fusion to get
+  // reference outputs.
+  torch::jit::GraphExecutor executor_baseline(g, "baseline");
+  torch::jit::Stack stack_baseline = stack;
+  executor_baseline.run(stack_baseline);
+
+  // Fuse operators into sub-graphs.
+  SimpleFuseGraph(g, fusion_selector, Symbol::fromQualString("prim::FusionGroup"));
+
+  // Run graph after fusion.
+  torch::jit::GraphExecutor executor(g, "fused");
+  executor.run(stack);
+
+  for (size_t i = 0; i < stack.size(); ++i) {
+    auto& value = stack.at(i);
+    auto& value_baseline = stack_baseline.at(i);
+    // Only compare tensors.
+    // TODO: compare other types.
+    if (value_baseline.isTensor()) {
+      torch::allclose(value.toTensor(), value_baseline.toTensor());
+    }
+  }
+}
+
+TEST(SimpleFusionTest, TwoFusedSubgraphs) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
+  auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %one : int = prim::Constant[value=1]()
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = aten::add(%2, %0, %one)
+      %4 : Tensor = aten::relu(%3)
+      %5 : Tensor = aten::exp(%4)
+      %6 : Tensor = aten::exp(%5)
+      return (%5))IR";
+
+  auto fusion_selector = [](const torch::jit::Node* node) {
+    if (!node) {
+      return false;
+    };
+
+    switch (node->kind()) {
+      case aten::add:
+      case aten::mul:
+      case aten::exp:
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  torch::jit::Stack stack;
+  for (size_t i = 0; i < 2; ++i) {
+    stack.push_back(torch::randn({2, 2}, torch::dtype(torch::kFloat32)));
+  }
+
+  auto g = std::make_shared<Graph>();
+
+  CheckFusionNumericalResult(graph_string, fusion_selector, stack, g);
+
+  // Expected fusion result is the following graph.
+  // Let's check if we really make it.
+  //
+  // graph(%0 : Tensor,
+  //       %1 : Tensor):
+  //   %2 : int = prim::Constant[value=1]()
+  //   %10 : Tensor = prim::FusionGroup_0(%0, %1)
+  //   %5 : Tensor = aten::relu(%10)
+  //   %8 : Tensor, %9 : Tensor = prim::FusionGroup_1(%5)
+  //   return (%9)
+  // with prim::FusionGroup_0 = graph(%1 : Tensor,
+  //       %4 : Tensor):
+  //   %2 : int = prim::Constant[value=1]()
+  //   %5 : Tensor = aten::mul(%1, %4)
+  //   %3 : Tensor = aten::add(%5, %1, %2)
+  //   return (%3)
+  // with prim::FusionGroup_1 = graph(%2 : Tensor):
+  //   %3 : Tensor = aten::exp(%2)
+  //   %1 : Tensor = aten::exp(%3)
+  //   return (%1, %3)
+
+  testing::FileCheck()
+      .check("prim::FusionGroup")
+      ->check_next("aten::relu")
+      ->check_next("prim::FusionGroup")
+      ->check_next("return")
+      ->run(*g);
+}
+
+TEST(SimpleFusionTest, TwoOutputsOp) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
+  auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %2 : Tensor = aten::mul(%0, %1)
+      %false: bool = prim::Constant[value=0]()
+      %3 : Tensor, %4 : Tensor = aten::var_mean(%2, %false)
+      %5 : Tensor = aten::relu(%4)
+      %6 : Tensor = aten::exp(%5)
+      %7 : Tensor = aten::mul(%5, %6)
+      return (%3, %7))IR";
+
+  auto fusion_selector = [](const torch::jit::Node* node) {
+    if (!node) {
+      return false;
+    };
+
+    switch (node->kind()) {
+      case aten::var_mean:
+      case aten::mul:
+      case aten::exp:
+      case aten::relu:
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  torch::jit::Stack stack;
+  for (size_t i = 0; i < 2; ++i) {
+    stack.push_back(torch::randn({2, 2}, torch::dtype(torch::kFloat32)));
+  }
+
+  auto g = std::make_shared<Graph>();
+
+  CheckFusionNumericalResult(graph_string, fusion_selector, stack, g);
+
+  // Expected fusion result is the following graph.
+  // Let's check if we really make it.
+  //
+  // graph(%0 : Tensor,
+  //       %1 : Tensor):
+  //   %3 : bool = prim::Constant[value=0]()
+  //   %9 : Tensor, %10 : Tensor = prim::FusionGroup_0(%0, %1)
+  //   return (%10, %9)
+  // with prim::FusionGroup_0 = graph(%10 : Tensor,
+  //       %11 : Tensor):
+  //   %7 : bool = prim::Constant[value=0]()
+  //   %12 : Tensor = aten::mul(%10, %11)
+  //   %8 : Tensor, %9 : Tensor = aten::var_mean(%12, %7)
+  //   %5 : Tensor = aten::relu(%9)
+  //   %3 : Tensor = aten::exp(%5)
+  //   %2 : Tensor = aten::mul(%5, %3)
+  //   return (%2, %8)
+  testing::FileCheck()
+      .check("prim::Constant")
+      ->check_next("prim::FusionGroup")
+      ->check_next("return")
+      ->run(*g);
+}
+
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
