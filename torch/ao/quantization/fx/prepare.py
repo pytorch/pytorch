@@ -1392,6 +1392,7 @@ def prepare(
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
         patterns = get_native_quant_patterns(additional_quant_patterns)
+        root_node_getter_mapping = {}
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
         patterns = sorted_patterns_dict(patterns)
