@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <libshm.h>
-#include <torch/csrc/jit/api/module.h>
 #include <cstdlib>
 
 #include <pybind11/detail/common.h>
@@ -61,8 +60,7 @@ extern "C"
   });
   pym.def("_load_jit_module_from_file", [](const std::string& filename) {
     ExtraFilesMap extra_files = ExtraFilesMap();
-    return torch::jit::load_jit_module_from_file(
-        filename, /*extra_files=*/extra_files);
+    return torch::jit::load_jit_module_from_file(filename, extra_files);
   });
   pym.def("_load_jit_module_from_bytes", [](const std::string& bytes) {
     auto bytes_copy = copyStr(bytes);
@@ -72,7 +70,8 @@ extern "C"
   });
   pym.def(
       "_save_mobile_module",
-      [](const torch::jit::mobile::Module& module, const std::string& filename) {
+      [](const torch::jit::mobile::Module& module,
+         const std::string& filename) {
         return torch::jit::save_mobile_module(module, filename);
       });
   pym.def(
@@ -84,13 +83,15 @@ extern "C"
       "_save_mobile_module_to_bytes",
       [](const torch::jit::mobile::Module& module) {
         auto detached_buffer = torch::jit::save_mobile_module_to_bytes(module);
-        return py::bytes(reinterpret_cast<char*>(detached_buffer.data()), detached_buffer.size());
+        return py::bytes(
+            reinterpret_cast<char*>(detached_buffer.data()),
+            detached_buffer.size());
       });
-  pym.def(
-      "_save_jit_module_to_bytes",
-      [](const torch::jit::Module& module) {
-        auto detached_buffer = torch::jit::save_jit_module_to_bytes(module);
-        return py::bytes(reinterpret_cast<char*>(detached_buffer.data()), detached_buffer.size());
-      });
+  pym.def("_save_jit_module_to_bytes", [](const torch::jit::Module& module) {
+    auto detached_buffer = torch::jit::save_jit_module_to_bytes(module);
+    return py::bytes(
+        reinterpret_cast<char*>(detached_buffer.data()),
+        detached_buffer.size());
+  });
   return module;
 }
