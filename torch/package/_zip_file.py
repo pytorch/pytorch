@@ -1,10 +1,12 @@
+import os.path
 import zipfile
 from abc import ABC, abstractmethod
 from io import BytesIO
-from ._directory_reader import DirectoryReader
 from pathlib import Path
-import os.path
 from typing import List, Union, BinaryIO, Optional
+
+from ._directory_reader import DirectoryReader
+
 
 class PackageZipFileReader(ABC):
     """
@@ -48,9 +50,8 @@ class PackageZipFileReader(ABC):
 
     @abstractmethod
     def close(self):
-        raise NotImplementedError(
-            f"close(self) is not implemented in {type(self)}"
-        )
+        raise NotImplementedError(f"close(self) is not implemented in {type(self)}")
+
 
 class PackageZipFileWriter(ABC):
     """
@@ -71,9 +72,8 @@ class PackageZipFileWriter(ABC):
 
     @abstractmethod
     def close(self):
-        raise NotImplementedError(
-            f"close(self) is not implemented in {type(self)}"
-        )
+        raise NotImplementedError(f"close(self) is not implemented in {type(self)}")
+
 
 class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
     """
@@ -90,11 +90,11 @@ class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
         else:  # is a byte buffer
             self.buffer = f
 
-        super().__init__(f, mode='w')
+        super().__init__(f, mode="w")
 
         self.prefix: str = "archive"
         if isinstance(f, (Path, str)):
-            self.prefix = "/".join(str(f).strip("/").split('/')[1:])
+            self.prefix = "/".join(str(f).strip("/").split("/")[1:])
         super().writestr(f"{self.prefix}/.data/version", "6\n")
 
     def write_record(self, f: str, str_or_bytes: Union[str, bytes], size: int = None):
@@ -104,6 +104,7 @@ class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
         if self.buffer:
             self.buffer.flush()
         super().close()
+
 
 class DefaultPackageZipFileReader(PackageZipFileReader):
     """
@@ -117,7 +118,9 @@ class DefaultPackageZipFileReader(PackageZipFileReader):
         if isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader: Union[zipfile.ZipFile, DirectoryReader] = zipfile.ZipFile(self.filename)
+                self.zip_reader: Union[
+                    zipfile.ZipFile, DirectoryReader
+                ] = zipfile.ZipFile(self.filename)
             else:
                 self.zip_reader = DirectoryReader(self.filename)
         else:
@@ -134,9 +137,9 @@ class DefaultPackageZipFileReader(PackageZipFileReader):
             if isinstance(file_or_buffer, BytesIO):
                 self.prefix = "archive"
             else:
-                self.prefix = "/".join(str(file_or_buffer).strip("/").split('/')[1:])
+                self.prefix = "/".join(str(file_or_buffer).strip("/").split("/")[1:])
             for record in prefixed_records:
-                self.records.append(record[len(self.prefix) + 1:])
+                self.records.append(record[len(self.prefix) + 1 :])
 
     def get_record(self, name: str) -> bytes:
         if isinstance(self.zip_reader, DirectoryReader):
