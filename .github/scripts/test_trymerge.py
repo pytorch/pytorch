@@ -2,7 +2,7 @@
 import json
 import os
 from hashlib import sha256
-from trymerge import find_matching_merge_rule, gh_graphql, GitHubPR
+from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any
 from unittest import TestCase, main, mock
@@ -105,6 +105,15 @@ class TestGitHubPR(TestCase):
         self.assertGreater(len(pr.get_comments()), 20)
         self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_team_members(self, mocked_gql: Any) -> None:
+        "Test fetching team members works"
+        dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
+        self.assertGreater(len(dev_infra_team), 2)
+        with self.assertWarns(Warning):
+            non_existing_team = gh_get_team_members("pytorch", "qwertyuiop")
+            self.assertEqual(len(non_existing_team), 0)
 
 
 if __name__ == "__main__":

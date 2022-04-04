@@ -27,8 +27,8 @@ jobs:
           - docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
           - docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-py3.7-clang9
-          - docker-image-name: pytorch-linux-bionic-rocm4.3.1-py3.7
           - docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
+          - docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
           - docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
