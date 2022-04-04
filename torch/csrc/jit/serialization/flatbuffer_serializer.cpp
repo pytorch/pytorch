@@ -765,8 +765,8 @@ flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
 Module parse_and_initialize_jit_module(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   FlatbufferLoader loader;
   mobile::Module mobilem = loader.parseModule(flatbuffer_module);
