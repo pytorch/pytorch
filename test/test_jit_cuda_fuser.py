@@ -4395,7 +4395,7 @@ class TestPassManagerCudaFuser(JitTestCase):
     def tearDown(self):
         if RUN_NVFUSER:
             torch._C._jit_set_nvfuser_enabled(self.is_enabled)
-        super().teardown()
+        super().tearDown()
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
