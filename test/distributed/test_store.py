@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import os
 import random
 import sys
@@ -83,6 +85,11 @@ class StoreTestBase(object):
         self.assertEqual(b"value2", fs.get("key2"))
         self.assertEqual(b"21", fs.get("key3"))
 
+        fs.set("-key3", "7")
+        self.assertEqual(b"7", fs.get("-key3"))
+        fs.delete_key("-key3")
+        self.assertEqual(fs.num_keys(), self.num_keys_total)
+
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
@@ -155,10 +162,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        if sys.platform == "win32":
-            err_msg_reg = "Only one usage of each socket address*"
-        else:
-            err_msg_reg = "^Address already in use$"
+        err_msg_reg = "^The server socket has failed to listen on any local "
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             addr = DEFAULT_HOSTNAME
             port = common.find_free_port()
@@ -169,6 +173,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             store1 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
 
+    @retry_on_connect_failures
     def test_multitenancy(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
@@ -180,6 +185,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store2 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
 
     @skip_if_win32()
+    @retry_on_connect_failures
     def test_init_pg_and_rpc_with_same_socket(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
@@ -396,6 +402,14 @@ class RendezvousTCPTest(TestCase):
             next(gen)
         with self.assertRaisesRegex(ValueError, "size parameter missing"):
             gen = dist.rendezvous("tcp://127.0.0.1:23456?rank=0")
+            next(gen)
+
+    def test_dns_timeout(self):
+        with self.assertRaisesRegex(TimeoutError, "client socket has timed out after.*dnsnotexist"):
+            gen = dist.rendezvous(
+                "tcp://dnsnotexist:23456?world_size=2&rank=0",
+                timeout=timedelta(seconds=1),
+            )
             next(gen)
 
     @retry_on_connect_failures

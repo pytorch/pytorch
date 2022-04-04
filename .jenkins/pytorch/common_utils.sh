@@ -49,19 +49,22 @@ function get_exit_code() {
   return $retcode
 }
 
-function file_diff_from_base() {
+function get_pr_change_files() {
   # The fetch may fail on Docker hosts, this fetch is necessary for GHA
+  # accepts PR_NUMBER and extract filename as arguments
   set +e
-  git fetch origin master --quiet
+  tmp_file=$(mktemp)
+  wget -O "$tmp_file" "https://api.github.com/repos/pytorch/pytorch/pulls/$1/files"
+  # this regex extracts the filename list according to the GITHUB REST API result.
+  sed -n "s/.*\"filename\": \"\(.*\)\",/\1/p" "$tmp_file" | tee "$2"
   set -e
-  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
 }
 
 function get_bazel() {
   # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
+  wget https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -O tools/bazel
   # verify content
-  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
+  echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c tools/bazel' | sha256sum --quiet -c
 
   chmod +x tools/bazel
 }
@@ -88,5 +91,7 @@ function checkout_install_torchvision() {
 }
 
 function clone_pytorch_xla() {
-  git clone --recursive https://github.com/pytorch/xla.git
+  if [[ ! -d ./xla ]]; then
+    git clone --recursive https://github.com/pytorch/xla.git
+  fi
 }

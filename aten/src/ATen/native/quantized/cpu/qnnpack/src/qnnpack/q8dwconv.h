@@ -58,6 +58,25 @@ DECLARE_PYTORCH_Q8MPDWCONV_UKERNEL_FUNCTION(pytorch_q8dwconv_ukernel_mp8x25__sse
 DECLARE_PYTORCH_Q8MPDWCONV_UKERNEL_FUNCTION(
     pytorch_q8dwconv_ukernel_mp8x25_per_channel__sse2)
 
+#define DECLARE_PYTORCH_Q8MPDWCONV_3D_UKERNEL_FUNCTION(fn_name) \
+  PYTORCH_QNNP_INTERNAL void fn_name(                           \
+      size_t channels,                                          \
+      size_t output_height,                                     \
+      size_t output_width,                                      \
+      const uint8_t** input,                                    \
+      const void* weights,                                      \
+      int32_t* buffer,                                          \
+      uint8_t* output,                                          \
+      size_t input_row_stride,                                  \
+      size_t input_col_stride,                                  \
+      size_t output_increment,                                  \
+      const union pytorch_qnnp_conv_quantization_params* quantization_params);
+
+DECLARE_PYTORCH_Q8MPDWCONV_3D_UKERNEL_FUNCTION(
+    pytorch_q8dwconv_ukernel_mp8x27__neon)
+DECLARE_PYTORCH_Q8MPDWCONV_3D_UKERNEL_FUNCTION(
+    pytorch_q8dwconv_ukernel_mp8x27__sse2)
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

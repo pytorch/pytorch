@@ -129,8 +129,11 @@ class ParametrizationList(ModuleList):
             new = original
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    new = module.right_inverse(new)
-                # else, we assume that right_inverse is the identity
+                    try:
+                        new = module.right_inverse(new)
+                    except NotImplementedError:
+                        pass
+                # else, or if it throws, we assume that right_inverse is the identity
 
         if not isinstance(new, Tensor) and not isinstance(new, collections.abc.Sequence):
             raise ValueError("'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
@@ -209,7 +212,9 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)
-                # else we assume that right_inverse is the identity
+                else:
+                    raise RuntimeError(f"parametrization {type(module).__name__} does not implement "
+                                       "right_inverse.")
             if self.is_tensor:
                 # These exceptions should only throw when a right_inverse function does not
                 # return the same dtype for every input, which should most likely be caused by a bug
@@ -257,8 +262,11 @@ class ParametrizationList(ModuleList):
             originals = (getattr(self, f"original{i}") for i in range(self.ntensors))
             x = self[0](*originals)
         # It's not possible to call self[1:] here, so we have to be a bit more cryptic
-        for module in list(self._modules.values())[1:]:
-            x = module(x)
+        # Also we want to skip all non-integer keys
+        curr_idx = 1
+        while hasattr(self, str(curr_idx)):
+            x = self[curr_idx](x)
+            curr_idx += 1
         return x
 
 
@@ -372,16 +380,12 @@ def register_parametrization(
 
         def right_inverse(self, X: Tensor) -> Union[Tensor, Sequence[Tensor]]
 
-    If this method is not implemented, it defaults to the identity.
     This method is called on the unparametrized tensor when the first parametrization
-    is registered.
+    is registered to compute the initial value of the original tensor.
+    If this method is not implemented, the original tensor will be just the unparametrized tensor.
 
-    In most situations, ``right_inverse`` will be a function such that
-    ``forward(right_inverse(X)) == X`` (see
-    `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
-    Sometimes, when the parametrization is not surjective, it may be reasonable
-    to relax this.
-    This may be used to initialize the tensor, as shown in the example below.
+    If all the parametrizations registered on a tensor implement `right_inverse` it is possible
+    to initialize a parametrized tensor by assigning to it, as shown in the example below.
 
     It is possible for the first parametrization to depend on several inputs.
     This may be implemented returning a tuple of tensors from ``right_inverse``
@@ -396,6 +400,14 @@ def register_parametrization(
         once to perform a number of consistency checks.
         If unsafe=True, then right_inverse will be called if the tensor is not parametrized,
         and nothing will be called otherwise.
+
+    .. note::
+
+        In most situations, ``right_inverse`` will be a function such that
+        ``forward(right_inverse(X)) == X`` (see
+        `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
+        Sometimes, when the parametrization is not surjective, it may be reasonable
+        to relax this.
 
     .. warning::
 
@@ -483,25 +495,29 @@ def register_parametrization(
                     f"parametrization(module.{tensor_name}).shape: {X.shape}"
                 )
             if hasattr(parametrization, "right_inverse"):
-                Z = parametrization.right_inverse(X)  # type: ignore[operator]
-                if not isinstance(Z, Tensor):
-                    raise ValueError(
-                        f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
-                    )
-                if Z.dtype != Y.dtype:
-                    raise ValueError(
-                        "The tensor returned by parametrization.right_inverse must have the same dtype "
-                        f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
-                        f"module.{tensor_name}.dtype: {Y.dtype}\n"
-                        f"returned dtype: {Z.dtype}"
-                    )
-                if Z.shape != Y.shape:
-                    raise ValueError(
-                        "The tensor returned by parametrization.right_inverse must have the same shape "
-                        f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
-                        f"module.{tensor_name}.shape: {Y.shape}\n"
-                        f"returned shape: {Z.shape}"
-                    )
+                try:
+                    Z = parametrization.right_inverse(X)  # type: ignore[operator]
+                except NotImplementedError:
+                    pass
+                else:
+                    if not isinstance(Z, Tensor):
+                        raise ValueError(
+                            f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
+                        )
+                    if Z.dtype != Y.dtype:
+                        raise ValueError(
+                            "The tensor returned by parametrization.right_inverse must have the same dtype "
+                            f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
+                            f"module.{tensor_name}.dtype: {Y.dtype}\n"
+                            f"returned dtype: {Z.dtype}"
+                        )
+                    if Z.shape != Y.shape:
+                        raise ValueError(
+                            "The tensor returned by parametrization.right_inverse must have the same shape "
+                            f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
+                            f"module.{tensor_name}.shape: {Y.shape}\n"
+                            f"returned shape: {Z.shape}"
+                        )
             # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list

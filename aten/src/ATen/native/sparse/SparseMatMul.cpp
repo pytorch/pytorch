@@ -1,11 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 #include <unordered_map>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_sparse_matmul_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -30,7 +41,7 @@ void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
     Output:
       `Bi` is the row indices
   */
-  for (int64_t i = 0; i < n_row; i++) {
+  for (const auto i : c10::irange(n_row)) {
     for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
       Bi[jj] = i;
     }
@@ -56,7 +67,7 @@ int64_t _csr_matmult_maxnnz(
   */
   std::vector<int64_t> mask(n_col, -1);
   int64_t nnz = 0;
-  for (int64_t i = 0; i < n_row; i++) {
+  for (const auto i : c10::irange(n_row)) {
     int64_t row_nnz = 0;
 
     for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
@@ -127,19 +138,19 @@ void _csr_matmult(
 
   Cp[0] = 0;
 
-  for (int64_t i = 0; i < n_row; i++) {
+  for (const auto i : c10::irange(n_row)) {
     int64_t head = -2;
     int64_t length = 0;
 
     int64_t jj_start = Ap[i];
     int64_t jj_end = Ap[i + 1];
-    for (int64_t jj = jj_start; jj < jj_end; jj++) {
+    for (const auto jj : c10::irange(jj_start, jj_end)) {
       int64_t j = Aj[jj];
       scalar_t v = Ax[jj];
 
       int64_t kk_start = Bp[j];
       int64_t kk_end = Bp[j + 1];
-      for (int64_t kk = kk_start; kk < kk_end; kk++) {
+      for (const auto kk : c10::irange(kk_start, kk_end)) {
         int64_t k = Bj[kk];
 
         sums[k] += v * Bx[kk];
@@ -152,7 +163,8 @@ void _csr_matmult(
       }
     }
 
-    for (int64_t jj = 0; jj < length; jj++) {
+    for (const auto jj : c10::irange(length)) {
+      (void)jj; //Suppress unused variable warning
       Cj[nnz] = head;
       Cx[nnz] = sums[head];
       nnz++;

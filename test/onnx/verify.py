@@ -226,7 +226,7 @@ class Errors(object):
             raise RuntimeError("ShortCircuit was raised, but no errors were recorded")
 
 def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-7,
-           test_args=2, do_constant_folding=True, example_outputs=None, opset_version=None,
+           test_args=2, do_constant_folding=True, opset_version=None,
            keep_initializers_as_inputs=True, add_node_names=False,
            operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
            input_names=None, dynamic_axes=None,
@@ -354,7 +354,6 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
         proto_bytes = io.BytesIO()
         torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose,
                                        do_constant_folding=do_constant_folding,
-                                       example_outputs=example_outputs,
                                        opset_version=opset_version,
                                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                                        add_node_names=add_node_names,
@@ -370,7 +369,6 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
             alt_proto_bytes = io.BytesIO()
             torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose,
                                            do_constant_folding=do_constant_folding,
-                                           example_outputs=example_outputs,
                                            opset_version=opset_version,
                                            keep_initializers_as_inputs=keep_initializers_as_inputs,
                                            add_node_names=add_node_names,

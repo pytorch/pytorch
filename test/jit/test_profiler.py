@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -29,8 +31,6 @@ class TestProfiler(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
-        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
-        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.prev_exec)
@@ -42,7 +42,6 @@ class TestProfiler(JitTestCase):
         torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script
@@ -232,6 +231,24 @@ class TestProfiler(JitTestCase):
         self.assertEqual(foo_script(x, x), foo(x, x))
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_count("aten::add", 2, exactly=True).run(g)
+
+    def test_local_fusion_strategy(self):
+        @torch.jit.script
+        def foo(x):
+            return x + x + x
+
+        torch.jit.set_fusion_strategy([("STATIC", 1)])
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        torch.jit.set_fusion_strategy([("STATIC", 10)])
+
+        for i in range(10):
+            foo(torch.rand([i]))
+            foo(torch.rand([i]))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
     def test_iterative_fusion(self):
         @torch.jit.script

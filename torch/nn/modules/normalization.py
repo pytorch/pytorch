@@ -123,6 +123,14 @@ class LayerNorm(Module):
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
 
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 1.
+        bias:   the learnable bias of the module of shape
+                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+                The values are initialized to 0.
+
     Shape:
         - Input: :math:`(N, *)`
         - Output: :math:`(N, *)` (same shape as input)
@@ -130,11 +138,12 @@ class LayerNorm(Module):
     Examples::
 
         >>> # NLP Example
-        >>> batch, sentence_length, embedding = 20, 5, 10
-        >>> embedding = torch.randn(batch, sentence_length, embedding)
-        >>> layer_norm = nn.LayerNorm(embedding)
+        >>> batch, sentence_length, embedding_dim = 20, 5, 10
+        >>> embedding = torch.randn(batch, sentence_length, embedding_dim)
+        >>> layer_norm = nn.LayerNorm(embedding_dim)
         >>> # Activate module
         >>> layer_norm(embedding)
+        >>>
         >>> # Image Example
         >>> N, C, H, W = 20, 5, 10, 10
         >>> input = torch.randn(N, C, H, W)
@@ -193,7 +202,8 @@ class GroupNorm(Module):
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The input channels are separated into :attr:`num_groups` groups, each containing
-    ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
+    ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
+    :attr:`num_groups`. The mean and standard-deviation are calculated
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
@@ -237,6 +247,9 @@ class GroupNorm(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(GroupNorm, self).__init__()
+        if num_channels % num_groups != 0:
+            raise ValueError('num_channels must be divisible by num_groups')
+
         self.num_groups = num_groups
         self.num_channels = num_channels
         self.eps = eps

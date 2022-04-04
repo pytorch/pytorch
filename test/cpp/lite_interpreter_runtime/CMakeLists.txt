@@ -4,6 +4,7 @@ set(
 set(LITE_INTERPRETER_RUNTIME_TEST_DIR
   ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime/main.cpp
   ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime/test_lite_interpreter_runtime.cpp
+  ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
 )
 
 add_library(backend_with_compiler_runtime SHARED
@@ -21,6 +22,10 @@ target_include_directories(
 )
 
 target_link_libraries(test_lite_interpreter_runtime PRIVATE torch gtest backend_with_compiler_runtime)
+
+if(LINUX)
+  target_link_libraries(test_lite_interpreter_runtime PRIVATE "-Wl,--no-as-needed,$<TARGET_FILE:backend_with_compiler_runtime>,--as-needed")
+endif()
 
 if(INSTALL_TEST)
   install(TARGETS test_lite_interpreter_runtime DESTINATION bin)

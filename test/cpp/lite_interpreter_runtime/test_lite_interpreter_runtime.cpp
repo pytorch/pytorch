@@ -142,9 +142,9 @@ TEST(RunTimeTest, DelegateException) {
   inputs.emplace_back(torch::rand({13, 9}));
 
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA).aten::add
+  Module hierarchy:top(C)::<unknown>.A0(backend_with_compiler_demoLoweredModule)::forward.AA0(AA)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
@@ -157,7 +157,7 @@ Traceback of TorchScript (most recent call last):
                         ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                   assert isinstance(_0, Tensor)
                   return _0
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.AA0.forward(x, y) + 3

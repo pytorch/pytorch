@@ -6,11 +6,10 @@
 #include <ATen/core/functional.h>
 #include <ATen/TensorGeometry.h>
 
-#include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch { namespace autograd { namespace generated {
 

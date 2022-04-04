@@ -28,29 +28,6 @@ torch::Library::Kind parseKind(const std::string& k) {
   TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
   return it->second;
 }
-
-c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
-  static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"CPU", c10::DispatchKey::CPU},
-    {"CUDA", c10::DispatchKey::CUDA},
-    {"XLA", c10::DispatchKey::XLA},
-    {"Lazy", c10::DispatchKey::Lazy},
-    {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
-    {"CompositeImplicitAutograd", c10::DispatchKey::CompositeImplicitAutograd},
-    {"Autograd", c10::DispatchKey::Autograd},
-    {"CompositeExplicitAutograd", c10::DispatchKey::CompositeExplicitAutograd},
-    {"AutogradCPU", c10::DispatchKey::AutogradCPU},
-    {"", c10::DispatchKey::Undefined},
-  };
-  auto it = key_map.find(k);
-  TORCH_CHECK(it != key_map.end(), "could not parse ", k);
-  if (it->second == c10::DispatchKey::Undefined) {
-    return c10::nullopt;
-  } else {
-    return c10::make_optional(it->second);
-  }
-}
-
 c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
   static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
     {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
@@ -66,7 +43,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = parseDispatchKey(key);
+  auto mb_key = std::string(key) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
     return torch::dispatch(*mb_key, std::forward<Func>(raw_f));
   } else {
@@ -86,7 +63,7 @@ public:
   // libtorch_python, so we want to disarm the deallocation if that happens.
   // PyInterpreter does this correctly, pybind11 does not.
   ~PythonKernelHolder() {
-    getPyInterpreter()->decref(func_);
+    getPyInterpreter()->decref(func_, /*is_tensor*/ false);
   }
 
   void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet, torch::jit::Stack* stack) {
@@ -213,10 +190,11 @@ void initDispatchBindings(PyObject* module) {
       );
       return self;
     }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("debug") = "")
-    .def("impl", [](py::object self, const char* name, const char* dispatch, py::object func) {
+    .def("impl", [{}](py::object self, const char* name, const char* dispatch, py::object func) {
+      auto op = CppFunction::makeFromBoxedFunctor(std::make_unique<PythonKernelHolder>(std::move(func)));
       self.cast<torch::Library&>().impl(
         name,
-        dispatch_str(dispatch, CppFunction::makeFromBoxedFunctor(std::make_unique<PythonKernelHolder>(std::move(func))))
+        dispatch_str(dispatch, op);
       );
     }, "", py::arg("name"), py::arg("dispatch"), py::arg("func"))
     .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
@@ -228,7 +206,12 @@ void initDispatchBindings(PyObject* module) {
   ;
 
   m.def("_dispatch_library", [](const char* kind, std::string name, const char* dispatch) {
-    return std::make_unique<torch::Library>(parseKind(kind), std::move(name), parseDispatchKey(dispatch), "/dev/null", 0);
+    return std::make_unique<torch::Library>(
+      parseKind(kind),
+      std::move(name),
+      std::string(dispatch) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch)),
+      "/dev/null",
+      0);
   });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
@@ -272,6 +255,18 @@ void initDispatchBindings(PyObject* module) {
 
     return states;
   });
+
+  // Prints out the name of every operator that has a kernel registered to the Dispatcher
+  // under [dispatch_key].
+  // If no arguments are specified, it'll print out the name of every operator that the Dispatcher knows of.
+  // This can be useful to answer questions like "list all operators that do not have a CPU kernel".
+  m.def("_dispatch_print_registrations_for_dispatch_key", [](const char* dispatch_key = "") {
+    auto k = std::string(dispatch_key) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch_key));
+    auto op_names = c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
+    for (auto& op : op_names) {
+        std::cout << op << std::endl;
+    }
+  }, py::arg("dispatch_key") = static_cast<const char*>(""));
 }
 
 }}} // namespace torch::impl::dispatch

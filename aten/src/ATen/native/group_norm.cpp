@@ -31,7 +31,10 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   const Tensor& gamma = *gamma_maybe_owned;
   const Tensor& beta = c10::value_or_else(beta_opt, [] { return Tensor(); });
 
-  TORCH_CHECK(X.is_contiguous());
+  auto memory_format = X.device().is_cpu() ?
+      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
+
+  TORCH_CHECK(X.is_contiguous(memory_format));
 
   Tensor Y = at::native::empty_like(
       X,
@@ -39,7 +42,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
       c10::nullopt /* layout */,
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      memory_format);
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
@@ -73,7 +76,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+        at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(
@@ -82,7 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+        at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
     dbeta = at::native::empty_like(
@@ -91,7 +94,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+        at::MemoryFormat::Contiguous);
   }
   GroupNormBackwardKernel(
       X.device().type(),
@@ -153,7 +156,9 @@ Tensor group_norm(
       c10::multiply_integers(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
-  const auto& X = input.is_contiguous() ? input : input.contiguous();
+  auto memory_format = input.suggest_memory_format();
+  const auto& X = input.device().is_cpu() ?
+      input.contiguous(memory_format) : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);

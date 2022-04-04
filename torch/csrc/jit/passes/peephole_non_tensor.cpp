@@ -61,6 +61,11 @@ bool trySimplifyAddOrSub(Node& node) {
     return false;
   }
 
+  if (constant == 0) {
+    node.output()->replaceAllUsesWith(node.input(0));
+    return true;
+  }
+
   auto& dep = *node.inputs()[0]->node();
   if (dep.kind() != aten::add && dep.kind() != aten::sub) {
     return false;
@@ -144,6 +149,24 @@ struct PeepholeOptimizeNonTensorImpl {
             changed = true;
           }
         }
+
+        // check for types that can be refined
+        for (size_t i = 0; i < n.outputs().size(); ++i) {
+          // common case of optional for now
+          bool inputs_non_optional =
+              !n.thenOutputs().at(i)->type()->cast<OptionalType>() &&
+              !n.elseOutputs().at(i)->type()->cast<OptionalType>();
+          auto output_optional =
+              n.outputs().at(i)->type()->cast<OptionalType>();
+          if (inputs_non_optional && output_optional) {
+            if (auto unif = unifyTypes(
+                    n.thenOutputs().at(i)->type(),
+                    n.elseOutputs().at(i)->type())) {
+              n.outputs().at(i)->setType(*unif);
+              changed = true;
+            }
+          }
+        }
       } else if (
           node->kind() == aten::__is__ || node->kind() == aten::__isnot__) {
         // if we are comparing a None value with a value that can't be None
@@ -185,7 +208,7 @@ struct PeepholeOptimizeNonTensorImpl {
         // losing anything by calling unshapedType here
         auto input_type = unshapedType(node->input()->type());
         auto output_type = unshapedType(node->output()->type());
-        if (input_type->isSubtypeOf(output_type)) {
+        if (input_type->isSubtypeOf(*output_type)) {
           GRAPH_UPDATE(
               "Removing ",
               getHeader(node),
@@ -193,25 +216,50 @@ struct PeepholeOptimizeNonTensorImpl {
           node->output()->replaceAllUsesWith(node->input());
           changed = true;
         }
+      } else if (
+          (node->kind() == aten::Int || node->kind() == aten::ceil) &&
+          node->inputs().size() == 1 &&
+          node->input()->type()->cast<IntType>()) {
+        GRAPH_UPDATE(
+            "Removing ", getHeader(node), " as input is already an integer");
+        node->output()->replaceAllUsesWith(node->input());
+        changed = true;
       } else if (node->kind() == aten::ne || node->kind() == aten::eq) {
         if (node->inputs().size() != 2 ||
             node->inputs().at(0) != node->inputs().at(1)) {
           continue;
         }
-        auto inp_kind = node->inputs().at(0)->type()->kind();
+        auto inp_type = node->inputs().at(0)->type();
         // only handling common immutable types here because other types like
         // Tensor or list of Tensor might throw on aten::eq
-        switch (inp_kind) {
-          case TypeKind::BoolType:
-          case TypeKind::IntType:
-          case TypeKind::FloatType: {
-            WithInsertPoint guard(node);
-            node->output()->replaceAllUsesWith(
-                graph_->insertConstant(node->kind() == aten::eq));
-            changed = true;
-          }
-          default:
-            break;
+        auto immut_type = [&](const TypePtr& type) {
+          auto kind = type->kind();
+          static const std::vector<TypeKind> handled_immutable_types = {
+              TypeKind::BoolType,
+              TypeKind::IntType,
+              TypeKind::FloatType,
+              TypeKind::NoneType};
+          return (
+              std::find(
+                  handled_immutable_types.begin(),
+                  handled_immutable_types.end(),
+                  kind) != handled_immutable_types.end());
+        };
+        bool non_throwing_type = false;
+        if (auto li_type = inp_type->cast<ListType>()) {
+          non_throwing_type = immut_type(li_type->getElementType());
+        } else if (auto di_type = inp_type->cast<DictType>()) {
+          non_throwing_type =
+              (immut_type(di_type->getKeyType()) &&
+               immut_type(di_type->getValueType()));
+        } else {
+          non_throwing_type = immut_type(inp_type);
+        }
+        if (non_throwing_type) {
+          WithInsertPoint guard(node);
+          node->output()->replaceAllUsesWith(
+              graph_->insertConstant(node->kind() == aten::eq));
+          changed = true;
         }
       } else if (
           node->kind() == aten::mul || node->kind() == aten::floordiv ||

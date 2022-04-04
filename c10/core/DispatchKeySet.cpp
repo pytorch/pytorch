@@ -19,6 +19,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
         DispatchKey::HPU,
+        DispatchKey::ORT,
         DispatchKey::Meta,
     });
 
@@ -45,6 +46,20 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
+  }
+}
+
+bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
+  TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  switch (t) {
+    case DispatchKey::Autograd:
+      return autograd_dispatch_keyset.has(k);
+    case DispatchKey::CompositeImplicitAutograd:
+      return math_dispatch_keyset.has(k);
+    case DispatchKey::CompositeExplicitAutograd:
+      return backend_dispatch_keyset.has(k);
+    default:
+      return t == k;
   }
 }
 
@@ -99,7 +114,7 @@ DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
-  return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
+  return k != DispatchKey::Undefined && runtimeDispatchKeySetHas(alias, k);
 }
 
 std::string toString(DispatchKeySet ts) {

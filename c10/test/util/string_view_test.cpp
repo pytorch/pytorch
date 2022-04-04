@@ -177,32 +177,16 @@ static_assert('o' == hello.at(4), "");
 
 TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
   expectThrows<std::out_of_range>(
-      [] { string_view("")[1]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 1, size: 0");
-
-  expectThrows<std::out_of_range>(
       [] { string_view("").at(1); },
       "string_view::operator[] or string_view::at() out of range. Index: 1, size: 0");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello")[5]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
 
   expectThrows<std::out_of_range>(
       [] { string_view("hello").at(5); },
       "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
 
   expectThrows<std::out_of_range>(
-      [] { string_view("hello")[100]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
-
-  expectThrows<std::out_of_range>(
       [] { string_view("hello").at(100); },
       "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello")[string_view::npos]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 18446744073709551615, size: 5");
 
   expectThrows<std::out_of_range>(
       [] { string_view("hello").at(string_view::npos); },

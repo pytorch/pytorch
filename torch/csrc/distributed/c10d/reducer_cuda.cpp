@@ -1,4 +1,4 @@
-#include <c10d/reducer.hpp>
+#include <c10d/reducer_timer.hpp>
 
 #include <c10/core/DeviceGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -43,6 +43,8 @@ class CudaTimer : public Timer {
   explicit CudaTimer(c10::Device dev) : device(dev) {}
 
   void record(Event event) override {
+    // Parent class sets the host-side time
+    Timer::record(event);
     c10::DeviceGuard g(device);
     getEvent(event).record();
   }

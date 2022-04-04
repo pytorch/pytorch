@@ -1,9 +1,10 @@
-from torch.testing._internal.common_utils import run_tests
+# Owner(s): ["module: autograd"]
+
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 import torch
-import unittest
 
-class TestPublicBindings(unittest.TestCase):
+class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
         """
         This test aims to stop the introduction of new JIT bindings into torch._C
@@ -139,6 +140,7 @@ class TestPublicBindings(unittest.TestCase):
             "IntType",
             "IODescriptor",
             "is_anomaly_enabled",
+            "is_autocast_cache_enabled",
             "is_autocast_cpu_enabled",
             "is_autocast_enabled",
             "is_grad_enabled",
@@ -171,6 +173,7 @@ class TestPublicBindings(unittest.TestCase):
             "QInt8StorageBase",
             "qscheme",
             "QUInt4x2StorageBase",
+            "QUInt2x4StorageBase",
             "QUInt8StorageBase",
             "read_vitals",
             "REMOVE_DROPOUT",
@@ -190,6 +193,7 @@ class TestPublicBindings(unittest.TestCase):
             "ScriptObjectProperty",
             "SerializationStorageContext",
             "set_anomaly_enabled",
+            "set_autocast_cache_enabled",
             "set_autocast_cpu_dtype",
             "set_autocast_cpu_enabled",
             "set_autocast_enabled",
@@ -210,9 +214,52 @@ class TestPublicBindings(unittest.TestCase):
             "TupleType",
             "Type",
             "unify_type_list",
+            "UnionType",
             "Use",
             "Value",
+            "autocast_decrement_nesting",
+            "autocast_increment_nesting",
+            "clear_autocast_cache",
+            "cpp",
+            "default_generator",
+            "device",
+            "dtype",
+            "finfo",
+            "fork",
+            "get_default_dtype",
+            "get_num_interop_threads",
+            "get_num_threads",
+            "has_cuda",
+            "has_cudnn",
+            "has_lapack",
+            "has_mkl",
+            "has_mkldnn",
+            "has_mlc",
+            "has_openmp",
+            "iinfo",
+            "import_ir_module",
+            "import_ir_module_from_buffer",
+            "init_num_threads",
+            "is_anomaly_enabled",
+            "is_autocast_enabled",
+            "is_grad_enabled",
+            "layout",
+            "memory_format",
+            "merge_type_from_type_comment",
+            "parse_ir",
+            "parse_schema",
+            "parse_type_comment",
+            "qscheme",
+            "set_anomaly_enabled",
+            "set_autocast_enabled",
+            'set_autocast_gpu_dtype',
+            'get_autocast_gpu_dtype',
+            "set_flush_denormal",
+            "set_num_interop_threads",
+            "set_num_threads",
+            "unify_type_list",
             "vitals_enabled",
+
             "wait",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}

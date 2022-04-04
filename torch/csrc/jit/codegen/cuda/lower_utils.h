@@ -1,8 +1,11 @@
+
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 #include <bitset>
 #include <map>
@@ -16,39 +19,15 @@ namespace cuda {
 
 class ThreadPredicateMap;
 
+using IterDomainMap = std::unordered_map<IterDomain*, IterDomain*>;
+
 namespace scope_utils {
 
-// Grab the ForLoop starting from scope working out
-std::vector<kir::ForLoop*> getLoops(Expr* scope);
+//! Create an **empty** Forloop and copy the metadata.
+kir::ForLoop* cloneForLoop(kir::ForLoop* for_loop);
 
-// Track how far our for loop scope is
-unsigned int computeForDepth(Expr* scope);
-
-// Push back an expr to scope
-void pushBack(Expr* scope, Expr* expr);
-
-// Insert expr in scope before ref
-void insertBefore(Expr* scope, Expr* ref, Expr* expr);
-
-// Returns if expr is in scope, does not check nested scopes
-bool exprInScope(Expr* scope, Expr* expr);
-
-// Return the parent of the active scope
-Expr* getParent(Expr* scope);
-
-// Open a new inner most for loop
-kir::ForLoop* openFor(Expr* scope, IterDomain*);
-
-// Provide a new for loop matching the one provided, sets parent_scope as
-// parent_scope, but does not insert into parent scope.
-kir::ForLoop* cloneLoopNest(kir::ForLoop* to_clone, Expr* parent_scope);
-
-// Run through a scope and replace expressions inside with replacement_map
-void replaceExprsInScope(
-    Expr* scope,
-    std::unordered_map<Expr*, Expr*> replacement_map);
-
-Expr* firstInnerMostScope(Expr* scope);
+//! Create an **empty** IfThenElse and copy the metadata.
+kir::IfThenElse* cloneIfThenElse(kir::IfThenElse* ite);
 
 } // namespace scope_utils
 
@@ -70,8 +49,12 @@ class TVDomainGuard {
   ~TVDomainGuard();
 };
 
-// Return inputs of provided IterDomains that are IterDomains
-std::vector<IterDomain*> iterDomainInputsOf(const std::vector<IterDomain*>&);
+//! Return inputs of provided IterDomains that are IterDomains. A list
+//! of input IterDomain can be optionally given. Otherwise,
+//! IterDomains with no defining expression are returned.
+std::vector<IterDomain*> iterDomainInputsOf(
+    const std::vector<IterDomain*>& input_ids,
+    const std::vector<IterDomain*>& all_inputs = {});
 
 // Return inputs of provided IterDomains that are IterDomains, order as the
 // second provided vector.
@@ -79,107 +62,81 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& of,
     const std::vector<IterDomain*>& order);
 
-std::vector<Val*> indices(std::vector<kir::ForLoop*>);
-
+// Returns if Val is a TensorView or TensorIndex
 bool isTV(const Val* const);
 
-bool isTVOp(const Expr*);
+// Returns is Expr is a TensorView or TensorIndex Expr.
+TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
-TensorView* getTVOutput(const Expr*);
+// Returns the first output of Expr that is a TensorView
+TensorView* getTvOutput(const Expr*);
+
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
+
+//! Returns the Fuser iterdomain that maps to the thread dimension grouped
+//!  to warps. Returns nullopt if the reduction is not to be lowered to
+//!  a warp reduction.
+c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
 
 bool isScalarOp(const Expr*);
 
-void ASSERT_EXPR(Statement*);
+//! Get TensorView potentially via kir::TensorIndex. Returns nullptr if
+//! cast fails.
+TensorView* getTv(Val*);
 
-bool isScope(const Expr*);
+//! Get only TensorView potentially via kir::TensorIndex.
+std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 
-Expr* asExpr(Statement*);
+//! Return true if axis is derived from a root axis that is an input
+//! to a CA leaf axis.
+bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
-// TODO: Remove in favor of ->as<TensorView>()
-TensorView* asTV(Val*);
-
-// TODO: Remove in favor of ->as<ForLoop>()
-kir::ForLoop* asForLoop(Statement*);
-
-// TODO: Remove in favor of ->as<TensorView>()
-const TensorView* asConstTV(const Val*);
-
-bool isUnrolledFor(const Expr*);
-
-// Represents mapping to bool from BIDx, BIDy, BIDz, TIDx, TIDy and TIDz.
-class ParallelTypeBitmap {
- public:
-  static constexpr int num_p_type = 6;
-  ParallelTypeBitmap() = default;
-  bool get(ParallelType pt) const;
-  bool set(ParallelType pt, bool);
-  ParallelTypeBitmap operator&=(const ParallelTypeBitmap& other);
-  ParallelTypeBitmap operator|=(const ParallelTypeBitmap& other);
-  ParallelTypeBitmap operator^=(const ParallelTypeBitmap& other);
-  ParallelTypeBitmap operator~() const;
-  bool none() const;
-  bool any() const;
-  bool all() const;
-  bool operator[](size_t pos) const;
-  std::map<ParallelType, bool> getMap() const;
-
- private:
-  ParallelTypeBitmap(const std::bitset<num_p_type>& bs) : bitset_(bs) {}
-  std::bitset<num_p_type> bitset_;
-  const static std::unordered_map<ParallelType, int, TypeHash> pt_to_offset_;
-  const static std::unordered_map<int, ParallelType> offset_to_pt_;
-};
-
-ParallelTypeBitmap operator&(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs);
-
-ParallelTypeBitmap operator|(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs);
-
-ParallelTypeBitmap operator^(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs);
-
-// Returns a ParallelTypeBitmap representing which domain needs
-// blockBroadcast.
-// Even when a domain is broadcast and parallelized, it does not need
-// blockBroadcast unless it is predicated.
-ParallelTypeBitmap getParallelBroadcastDomains(
-    const Val* bop_out,
-    const ThreadPredicateMap& preds);
+std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
+    Val* val);
 
 } // namespace ir_utils
 
 namespace loop_utils {
 
-// I wanted to make the tv's in these util functions constant, but that started
-// a long const-ness project going into TensorView (making functions const
-// there) then into lower_loops where we sort exprs.
-// TODO: We should fix this when we have some time.
+struct BasicAllocInfo {
+  // The for loop that the initialization of this allocation must be
+  // placed in, nullptr if not within a loop
+  kir::ForLoop* init_for_loop = nullptr;
 
-// Figure out which loop the allocation needs to be in. Returns nullptr if
-// outside the first loop in loops. Also find out which index in tv the
-// first dimension that needs to be allocated is. Meaning we need to allocate
-// that local axis and above.
-std::pair<kir::ForLoop*, int64_t> getAllocPoint(
-    TensorView* tv,
-    const std::vector<kir::ForLoop*>& loops);
+  // Keep track of the actual allocation loop. This can be different
+  // from init_for_loop only with unswitched shared memory allocations,
+  // which are moved outer loops to avoid duplicated allocations. This means
+  // that the alloc position may be outside what's expected. Most applications
+  // outside lower_allocation is likely looking for init_for_loop which is
+  // more directly related to how large an allocation is and how it's used.
+  // (see issue #1133).
+  kir::ForLoop* alloc_for_loop = nullptr;
 
-// Go through exprs mapping root domains from producer to consumer. Provides a
-// ground truth for how root domains map through our expressions. Needed for
-// unrolling.
-std::unordered_map<IterDomain*, IterDomain*> p2cRootMap(
-    const std::vector<Expr*>& exprs);
+  // The allocation position relative to buffer IDs, it could be outside the
+  // compute at position if it's shared memory with a compute at inside an
+  // unswitch
+  size_t alloc_pos = 0;
+};
 
-// Given a root IterationDomain and a p2c_root_map find the root IterationDomain
-// furthest down in the sorted expr list it maps to. Needed for unrolling.
-IterDomain* getTermIDInMap(
-    IterDomain* root_id,
-    std::unordered_map<IterDomain*, IterDomain*> p2c_root_map);
-
+// Fill the above allocation struct based on provided information. id_map is
+// used if we're looking at a producer tensor but loops on a consumer tensor.
+BasicAllocInfo getAllocInformation(
+    const TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {},
+    bool use_id_map = false);
 } // namespace loop_utils
+
+// Replace value pass on Kernel IR.
+//  Replace each use of any Val* that apears in the given `replacement_map`
+//  Keeps the predicate carried by each expr
+//
+// Warning: Blindly replaces all use based on pointer
+// Warning: May invalidate indexing if replacing uses of allocated values
+std::vector<Expr*> replaceInputsInExpr(
+    const std::vector<Expr*>& exprs,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

@@ -1,18 +1,21 @@
+# Owner(s): ["oncall: fx"]
+
 import math
 import numbers
 import operator
 import sys
 import unittest
 from typing import Callable, Dict, Union, List, Optional
+from types import BuiltinFunctionType
 
 import torch
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -32,7 +35,7 @@ from torch.fx.operator_schemas import (
     type_matches,
     create_type_hint,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.fx.passes.split_module import split_module
 from torch.testing._internal.common_device_type import (
     ops,
@@ -96,13 +99,13 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.meta["tensor_meta"] = extract_tensor_metadata(a)
+                node.meta["tensor_meta"] = _extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.meta["tensor_meta"] = extract_tensor_metadata(a)
+                    node.meta["tensor_meta"] = _extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.meta["tensor_meta"] = extract_tensor_metadata(a)
+            node.meta["tensor_meta"] = _extract_tensor_metadata(a)
 
         weights1 = {}
         weights2 = {}
@@ -451,7 +454,7 @@ class TestFXExperimental(JitTestCase):
                 return add_5
 
         def get_node_to_latency_mapping(fx_module: GraphModule):
-            node_to_latency_mapping: Dict[Node, Nodelatency] = {}
+            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -497,117 +500,64 @@ class TestFXExperimental(JitTestCase):
         )
         assert critical_path_latency_sec == 160.0
 
-        def test_kl_based_partition(self):
-            class TestModule(torch.nn.Module):
-                def __init__(self):
-                    super(TestModule, self).__init__()
-                    self.linear = torch.nn.Linear(4, 4)
-                    self.b = torch.rand(4)
-                    self.c = torch.rand(4)
-                    self.d = torch.rand(4)
+    def test_aot_based_partition(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.b = torch.rand(4)
+                self.c = torch.rand(4)
 
-                def forward(self, a):
-                    add_1 = a + self.b
-                    add_2 = add_1 + self.c
-                    linear_1 = self.linear(add_1)
-                    add_3 = add_2 + linear_1
-                    add_4 = add_2 + self.d
-                    add_5 = add_3 + add_4
-                    return add_4
+            def forward(self, a):
+                add_1 = a + self.b
+                add_2 = self.c + add_1
+                return add_2
 
-            m = TestModule()
-            traced = symbolic_trace(m)
-            a = torch.rand(4)
-            graph_manipulation.get_size_of_all_nodes(traced, [a])
-            node_to_latency_mapping = get_node_to_latency_mapping(traced)
-            transfer_rate_bytes_per_sec = 2
-            devices = [
-                Device("dev_0", 200, 0),
-                Device("dev_1", 200, 1),
-                Device("dev_2", 200, 2),
-                Device("dev_3", 200, 3),
-            ]
-            partitioner = Partitioner()
-            partitioner_config = PartitionerConfig(
-                devices,
-                mode=PartitionMode.kl_based,
-                transfer_rate_bytes_per_sec=transfer_rate_bytes_per_sec,
-                node_to_latency_mapping=node_to_latency_mapping,
-            )
-            ret = partitioner.partition_graph(traced, m, partitioner_config)
-            module_with_submodules = ret.module_with_submodules
-            self.assertEqual(traced(a), module_with_submodules(a))
-            dag = ret.dag
-            assert dag.nodes[0] == 176
-            assert dag.nodes[1] == 112
-            partition_to_latency_mapping = get_partition_to_latency_mapping(
-                partitioner.partitions, node_to_latency_mapping
-            )
-            cost = get_latency_of_partitioned_graph(
-                partitioner.partitions,
-                partition_to_latency_mapping,
-                transfer_rate_bytes_per_sec,
-            )
-            assert cost == 208.0
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        node_to_partition_id = {}
+        partition_to_logical_devices = {}
+        count = 0
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
+        for node in traced.graph.nodes:
+            if node.op not in {"placeholder", "get_attr", "output"}:
+                node_to_partition_id[node] = count
+                partition_to_logical_devices[count] = [0]
+                count += 1
+        devices = [Device("dev_0", 200, 0)]
+        partitioner_config = PartitionerConfig(
+            devices=devices,
+            mode=PartitionMode.aot_based,
+            node_to_partition_mapping=node_to_partition_id,
+            partition_to_logical_device_mapping=partition_to_logical_devices,
+        )
+        partitioner = Partitioner()
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        module_with_submodules = ret.module_with_submodules
+        dag = ret.dag
+        self.assertEqual(module_with_submodules(a), traced(a))
+        for node in dag.nodes:
+            assert node.size_bytes == 48
+            assert node.logical_device_ids == [0]
 
-        def test_aot_based_partition(self):
-            class TestModule(torch.nn.Module):
-                def __init__(self):
-                    super(TestModule, self).__init__()
-                    self.b = torch.rand(4)
-                    self.c = torch.rand(4)
+    def test_replace_target_nodes_with(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
 
-                def forward(self, a):
-                    add_1 = a + self.b
-                    add_2 = self.c + add_1
-                    return add_2
-
-            m = TestModule()
-            traced = symbolic_trace(m)
-            a = torch.rand(4)
-            node_to_partition_id = {}
-            partition_to_logical_devices = {}
-            count = 0
-            GraphManipulation.get_size_of_all_nodes(traced, [a])
-            for node in traced.graph.nodes:
-                if node.op not in {"placeholder", "get_attr", "output"}:
-                    node_to_partition_id[node] = count
-                    partition_to_logical_devices[count] = [0]
-                    count += 1
-            devices = [Device("dev_0", 200, 0)]
-            partitioner_config = PartitionerConfig(
-                devices=devices,
-                mode=PartitionMode.aot_based,
-                node_to_partition_mapping=node_to_partition_id,
-                partition_to_logical_device_mapping=partition_to_logical_devices,
-            )
-            partitioner = Partitioner()
-            ret = partitioner.partition_graph(traced, m, partitioner_config)
-            module_with_submodules = ret.module_with_submodules
-            dag = ret.dag
-            self.assertEqual(module_with_submodules(a), traced(a))
-            for node in dag.nodes:
-                assert node.size_bytes == 48
-                assert node.logical_device_ids == [0]
-
-        def test_replace_target_nodes_with(self):
-            class testModule(torch.nn.Module):
-                def forward(self, a, b):
-                    return a + b
-
-            m = testModule()
-            traced = symbolic_trace(m)
-            input1 = torch.randn(1)
-            input2 = torch.randn(1)
-            assert (input1 + input2) == traced(input1, input2)
-            graph_manipulation.replace_target_nodes_with(
-                fx_module=traced,
-                old_op="call_function",
-                old_target=operator.add,
-                new_op="call_function",
-                new_target=operator.mul,
-            )
-            assert (input1 * input2) == traced(input1, input2)
+        m = testModule()
+        traced = symbolic_trace(m)
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+        assert (input1 + input2) == traced(input1, input2)
+        graph_manipulation.replace_target_nodes_with(
+            fx_module=traced,
+            old_op="call_function",
+            old_target=operator.add,
+            new_op="call_function",
+            new_target=operator.mul,
+        )
+        assert (input1 * input2) == traced(input1, input2)
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
@@ -664,6 +614,30 @@ class TestFXExperimental(JitTestCase):
         inp = torch.randn(N, C, H, W)
 
         self.assertEqual(fused(inp), rn18(inp))
+
+    def test_conv_bn_fusion_not_running_state(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
+                self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        model = M().eval()
+
+        traced = symbolic_trace(model)
+        fused = optimization.fuse(traced)
+        inp = torch.randn([1, 32, 50, 50])
+
+        # bn need not be folded in conv
+        self.assertTrue(
+            any(isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
+        )
+        self.assertEqual(fused(inp), model(inp))
 
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
@@ -840,6 +814,29 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_kwargs_expansion(self):
+        class ModuleWithKwargsExpansion(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs['foo']
+
+        mod = ModuleWithKwargsExpansion()
+        traced = torch.fx.symbolic_trace(mod)
+
+        seen_getitem = False
+
+        def split_callback(n):
+            nonlocal seen_getitem
+            split_idx = int(seen_getitem)
+            if n.target == operator.getitem:
+                seen_getitem = True
+            return split_idx
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn(5, 3)
+        foo = torch.randn(5, 3)
+        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
+
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
         # Smoke test trivially splitting resnet into 1 partition works
@@ -849,6 +846,28 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    def test_split_module_default_arg(self):
+        class ModelToTrace(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(512, 512)
+
+            def forward(self, x, targets=None):
+                x = self.lin(x)
+
+                if targets is not None:
+                    x = x + targets
+
+                return x
+
+        mtt = ModelToTrace()
+        traced = torch.fx.symbolic_trace(mtt, concrete_args={'targets': None})
+
+        split = split_module(traced, mtt, lambda node: 0)
+
+        x = torch.randn(50, 512)
+        torch.testing.assert_allclose(split(x), traced(x))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -876,7 +895,7 @@ terrible spacing
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
             x, y = torch.randn(3, 4), torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x, y), normalized(x, y))
+            torch.testing.assert_close(traced(x, y), normalized(x, y))
             self.assertFalse(
                 any(n.target in ops_to_test for n in normalized.graph.nodes)
             )
@@ -891,7 +910,7 @@ terrible spacing
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
             x = torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x), normalized(x))
+            torch.testing.assert_close(traced(x), normalized(x))
             self.assertFalse(
                 any(n.target in ops_to_test for n in normalized.graph.nodes)
             )
@@ -1057,10 +1076,11 @@ class {test_classname}(torch.nn.Module):
         for node in traced_modules_annotated.graph.nodes:
             if node.type is None:
                 check = (node.op, node.target)
-                self.assertTrue(
-                    check
-                    in {
+                self.assertIn(
+                    check,
+                    {
                         ("placeholder", "x"),
+                        ("call_module", "maxpool"),
                         ("call_function", operator.add),
                         ("call_function", torch.flatten),
                         ("output", "output"),
@@ -1089,14 +1109,13 @@ class {test_classname}(torch.nn.Module):
                 check = (node.op, node.target)
                 excluded_nodes = {
                     ("placeholder", "x"),
-                    ("call_function", torch.conv2d),
                     # Return type differs based on boolean dispatch :(
                     ("call_function", torch.nn.functional.max_pool2d),
-                    ("call_function", operator.add),
-                    ("call_function", torch.flatten),
                     ("output", "output"),
                 }
-                self.assertTrue(check in excluded_nodes)
+                # AnnotateTypesWithSchema doesn't work with bound C++ functions
+                if not isinstance(node.target, BuiltinFunctionType):
+                    self.assertIn(check, excluded_nodes)
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
@@ -1129,6 +1148,47 @@ class {test_classname}(torch.nn.Module):
         module_with_submodule = split_module(traced, mm, split_cb)
         self.assertEqual(module_with_submodule(a, b, c, d), traced(a, b, c, d))
 
+    def test_split_qualname_mapping(self):
+        d_hid = 4
+
+        class ExampleCode(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.lin = torch.nn.Linear(d_hid, d_hid)
+
+            def forward(self, x):
+                x = torch.mm(x, self.mm_param)
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param)
+                x = self.lin(x)
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param2)
+                x = self.lin(x)
+                return x
+
+        my_module = ExampleCode()
+        my_module_traced = symbolic_trace(my_module)
+
+        part_idx = 0
+
+        def split_callback(n : torch.fx.Node):
+            nonlocal part_idx
+            if (n.op, n.target) == ('call_module', 'lin'):
+                part_idx += 1
+            return part_idx
+
+        # split module in module with submodules
+        qualname_map : Dict[str, str] = {}
+        module_with_submodules = split_module(
+            my_module_traced, my_module, split_callback, qualname_map
+        )
+        expected_qualname_map = {
+            'submod_1.lin': 'lin', 'submod_2.lin': 'lin'
+        }
+        self.assertEqual(qualname_map, expected_qualname_map)
+
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
             return torch.relu(x)
@@ -1144,9 +1204,10 @@ class {test_classname}(torch.nn.Module):
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
                 self.register_buffer("attr2", torch.randn(2))
+                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
 
         mod = symbolic_trace(Test())
         module_name = "Foo"
@@ -1413,12 +1474,12 @@ class {test_classname}(torch.nn.Module):
         with torch.no_grad():
             model = Foo().eval()
             optimized_model = optimization.optimize_for_inference(model)
-            torch.testing.assert_allclose(model(inp), optimized_model(inp))
+            torch.testing.assert_close(model(inp), optimized_model(inp))
 
             optimized_model2 = optimization.optimize_for_inference(
                 model, pass_config={"remove_dropout": False}
             )
-            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+            torch.testing.assert_close(model(inp), optimized_model2(inp))
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
@@ -1450,7 +1511,7 @@ class {test_classname}(torch.nn.Module):
 
                 orig_out = model(inp)
                 new_out = optimized_model(inp)
-                torch.testing.assert_allclose(orig_out, new_out)
+                torch.testing.assert_close(orig_out, new_out)
 
 
 class TestNormalizeOperators(JitTestCase):
@@ -1459,13 +1520,34 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
+            # See: https://github.com/pytorch/pytorch/issues/64997
+            "as_strided",
+            "block_diag",
+            "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
+            "T",   # Implemented with a lambda
+            "H",   # Implemented with a lambda
+            "mT",  # Implemented with a lambda
+            "mH",  # Implemented with a lambda
             "gradient",
+            "histogramdd",
+            "igamma",
+            "igammac",
             "index_put",
+            "linalg_pinv_singular",  # Implemented with a lambda (only the singular variant)
+            "nn.functional.conv2d",
+            "nn.functional.dropout",
+            "nn.functional.dropout2d",
+            "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.embedding_bag",  # Implemented with a lambda
+            "nn.functional.rrelu",  # Implemented with a lambda
+            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1473,12 +1555,39 @@ class TestNormalizeOperators(JitTestCase):
             "resize_",
             "resize_as_",
             "special.zeta",
+            "sum_to_size",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",
             "where",
             "zero_",
+            'bfloat16',
+            'bool',
+            'byte',
+            'char',
+            'double',
+            'float',
+            'half',
+            'int',
+            'long',
+            'short',
+            'empty_like',
+            'ones_like',
+            'randn_like',
+            'zeros_like',
+            'full_like',
+            'rand_like',
+            'randint_like',
+            'new_ones',
+            'new_empty',
+            'new_zeros',
+            'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1490,14 +1599,26 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types
         if op.name in op_skip:
             return
 
+        if op.formatted_name in op_skip:
+            return
+
+        if op.name.startswith('_masked.'):
+            return
+
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False

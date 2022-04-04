@@ -82,7 +82,7 @@ class DispatchKeySet final {
     return DispatchKeySet(repr_ & ~other.repr_);
   }
   // Compute self ^ other
-  DispatchKeySet operator^(DispatchKeySet other) const {
+  constexpr DispatchKeySet operator^(DispatchKeySet other) const {
     return DispatchKeySet(repr_ ^ other.repr_);
   }
   // Perform set equality
@@ -97,7 +97,7 @@ class DispatchKeySet final {
   // Remove a DispatchKey from the DispatchKey set.  This is
   // generally not an operation you should be doing (it's
   // used to implement operator<<)
-  C10_NODISCARD DispatchKeySet remove(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(repr_ & ~DispatchKeySet(t).repr_);
   }
   // Is the set empty?  (AKA undefined tensor)
@@ -248,7 +248,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
     {DispatchKey::HIP,
      DispatchKey::VE,
      DispatchKey::FPGA,
-     DispatchKey::MSNPU,
+     DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,
      DispatchKey::QuantizedCPU,
@@ -259,6 +259,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
      DispatchKey::SparseCUDA,
      DispatchKey::SparseHIP,
      DispatchKey::SparseVE,
+     DispatchKey::SparseXPU,
      DispatchKey::SparseCsrCPU,
      DispatchKey::SparseCsrCUDA,
      DispatchKey::Meta});
@@ -274,11 +275,32 @@ constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
     DispatchKeySet::FULL_AFTER,
     c10::DispatchKey::ADInplaceOrView);
 
+// The set of dispatch keys that come after Functionalize
+constexpr DispatchKeySet after_func_keyset =
+    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
+        .remove(
+            // NOTE: we also need to remove ADInplaceOrView from the keyset when
+            // redispatching after the func kernels. This is because we're not
+            // calling the same op; we originally called an inplace op, and now
+            // we aren't. The original key calculation figured out which keys
+            // were Fallthrough based on the inplace op. That means that it did
+            // not include the ADInPlaceOrView kernel as a fallthrough key.
+            // However, we WANT the ADInPlaceOrView kernel to be ignored now
+            // that we're calling an out-of-place op. Re-invoking
+            // Dispatcher::call would re-run the Fallthrough key calculation and
+            // get us that, But at::redispatch is more performant. We can get
+            // away with it by explicitly removing the key here.
+            c10::DispatchKey::ADInplaceOrView);
+
 // true if t is a backend dispatch key
 C10_API bool isBackendDispatchKey(DispatchKey t);
 
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
+
+// Resolve alias dispatch key to DispatchKeySet if applicable,
+// and chek if k is a part of that set
+C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
 
 // Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key
 // t, DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.

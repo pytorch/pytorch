@@ -18,13 +18,13 @@ import builtins
 import typing
 import io
 import pickle
-import functools
+import threading
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._utils_internal import get_source_lines_and_file
 from torch._C import Future as CFuture
+from torch._sources import get_source_lines_and_file, parse_def, fake_range
 from torch.futures import Future
 import torch.package._mangling as package_mangling
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union  # noqa: F401
@@ -716,7 +716,57 @@ def copy_torchscript_modifier(orig, new) -> None:
 # qualified_name => list[overload_functions]
 _overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
+
+_OVERLOAD_EXAMPLE = '''
+Example usage of overload function:
+@torch.jit._overload
+def my_function(x: type0) -> type0: # decl 1
+    pass
+
+@torch.jit._overload
+def my_function(x: type1) -> type1: # decl 2
+    pass
+
+def my_function(x):                 # implementation
+    if isinstance(x, type0):
+        return x
+    elif isinstance(x, type1):
+        return x
+'''
+
+def get_overload_no_implementation_error_message(kind, obj):
+    sourcelines, file_lineno, filename = get_source_lines_and_file(obj)
+    return (
+        f'Implementation for the {kind} "{_qualified_name(obj)}" is missing. Please make '
+        f'sure a definition is provided and defined after all overload declarations.\n'
+        f'File "{filename}", line {file_lineno}:\n' + ''.join(sourcelines) + "\n" + _OVERLOAD_EXAMPLE
+    )
+
+def _check_overload_body(func):
+    try:
+        parsed_def = parse_def(func)
+    except OSError as e:
+        # Parsing the function definition can raise an OSError if source is unavailable.
+        # Since this is just an initial check, just raise a warning if this is the case.
+        warnings.warn(f"Unable to retrieve source for @torch.jit._overload function: {func}.")
+        return
+
+    body = parsed_def.ast.body[0].body
+
+    def is_pass(x):
+        return isinstance(x, ast.Pass)
+
+    def is_ellipsis(x):
+        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+
+    if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
+        msg = "Only `pass` statement or `...` can be the body of overload declaration:\n"
+        msg += '\n'.join(parsed_def.source.split("\n")[:3])
+        msg += " <- Expecting `pass` or `...` here!\n" + _OVERLOAD_EXAMPLE
+        raise RuntimeError(msg)
+
 def _overload(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
@@ -762,6 +812,7 @@ _overloaded_methods : Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno = {}
 
 def _overload_method(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name, None)
@@ -835,33 +886,28 @@ def is_dict(ann) -> bool:
         (getattr(ann, '__origin__', None) is Dict or
             getattr(ann, '__origin__', None) is dict)
 
-def is_optional(ann) -> bool:
+def is_union(ann):
+    if ann is Union:
+        raise_error_container_parameter_missing("Union")
+
+    return (hasattr(ann, '__module__') and
+            ann.__module__ == 'typing' and
+            (getattr(ann, '__origin__', None) is Union))
+
+def is_optional(ann):
     if ann is Optional:
         raise_error_container_parameter_missing("Optional")
 
-    # Optional[T] is just shorthand for Union[T, None], so check for both
-    def safe_is_subclass(the_type, super_type):
-        # Don't throw if `the_type` isn't a class type (e.g. if it is
-        # another type annotation instance)
-        if not inspect.isclass(the_type):
-            return False
-        return issubclass(the_type, super_type)
+    def is_optional_as_optional(ann):
+        return (hasattr(ann, '__module__') and
+                ann.__module__ == 'typing' and
+                (getattr(ann, '__origin__', None) is Optional))
 
-    if not hasattr(ann, '__module__'):
-        return False
+    def is_union_as_optional(ann):
+        ann_args = ann.__args__
+        return len(ann_args) == 2 and None in ann_args
 
-    union_optional = False
-    if ann.__module__ == 'typing' and \
-       (getattr(ann, '__origin__', None) is Union):
-        args = getattr(ann, '__args__', ())
-        if len(args) == 2:
-            union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
-                or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
-
-    optional = ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is Optional)
-
-    return optional or union_optional
+    return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
 
 def is_future(ann) -> bool:
     if ann is Future:
@@ -932,7 +978,7 @@ def is_scripting() -> bool:
 
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj) -> str:
+def _qualified_name(obj, mangle_name=True) -> str:
     # This special case allows us to override the qualified name on a type.
     # It's currently used in conjunction with tracing, where we create a
     # fake module to filter only supported attributes. However, since this
@@ -976,38 +1022,27 @@ def _qualified_name(obj) -> str:
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
-    # each other, remove the package mangling here.
-    module_name = package_mangling.demangle(module_name)
+    # each other, normalize the package manging here.
+    if package_mangling.is_mangled(module_name):
+        module_name = module_name.replace("<", "_")
+        module_name = module_name.replace(">", "_")
 
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
+    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
+    # does not need mangle the python class name.
+    if mangle_name:
+        # __main__ is a builtin module, so rewrite it to "__torch__".
+        if module_name == "__main__":
+            module_name = "__torch__"
+        else:
+            # Everything else gets a "__torch__" prefix to avoid name collisions
+            # with the names of user values.
+            module_name = "__torch__." + module_name
 
     if "." in name:
         raise RuntimeError(f"Could not get qualified name for class '{name}': "
                            f"'{name}' is not a valid identifier")
 
     return module_name + "." + name
-
-
-# Thin wrapper around SourceRangeFactory to store extra metadata
-# about the function-to-be-compiled.
-class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
-        self.uses_true_division = uses_true_division
-        self.filename = filename
-
-@functools.lru_cache(maxsize=None)
-def make_source_context(*args):
-    return SourceContext(*args)
-
-def fake_range():
-    return SourceContext('', None, 0, 0).make_raw_range(0, 1)
 
 
 def _try_get_dispatched_fn(fn):
@@ -1098,12 +1133,22 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("Optional")
 
 
+def check_empty_containers(obj) -> None:
+    if obj == [] or obj == {} or obj == ():
+        warnings.warn("The inner type of a container is lost when "
+                      "calling torch.jit.isinstance in eager mode. For "
+                      "example, List[int] would become list and "
+                      "therefore falsely return True for List[float] or"
+                      " List[str].")
+
+
 # supports List/Dict/Tuple and Optional types
 # TODO support future
 def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
     if origin_type is list or origin_type is List:
+        check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
         arg_type = get_args(target_type)[0]
@@ -1117,6 +1162,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Dict or origin_type is dict:
+        check_empty_containers(obj)
         if not isinstance(obj, dict):
             return False
         key_type = get_args(target_type)[0]
@@ -1133,6 +1179,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Tuple or origin_type is tuple:
+        check_empty_containers(obj)
         if not isinstance(obj, tuple):
             return False
         arg_types = get_args(target_type)
@@ -1146,28 +1193,36 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, el_type):
                 return False
         return True
-    elif origin_type is Union:  # actually handles Optional Case
+    elif origin_type is Union:  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
-        optional_type = get_args(target_type)[0]
-        optional_origin = get_origin(optional_type)
-        if optional_origin:
-            return container_checker(obj, optional_type)
-        elif isinstance(obj, optional_type):
-            return True
+        inner_types = get_args(target_type)
+        for t in inner_types:
+            t_origin = get_origin(t)
+            if (t_origin):
+                return container_checker(obj, t)
+            elif isinstance(obj, t):
+                return True
     return False
 
 
 def _isinstance(obj, target_type) -> bool:
+    if isinstance(target_type, collections.abc.Container):
+        if not isinstance(target_type, tuple):
+            raise RuntimeError("The second argument to "
+                               "`torch.jit.isinstance` must be a type "
+                               "or a tuple of types")
+        for t_type in target_type:
+            if _isinstance(obj, t_type):
+                return True
+        return False
+
     origin_type = get_origin(target_type)
     if origin_type:
         return container_checker(obj, target_type)
 
-    # Check to handle weird python type behaviors
-    # 1. python 3.6 returns None for origin of containers without
-    #    contained type (intead of returning outer container type)
-    # 2. non-typed optional origin returns as none instead
-    #    of as optional in 3.6-3.8
+    # Check to handle non-typed optional origin returns as none instead
+    #    of as optional in 3.7-3.8
     check_args_exist(target_type)
 
     # handle non-containers
@@ -1196,6 +1251,8 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
         if isinstance(obj, torch.cuda.Event):
+            return ""
+        if isinstance(obj, threading.Thread):
             return ""
         return None
 

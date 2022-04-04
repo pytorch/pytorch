@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -54,8 +55,6 @@ TEST(MathKernelTest, NativeGroupNorm) {
 TEST(MathKernelTest, NativeLayerNorm) {
   const auto input = rand({20, 10, 10, 10});
   const auto input_shape = input.sizes();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  const auto input_ndim = input.dim();
 
   double eps = 1e-05;
   for (bool undef_weight: {true, false}) {
@@ -117,7 +116,7 @@ TEST(MathKernelTest, MishBackward) {
 
 TEST(MathKernelTest, NarrowCopy)  {
   auto x = rand({5, 8, 7});
-  for (int64_t dim = 0; dim < 3; ++dim) {
+  for (const auto dim : c10::irange(3)) {
     const int64_t start = 1, length = 4;
     auto y_ref = x.narrow(dim, start, length);
     auto y_test = at::native::narrow_copy_dense(x, dim, start, length);

@@ -1,10 +1,8 @@
 import torch
 from .grad_mode import _DecoratorContextManager
+from collections import namedtuple
 
 from typing import Any
-
-# TODO(alband): Once most of the formulas are implemented, these functions need to be added
-# to the main doc to make them fully "public".
 
 # Global variable used to make the python API simpler to use
 _current_level = -1
@@ -43,19 +41,26 @@ def exit_dual_level(*, level=None):
     _current_level = level - 1
 
 def make_dual(tensor, tangent, *, level=None):
-    r"""Function that creates a "dual object" that can be used to compute forward AD gradients
-    based on the given Tensor and its tangent. It returns a new Tensor that shares memory with
-    :attr:`tensor` and the :attr:`tangent` is used as-is.
+    r"""Associates a tensor value with a forward gradient, the tangent, to create a
+    "dual tensor", which is used to compute forward AD gradients.
+    The result is a new tensor aliased to :attr:`tensor` with :attr:`tangent` embedded
+    as an attribute as-is if it has the same storage layout or copied otherwise.
+    The tangent attribute can be recovered with :func:`unpack_dual`.
 
     This function is backward differentiable.
 
-    Given a function `f` whose jacobian is `J`, it allows to compute the jacobian vector product,
-    named `jvp`, between `J` and a given vector `v` as follows.
+    Given a function `f` whose jacobian is `J`, it allows one to compute the Jacobian-vector product (`jvp`)
+    between `J` and a given vector `v` as follows.
 
     Example::
-        >>> inp = make_dual(x, v)
-        >>> out = f(inp)
-        >>> y, jvp = unpack_dual(out)
+
+        >>> with dual_level():
+        ...   inp = make_dual(x, v)
+        ...   out = f(inp)
+        ...   y, jvp = unpack_dual(out)
+
+    Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    for detailed steps on how to use this API.
 
     """
     if level is None:
@@ -67,27 +72,50 @@ def make_dual(tensor, tangent, *, level=None):
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
+UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
+
 def unpack_dual(tensor, *, level=None):
-    r"""Function that unpacks a "dual object" to recover two plain tensors, one representing
-    the primal and the other the tangent (both are views of :attr:`tensor`. Neither of these
-    tensors can be dual tensor of level :attr:`level`.
+    r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.
+    The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of
+    :attr:`tensor`'s primal and ``tangent`` is :attr:`tensor`'s tangent as-is.
+    Neither of these tensors can be dual tensor of level :attr:`level`.
 
     This function is backward differentiable.
+
+    Example::
+
+        >>> with dual_level():
+        ...   inp = make_dual(x, x_t)
+        ...   out = f(inp)
+        ...   y, jvp = unpack_dual(out)
+        ...   jvp = unpack_dual(out).tangent
+
+    Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    for detailed steps on how to use this API.
     """
     if level is None:
         level = _current_level
 
     if level < 0:
-        return tensor, None
+        return UnpackedDualTensor(tensor, None)
 
-    return torch._VF._unpack_dual(tensor, level=level)
+    primal, dual = torch._VF._unpack_dual(tensor, level=level)
+
+    return UnpackedDualTensor(primal, dual)
 
 class dual_level(_DecoratorContextManager):
-    r"""Context-manager that controls the current forward ad level. It
-    appropriately enters and exit the dual level.
+    r"""Context-manager that enables forward AD. All forward AD computation must
+    be performed in a ``dual_level`` context.
 
-    This function also updates the current level that is used by default
-    by the other functions in this API.
+    .. Note::
+
+        The ``dual_level`` context appropriately enters and exit the dual level to
+        controls the current forward AD level, which is used by default by the other
+        functions in this API.
+
+        We currently don't plan to support nested ``dual_level`` contexts, however, so
+        only a single forward AD level is supported. To compute higher-order
+        forward grads, one can use `functorch's jvp <https://github.com/pytorch/functorch#jvp>`__.
 
     Example::
 
@@ -105,6 +133,8 @@ class dual_level(_DecoratorContextManager):
         >>> grad is None
         True
 
+    Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    for detailed steps on how to use this API.
     """
     def __init__(self):
         super().__init__()

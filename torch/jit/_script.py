@@ -26,7 +26,7 @@ from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
-from torch.jit._fuser import _graph_for
+from torch.jit._fuser import _graph_for, _script_method_graph_for
 from torch.jit._state import (
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
@@ -47,7 +47,7 @@ from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore[attr-defined]
+torch._C.ScriptMethod.graph_for = _script_method_graph_for  # type: ignore[attr-defined]
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore[attr-defined]
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
@@ -55,6 +55,13 @@ Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
+
+# Throws an error if a jit function is pickled.
+# Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
+def _reduce(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
 
 if _enabled:
@@ -449,7 +456,7 @@ if _enabled:
         setattr(RecursiveScriptClass, method_name, method_template)
 
     # this is a Python 'non-data descriptor' that causes the first access
-    # to ScriptModule's forward to lookup the forward method and stash
+    # to ScriptModule's forward to look up the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup,
     # subsequent lookups will just directly return the previously looked up method.
     # This is necessary because nn.Module defines forward as a method. If we
@@ -712,7 +719,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(*args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)
 
         @property
         def original_name(self):
@@ -784,13 +791,6 @@ if _enabled:
                 #   s.save()   <--- this doesn't have `python_attr`
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
-
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. "
-                + "Mixed serialization of script and non-script modules is not supported. "
-                + "For purely script modules use my_script_module.save(<filename>) instead."
-            )
 
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
@@ -881,6 +881,7 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_module",
         "add_module",
         "_apply",
         "apply",
@@ -892,6 +893,7 @@ if _enabled:
         "double",
         "half",
         "state_dict",
+        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -912,6 +914,8 @@ if _enabled:
         "_tracing_name",
         "eval",
         "train",
+        "get_extra_state",
+        "set_extra_state"
     }
 
     def _make_fail(name):
@@ -982,57 +986,6 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-
-def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
-                example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
-    # This is a private API, intended for internal use only. Usage of this API is only for experimental
-    # purposes only and is highly discouraged.
-    global type_trace_db
-    if not _enabled:
-        return obj
-
-    if optimize is not None:
-        warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
-        )
-
-    # No-op for modules and functions that are already scripted
-    if isinstance(obj, ScriptModule):
-        return obj
-    if isinstance(obj, ScriptFunction):
-        return obj
-
-    if example_inputs:
-        # If MonkeyType is installed, enable profile directed type annotation
-        # Check if example_inputs are defined and generate call traces
-        # for the method by running eager mode version of the method with
-        # the provide example inputs. This logs all the traces in type_trace_db
-        type_trace_db = JitTypeTraceStore()
-        if monkeytype_trace:
-            monkeytype_config = JitTypeTraceConfig(type_trace_db)
-            with monkeytype_trace(monkeytype_config):
-                if isinstance(example_inputs, Dict):
-                    # If the obj is an nn.Module or a class, then each method is
-                    # executed with the arguments provided in the example inputs.
-                    # example inputs here will be of type Dict(class.method, (arguments))
-                    # This is used to infer type annotations for those methods
-                    # which are not called directly under the hood of monkeytype.
-                    for module, example_input in example_inputs.items():
-                        for example in example_input:
-                            module(*example)
-                elif isinstance(example_inputs, List):
-                    for examples in example_inputs:
-                        obj(*examples)
-                else:
-                    warnings.warn("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
-                                  " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
-        else:
-            warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
-                          "to enable Profile-Directed Typing in TorchScript. Refer to "
-                          "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
-    return script(obj, optimize, _frames_up, _rcb)
-
-
 def create_script_dict(obj):
     """
     Create a ``torch._C.ScriptDict`` instance with the data from ``obj``.
@@ -1063,7 +1016,8 @@ def create_script_list(obj, type_hint=None):
     return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
 
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+def script(obj, optimize=None, _frames_up=0, _rcb=None,
+           example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -1081,6 +1035,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     Args:
         obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, class type,
                                                   dictionary, or list to compile.
+        example_inputs (Union[List[Tuple], Dict[Callable, List[Tuple]], None]): Provide example inputs
+            to annotate the arguments for a function or ``nn.Module``.
 
     Returns:
         If ``obj`` is ``nn.Module``, ``script`` returns
@@ -1116,6 +1072,34 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
             # Call the function using the TorchScript interpreter
             foo(torch.ones(2, 2), torch.ones(2, 2))
+
+        .. testoutput::
+            :hide:
+
+            ...
+
+    ****Scripting a function using example_inputs**
+        Example inputs can be used to annotate a function arguments.
+
+        Example (annotating a function before scripting):
+
+        .. testcode::
+
+            import torch
+
+            def test_sum(a, b):
+                return a + b
+
+            # Annotate the arguments to be int
+            scripted_fn = torch.jit.script(test_sum, example_inputs=[(3, 4)])
+
+            print(type(scripted_fn))  # torch.jit.ScriptFunction
+
+            # See the compiled graph as Python code
+            print(scripted_fn.code)
+
+            # Call the function using the TorchScript interpreter
+            scripted_fn(20, 100)
 
         .. testoutput::
             :hide:
@@ -1208,7 +1192,30 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
             print(scripted_module.some_entry_point(torch.randn(2, 2)))
             print(scripted_module(torch.randn(2, 2)))
+
+        Example ( Annotating forward of nn.Module using example_inputs)::
+
+            import torch
+            import torch.nn as nn
+            from typing import NamedTuple
+
+            class MyModule(NamedTuple):
+            result: List[int]
+
+            class TestNNModule(torch.nn.Module):
+                def forward(self, a) -> MyModule:
+                    result = MyModule(result=a)
+                    return result
+
+            pdt_model = TestNNModule()
+
+            # Runs the pdt_model in eager model with the inputs provided and annotates the arguments of forward
+            scripted_model = torch.jit.script(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
+
+            # Run the scripted_model with actual inputs
+            print(scripted_model([20]))
     """
+    global type_trace_db
     if not _enabled:
         return obj
 
@@ -1224,6 +1231,35 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
     if isinstance(obj, ScriptFunction):
         return obj
+
+    if example_inputs:
+        # If MonkeyType is installed, enable profile directed type annotation
+        # Check if example_inputs are defined and generate call traces
+        # for the method by running eager mode version of the method with
+        # the provide example inputs. This logs all the traces in type_trace_db
+        type_trace_db = JitTypeTraceStore()
+        if monkeytype_trace:
+            monkeytype_config = JitTypeTraceConfig(type_trace_db)
+            with monkeytype_trace(monkeytype_config):
+                if isinstance(example_inputs, Dict):
+                    # If the obj is an nn.Module or a class, then each method is
+                    # executed with the arguments provided in the example inputs.
+                    # example inputs here will be of type Dict(class.method, (arguments))
+                    # This is used to infer type annotations for those methods
+                    # which are not called directly under the hood of monkeytype.
+                    for module, example_input in example_inputs.items():
+                        for example in example_input:
+                            module(*example)
+                elif isinstance(example_inputs, List):
+                    for examples in example_inputs:
+                        obj(*examples)
+                else:
+                    raise ValueError("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
+                                     " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
+        else:
+            warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+                          "to enable Profile-Directed Typing in TorchScript. Refer to "
+                          "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
 
     if isinstance(obj, torch.nn.Module):
         obj = call_prepare_scriptable_func(obj)
@@ -1272,6 +1308,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        # some functions are explicitly marked as not supported in script mode
+        if hasattr(obj, "__script_unsupported"):
+            raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
@@ -1336,6 +1376,10 @@ def _get_overloads(obj):
     uncompiled_overloads = _jit_internal._get_fn_overloads(qual_name)
     if uncompiled_overloads is None:
         return existing_compiled_fns
+
+    if obj in uncompiled_overloads:
+        raise RuntimeError(_jit_internal.get_overload_no_implementation_error_message(
+            'function', obj))
 
     compiled_fns = []
     for overload_fn in uncompiled_overloads:

@@ -1,8 +1,10 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/util/TypeSafeSignMath.h>
 
 #include <type_traits>
 
@@ -16,7 +18,7 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         scalar_t r = a % b;
-        if (!std::is_unsigned<scalar_t>::value && (r != 0) && ((r < 0) != (b < 0))) {
+        if (r != 0 && c10::signs_differ(r, b)) {
           r += b;
         }
         return r;
@@ -27,7 +29,7 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           auto mod = ::fmod(a, b);
-          if (!std::is_unsigned<scalar_t>::value && (mod != 0) && ((b < 0) != (mod < 0))) {
+          if (mod != 0 && c10::signs_differ(b, mod)) {
             mod += b;
           }
           return mod;
