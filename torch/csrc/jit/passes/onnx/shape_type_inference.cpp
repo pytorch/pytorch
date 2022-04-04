@@ -2065,7 +2065,7 @@ void ONNXShapeTypeInference(
 
     std::vector<string> original_keys;
     for (auto gs: generated_shape) {
-      if (outputs_map.count(gs.first) > 0) { 
+      if (outputs_map.count(gs.first) > 0) {
         generated_shape[outputs_map[gs.first]] = gs.second;
         if (gs.first != outputs_map[gs.first]) {
           original_keys.push_back(gs.first);
@@ -2136,8 +2136,8 @@ void ONNXShapeTypeInference(
       generated_shape.erase(outputs_map[output->debugName()]);
     }
   }
-  ConstantValueMap::SetGeneratedShape(generated_shape);  
-  
+  ConstantValueMap::SetGeneratedShape(generated_shape);
+
   if (IsValidONNXNode(n)) {
     ProcessConstantValueMap(n, opset_version);
     if (n->kind() != prim::ListConstruct) {
