@@ -162,8 +162,13 @@ class Softmax(torch.nn.Softmax):
         self.zero_point = zero_point
 
     def forward(self, input):
+        dim = self.dim
+        if dim is None:
+            stacklevel = 3
+            dim = torch.nn.functional._get_softmax_dim(
+                "softmax", input.dim(), stacklevel)
         return torch.ops.quantized.softmax(
-            input, dim=self.dim, scale=self.scale, zero_point=self.zero_point)
+            input, dim, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedSoftmax'
