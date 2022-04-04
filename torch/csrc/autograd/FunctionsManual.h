@@ -471,11 +471,12 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask);
 
-Tensor scatter_reduce_backward(
+std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& grad,
-  const Tensor& input,
+  const Tensor& self,
   int dim,
   const Tensor& index,
+  const Tensor& src,
   c10::string_view reduce,
   const Tensor& result
 );
