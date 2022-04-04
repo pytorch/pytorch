@@ -430,7 +430,7 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-# TODO fix when https://github.com/python/mypy/issues/2427 is address
+# TODO fix when https://github.com/python/mypy/issues/2427 is addressed
 torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
 
