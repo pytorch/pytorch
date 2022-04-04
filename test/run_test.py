@@ -104,7 +104,6 @@ TESTS = discover_tests(
         'test_kernel_launch_checks',
         'test_metal',
         'test_nnapi',
-        'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
         'test_throughput_benchmark',
@@ -313,7 +312,6 @@ ENABLE_PR_HISTORY_REORDERING = bool(
 )
 
 JIT_EXECUTOR_TESTS = [
-    "test_jit_cuda_fuser",
     "test_jit_profiling",
     "test_jit_legacy",
     "test_jit_fuser_legacy",
