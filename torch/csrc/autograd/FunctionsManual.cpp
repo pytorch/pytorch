@@ -190,6 +190,8 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
 }
 
 Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: zero entries of `norm` (and in one case, `self`) are replaced with something
+  // arbitrary (such as ones) to avoid division by zero.
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -206,7 +208,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
-    scale_v = grad / norm;
+    scale_v = grad / at::where(norm == 0, 1., norm);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
@@ -221,14 +223,17 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     }
     scale_v = grad / nb_max;
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow(p - 1);
     if (p < 1.0) {
+      // We must create a ones tensor here in case self is complex
+      self_scaled = self.sgn() * at::where(self == 0, at::ones({}, self.options()), self).abs().pow(p - 1);
       self_scaled.masked_fill_(self == 0, 0);
+    } else {
+      self_scaled = self.sgn() * self.abs().pow(p - 1);
     }
-    scale_v = grad / norm.pow(p - 1);
+    scale_v = grad / at::where(norm == 0, 1., norm).pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
-    scale_v = grad / norm.pow(p - 1);
+    scale_v = grad / at::where(norm == 0, 1., norm).pow(p - 1);
   }
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
@@ -259,7 +264,7 @@ Tensor norm_jvp(
     auto result = self_p.mul(self_t.conj());
     result = at::real(result);
     result = result.sum(dim, keepdim);
-    return result.div_(norm).masked_fill_(norm == 0, 0);
+    return result.div_(at::where(norm == 0, 1., norm)).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     if (!keepdim && self_p.dim() != 0) {
       norm = unsqueeze_multiple(norm, dim, ndim);
@@ -276,12 +281,19 @@ Tensor norm_jvp(
     }
     return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
   } else if (p < 2.0) {
-    auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
-    auto out = sumpow_t / norm.pow(p - 1);
+    Tensor sumpow_t;
+    if (p < 1.0) {
+      // We must create a ones tensor here in case self is complex
+      Tensor ones = at::ones({}, self_p.options());
+      sumpow_t = (at::where(self_p == 0, ones, self_p).abs().pow_(p - 1).masked_fill_(self_p == 0, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    } else {
+      sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    }
+    auto out = sumpow_t / at::where(norm == 0, 1., norm).pow(p - 1);
     return out.masked_fill_(norm == 0, 0);
   } else {
     auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
-    auto out = sumpow_t / norm.pow(p - 1);
+    auto out = sumpow_t / at::where(norm == 0, 1., norm).pow(p - 1);
     return out.masked_fill_(norm == 0, 0);
   }
 }
