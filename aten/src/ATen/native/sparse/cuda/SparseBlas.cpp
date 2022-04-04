@@ -156,7 +156,7 @@ Tensor& addmm_out_sparse_csr_cuda(
 
   if (&result != &self) {
     if (result.layout() == kStrided) {
-      result.resize_as_(*self_);
+      at::native::resize_output(result, self_->sizes());
     } else {
       result.resize_as_sparse_(*self_);
     }
