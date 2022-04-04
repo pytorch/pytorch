@@ -116,7 +116,8 @@
         "zhaojuanmao",
         "zhxchen17",
         "ZolotukhinM",
-        "zou3519"
+        "zou3519",
+        "pytorch/facebook"
       ],
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    }
