@@ -131,8 +131,13 @@ Tensor& addmm_out_sparse_csr_cuda(
   // There were undefined symbol problems,
   // when using the same function for CUDA and SparseCsrCUDA dispatch keys
   // Also structured kernels do not support sparse output
-  c10::MaybeOwned<at::Tensor> self_ =
-      expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  c10::MaybeOwned<at::Tensor> self_;
+  // Don't expand self if this is an in-place operation
+  if (&result == &self) {
+     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
+  } else {
+     self_ = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  }
 
   sparse::impl::_check_dim(*self_, 2, "self");
   TORCH_CHECK(((self_->dim() == 2) &&

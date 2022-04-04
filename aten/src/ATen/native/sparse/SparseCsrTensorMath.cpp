@@ -436,8 +436,13 @@ Tensor& addmm_out_sparse_csr_cpu(
       mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  c10::MaybeOwned<at::Tensor> self_ =
-      expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  c10::MaybeOwned<at::Tensor> self_;
+  // Don't expand self if this is an in-place operation
+  if (&result == &self) {
+     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
+  } else {
+     self_ = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  }
 
 
   TORCH_CHECK(((self_->dim() == 2) &&
