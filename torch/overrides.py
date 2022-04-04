@@ -1789,7 +1789,7 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
 
 
 @contextlib.contextmanager
-def push_torch_function_mode(ctor) -> Iterator[None]:
+def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
     """
     Context manager that pushes a :class:`TorchFunctionMode` onto the current
     mode stack; see the class for more information on what modes are.  Stacked
@@ -1824,6 +1824,6 @@ def push_torch_function_mode(ctor) -> Iterator[None]:
         )
     _set_torch_function_mode(mode)
     try:
-        yield
+        yield mode
     finally:
         _set_torch_function_mode(old)
