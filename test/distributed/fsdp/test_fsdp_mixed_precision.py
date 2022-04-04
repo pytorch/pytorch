@@ -54,7 +54,7 @@ if nccl_supports_bf16:
     mp_configs.extend([
         MixedPrecision(reduce_dtype=torch.bfloat16),
         MixedPrecision(buffer_dtype=torch.bfloat16),
-        MixedPrecision(buffer_dtype=torch.bfloat16, reduce_type=torch.float32)
+        MixedPrecision(buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32)
     ])
 
 # Buffer original dtype, which can differ from model params.
