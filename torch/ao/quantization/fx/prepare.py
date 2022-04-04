@@ -335,7 +335,7 @@ def get_target_activation_dtype_for_node(
 
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
-            if qhandler is not None and qhandler.input_output_observed() and qhandler.is_output_quantized(qconfig):
+            if qhandler is not None and qhandler.input_output_observed():
                 act_dtype, weight_dtype, act_compute_dtype = \
                     get_qconfig_dtypes(qconfig)
                 bias_dtype = torch.float16 \
@@ -1411,7 +1411,7 @@ def prepare(
     equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
-    propagate_qconfig_(model, flattened_qconfig_dict)
+    propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
