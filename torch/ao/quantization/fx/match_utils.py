@@ -7,8 +7,6 @@ from torch.fx.graph import (
 from .quantization_types import Pattern
 from .quantization_patterns import (
     QuantizeHandler,
-    CustomModuleQuantizeHandler,
-    StandaloneModuleQuantizeHandler,
 )
 from ..qconfig import (
     QConfigAny,
