@@ -1236,6 +1236,31 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
+// We need to introduce `SymIntType` to represent the `SymInt` type
+// used in function schemas e.g. `aten::narrow_copy(... SymInt length)
+// `SymInt` will be used to enable tracing arithmetic operations on
+// dimension values. Please see [SymInt.h] for more information
+struct SymIntType;
+using SymIntTypePtr = SingletonTypePtr<SymIntType>;
+struct TORCH_API SymIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymInt";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    return "int";
+  }
+  static const TypeKind Kind = TypeKind::SymIntType;
+  // global singleton
+  static SymIntTypePtr get();
+
+ private:
+  SymIntType() : Type(TypeKind::SymIntType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1695,6 +1720,13 @@ template <>
 struct getTypePtr_<int64_t> final {
   static decltype(auto) call() {
     return IntType::get();
+  }
+};
+
+template <>
+struct getTypePtr_<SymInt> final {
+  static decltype(auto) call() {
+    return SymIntType::get();
   }
 };
 template <>

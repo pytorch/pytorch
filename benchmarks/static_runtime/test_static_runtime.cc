@@ -2988,6 +2988,35 @@ TEST(StaticRuntime, IfThenElse) {
   testStaticRuntime(src, args2);
 }
 
+TEST(StaticRuntime, EmptyIfBlock) {
+  const auto src =
+      R"JIT(
+      def forward(self, cond: bool, a: Tensor, b: Tensor):
+          l = []
+          if cond:
+              l.append((a + b).clone())
+          return l
+  )JIT";
+
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
+TEST(StaticRuntime, EmptyNestedIfBlock) {
+  const auto src =
+      R"JIT(
+      def forward(self, cond: bool, a: Tensor, b: Tensor):
+          l = []
+          if cond:
+              if cond:
+                  l.append((a + b).clone())
+          return l
+  )JIT";
+
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
 TEST(StaticRuntime, StackEmpty) {
   const auto src = R"JIT(
     def forward(self):

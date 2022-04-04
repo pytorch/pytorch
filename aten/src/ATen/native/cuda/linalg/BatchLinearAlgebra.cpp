@@ -1723,6 +1723,13 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
       "Calling torch.linalg.lu_factor on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
+  // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
+  // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+  std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
+  magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
+  const bool magma_batched_buggy = version < std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2);
+  TORCH_CHECK(!magma_batched_buggy, "linalg.lu_factor has buggs on MAGMA < 2.5.2. Please update your MAGMA version to a newer one.");
+
   auto input_data = input.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<magma_int_t>();
   auto input_matrix_stride = matrixStride(input);
@@ -1783,17 +1790,8 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   auto m = input.size(-2);
   auto n = input.size(-1);
 
-  bool magma_batched_buggy = false;
-#if AT_MAGMA_ENABLED()
-  // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
-  // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-  std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
-  magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
-  magma_batched_buggy = version < std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2);
-#endif
-
-  const auto lu_factor_magma = [batch_size, magma_batched_buggy](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
-    if (batch_size == 1 || magma_batched_buggy) {
+  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
+    if (batch_size == 1) {
       lu_factor_looped_magma(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_magma(input, pivots, infos, compute_pivots);
@@ -1822,7 +1820,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     // If magma batched is buggy, we use cusolver
     // otherwise, lu_factor just works for square matrices, for non-square matrices magma batched is the fastest
     // otherwise (i.e. for square matrices), we choose between cusolver and magma using a heuristic
-    if (magma_batched_buggy || (m == n && (m <= 16 || (m <= 128 && batch_size <= 16)))) {
+    if (m == n && (batch_size == 1 || m <= 16 || (m <= 128 && batch_size <= 16))) {
       lu_factor_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_magma(input, pivots, infos, compute_pivots);
@@ -2837,6 +2835,11 @@ c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots
 }
 
 static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  // Trivial case. We need it here as it makes some backends fail
+  if (B.numel() == 0) {
+    return;
+  }
+
   auto batch_size = batchCount(B);
   auto m = LU.size(-2);
   auto b2 = B.size(-1);
@@ -2848,18 +2851,20 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
   // Helps mitigating the bugs in magma
   auto lu_solve_triangular = [m](const Tensor& LU, const Tensor& pivots, const Tensor& B, const TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
     // LAPACK / cublas / etc returns the permutaiton in an odd format
     // Here we transform it to a vector representing a permutation, i.e. a (batch of) vectors st. P(i) = j
-    auto perm = at::arange(m, pivots.options().dtype(kLong)).expand(pivots.sizes()).contiguous();
+    auto perm = at::arange(m, pivots_->options().dtype(kLong)).expand(pivots_->sizes()).contiguous();
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
       .add_output(perm)
-      .add_input(pivots)
+      .add_input(*pivots_)
       .build();
-    unpack_pivots_stub(pivots.device().type(), iter, m);
+    unpack_pivots_stub(pivots_->device().type(), iter, m);
 
     if (trans == TransposeType::NoTranspose) {
       // Get the inverse permutation
@@ -2871,11 +2876,11 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       // B1 = P^T @ B  (must be done out-of-place as B is both source and target)
       auto B1 = B.scatter(-2, inv_perm.unsqueeze(-1).expand_as(B), B);
       // B = L^{-1} @ B1
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
       // B = U^{-1} @ B
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, B, /*upper=*/true);
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B, /*upper=*/true);
     } else {
-      auto LU_H = LU.mH();
+      auto LU_H = LU_->mH();
       // B = U^{-H} @ B
       at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU_H, B, /*upper=*/false);
       // B = L^{-H} @ B
@@ -2885,17 +2890,29 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
   };
 
-  auto LU_ = maybe_expand_lu(B, LU);
-  auto pivots_ = maybe_expand_pivots(B, pivots);
+#ifdef CUDART_VERSION
+  auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+  };
+#endif
+
+  auto lu_solve_batched_magma_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+  };
+
 
   // Preferred Backend
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_CUSOLVER
   if (preferred_backend == at::LinalgBackend::Cusolver) {
     if (batch_size <= 2 && m >= 64) {
-      lu_solve_looped_cusolver(*LU_, *pivots_, B, trans);
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
     } else {
-      lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
     }
     return;
   } else
@@ -2903,10 +2920,10 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   if (preferred_backend == at::LinalgBackend::Magma) {
     // Looped magma is very slow, but batched magma is buggy in these two cases
     if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose) {
-      lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+      lu_solve_batched_magma_fn(LU, pivots, B, trans);
     }
     else {
-      lu_solve_looped_magma(*LU_, *pivots_, B, trans);
+      lu_solve_looped_magma(LU, pivots, B, trans);
     }
     return;
   }
@@ -2916,24 +2933,24 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
 #ifdef CUDART_VERSION
 #ifdef USE_CUSOLVER
   if (batch_size <= 2 && m >= 64) {
-    lu_solve_looped_cusolver(*LU_, *pivots_, B, trans);
+    lu_solve_looped_cusolver(LU, pivots, B, trans);
     return;
   }
 #endif // ifdef USE_CUSOLVER
   if (trans != TransposeType::NoTranspose && m <= 2 && batch_size >= 128) {
-    lu_solve_triangular(*LU_, *pivots_, B, trans);
+    lu_solve_triangular(LU, pivots, B, trans);
   } else {
-    lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
   }
 #else
   // If it's not buggy and it's faster than solve triangular (large matrix and large batch regime)
   // we use batched_magma, otherwise, we resort to two triangular solves
   // For trans != TransposeType::NoTranspose lu_solve_triangular is faster anyway
   if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && m >= 256 && batch_size >= 128) {
-    lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+    lu_solve_batched_magma_fn(LU, pivots, B, trans);
   }
   else {
-    lu_solve_triangular(*LU_, *pivots_, B, trans);
+    lu_solve_triangular(LU, pivots, B, trans);
   }
 #endif // ifdef CUDART_VERSION
 }
