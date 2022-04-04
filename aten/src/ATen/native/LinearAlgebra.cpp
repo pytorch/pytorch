@@ -1126,6 +1126,19 @@ static void addmm_impl_cpu_(
     return;
   }
 
+  // Some paths in the code below do not handle multiplications of the form [a, 0] x [0, b]
+  if (m1_sizes[1] == 0) {
+    if (beta.toComplexDouble() == 0.0) {
+      result.zero_();
+    } else {
+      if (!self.is_same(result)) {
+        result.copy_(self);
+      }
+      result.mul_(beta);
+    }
+    return;
+  }
+
   if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
   }
