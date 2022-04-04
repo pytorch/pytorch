@@ -63,7 +63,7 @@ def generate_code(ninja_global: Optional[str] = None,
         gen_autograd_python(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
-            autograd_dir)
+            os.fspath(autograd_dir))
 
     if operator_selector is None:
         operator_selector = SelectiveBuilder.get_nop_selector()
@@ -73,7 +73,7 @@ def generate_code(ninja_global: Optional[str] = None,
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
-            autograd_dir,
+            os.fspath(autograd_dir),
             disable_autograd=disable_autograd,
             operator_selector=operator_selector,
         )
@@ -82,7 +82,7 @@ def generate_code(ninja_global: Optional[str] = None,
         gen_annotated(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             python_install_dir,
-            autograd_dir)
+            os.fspath(autograd_dir))
 
 
 def get_selector_from_legacy_operator_selection_list(
