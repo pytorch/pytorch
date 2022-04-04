@@ -165,7 +165,7 @@ void TestBackward(
     // Check grad of sum(outs) w.r.t inputs_w_grad.
     torch::Tensor sum = torch::zeros_like(outs[0]).sum();
     torch::Tensor xsum = torch::zeros_like(xouts[0]).sum();
-    for (int i = 0; i < outs.size(); ++i) {
+    for (size_t i = 0; i < outs.size(); ++i) {
       if (outs[i].requires_grad()) {
         sum += outs[i].sum();
         xsum += xouts[i].sum();
