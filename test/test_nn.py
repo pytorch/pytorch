@@ -892,7 +892,7 @@ class TestNN(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
     def test_invalid_conv1d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
+        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
             input = torch.randn(1, 3, 4).to(dtype)
             with self.assertRaisesRegex(RuntimeError,
@@ -13364,8 +13364,8 @@ class TestNNDeviceType(NNTestCase):
                                                batch_size, inp_size, dilation,
                                                no_weight)
 
-
-    def test_conv1d_same_padding(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
         test_args = [
             # in_size
@@ -13378,22 +13378,22 @@ class TestNNDeviceType(NNTestCase):
             [1],
         ]
         for in_size, k_size, dilation, stride in itertools.product(*test_args):
-            x = torch.rand(1, 1, in_size, device=device)
-            y = torch.rand(1, 1, k_size, device=device)
+            x = torch.rand(1, 1, in_size, device=device, dtype=dtype)
+            y = torch.rand(1, 1, k_size, device=device, dtype=dtype)
             z = F.conv1d(x, y, padding='same', dilation=dilation, stride=stride)
             self.assertEqual(z.size(2), int(math.ceil(in_size / stride)))
 
         # Compare F.conv1d padding='same' output against manual padding
         # Without strides/dilation
-        x = torch.rand(1, 1, 12, device=device)
-        y = torch.rand(1, 1, 3, device=device)
+        x = torch.rand(1, 1, 12, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 3, device=device, dtype=dtype)
         expect = F.conv1d(x, y, padding=1)
         actual = F.conv1d(x, y, padding='same')
         self.assertEqual(expect, actual)
 
         # With dilation
-        x = torch.rand(1, 1, 12, device=device)
-        y = torch.rand(1, 1, 4, device=device)
+        x = torch.rand(1, 1, 12, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 4, device=device, dtype=dtype)
         expect = F.conv1d(x, y, padding=3, dilation=2)
         actual = F.conv1d(x, y, padding='same', dilation=2)
         self.assertEqual(expect, actual)
@@ -13445,10 +13445,11 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv3d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual)
 
-    def test_conv1d_valid_padding(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv1d_valid_padding(self, device, dtype):
         # Test F.conv1d padding='valid' is the same as no padding
-        x = torch.rand(1, 1, 10, device=device)
-        y = torch.rand(1, 1, 4, device=device)
+        x = torch.rand(1, 1, 10, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 4, device=device, dtype=dtype)
         expect = F.conv1d(x, y)
         actual = F.conv1d(x, y, padding='valid')
         self.assertEqual(expect, actual)
@@ -13469,10 +13470,11 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv3d(x, y, padding='valid')
         self.assertEqual(expect, actual)
 
-    def test_conv1d_same_padding_backward(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv1d_same_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='same'
-        x = torch.rand(1, 1, 12, device=device, requires_grad=True)
-        y = torch.rand(1, 1, 4, device=device, requires_grad=True)
+        x = torch.rand(1, 1, 12, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, dtype=dtype, device=device, requires_grad=True)
 
         # Symmetric padding
         z = F.conv1d(x, y, padding=3, dilation=2)
@@ -13571,10 +13573,11 @@ class TestNNDeviceType(NNTestCase):
             gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
                           check_fwd_over_rev=True)
 
-    def test_conv1d_valid_padding_backward(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
-        x = torch.rand(1, 1, 10, device=device, requires_grad=True)
-        y = torch.rand(1, 1, 4, device=device, requires_grad=True)
+        x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, dtype=dtype, device=device, requires_grad=True)
         F.conv1d(x, y, padding=0).sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
