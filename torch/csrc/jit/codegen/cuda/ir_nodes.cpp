@@ -1372,6 +1372,22 @@ bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
 }
 
+bool TensorDomain::hasViewLikeRFactor() const {
+  if (!hasRFactor()) {
+    // Can't have view like rfactor if there is no rfactor domain
+    return false;
+  }
+
+  // If there's an rfactor domain and no rfactor product is a reduction, this is
+  // a view like rfactor
+  return std::none_of(
+      getMaybeRFactorDomain().begin(),
+      getMaybeRFactorDomain().end(),
+      [](IterDomain* id) {
+        return id->isReduction() && id->isRFactorProduct();
+      });
+}
+
 bool TensorDomain::hasVectorize() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
     return id->getParallelType() == ParallelType::Vectorize ||

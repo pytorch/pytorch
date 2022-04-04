@@ -644,10 +644,14 @@ void ComputeAtRootDomainMapBuilder::initializeBcastMap(
     return;
   }
 
-  // This initialization should be only used for fusion output tensors and
-  // outputs of multi-consumer expressions that are not fusion outputs.
+  // This initialization should be only used for: 1) fusion output
+  // tensors, 2) outputs of multi-consumer expressions that are not
+  // fusion outputs, and 3) view outputs as broadcasts can be merged
+  // with non-broadcast domains, resulting in non-broadcast rfactor
+  // domains.
   TORCH_INTERNAL_ASSERT(
-      tv->isFusionOutput() || tv->definition()->outputs().size() > 1,
+      tv->isFusionOutput() || tv->definition()->outputs().size() > 1 ||
+          tv->isDefinitionType(ExprType::ViewOp),
       "Invalid tensor to initialize bcast map: t",
       tv->name());
   root_map_.bcast_map_.insert({key, {id}});
@@ -934,6 +938,17 @@ void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
       }
     } else {
       mapAllConsumers(DomainKey(td, id));
+    }
+  }
+  // There can be broadcast domains that appear at root domains but
+  // are removed at rfactor domains as they are merged into
+  // non-reduction domains. Initialize the map for those broadcast
+  // domains.
+  if (td->hasViewLikeRFactor()) {
+    for (auto id : TensorDomain::noReductions(td->getRootDomain())) {
+      if (id->isBroadcast()) {
+        initializeBcastMap(tv, id);
+      }
     }
   }
 }

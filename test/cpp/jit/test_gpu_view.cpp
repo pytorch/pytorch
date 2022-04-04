@@ -887,6 +887,41 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain5_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionFlattenAfterUnsqueezeOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{512};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size(), DataType::Double);
+  TensorView* bias = makeSymbolicTensor(input_shape.size(), DataType::Double);
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_unsqueeze = unsqueeze(x_add_bias, -1);
+  auto x_view = flatten(x_unsqueeze);
+  fusion.addOutput(x_view);
+
+  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  x_view->split(0, 4);
+  x_add_bias->computeAt(x_view, 1);
+  x_view->axis(0)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at_x_add_bias.unsqueeze(-1).flatten();
+
+  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

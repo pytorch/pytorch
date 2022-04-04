@@ -916,6 +916,10 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   bool hasGridBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
+
+  // Returns if rfactor domain only consists of id's of iter type.
+  bool hasViewLikeRFactor() const;
+
   bool hasVectorize() const;
 
   c10::optional<unsigned int> getReductionAxis() const;
