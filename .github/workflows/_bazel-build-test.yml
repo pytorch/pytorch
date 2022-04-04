@@ -146,12 +146,12 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id@${{ github.sha }}
+        uses: ./.github/actions/get-workflow-job-id
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts-s3@${{ github.sha }}
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
