@@ -170,7 +170,7 @@ def generate_arg_extraction(g: NativeFunctionsGroup) -> str:
         assert maybe_method
         is_reference, type_conversion_method = maybe_method
         reference = "&" if is_reference else ""
-        arg_populations.append(f'const auto{reference} {arg.name} = p_node->Input({i}).{type_conversion_method}')
+        arg_populations.append(f'const auto{reference} {arg.name} = p_node->input({i}).{type_conversion_method}')
     return ";\n    ".join(arg_populations) + ";"
 
 def generate_non_out_variant_call(g: NativeFunctionsGroup) -> str:
@@ -223,7 +223,7 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_{op_name},
     [](Node* n) -> SROperator {{
       {body}
-      LogAndDumpSchema(n);
+      logAndDumpSchema(n);
       return nullptr;
     }});
 """
@@ -242,11 +242,11 @@ REGISTER_OPERATOR_FUNCTOR(
       if (n->matches(torch::schema("aten::{schema}"))) {{
         return [](ProcessedNode* p_node) {{
           {populated_argument}
-          if (p_node->Output(0).isNone()) {{
-            p_node->Output(0) = {functional_variant_call};
+          if (p_node->output(0).isNone()) {{
+            p_node->output(0) = {functional_variant_call};
             return;
           }}
-          auto& {out_variable_name} = p_node->Output(0).toTensor();
+          auto& {out_variable_name} = p_node->output(0).toTensor();
           fastResizeToZero({out_variable_name});
           {out_variant_call};
         }};

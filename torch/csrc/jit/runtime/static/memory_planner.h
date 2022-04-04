@@ -105,7 +105,7 @@ class MemoryPlanner {
   MemoryPlanner& operator=(MemoryPlanner&&) = delete;
   virtual ~MemoryPlanner() = default;
 
-  virtual std::unique_ptr<MemoryPlanner> maybe_clone(
+  virtual std::unique_ptr<MemoryPlanner> maybeClone(
       BlockRunner* /*new_block_runner*/,
       const FastMap<at::Tensor*, at::Tensor*>& /*old_tensor_to_new*/) const {
     return nullptr;
@@ -124,31 +124,31 @@ class MemoryPlanner {
   // does _all_ required cleanup.
   virtual bool shouldFallBackToStandardStrategy() const = 0;
 
-  size_t total_num_managed_tensors() const {
+  size_t totalNumManagedTensors() const {
     return num_managed_tensors_;
   }
 
-  size_t total_reused_tensors() const {
+  size_t totalReusedTensors() const {
     return reused_tensors_;
   }
 
-  size_t total_num_managed_output_tensors() const {
+  size_t totalNumManagedOutputTensors() const {
     return managed_output_tensors_.size();
   }
 
-  C10_NODISCARD size_t total_num_unmanaged() const {
-    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
+  size_t totalNumUnmanaged() const {
+    return numUnmanagedNonScalars() + numUnmanagedScalars();
   }
 
-  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
+  size_t numUnmanagedNonScalars() const {
     return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
   }
 
-  C10_NODISCARD size_t num_unmanaged_scalars() const {
+  size_t numUnmanagedScalars() const {
     return num_unmanaged_scalar_ivalues_;
   }
 
-  size_t total_managed() const {
+  size_t totalManaged() const {
     return managed_bytes_;
   }
 
@@ -297,7 +297,7 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
     size_t offset;
   };
 
-  std::unique_ptr<MemoryPlanner> maybe_clone(
+  std::unique_ptr<MemoryPlanner> maybeClone(
       BlockRunner* new_block_runner,
       const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new)
       const override;

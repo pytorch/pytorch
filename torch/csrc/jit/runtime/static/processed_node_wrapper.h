@@ -139,26 +139,26 @@ class ProcessedNodeInputWrapper
         num_ignored_elems_(num_ignored_elems) {}
 
   size_t size() const {
-    return pnode_.num_inputs() - num_ignored_elems_;
+    return pnode_.numInputs() - num_ignored_elems_;
   }
 
   const at::Tensor& operator[](size_t idx) const {
     TORCH_CHECK(idx < size());
-    return pnode_.Input(idx).toTensor();
+    return pnode_.input(idx).toTensor();
   }
 
   const at::Tensor& front() const {
     TORCH_CHECK(
         !empty(),
         "Attempted to access front() of empty ProcessedNodeInputWrapper");
-    return pnode_.Input(0).toTensor();
+    return pnode_.input(0).toTensor();
   }
 
   const at::Tensor& back() const {
     TORCH_CHECK(
         !empty(),
         "Attempted to access back() of empty ProcessedNodeInputWrapper");
-    return pnode_.Input(size() - 1).toTensor();
+    return pnode_.input(size() - 1).toTensor();
   }
 
  private:
@@ -174,26 +174,26 @@ class ProcessedNodeOutputWrapper
       ProcessedNodeOutputWrapper>::ProcessedNodeWrapperBase;
 
   size_t size() const {
-    return pnode_.num_outputs();
+    return pnode_.numOutputs();
   }
 
   at::Tensor& operator[](size_t idx) const {
     TORCH_CHECK(idx < size());
-    return pnode_.Output(idx).toTensor();
+    return pnode_.output(idx).toTensor();
   }
 
   at::Tensor& front() const {
     TORCH_CHECK(
         !empty(),
         "Attempted to access front() of empty ProcessedNodeOutputWrapper");
-    return pnode_.Output(0).toTensor();
+    return pnode_.output(0).toTensor();
   }
 
   at::Tensor& back() const {
     TORCH_CHECK(
         !empty(),
         "Attempted to access back() of empty ProcessedNodeOutputWrapper");
-    return pnode_.Output(size() - 1).toTensor();
+    return pnode_.output(size() - 1).toTensor();
   }
 };
 

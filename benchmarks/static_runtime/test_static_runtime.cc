@@ -1497,7 +1497,7 @@ TEST(StaticRuntime, LeakyReLU) {
   std::vector<c10::IValue> input_tensors({inputs});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().check_for_memory_leak();
+  smod.runtime().checkForMemoryLeak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -2594,13 +2594,13 @@ TEST(StaticRuntime, ModelCrashOnFirstRun) {
   EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
 
   // The run didn't finish, we didn't allocate the memory planner
-  EXPECT_EQ(runtime.get_memory_planner(), nullptr);
-  runtime.check_for_memory_leak();
+  EXPECT_EQ(runtime.getMemoryPlanner(), nullptr);
+  runtime.checkForMemoryLeak();
 
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
   compareResultsWithJIT(runtime, graph, args_no_crash);
-  EXPECT_NE(runtime.get_memory_planner(), nullptr);
+  EXPECT_NE(runtime.getMemoryPlanner(), nullptr);
 }
 
 TEST(StaticRuntime, ModelCrashOnSecondRun) {
@@ -2620,11 +2620,11 @@ TEST(StaticRuntime, ModelCrashOnSecondRun) {
   std::vector<IValue> args_crash{at::randn({1}), true};
   std::vector<IValue> args_no_crash{at::randn({1}), false};
   runtime(args_no_crash, {});
-  EXPECT_NE(runtime.get_memory_planner(), nullptr);
-  runtime.check_for_memory_leak();
+  EXPECT_NE(runtime.getMemoryPlanner(), nullptr);
+  runtime.checkForMemoryLeak();
 
   EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
-  runtime.check_for_memory_leak();
+  runtime.checkForMemoryLeak();
 
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
@@ -2690,7 +2690,7 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   // Static Runtime.
   torch::jit::StaticModule smodule(g);
   auto actual = smodule(args, {}).toTensor();
-  smodule.runtime().check_for_memory_leak();
+  smodule.runtime().checkForMemoryLeak();
 
   EXPECT_TRUE(expected.equal(actual));
   EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
@@ -3153,7 +3153,7 @@ TEST(StaticRuntime, MemoryPlannerFallback) {
   // First run, profiling.
   runtime(args1);
 
-  const auto* first_memory_planner = runtime.get_memory_planner();
+  const auto* first_memory_planner = runtime.getMemoryPlanner();
   EXPECT_NE(first_memory_planner, nullptr);
   EXPECT_NE(
       dynamic_cast<const PrecomputedOffsetsMemoryPlanner*>(
@@ -3165,7 +3165,7 @@ TEST(StaticRuntime, MemoryPlannerFallback) {
 
   // Run again to reset the memory planner
   runtime(args1);
-  const auto* second_memory_planner = runtime.get_memory_planner();
+  const auto* second_memory_planner = runtime.getMemoryPlanner();
   EXPECT_NE(second_memory_planner, nullptr);
   EXPECT_NE(
       dynamic_cast<const StandardMemoryPlanner*>(second_memory_planner),

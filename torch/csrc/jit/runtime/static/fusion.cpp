@@ -24,8 +24,8 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
-  ReplaceWithCopy(graph);
-  ReplaceWithMaybeCopy(graph);
+  replaceWithCopy(graph);
+  replaceWithMaybeCopy(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -42,7 +42,7 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
 Operation createStaticSubgraphRuntime(const Node* node) {
   auto g = node->g(attr::Subgraph);
   auto module = std::make_shared<torch::jit::StaticModule>(g);
-  auto num_inputs = module->num_inputs();
+  auto num_inputs = module->numInputs();
   return [module, num_inputs](Stack& stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);
@@ -50,7 +50,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
     auto outputs = (*module)(inps.vec(), {});
     torch::jit::drop(stack, num_inputs);
 
-    if (module->num_outputs() > 1) {
+    if (module->numOutputs() > 1) {
       for (auto& o : outputs.toTupleRef().elements()) {
         push_one(stack, std::move(o));
       }

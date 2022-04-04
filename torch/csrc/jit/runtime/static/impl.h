@@ -263,7 +263,7 @@ class BlockInfo {
   BlockInfo(uint32_t input_idx, Block& block)
       : input_idx_(input_idx), block_(block) {}
 
-  void set_nodes(
+  void setNodes(
       std::vector<StaticNodeInfo> nodes,
       const FastMap<Node*, bool>& node_has_out_variant);
 
@@ -271,72 +271,72 @@ class BlockInfo {
     return nodes_;
   }
 
-  size_t num_nodes() const {
+  size_t numNodes() const {
     return nodes_.size();
   }
 
-  size_t num_inputs() const {
+  size_t numInputs() const {
     return block_.inputs().size();
   }
 
-  size_t num_outputs() const {
+  size_t numOutputs() const {
     return block_.outputs().size();
   }
 
-  graph_node_list node_ptrs() const {
+  graph_node_list nodePtrs() const {
     return block_.nodes();
   }
 
-  void set_output_indices(std::vector<uint16_t> indices) {
+  void setOutputIndices(std::vector<uint16_t> indices) {
     output_indices_ = std::move(indices);
   }
 
-  const std::vector<uint16_t>& block_output_indices() const {
+  const std::vector<uint16_t>& blockOutputIndices() const {
     return output_indices_;
   }
 
-  auto block_inputs_idx() const {
+  auto blockInputsIdx() const {
     return input_idx_;
   }
 
-  bool node_is_optimizable_container_type(const Node* node) const {
+  bool nodeIsOptimizableContainerType(const Node* node) const {
     return node_is_optimizable_container_type_.find(node) !=
         node_is_optimizable_container_type_.end();
   }
 
-  bool value_is_managed_tensor(const Value* value) const {
+  bool valueIsManagedTensor(const Value* value) const {
     return managed_tensor_values_.find(value) != managed_tensor_values_.end();
   }
 
-  bool value_is_leaked_container(const Value* value) const {
+  bool valueIsLeakedContainer(const Value* value) const {
     return leaked_values_.find(value) != leaked_values_.end();
   }
 
-  const ValueGroup& value_group() const {
+  const ValueGroup& valueGroup() const {
     return value_group_;
   }
 
-  const ManagedTensorRanges& managed_tensor_ranges() const {
+  const ManagedTensorRanges& managedTensorRanges() const {
     return managed_tensor_ranges_;
   }
 
-  void init_value_group(const AliasDb& alias_db) {
+  void initValueGroup(const AliasDb& alias_db) {
     value_group_.init(block_, alias_db);
   }
 
-  void prepare_for_memory_planner(
+  void prepareForMemoryPlanner(
       const AliasDb& alias_db,
       const StaticModuleOptions& opt);
 
-  const auto& managed_output_tensor_values() const {
+  const auto& manageOutputTensorValues() const {
     return managed_output_tensor_values_;
   }
 
-  const auto& managed_tensor_values() const {
+  const auto& managedTensorValues() const {
     return managed_tensor_values_;
   }
 
-  const auto& leaked_values() const {
+  const auto& leakedValues() const {
     return leaked_values_;
   }
 
@@ -398,22 +398,22 @@ class TORCH_API StaticModule {
 
   const StaticModuleOptions& opts() const;
 
-  size_t num_inputs() const;
-  size_t num_outputs() const;
+  size_t numInputs() const;
+  size_t numOutputs() const;
 
-  size_t num_constants() const {
+  size_t numConstants() const {
     return constants_.size();
   }
 
-  size_t num_intermediate_values() const {
+  size_t numIntermediateValues() const {
     return num_intermediate_values_;
   }
 
-  size_t total_num_values() const {
-    return num_inputs() + num_constants() + num_intermediate_values();
+  size_t totalNumValues() const {
+    return numInputs() + numConstants() + numIntermediateValues();
   }
 
-  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
+  C10_NODISCARD const std::vector<uint16_t>& outputIndices() const {
     return output_indices_;
   }
 
@@ -421,11 +421,11 @@ class TORCH_API StaticModule {
     return constants_;
   }
 
-  const BlockInfo& block_info(Block* block) const {
+  const BlockInfo& blockInfo(Block* block) const {
     return block_infos_.at(block);
   }
 
-  Block* root_block() const {
+  Block* rootBlock() const {
     return graph_->block();
   }
 
@@ -434,14 +434,14 @@ class TORCH_API StaticModule {
   friend class BlockRunner;
 
  public:
-  auto num_nodes() const {
+  auto numNodes() const {
     return std::accumulate(
         block_infos_.begin(),
         block_infos_.end(),
         0,
         [](size_t sum, const auto& block_and_info) {
           auto& block_info = block_and_info.second;
-          return sum + block_info.num_nodes();
+          return sum + block_info.numNodes();
         });
   }
 
@@ -451,15 +451,15 @@ class TORCH_API StaticModule {
     return schema_;
   }
 
-  bool first_input_is_self() const {
+  bool firstInputIsSelf() const {
     return module_.has_value();
   }
 
   StaticRuntime& runtime();
-  StaticRuntime clone_runtime_from_cached();
+  StaticRuntime cloneRuntimeFromCached();
 
   // See [Shared values array]
-  size_t value_buffer_size() const {
+  size_t valueBufferSize() const {
     return value_buffer_size_;
   }
 
@@ -574,25 +574,25 @@ class TORCH_API BlockRunner {
     std::unordered_set<std::string> native_nodes;
   };
 
-  IndividualMetrics benchmark_individual_ops(
+  IndividualMetrics benchmarkIndividualOps(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
   // Input is readwrite
-  IValue& Input(uint32_t i) {
-    DCHECK_LT(i, block_info_.num_inputs());
-    return values_[i + block_info_.block_inputs_idx()];
+  IValue& input(uint32_t i) {
+    DCHECK_LT(i, block_info_.numInputs());
+    return values_[i + block_info_.blockInputsIdx()];
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  C10_NODISCARD const IValue& Output(uint32_t i) const {
+  const IValue& output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
 
-  const std::vector<IValue*> outputs() const {
+  const std::vector<IValue*>& outputs() const {
     return outputs_;
   }
 
@@ -604,23 +604,23 @@ class TORCH_API BlockRunner {
     return nodes_;
   }
 
-  graph_node_list node_ptrs() const {
-    return block_info_.node_ptrs();
+  graph_node_list nodePtrs() const {
+    return block_info_.nodePtrs();
   }
 
   const Graph& graph() const {
     return static_module_.graph();
   }
 
-  const MemoryPlanner* get_memory_planner() const {
+  const MemoryPlanner* getMemoryPlanner() const {
     return planner_.get();
   }
 
-  void maybe_clone_memory_planner(
+  void maybeCloneMemoryPlanner(
       const BlockRunner& src,
       const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new);
 
-  bool check_for_memory_leak(
+  bool checkForMemoryLeak(
       bool output_returned = true,
       bool recurse_on_sub_blocks = false);
 
@@ -674,53 +674,53 @@ class TORCH_API BlockRunner {
   };
 
   template <typename IValueList>
-  c10::IValue run_impl(IValueList&& args, const KeywordArgs& kwargs);
+  c10::IValue runImpl(IValueList&& args, const KeywordArgs& kwargs);
 
   template <typename IValueList>
-  c10::IValue run_impl_record_functions(
+  c10::IValue runImplWithRecordFunctions(
       IValueList&& args,
       const KeywordArgs& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
   template <typename IValueList>
-  void set_inputs(
+  void setInputs(
       IValueList&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // Set Input(idx) to args[idx]. Invoked by set_inputs. Copies or moves
   // depending on overload.
-  void set_arg(const size_t idx, std::vector<IValue>&& args);
-  void set_arg(const size_t idx, const std::vector<IValue>& args);
+  void setArg(const size_t idx, std::vector<IValue>&& args);
+  void setArg(const size_t idx, const std::vector<IValue>& args);
 
   // Set Input(idx) to arg. Always copies. Used for kwargs.
-  void set_arg(const size_t idx, const IValue& arg);
+  void setArg(const size_t idx, const IValue& arg);
 
-  bool fast_check_and_correct_overlap_with(
+  bool fastCheckAndCorrectOverlapWith(
       ProcessedNode& n,
       c10::IValue& tensor_ival);
-  void verify_and_correct_memory_overlap(ProcessedNode& n);
+  void verifyAndCorrectMemoryOverlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
-  void clean_up_input_ivalues() noexcept {
-    for (const auto idx : c10::irange(block_info_.num_inputs())) {
+  void cleanUpInputIValues() noexcept {
+    for (const auto idx : c10::irange(block_info_.numInputs())) {
       values_[idx + inputs_begin_] = IValue();
     }
   }
 
-  void clean_up_intermediate_ivalues() noexcept;
+  void cleanUpIntermediateIValues() noexcept;
 
-  IValue move_outputs_to_tuple(uint32_t num_outputs);
+  IValue moveOutputsToTuple(uint32_t num_outputs);
 
-  void create_memory_planner();
-  void maybe_allocate();
+  void createMemoryPlanner();
+  void maybeAllocate();
 
-  float benchmark_model(
+  float benchmarkModel(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
-  void display_nodes(
+  void displayNodes(
       const std::vector<c10::IValue>& args,
       const KeywordArgs& kwargs);
 
@@ -779,7 +779,7 @@ class TORCH_API ProcessedFunction {
     return check_memory_overlap_;
   }
 
-  size_t num_outputs() const {
+  size_t numOutputs() const {
     return num_outputs_;
   }
 
@@ -804,12 +804,12 @@ class TORCH_API StaticNodeInfo {
     return node_;
   }
 
-  size_t num_outputs() const {
+  size_t numOutputs() const {
     DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
+    return fn_->numOutputs();
   }
 
-  bool has_out_variant() const {
+  bool hasOutVariant() const {
     return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
   }
 
@@ -854,93 +854,93 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  C10_NODISCARD const IValue& Input(uint32_t i) const {
+  const IValue& input(uint32_t i) const {
     return values_[inputs_[i]];
   }
 
   // Output is readwrite
-  IValue& Output(uint32_t i) {
-    DCHECK(i < num_outputs());
+  IValue& output(uint32_t i) {
+    DCHECK(i < numOutputs());
     return values_[outputs_offset_ + i];
   }
 
-  C10_NODISCARD const IValue& Output(uint32_t i) const {
-    DCHECK(i < num_outputs());
+  const IValue& output(uint32_t i) const {
+    DCHECK(i < numOutputs());
     return values_[outputs_offset_ + i];
   }
 
-  size_t num_outputs() const {
+  size_t numOutputs() const {
     DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
+    return fn_->numOutputs();
   }
 
-  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+  c10::ArrayRef<const IValue> outputs() const {
     return c10::ArrayRef<const IValue>(
-        values_ + outputs_offset_, num_outputs());
+        values_ + outputs_offset_, numOutputs());
   }
 
-  C10_NODISCARD uint16_t num_inputs() const {
+  uint16_t numInputs() const {
     return inputs_.size();
   }
 
-  std::vector<IValue> inputs_ivalue_vec() const;
+  std::vector<IValue> inputIValueVec() const;
 
-  bool has_out_variant() const {
+  bool hasOutVariant() const {
     return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
   }
 
-  bool has_native() const {
+  bool hasNative() const {
     return fn_->kind() == ProcessedFunction::Kind::kNativeFunction;
   }
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  const char* get_op_name() const {
+  const char* getOpName() const {
     return node_->kind().toQualString();
   }
 #endif
 
-  bool check_outputs_for_memory_overlap() const {
+  bool checkOutputsForMemoryOverlap() const {
     return fn_->checkMemoryOverlap();
   }
 
-  void set_outputs_memory_overlap_detected() {
+  void setOutputsMemoryOverlapDetected() {
     overlap_detected_ = true;
   }
 
-  bool outputs_memory_overlap_detected() {
+  bool outputsMemoryOverlapDetected() {
     return overlap_detected_;
   }
 
-  bool check_and_correct_overlap_with(
+  bool checkAndCorrectOverlapWith(
       const at::Tensor& input,
       c10::IValue& output);
-  void verify_and_correct_memory_overlap();
+  void verifyAndCorrectMemoryOverlap();
 
-  void set_values(IValue* values) {
+  void setValues(IValue* values) {
     DCHECK(values_ == nullptr);
     values_ = values;
   }
 
-  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
-    DCHECK(i < num_outputs());
+  uint16_t outputIValueIndex(uint16_t i) const {
+    DCHECK(i < numOutputs());
     return outputs_offset_ + i;
   }
   // used in debug mode
-  bool verify_no_memory_overlap(bool force_check = false) const;
+  bool verifyNoMemoryOverlap(bool force_check = false) const;
 
-  std::vector<BlockRunner>* block_runners() {
+  std::vector<BlockRunner>* blockRunners() {
     return block_runners_.get();
   }
 
-  void set_block_runners(
+  void setBlockRunners(
       std::unique_ptr<std::vector<BlockRunner>> block_runners) {
     block_runners_ = std::move(block_runners);
   }
 
  private:
-  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
+  C10_NODISCARD bool verifyOutputsDontOverlapEachOther() const;
 
-  C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
+  C10_NODISCARD bool verifyInputsDontOverlapOutputs(bool force_check) const;
 
   Node* node_;
   const ProcessedFunction* fn_;
@@ -972,7 +972,7 @@ class TORCH_API StaticRuntime {
       std::vector<c10::IValue>&& args,
       const KeywordArgs& kwargs = KeywordArgs());
 
-  bool check_for_memory_leak(bool output_returned = true);
+  bool checkForMemoryLeak(bool output_returned = true);
   bool checkOutputTensorMemoryLeaks();
 
   void deallocateOutputTensors();
@@ -980,7 +980,7 @@ class TORCH_API StaticRuntime {
   void disableManageOutputTensors();
 
   // Gets the top-level memory planner. Used for testing.
-  const MemoryPlanner* get_memory_planner() const;
+  const MemoryPlanner* getMemoryPlanner() const;
 
   // Clone this static runtime instance. Not to be used concurrently with
   // operator(). Useful when the precompute_offsets option is on (to
@@ -1005,12 +1005,12 @@ class TORCH_API StaticRuntime {
 
   using IndividualMetrics = BlockRunner::IndividualMetrics;
 
-  IndividualMetrics benchmark_individual_ops(
+  IndividualMetrics benchmarkIndividualOps(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs) {
-    return block_->benchmark_individual_ops(
+    return block_->benchmarkIndividualOps(
         args_list, kwargs_list, warmup_runs, main_runs);
   }
 

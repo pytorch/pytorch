@@ -3,34 +3,34 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void FuseInferenceOpsForSparseNN(
+TORCH_API void fuseInferenceOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph);
 
-TORCH_API void EliminateTrivialEquallySplit(
+TORCH_API void eliminateTrivialEquallySplit(
     std::shared_ptr<torch::jit::Graph>& graph);
 
-TORCH_API void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph);
+TORCH_API void fuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph);
 
 // If outputs_are_immutable is set to false, don't replace the view ops that
 // produce aliases of graph outputs with the copy version.
-TORCH_API void ReplaceWithCopy(
+TORCH_API void replaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
-void ReplaceWithMaybeCopy(
+void replaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
-TORCH_API void RemoveImmutableInputDictLookups(
+TORCH_API void removeImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph);
 
 TORCH_API bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name);
 
 TORCH_API bool forwardHasOp(const Module& module, const char* op_name);
 
-TORCH_API void FuseSignLog1P(std::shared_ptr<Graph>& graph);
+TORCH_API void fuseSignLog1P(std::shared_ptr<Graph>& graph);
 
-TORCH_API void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph);
+TORCH_API void useVariadicTupleUnpack(const std::shared_ptr<Graph>& graph);
 
 // c10::Symbol::fromQualString is a bit long to type everywhere, and
 // we can't use a `using` statement since it's a static class function.
@@ -50,20 +50,20 @@ inline c10::Symbol fromQualString(const std::string& qual_string) {
 // this actually does a copy.
 // Note that we have to do the same thing if we are returning a value from an
 // outer scope in a sub-block.
-TORCH_API void CreateOwnedRefsForSpecialValues(Graph& graph);
+TORCH_API void createOwnedRefsForSpecialIValues(Graph& graph);
 
 // [Force non-empty outputs]
 // It is technically possible for sub-blocks to not return anything. This is
 // problematic for StaticRuntimeBlockRunner because it assumes that at least one
 // output is being returned. Rather than slowing down SR with special logic for
 // this corner case, we simply force blocks that return nothing to return None.
-TORCH_API void ForceNonEmptyOutputs(Graph& graph);
+TORCH_API void forceNonEmptyOutputs(Graph& graph);
 
-TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
+TORCH_API void useVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
 
-TORCH_API void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
+TORCH_API void eliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
 
-TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
+TORCH_API void useSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

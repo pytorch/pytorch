@@ -264,7 +264,7 @@ void compareResultsWithJIT(
   GraphExecutorWrapper graph_exec(graph);
   auto expected = graph_exec(args);
   auto actual = runtime(args, {});
-  runtime.check_for_memory_leak();
+  runtime.checkForMemoryLeak();
   compareResults(expected, actual, use_allclose, use_equalnan);
 }
 
@@ -311,12 +311,12 @@ void testStaticRuntime(
           StaticRuntime runtime(smodule);
           auto actual = runtime(args, {});
           if (actual.isTensor()) {
-            EXPECT_GE(smodule.num_nodes(), 2)
+            EXPECT_GE(smodule.numNodes(), 2)
                 << "If we only have one node, the output of the op we are testing is "
                 << "not being managed by the memory planner! A failure here "
                 << "can typically be fixed by clone()ing the output of the test script.";
           }
-          runtime.check_for_memory_leak();
+          runtime.checkForMemoryLeak();
           // first run
           VLOG(2) << "enable_out_variant: " << enable_out_variant;
           VLOG(2) << "manage_output_tensors: " << manage_output_tensors;
@@ -334,14 +334,14 @@ void testStaticRuntime(
           }
 
           if (!args2.empty()) {
-            auto* memory_planner = runtime.get_memory_planner();
+            auto* memory_planner = runtime.getMemoryPlanner();
             size_t managed_bytes =
-                memory_planner ? memory_planner->total_managed() : 0;
+                memory_planner ? memory_planner->totalManaged() : 0;
 
             // Run static runtime again with inputs of a different shape.
             expect = test_context->getExpected(args2);
             actual = runtime(args2, {});
-            runtime.check_for_memory_leak();
+            runtime.checkForMemoryLeak();
             VLOG(2) << "comparing with args2";
             compareResults(expect, actual, use_allclose, use_equalnan);
             VLOG(2) << "second run comparison done";
@@ -352,9 +352,9 @@ void testStaticRuntime(
             }
 
             // The memory planner is allowed to get reallocated
-            auto* new_memory_planner = runtime.get_memory_planner();
+            auto* new_memory_planner = runtime.getMemoryPlanner();
             size_t new_managed_bytes =
-                new_memory_planner ? new_memory_planner->total_managed() : 0;
+                new_memory_planner ? new_memory_planner->totalManaged() : 0;
             if (algorithm != MemoryPlannerAlgorithm::kPrecomputedOffsets &&
                 check_resize && new_managed_bytes > 0) {
               EXPECT_GT(new_managed_bytes, managed_bytes);
@@ -364,7 +364,7 @@ void testStaticRuntime(
             // during the profile run.
             expect = test_context->getExpected(args);
             actual = runtime(args, {});
-            runtime.check_for_memory_leak();
+            runtime.checkForMemoryLeak();
             // third run
             VLOG(2) << "comparing third run";
             compareResults(expect, actual, use_allclose, use_equalnan);
@@ -378,7 +378,7 @@ void testStaticRuntime(
             // run static runtime again to exercise the memory planner
             // and allocate managed tensors.
             actual = runtime(args, {});
-            runtime.check_for_memory_leak();
+            runtime.checkForMemoryLeak();
             VLOG(2) << "comparing second run with same args";
             compareResults(expect, actual, use_allclose, use_equalnan);
             VLOG(2) << "second run comparison done";
@@ -389,7 +389,7 @@ void testStaticRuntime(
             }
             // third run to use the allocated managed tensors.
             actual = runtime(args, {});
-            runtime.check_for_memory_leak();
+            runtime.checkForMemoryLeak();
             if (manage_output_tensors) {
               actual = IValue();
               runtime.deallocateOutputTensors();
