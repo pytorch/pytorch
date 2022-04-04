@@ -15,12 +15,6 @@ Default values for native configurations
 Below is the output of the configuration for quantization of ops
 in fbgemm and qnnpack (PyTorch's default quantized backends).
 
-Code to generate results::
-
-  from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
-  from pprint import pprint
-  pprint(get_native_backend_config_dict())
-
 Results:
 
-.. literalinclude:: scripts/quantization_configs/default_config.txt
+.. literalinclude:: scripts/quantization_backend_configs/default_backend_config.txt
