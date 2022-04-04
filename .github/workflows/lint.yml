@@ -405,10 +405,12 @@ jobs:
 
           python3 -m tools.linter.clang_tidy \
             --paths \
+              torch/csrc/cuda \
               torch/csrc/fx \
               torch/csrc/utils \
               torch/csrc/generic \
               torch/csrc/deploy \
+              torch/csrc/onnx \
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
