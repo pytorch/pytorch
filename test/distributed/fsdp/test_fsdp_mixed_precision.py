@@ -51,10 +51,11 @@ nccl_supports_bf16 = (
 mp_configs = [default_mp]
 
 if nccl_supports_bf16:
+    mp_diff_reduce = MixedPrecision(reduce_dtype=torch.bfloat16)
+    mp_diff_buffer = MixedPrecision(buffer_dtype=torch.bfloat16)
+    mp_diff_buffer_and_reduce = MixedPrecision(buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32)
     mp_configs.extend([
-        MixedPrecision(reduce_dtype=torch.bfloat16),
-        MixedPrecision(buffer_dtype=torch.bfloat16),
-        MixedPrecision(buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+        mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce,
     ])
 
 # Buffer original dtype, which can differ from model params.
@@ -81,12 +82,16 @@ test_name_mapping = {
     str(BackwardPrefetch.BACKWARD_PRE): "prefetch_pre",
     str(BackwardPrefetch.BACKWARD_POST): "prefetch_post",
     str(default_mp): "mp_fp16",
-    str(mp_diff_reduce): "mp_diff_reduce",
-    str(mp_diff_buffer): "mp_diff_buffer",
-    str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
 }
+
+if nccl_supports_bf16:
+    test_name_mapping.update({
+        str(mp_diff_reduce): "mp_diff_reduce",
+        str(mp_diff_buffer): "mp_diff_buffer",
+        str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
+    })
 
 subtest_name = partial(subtest_name, test_name_mapping)
 
