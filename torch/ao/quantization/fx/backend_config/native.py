@@ -307,8 +307,14 @@ _ADD_CONFIG = {
 _HARDSIGMOID_MODULE_CONFIG = {
     "pattern": torch.nn.Hardsigmoid,
     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-    "overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer),
-    "overwrite_output_observer": default_affine_fixed_qparams_observer,
+    # TODO: The following two keys are temporary, since we don't want to put observer in the configs
+    # we expect that it's provided by user
+    # What we want to put here is the requirement on observers, in this case dtype,
+    # quant_min, quant_max etc., but we need to first move all configs to
+    # backend_config_dict to do that, we'll remove these keys after we fully migrated
+    # everything to use backend_config_dict
+    "_overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer),
+    "_overwrite_output_observer": default_affine_fixed_qparams_observer,
     "dtype_configs": [
         weighted_op_int8_dtype_config,
     ],
