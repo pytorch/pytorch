@@ -2009,7 +2009,16 @@ void initJitScriptBindings(PyObject* module) {
     setGraphExecutorOptimize(optimize);
   });
 
-  m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+  m.def(
+      "_get_graph_executor_optimize",
+      [](c10::optional<bool> new_setting = c10::nullopt) {
+        bool old_value = getGraphExecutorOptimize();
+        if (new_setting) {
+          setGraphExecutorOptimize(*new_setting);
+        }
+        return old_value;
+      },
+      py::arg("new_settings") = nullptr);
 
   m.def(
       "_enable_mobile_interface_call_export",
