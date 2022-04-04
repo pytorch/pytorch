@@ -1415,20 +1415,20 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto search_in_dim_indices
-        = index_len * std::log2(size) < std::log2(index_len) * size
+        = index_len * std::log2(nnz) < std::log2(index_len) * nnz
         ? true
         : false;
 
       Tensor sorted, sorted_idx, src;
       std::tie(sorted, sorted_idx, src) = [
         &dim_indices, &nneg_index, &self,
-        search_in_dim_indices, dim, size
+        search_in_dim_indices, dim, nnz
       ](void) -> std::tuple<Tensor, Tensor, Tensor> {
         // sort dim_indices to binary search into it
         if (search_in_dim_indices) {
           // dim_indices is already sorted if self is coalesced and dim == 0
           if (self.is_coalesced() && dim == 0) {
-            return std::make_tuple(dim_indices, at::arange(size, dim_indices.options()), nneg_index);
+            return std::make_tuple(dim_indices, at::arange(nnz, dim_indices.options()), nneg_index);
           }
           else {
             Tensor sorted_dim_indices, sorted_dim_indices_idx;
@@ -1492,6 +1492,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         auto empty_idx = at::empty({0}, src.options());
         return std::make_tuple(empty_idx, empty_idx);
       }
+
+      auto selected_sorted = at::empty({res_len}, sorted.options());
+      auto selected_src = at::empty({res_len}, src.options());
 
       // Much faster than at::unique_dim
       const auto unique_with_counts = [](
