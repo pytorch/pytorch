@@ -599,6 +599,16 @@ void addInputs(Node* n, const char* name, int64_t value) {
   }
 }
 
+void addInputs(Node* n, const char* name, c10::SymInt value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
+
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
@@ -795,6 +805,19 @@ void addInputs(
     const char* name,
     const c10::optional<at::IntArrayRef>& opt_value) {
   detail::genericAddOptionalInput(n, name, opt_value);
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalIntArrayRef& opt_value) {
+  if (opt_value.has_value()) {
+    jit::tracer::addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
 }
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {
