@@ -628,7 +628,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.gelu', device_type='cpu'),
 
         xfail('linalg.lu_factor', ''),
-        xfail('scatter_reduce', '', device_type='cpu'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -995,7 +994,6 @@ class TestOperators(TestCase):
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.kl_div', ''),
-        xfail('scatter_reduce', '', device_type='cpu'),
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -1215,7 +1213,6 @@ class TestOperators(TestCase):
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.kl_div', ''),
-        xfail('scatter_reduce', '', device_type='cpu'),
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
