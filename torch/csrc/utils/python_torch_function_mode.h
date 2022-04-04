@@ -5,7 +5,7 @@
 namespace torch {
 namespace overrides {
 
-struct TORCH_API no_torch_function_mode {
+struct no_torch_function_mode {
   no_torch_function_mode() { at::impl::PythonTorchFunctionTLS::swap_mode(old_mode_); }
   ~no_torch_function_mode() { at::impl::PythonTorchFunctionTLS::set_mode(std::move(old_mode_)); }
 private:

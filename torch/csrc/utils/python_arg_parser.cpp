@@ -308,7 +308,7 @@ auto handle_torch_function_no_python_arg_parser(
     ss << "no implementation found for '" << module_name << "." << func_name
        << "' on types that implement " << torch_function_name_str << ": [";
     for (auto &arg : overloaded_args) {
-      ss << PyObject_Repr(get_type_of_overloaded_arg(arg.ptr()));
+      ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
       if (!arg.is(overloaded_args.back())) {
         ss << ", ";
       }
