@@ -1,3 +1,8 @@
+_coverage: 91.09
+_covered_ops: 358
+_generated_ops: 705
+_production_ops: 393
+_uncovered_ops: 35
 all_generated_ops:
 - aten::Bool.Tensor
 - aten::Bool.int
@@ -642,6 +647,8 @@ all_generated_ops:
 - aten::zeros
 - aten::zeros.out
 - aten::zeros_like
+- prepacked::conv2d_clamp_run
+- prepacked::linear_clamp_run
 - prim::RaiseException
 - prim::TupleIndex
 - prim::TupleUnpack
@@ -1023,6 +1030,8 @@ covered_ops:
 - aten::zeros
 - aten::zeros.out
 - aten::zeros_like
+- prepacked::conv2d_clamp_run
+- prepacked::linear_clamp_run
 - prim::RaiseException
 - prim::TupleIndex
 - prim::TupleUnpack
@@ -1086,10 +1095,8 @@ uncovered_ops:
 - aten::true_divide.Tensor
 - aten::upsample_nearest2d
 - prepacked::conv2d_clamp_prepack
-- prepacked::conv2d_clamp_run
 - prepacked::conv2d_transpose_clamp_prepack
 - prepacked::conv2d_transpose_clamp_run
-- prepacked::linear_clamp_run
 - prim::ModuleContainerIndex.list
 - prim::NumToTensor.Scalar
 - prim::Print

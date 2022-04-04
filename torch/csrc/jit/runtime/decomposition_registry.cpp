@@ -16,7 +16,6 @@ namespace jit {
 namespace {
 std::mutex lock;
 
-
 // CompilationUnit that holds all these Functions and keeps them alive.
 auto compilation_unit = std::make_shared<CompilationUnit>();
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
@@ -60,7 +59,6 @@ void loadDecompositionFunctions() {
 }
 
 } // anonymous namespace
-
 
 void DecomposeOp(Node* n) {
   auto schema = n->maybeSchema();
