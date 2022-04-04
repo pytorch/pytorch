@@ -6381,8 +6381,6 @@ class TestNN(NNTestCase):
             output = deconv(inputs)
             output.mean().backward()
 
-
-    @skipIfRocm
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     def test_Conv2d_groups_nobias(self):
@@ -6422,7 +6420,6 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
-    @skipIfRocm
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -9978,10 +9975,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
             F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "expected 4D or 5D input"):
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
             F.grid_sample(input[0], grid, align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "grid with same number of dimensions"):
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
             F.grid_sample(input, torch.empty(1, 1, 1, 1, 3), align_corners=False)
 
         with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
@@ -9997,7 +9994,7 @@ class TestNN(NNTestCase):
             F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
 
         if TEST_CUDA:
-            with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
 
     def test_affine_grid_error_checking(self):
@@ -14923,6 +14920,31 @@ class TestNNDeviceType(NNTestCase):
         test_unequal_when_beta_is_less_than_one()
         test_unequal_when_beta_is_greater_than_one()
 
+    @onlyCPU
+    def test_smooth_l1_loss_bfloat16(self, device):
+        def test_dtype(fn, input, target, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            target = target.detach().clone().to(dtype=dtype)
+            target2 = target.detach().clone().float()
+            out = fn(input, target)
+            out.sum().backward()
+            out2 = fn(input2, target2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, exact_dtype=False)
+
+        def func(device):
+            return nn.SmoothL1Loss().to(device=device)
+
+        shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 128, 128]]
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            t = torch.randn(shape, device=device)
+            test_dtype(func(device), x, t, torch.bfloat16)
+
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def test_nonlinearity_propagate_nan(self, device):
@@ -16158,6 +16180,7 @@ class TestNNDeviceType(NNTestCase):
                 mask = mask.cuda()
             mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
             native_res = torch._masked_softmax(input, mask)
+            mask = ~mask
             mask = mask.float()
 
             def slow_masked_softmax(input, mask):
@@ -16181,6 +16204,7 @@ class TestNNDeviceType(NNTestCase):
         mask = mask.bool()
         native_res = torch._masked_softmax(input, mask)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
+        mask = ~mask
         mask = mask.float()
 
         def slow_masked_softmax(input, mask):
