@@ -45,21 +45,21 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/pytorch/.github/actions/setup-ssh@master
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
+        uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -78,7 +78,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Build arm-v7a
-        uses: pytorch/pytorch/.github/actions/build-android@master
+        uses: ./.github/actions/build-android
         with:
           arch: arm_v7a
           arch-for-build-env: arm-v7a
@@ -88,7 +88,7 @@ jobs:
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build arm-v8a
-        uses: pytorch/pytorch/.github/actions/build-android@master
+        uses: ./.github/actions/build-android
         with:
           arch: arm_v8a
           arch-for-build-env: arm-v8a
@@ -99,7 +99,7 @@ jobs:
 
       - name: Build x86_32
         id: build-x86_32
-        uses: pytorch/pytorch/.github/actions/build-android@master
+        uses: ./.github/actions/build-android
         with:
           arch: x86_32
           arch-for-build-env: x86_32
@@ -109,7 +109,7 @@ jobs:
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build x86_64
-        uses: pytorch/pytorch/.github/actions/build-android@master
+        uses: ./.github/actions/build-android
         with:
           arch: x86_64
           arch-for-build-env: x86_64
@@ -214,9 +214,9 @@ jobs:
           path: build_android_artifacts/artifacts.tgz
 
       - name: Chown workspace
-        uses: pytorch/pytorch/.github/actions/chown-workspace@master
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Teardown Linux
-        uses: pytorch/pytorch/.github/actions/teardown-linux@master
+        uses: ./.github/actions/teardown-linux
         if: always()

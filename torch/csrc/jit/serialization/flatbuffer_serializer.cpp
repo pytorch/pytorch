@@ -386,9 +386,12 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
   }
 
+  const uint32_t bytecode_version =
+      static_cast<uint32_t>(module.bytecode_version());
+
   auto mod = CreateModule(
       fbb,
-      0, /* version */
+      /*bytecode_version=*/bytecode_version,
       extra_files_offset, /* extra_files */
       functions_offset,
       ivalue_index,
@@ -770,7 +773,10 @@ Module parse_and_initialize_jit_module(
   std::vector<IValue> constants;
   loader.extractJitSourceAndConstants(&files, &constants);
   Module m = jitModuleFromSourceAndConstants(
-      mobilem._ivalue(), files, constants, flatbuffer_module->version());
+      mobilem._ivalue(),
+      files,
+      constants,
+      flatbuffer_module->bytecode_version());
   m.set_delete_memory(data);
   return m;
 }
@@ -779,6 +785,14 @@ Module load_jit_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device) {
   auto data = get_file_content(filename.c_str());
+  return parse_and_initialize_jit_module(
+      std::move(std::get<0>(data)), std::get<1>(data), device);
+}
+
+Module load_jit_module_from_stream(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  auto data = get_stream_content(in);
   return parse_and_initialize_jit_module(
       std::move(std::get<0>(data)), std::get<1>(data), device);
 }
