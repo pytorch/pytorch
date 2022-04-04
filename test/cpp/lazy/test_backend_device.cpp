@@ -75,12 +75,12 @@ TEST(BackendDeviceTest, FromAten) {
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
 
   device = c10::Device(c10::kLazy);
-#ifndef FBCODE_CAFFE2
+#ifdef USE_LAZY_TS_BACKEND
   auto backend_device = atenDeviceToBackendDevice(device);
 #else
   // Lazy Tensor is disabled in FBCODE until addressing non-virtual methods (e.g. sizes) in TensorImpl
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
-#endif // FBCODE_CAFFE2
+#endif // USE_LAZY_TS_BACKEND
 }
 
 TEST(BackendDeviceTest, ToAten) {

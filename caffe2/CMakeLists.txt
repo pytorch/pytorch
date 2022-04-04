@@ -976,6 +976,10 @@ if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
+if(BUILD_LAZY_TS_BACKEND)
+  # TODO(whc) is this the only library I need to modify, and is this the best place to do it?
+  target_compile_definitions(torch_cpu PUBLIC USE_LAZY_TS_BACKEND)
+endif()
 # ==========================================================
 # formerly-libtorch flags
 # ==========================================================

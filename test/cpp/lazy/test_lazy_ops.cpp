@@ -15,7 +15,7 @@ namespace lazy {
 
 
 // Lazy Tensor is disabled in FBCODE until addressing non-virtual methods (e.g. sizes) in TensorImpl
-#ifndef FBCODE_CAFFE2
+#ifdef USE_LAZY_TS_BACKEND
 
 namespace {
   // This registers the torchscript backend, without which lazy device won't work
@@ -10700,7 +10700,7 @@ TEST_F(LazyOpsTest, TestLerpScalarOut) {
   ExpectCounterChanged("lazy::lerp", GetIgnoredCounters());
 }
 
-#endif // FBCODE_CAFFE2
+#endif // USE_LAZY_TS_BACKEND
 
 }  // namespace lazy
 }  // namespace torch
