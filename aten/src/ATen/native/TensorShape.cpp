@@ -1414,6 +1414,85 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     const auto dim_indices = indices[dim].contiguous();
 
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
+      const auto search_in_dim_indices
+        = index_len * std::log2(size) < std::log2(index_len) * size
+        ? true
+        : false;
+
+      Tensor sorted, sorted_idx, src;
+      std::tie(sorted, sorted_idx, src) = [
+        &dim_indices, &nneg_index, &self,
+        search_in_dim_indices, dim, size
+      ](void) -> std::tuple<Tensor, Tensor, Tensor> {
+        // sort dim_indices to binary search into it
+        if (search_in_dim_indices) {
+          // dim_indices is already sorted if self is coalesced and dim == 0
+          if (self.is_coalesced() && dim == 0) {
+            return std::make_tuple(dim_indices, at::arange(size, dim_indices.options()), nneg_index);
+          }
+          else {
+            Tensor sorted_dim_indices, sorted_dim_indices_idx;
+            std::tie(sorted_dim_indices, sorted_dim_indices_idx) = dim_indices.sort();
+            return std::make_tuple(sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
+          }
+        }
+        // sort nneg_index to binary search into it
+        else {
+          Tensor sorted_nneg_index, sorted_nneg_index_idx;
+          std::tie(sorted_nneg_index, sorted_nneg_index_idx) = nneg_index.sort();
+          return std::make_tuple(sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
+        }
+      }();
+
+      const auto src_grain_size = at::internal::GRAIN_SIZE;
+      const auto src_len = src.numel();
+      const auto n_threads_src = std::max<int64_t>(
+          // 1 <= n_threads_src <= std::min(ceil(src.numel() / src_grain_size), max_threads)
+          1, std::min<int64_t>((src_len + src_grain_size - 1) / src_grain_size, at::get_num_threads())
+      );
+
+      const auto src_n_threads_shape = {n_threads_src, (src_len + n_threads_src - 1) / n_threads_src};
+      auto src_int_idx = at::empty(src_n_threads_shape, src.options());
+      auto sorted_int_idx = at::empty_like(src_int_idx);
+      auto int_counts = at::zeros_like(src_int_idx);
+
+      const auto sorted_len = sorted.numel();
+      const auto* ptr_sorted = sorted.data_ptr<int64_t>();
+      const auto* ptr_sorted_start = ptr_sorted;
+      const auto* ptr_sorted_end = ptr_sorted + sorted_len;
+
+      at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
+          const auto tid = at::get_thread_num();
+          auto* ptr_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
+          auto* ptr_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+          auto* ptr_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+          const auto* ptr_src = src.data_ptr<int64_t>() + start;
+
+          for (const auto i : c10::irange(start, end)) {
+            const auto src_val = *ptr_src++;
+            const auto src_val_lb = std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+            if (*src_val_lb != src_val) continue;
+            const auto src_val_up = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+
+            const int64_t count = src_val_up - src_val_lb;
+            const int64_t j = src_val_up - ptr_sorted_start;
+
+            *ptr_src_int_idx++ = i;
+            *ptr_sorted_int_idx++ = j;
+            *ptr_int_counts++ = count;
+          }
+      });
+
+      const auto compressed_int_counts = int_counts.sum(-1);
+      const auto thread_offsets = compressed_int_counts.cumsum(0);
+      const auto res_len = compressed_int_counts.sum().item<int64_t>();
+
+      // Short-circuit if emtpy intersection
+      if (!res_len) {
+        auto empty_idx = at::empty({0}, src.options());
+        return std::make_tuple(empty_idx, empty_idx);
+      }
+
       // Much faster than at::unique_dim
       const auto unique_with_counts = [](
           const Tensor& t, int64_t len, bool is_sorted = false
@@ -1534,6 +1613,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
               dim_indices_unique, dim_indices_counts, n_unique_dim_indices
             );
       }
+
+      std::cout << "nnz2: " << res_nnz << std::endl;
+      std::cout << std::endl;
 
       const auto compute_offsets = [](const Tensor& counts, int64_t len) {
         const auto narrowed_counts = counts.narrow(-1, 0, len);
