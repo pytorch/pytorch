@@ -3033,6 +3033,11 @@ c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots
 }
 
 static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  // Trivial case. We need it here as it makes some backends fail
+  if (B.numel() == 0) {
+    return;
+  }
+
   auto batch_size = batchCount(B);
   auto m = LU.size(-2);
   auto b2 = B.size(-1);
@@ -3044,18 +3049,20 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
   // Helps mitigating the bugs in magma
   auto lu_solve_triangular = [m](const Tensor& LU, const Tensor& pivots, const Tensor& B, const TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
     // LAPACK / cublas / etc returns the permutaiton in an odd format
     // Here we transform it to a vector representing a permutation, i.e. a (batch of) vectors st. P(i) = j
-    auto perm = at::arange(m, pivots.options().dtype(kLong)).expand(pivots.sizes()).contiguous();
+    auto perm = at::arange(m, pivots_->options().dtype(kLong)).expand(pivots_->sizes()).contiguous();
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
       .add_output(perm)
-      .add_input(pivots)
+      .add_input(*pivots_)
       .build();
-    unpack_pivots_stub(pivots.device().type(), iter, m);
+    unpack_pivots_stub(pivots_->device().type(), iter, m);
 
     if (trans == TransposeType::NoTranspose) {
       // Get the inverse permutation
@@ -3067,11 +3074,11 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       // B1 = P^T @ B  (must be done out-of-place as B is both source and target)
       auto B1 = B.scatter(-2, inv_perm.unsqueeze(-1).expand_as(B), B);
       // B = L^{-1} @ B1
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
       // B = U^{-1} @ B
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU, B, /*upper=*/true);
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B, /*upper=*/true);
     } else {
-      auto LU_H = LU.mH();
+      auto LU_H = LU_->mH();
       // B = U^{-H} @ B
       at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU_H, B, /*upper=*/false);
       // B = L^{-H} @ B
@@ -3081,17 +3088,29 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
   };
 
-  auto LU_ = maybe_expand_lu(B, LU);
-  auto pivots_ = maybe_expand_pivots(B, pivots);
+#ifdef CUDART_VERSION
+  auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+  };
+#endif
+
+  auto lu_solve_batched_magma_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+  };
+
 
   // Preferred Backend
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_CUSOLVER
   if (preferred_backend == at::LinalgBackend::Cusolver) {
     if (batch_size <= 2 && m >= 64) {
-      lu_solve_looped_cusolver(*LU_, *pivots_, B, trans);
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
     } else {
-      lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
     }
     return;
   } else
@@ -3099,10 +3118,10 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   if (preferred_backend == at::LinalgBackend::Magma) {
     // Looped magma is very slow, but batched magma is buggy in these two cases
     if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose) {
-      lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+      lu_solve_batched_magma_fn(LU, pivots, B, trans);
     }
     else {
-      lu_solve_looped_magma(*LU_, *pivots_, B, trans);
+      lu_solve_looped_magma(LU, pivots, B, trans);
     }
     return;
   }
@@ -3112,24 +3131,24 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
 #ifdef CUDART_VERSION
 #ifdef USE_CUSOLVER
   if (batch_size <= 2 && m >= 64) {
-    lu_solve_looped_cusolver(*LU_, *pivots_, B, trans);
+    lu_solve_looped_cusolver(LU, pivots, B, trans);
     return;
   }
 #endif // ifdef USE_CUSOLVER
   if (trans != TransposeType::NoTranspose && m <= 2 && batch_size >= 128) {
-    lu_solve_triangular(*LU_, *pivots_, B, trans);
+    lu_solve_triangular(LU, pivots, B, trans);
   } else {
-    lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
   }
 #else
   // If it's not buggy and it's faster than solve triangular (large matrix and large batch regime)
   // we use batched_magma, otherwise, we resort to two triangular solves
   // For trans != TransposeType::NoTranspose lu_solve_triangular is faster anyway
   if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && m >= 256 && batch_size >= 128) {
-    lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+    lu_solve_batched_magma_fn(LU, pivots, B, trans);
   }
   else {
-    lu_solve_triangular(*LU_, *pivots_, B, trans);
+    lu_solve_triangular(LU, pivots, B, trans);
   }
 #endif // ifdef CUDART_VERSION
 }
