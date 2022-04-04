@@ -324,11 +324,29 @@ class TestFSDPStateDict(FSDPTest):
             # by FSDP.state_dict(). Have a check once this is implemented in
             # FSDP.state_dict().
 
-
+        # Check that it can be loaded into FSDP.
         new_fsdp, _ = _create_module()
+        _zero_model(new_fsdp)
+        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
+            self.assertNotEqual(p1, p2)
         new_fsdp.load_state_dict(deepcopy(state_dict))
         for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertEqual(p1, p2)
+
+        # Test that the checkpoint can be loaded into a local model.
+        local, _ = _create_module(wrap_fsdp=False)
+        for param in local.parameters():
+            with torch.no_grad():
+                param.zero_()
+
+        with fsdp.summon_full_params():
+            for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
+                self.assertNotEqual(p1, p2)
+
+        local.load_state_dict(deepcopy(state_dict))
+        with fsdp.summon_full_params():
+            for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
+                self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)
