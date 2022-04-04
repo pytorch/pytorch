@@ -21,6 +21,7 @@
 
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #endif
 
 #include <caffe2/serialize/file_adapter.h>
