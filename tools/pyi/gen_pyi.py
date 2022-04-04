@@ -11,6 +11,7 @@ from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
 
 from tools.autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
+from libfb.py import parutil
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -35,6 +36,10 @@ Here's our general strategy:
 There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
+
+def respath(name: str) -> str:
+    return parutil.get_file_path(name, pkg=__package__)
+
 
 def get_py_torch_functions(
         python_funcs: Sequence[PythonSignatureNativeFunctionPair],
@@ -255,7 +260,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     # so, we don't export then to it
     from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
-    fm.write_with_template('torch/_C/_nn.pyi', 'torch/_C/_nn.pyi.in', lambda: {
+    fm.write_with_template('torch/_C/_nn.pyi', respath("_nn.pyi.in"), lambda: {
         'imported_hints': import_code,
         'dispatched_hints': dispatch_code,
     })
@@ -606,19 +611,19 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'dtype_class_hints': dtype_class_hints,
         'all_directive': all_directive
     }
-    fm.write_with_template('torch/_C/__init__.pyi', 'torch/_C/__init__.pyi.in', lambda: {
+    fm.write_with_template('torch/_C/__init__.pyi', respath('__init__.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/__init__.pyi.in',
         **env,
     })
-    fm.write_with_template('torch/_C/_VariableFunctions.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
+    fm.write_with_template('torch/_C/_VariableFunctions.pyi', respath('_VariableFunctions.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
         **env,
     })
-    fm.write_with_template('torch/_VF.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
+    fm.write_with_template('torch/_VF.pyi', respath('_VariableFunctions.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
         **env,
     })
-    fm.write_with_template('torch/return_types.pyi', 'torch/_C/return_types.pyi.in', lambda: {
+    fm.write_with_template('torch/return_types.pyi', respath('return_types.pyi.in'), lambda: {
         'generated_comment': '@' + 'generated from torch/_C/return_types.pyi',
         **env,
     })
