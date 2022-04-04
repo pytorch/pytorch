@@ -575,8 +575,10 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
       __syncthreads();
       if (kth) {
         uint32_t offset = kthIndex + startKth;
-        topKSliceStart[offset * topKWithinSliceStride] = val;
-        indicesSliceStart[offset * indicesWithinSliceStride] = idx;
+        if (offset < outputSliceSize) {
+          topKSliceStart[offset * topKWithinSliceStride] = val;
+          indicesSliceStart[offset * indicesWithinSliceStride] = idx;
+        }
       }
       startKth += numKth;
     }
