@@ -27,7 +27,7 @@ class PackageImporter(DefaultPackageImporter):
             if self.storage_context.has_storage(name):
                 storage = self.storage_context.get_storage(name, dtype).storage()
             else:
-                tensor = self.zip_reader.get_storage_from_record(  #type: ignore[attr-defined]
+                tensor = self.zip_reader.get_storage_from_record(  # type: ignore[attr-defined]
                     ".data/" + name, size, dtype
                 )
                 if not self.zip_reader.is_directory():
@@ -61,7 +61,7 @@ class PackageImporter(DefaultPackageImporter):
         self.storage_context = torch._C.DeserializationStorageContext()
         self.last_map_location = map_location
         self.restore_location = _get_restore_location(map_location)
-        self.loaded_storages: Dict[int, Any] = {}
+        self.loaded_storages: Union[Dict[int, Any], None] = {}
         try:
             yield
         finally:
