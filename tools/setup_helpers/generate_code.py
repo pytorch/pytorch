@@ -46,6 +46,9 @@ def generate_code(ninja_global: Optional[str] = None,
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.codegen.selective_build.selector import SelectiveBuilder
 
+    # Copy all of the tools.autograd resources to the autograd
+    # directory so that code generation below can see them as local
+    # files.
     copy_resources_to_dir(autograd_dir)
 
     # Build ATen based Variable classes
@@ -178,9 +181,6 @@ def main() -> None:
     options = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as autograd_dir_str:
-        # Copy all of the tools.autograd resources to a temporary
-        # directory so that code generation below can see it as local
-        # files.
         autograd_dir = pathlib.Path(autograd_dir_str)
 
         generate_code(
@@ -224,6 +224,7 @@ def main() -> None:
 
 
 def copy_resources_to_dir(autograd_dir: pathlib.Path) -> None:
+    """Extracts autograd data files from the package into the given directory."""
     copy_resource_to_dir("tools.autograd", "deprecated.yaml", autograd_dir)
     copy_resource_to_dir("tools.autograd", "derivatives.yaml", autograd_dir)
 
