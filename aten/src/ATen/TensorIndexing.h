@@ -269,7 +269,14 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   // TODO: check scalarType
   outIndices.resize(*dim_ptr + 1);
   outIndices[*dim_ptr] = tensor;
-  (*dim_ptr)++;
+  // This makes sure multi-dim tensor indices work properly, see:
+  // https://github.com/pytorch/pytorch/issues/71673
+  // Similar to count_specified_dimensions:
+  if (tensor.scalar_type() == kByte || tensor.scalar_type() == kBool) {
+    *dim_ptr += tensor.dim();
+  } else {
+    *dim_ptr += 1;
+  }
 };
 
 static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& /*self*/, std::vector<Tensor>&& indices) {
@@ -363,16 +370,12 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
 }
 
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-// prev_tensor_dim_ptr is used to keep track of the dimension of the previously
-// passed tensor.  Must be -1 when not set.
-// https://github.com/pytorch/pytorch/issues/71673
 static inline Tensor handleDimInMultiDimIndexing(
     const Tensor& prev_dim_result,
     const Tensor& original_tensor,
     const TensorIndex& index,
     int64_t* dim_ptr,
     int64_t* specified_dims_ptr,
-    int64_t* prev_tensor_dim_ptr,
     int64_t real_dim,
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
@@ -381,17 +384,8 @@ static inline Tensor handleDimInMultiDimIndexing(
   // Make sure all pointers are valid before using them.
   TORCH_INTERNAL_ASSERT(dim_ptr);
   TORCH_INTERNAL_ASSERT(specified_dims_ptr);
-  TORCH_INTERNAL_ASSERT(prev_tensor_dim_ptr);
   if (index.is_integer()) {
-    int64_t old_dim = *dim_ptr;
-    // Perform the view operation based on the dimension of the mask tensor.
-    // For instance, t[m,0] == t[:,:,0][m] where m is a 2D tensor.
-    if (*prev_tensor_dim_ptr != -1) {
-      *dim_ptr = *prev_tensor_dim_ptr;
-    }
     auto result = impl::applySelect(prev_dim_result, *dim_ptr, index.integer(), real_dim, original_tensor_device, prev_dim_result_sizes);
-    *dim_ptr = old_dim;
-    *prev_tensor_dim_ptr = -1;
     return result;
   } else if (index.is_slice()) {
     Tensor result = impl::applySlice(
@@ -434,11 +428,6 @@ static inline Tensor handleDimInMultiDimIndexing(
     } else {
       impl::recordTensorIndex(tensor, outIndices, dim_ptr);
     }
-    // The case t[m,0,n,1] where m and n are 1D tensors works fine as is, so do
-    // not do anything.
-    if (tensor.dim() != 1) {
-      *prev_tensor_dim_ptr = tensor.dim();
-    }
     return result;
   } else {
     TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
@@ -456,7 +445,6 @@ static inline Tensor applySlicing(
     const IntArrayRef& self_sizes) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
-  int64_t prev_tensor_dim = -1;
 
   TORCH_CHECK_INDEX(
     specified_dims <= (int64_t)self_sizes.size(),
@@ -471,7 +459,6 @@ static inline Tensor applySlicing(
       /*index=*/obj,
       /*dim=*/&dim,
       /*specified_dims=*/&specified_dims,
-      /*prev_tensor_dim=*/&prev_tensor_dim,
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
       /*disable_slice_optimization=*/disable_slice_optimization,
