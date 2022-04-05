@@ -265,10 +265,13 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
 
   // Make a new map based on all the leaves resulting from best effort replay
   id_map forwarded_replay_map;
+  auto forward_dangling_leaves = forward_replay.getUnorderedLeafIDs();
   for (auto entry : forward_replay.getReplay()) {
-    if (forward_replay.getUnorderedLeafIDs().find(entry.second) !=
-        forward_replay.getUnorderedLeafIDs().end())
+    if (forward_dangling_leaves.find(entry.second) !=
+        forward_dangling_leaves.end()) {
       forwarded_replay_map[entry.first] = entry.second;
+      forward_dangling_leaves.erase(entry.second);
+    }
   }
 
   // Replay producer dimensions.
@@ -304,6 +307,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   // (if possible):
   id_map producer_self_replay_map;
   for (auto entry : leaf_ids) {
+    producer_self_replay_map[entry.first] = entry.first;
+  }
+
+  for (auto entry : forward_dangling_leaves) {
     producer_self_replay_map[entry.first] = entry.first;
   }
 

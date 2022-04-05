@@ -21497,6 +21497,173 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexPointwiseSchedule_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+// Repro of issue #1539.
+TEST_F(NVFuserTest, FusionTrivialReductionForwarding1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false});
+  auto tv2 = sum(tv1, {0});
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv2->merge(0);
+  tv2->split(0, 4);
+
+  TransformPropagator::from(tv2);
+
+  // All tensors must be transformed to a 2D tensor with each axis
+  // mapped with each other in the LOOP map.
+  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
+  for (auto tv : ir_utils::allTvs(&fusion)) {
+    TORCH_CHECK(
+        tv->nDims() == 2, "Expected to be a 2D tensor but: ", tv->toString());
+    for (const auto i : c10::irange(2)) {
+      TORCH_CHECK(loop_map.areMapped(tv->axis(i), tv3->axis(i)));
+    }
+  }
+}
+
+TEST_F(NVFuserTest, FusionTrivialReductionForwarding2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false});
+  auto tv2 = sum(tv1, {0});
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv3);
+
+  // Merging a trivial reduction with a non-reduction domain
+  tv2->merge(0, 1);
+  tv2->split(0, 4);
+
+  tv3->split(0, 4);
+
+  // tv2 and tv3 are different as tv3 lacks the trivial reduction, but
+  // they are mapped with each other by BestEffortReplay as the merge
+  // of trivial reduciton dim is forwarded.
+
+  PairwiseRootDomainMap root_map(tv2, tv3);
+
+  auto p2c = BestEffortReplay::replayCasP(tv3, tv2, 2, root_map).getReplay();
+  for (const auto i : c10::irange(tv2->nDims())) {
+    auto tv2_id = tv2->axis(i);
+    auto it = p2c.find(tv2_id);
+    TORCH_CHECK(
+        it != p2c.end(),
+        "Expected mapped consumer ID but not found: ",
+        tv2_id->toString());
+    auto tv3_mapped_id = it->second;
+    TORCH_CHECK(
+        tv3_mapped_id == tv3->axis(i),
+        "Unexpected mapped consumer ID: ",
+        tv3_mapped_id->toString());
+  }
+
+  auto c2p = BestEffortReplay::replayPasC(tv2, tv3, 2, root_map).getReplay();
+  for (const auto i : c10::irange(tv3->nDims())) {
+    auto tv3_id = tv3->axis(i);
+    auto it = c2p.find(tv3_id);
+    TORCH_CHECK(
+        it != c2p.end(),
+        "Expected mapped producer ID but not found: ",
+        tv3_id->toString());
+    auto tv2_mapped_id = it->second;
+    TORCH_CHECK(
+        tv2_mapped_id == tv2->axis(i),
+        "Unexpected mapped consumer ID: ",
+        tv2_mapped_id->toString());
+  }
+}
+
+TEST_F(NVFuserTest, FusionTrivialReductionForwarding3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv2);
+
+  // Similar pattern as FusionTrivialReductionForwarding2 but no
+  // trivial reduciton at the root domain
+
+  // Create a trivial reduction by splitting with a factor of 1
+  tv1->split(1, 1, false);
+  // Merging with a trivial reduction
+  tv1->merge(0, 1);
+  tv1->split(0, 5);
+
+  tv2->split(0, 5);
+
+  // While the merge of tv1 is done with a trivial reduciton, it's not
+  // a root domain, so forwarding is not enabled. BestEffortReplay
+  // should only map the first axis of each tensor.
+
+  PairwiseRootDomainMap root_map(tv1, tv2);
+  auto p2c = BestEffortReplay::replayCasP(tv2, tv1, 2, root_map).getReplay();
+  TORCH_CHECK(p2c.size() == 1, "Expected only one mapping found");
+  TORCH_CHECK(p2c.begin()->first == tv1->getRootDomain().at(0));
+  TORCH_CHECK(p2c.begin()->second == tv2->getRootDomain().at(0));
+}
+
+TEST_F(NVFuserTest, FusionTrivialReductionForwarding4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  // tv4 has a trivial reduction axis
+  auto tv4 = sum(tv2, {0});
+  auto tv5 = add(tv4, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv5);
+
+  fusion.printMath();
+
+  tv3->merge(0, 1);
+  tv3->split(0, 32);
+
+  // This causes the trivial reduction of tv4 to be merged with
+  // another axis of tv4, and then forward computeAt is done from tv4
+  // to tv5. The split of the merged id of tv4 should be done on tv5
+  // by forwarding the merge of the trivial reduction.
+  tv0->computeAt(tv3, -1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({111}, options);
+  auto t1 = at::randn({123, 111}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto t2 = t0.unsqueeze(0);
+  auto t3 = t1 + t2;
+  auto t5 = sum(t2, {0}) + 1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {t3, t5}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
