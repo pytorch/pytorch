@@ -78,12 +78,20 @@ TensorIndex::TensorIndex(
   }
 }
 
-Sync::Sync(IrBuilderPasskey passkey, bool war_sync)
-    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {
+BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync)
+    : Expr(passkey, ExprType::BlockSync), war_sync_(war_sync) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
 }
+
+GridSync::GridSync(
+    IrBuilderPasskey passkey,
+    ParallelTypeBitmap sync_dims,
+    Val* sync_buffer)
+    : Expr(passkey, ExprType::GridSync),
+      sync_dims_(sync_dims),
+      sync_buffer_(sync_buffer) {}
 
 InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
     : Expr(passkey, ExprType::InitMagicZero) {
@@ -206,7 +214,8 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain)
           nullptr,
           nullptr,
           nullptr,
-          isParallelTypeVectorize(iter_domain->getParallelType()),
+          !iter_domain->isBroadcast() &&
+              isParallelTypeVectorize(iter_domain->getParallelType()),
           nullptr,
           false) {
   TORCH_INTERNAL_ASSERT(
@@ -296,6 +305,51 @@ Val* ForLoop::stop() const {
 Val* ForLoop::step() const {
   TORCH_INTERNAL_ASSERT(step_ != nullptr);
   return step_;
+}
+
+bool ForLoop::isTrivial() const {
+  // These loops are not materialized
+  if (vectorize() || iter_domain()->isBroadcast() ||
+      iter_domain()->isStride() || iter_domain()->isMma()) {
+    return true;
+  }
+
+  // By default, a parallelized loop would look like:
+  //
+  //   for (int x = threadIdx.x; x < stop; x += blockDim.x) {
+  //     do_some_comp(x);
+  //   }
+  //
+  // When stop is guaranteed to be smaller or equal to the number of
+  // threads, the for-loop is not necessary. In the above case, we
+  // would just generate the loop body without the for clause but
+  // references to the loop index replaced by the loop start value.
+  //
+  // When the loop end is the same as the IterDomain extent, the
+  // assumption can be safely made. This is more conservative than
+  // necessary since the loop stop value just needs to be <= the
+  // IterDomain extent. However, at this point, this conservative
+  // analysis seems sufficient.
+  if (stop() == iter_domain()->extent() && iter_domain()->isThread()) {
+    return true;
+  }
+
+  // Extent-1 loop: for (int i = 0; i < 1; ++i) {
+  if (start()->isZeroInt() && stop()->isOneInt() && step()->isOneInt()) {
+    return true;
+  }
+
+  // Another extent-1 loop: for (int i = N - 1; i < N; ++i) {
+  if (start()->definition() != nullptr &&
+      start()->definition()->isA<BinaryOp>() &&
+      start()->definition()->as<BinaryOp>()->getBinaryOpType() ==
+          BinaryOpType::Sub &&
+      start()->definition()->as<BinaryOp>()->lhs() == stop() &&
+      start()->definition()->as<BinaryOp>()->rhs()->isOneInt()) {
+    return true;
+  }
+
+  return false;
 }
 
 IfThenElse::IfThenElse(IrBuilderPasskey passkey, Predicate* cond)
@@ -417,6 +471,50 @@ GridWelford::GridWelford(
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridReduction* grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridWelford* grid_welford)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_welford) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+TensorIndex* AllocateFusedReduction::out() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->reduction_op()->out()->as<kir::TensorIndex>();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
+}
+
+const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->threadPredicate();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->threadPredicate();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
 }
 
 } // namespace kir
