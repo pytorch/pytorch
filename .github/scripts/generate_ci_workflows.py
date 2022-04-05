@@ -667,8 +667,8 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-rocm4.5-py3.7",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        build_environment="linux-bionic-rocm5.0-py3.7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm5.0-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         num_test_shards=2,
         enable_distributed_test=False,
@@ -719,6 +719,19 @@ LINUX_WORKFLOWS = [
         enable_noarch_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-py3.7-clang9-slow",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.7-clang9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        enable_default_test=False,
+        enable_distributed_test=False,
+        enable_slow_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
     CIWorkflow(
@@ -923,8 +936,8 @@ MACOS_WORKFLOWS = [
 ]
 
 DOCKER_IMAGES = {
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.7",               # for rocm
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",               # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm5.0-py3.7",                 # for rocm
 }
 
 DOCKER_IMAGES.update({
@@ -1219,7 +1232,7 @@ def main() -> None:
 
 
     # check new pull workflow matches ciflow/default
-    with open(".github/workflows/pull.yml") as f:
+    with open(f"{GITHUB_DIR}/workflows/pull.yml") as f:
         y = yaml.load(f, Loader=Loader)
     new_pull = set([i["name"] for i in y["jobs"].values()])
 
@@ -1230,7 +1243,7 @@ def main() -> None:
     assert new_pull == old_pull_ex_binary
 
     # check new trunk workflow matches ciflow/trunk
-    with open(".github/workflows/trunk.yml") as f:
+    with open(f"{GITHUB_DIR}/workflows/trunk.yml") as f:
         y = yaml.load(f, Loader=Loader)
     new_trunk = set([i["name"] for i in y["jobs"].values()])
     old_trunk = ciflow_ruleset.label_rules[LABEL_CIFLOW_TRUNK] - ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT]
@@ -1239,7 +1252,7 @@ def main() -> None:
     old_trunk = old_trunk - {"docker-builds"}
     assert new_trunk == old_trunk
 
-    with open(".github/workflows/periodic.yml") as f:
+    with open(f"{GITHUB_DIR}/workflows/periodic.yml") as f:
         y = yaml.load(f, Loader=Loader)
     new_periodic = set([i["name"] for i in y["jobs"].values()])
     old_periodic_l = list(ciflow_ruleset.label_rules[LABEL_CIFLOW_SCHEDULED])

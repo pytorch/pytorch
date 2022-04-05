@@ -243,6 +243,30 @@ def _tensorpipe_exchange_and_check_all_device_maps(
 
     return reverse_device_maps, my_devices
 
+def _tensorpipe_check_local_device_maps(name, device_count, options):
+    # Check local devices in device_maps and devices are all valid.
+    local_devices = set(options.devices) if options.devices else set()
+    device_maps = options.device_maps
+    for worker_name in device_maps:
+        device_map = device_maps[worker_name]
+        key_set = set(device_map.keys())
+        val_set = set(device_map.values())
+        if not all([
+            len(key_set) == len(device_map),
+            len(val_set) == len(device_map),
+        ]):
+            raise ValueError(
+                f"Invalid device_map configuration for {worker_name}, "
+                f"not 1-to-1 mapping:\ndevice_maps = {device_map}"
+            )
+        local_devices.update(key_set)
+
+    if not _tensorpipe_validate_devices(local_devices, device_count):
+        raise ValueError(
+            f"Invalid device in TensorPipe options on {name}:\n"
+            f"device_maps = {options.device_maps},\n"
+            f"devices = {options.devices}"
+        )
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
@@ -260,12 +284,6 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
-    # The agent's join method is required to behave like a barrier and perform
-    # collective operations, for which it relies on a process group, instead of
-    # re-implementing this on top of RPCs.
-
-    group = _init_process_group(store, rank, world_size)
-
     if torch.cuda.is_available():
         # It's necessary to initialize PyTorch CUDA states here (e.g.,
         # CUDACachingAllocator). If this is missing, we could hit errors like
@@ -277,38 +295,88 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     else:
         device_count = 0
 
-    reverse_device_maps, devices = _tensorpipe_exchange_and_check_all_device_maps(
-        name,
-        device_count,
-        rpc_backend_options.device_maps,
-        rpc_backend_options.devices,
-        group,
-    )
+    is_static_group = True if world_size else False
+    # world_size is specified so this is a static group (ranks cannot join and leave)
+    if is_static_group:
+        # The agent's join method is required to behave like a barrier and perform
+        # collective operations, for which it relies on a process group, instead of
+        # re-implementing this on top of RPCs.
+        group = _init_process_group(store, rank, world_size)
 
-    # TODO: add try-except and destroy _agent in all processes if any fails.
-    agent = TensorPipeAgent(
-        store,
-        name,
-        rank,
-        world_size,
-        rpc_backend_options,
-        reverse_device_maps,
-        devices,
-    )
+        reverse_device_maps, devices = _tensorpipe_exchange_and_check_all_device_maps(
+            name,
+            device_count,
+            rpc_backend_options.device_maps,
+            rpc_backend_options.devices,
+            group,
+        )
 
-    api._init_rpc_states(agent)
+        # TODO: add try-except and destroy _agent in all processes if any fails.
+        agent = TensorPipeAgent(
+            store,
+            name,
+            rank,
+            world_size,
+            rpc_backend_options,
+            reverse_device_maps,
+            devices,
+        )
 
-    # Run one dummy round of RPC to initialize channels/transports. Without
-    # this, it's easy to hit timeout in rpc.shutdown() if there is no other RPC
-    # on that process before rpc.shutdown(), as the agent initialization can
-    # take longer than 5s.
-    api._all_gather(None, timeout=rpc_backend_options.rpc_timeout)
-    # Need a barrier here to make sure no peers leave before the rank0 finishes
-    # _all_gather
-    group.barrier().wait()
+        api._init_rpc_states(agent)
 
-    return agent
+        # Run one dummy round of RPC to initialize channels/transports. Without
+        # this, it's easy to hit timeout in rpc.shutdown() if there is no other RPC
+        # on that process before rpc.shutdown(), as the agent initialization can
+        # take longer than 5s.
+        api._all_gather(None, timeout=rpc_backend_options.rpc_timeout)
+        # Need a barrier here to make sure no peers leave before the rank0 finishes
+        # _all_gather
+        group.barrier().wait()
 
+        return agent
+    # initialization for dynamic rpc (ranks can join and leave)
+    else:
+        # Validate devices and device_maps locally for current rank
+        _tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options)
+
+        token_key = "RpcGroupManagementToken"
+        token_location = f"TokenOnWorker{rank}"
+        while True:
+            # Retrieve token from store to signal start of rank join/leave critical section
+            returned = store.compare_set(token_key, "", token_location).decode()
+            if returned == token_location:
+                # Construct TPAgent with empty reverse_device_map and devices
+                # these two properties will be updated after construction
+                agent = TensorPipeAgent(
+                    store,
+                    name,
+                    rank,
+                    world_size,
+                    rpc_backend_options,
+                    {},
+                    [],
+                )
+
+                try:
+                    # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
+                    # This is a synchronous operation that completes once all existing ranks are updated
+                    # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
+                    pass
+                except Exception:
+                    api.shutdown()
+                    raise
+
+                # Finish initialization
+                break
+            else:
+                # Store will wait for the token to be released based on the timeout set in backend options
+                store.wait([returned])
+
+        # Update from store to signal end of rank join/leave critical section
+        store.set(token_key, "")
+        # Other will wait for this token to be set before they execute
+        store.set(token_location, "Done")
+        return agent
 
 register_backend(
     "TENSORPIPE",
