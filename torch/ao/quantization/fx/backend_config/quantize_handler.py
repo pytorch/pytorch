@@ -1,14 +1,18 @@
 import torch
-from typing import Dict
-from torch.fx.graph import Node
+from typing import Dict, Callable
 from .observation_type import ObservationType
 from ..quantization_patterns import QuantizeHandler
+from ..quantization_types import NodePattern
 
 def get_quantize_handler_cls(observation_type, dtype_configs):
 
     class ConfigurableQuantizeHandler(QuantizeHandler):
-        def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
-            super().__init__(node, modules)
+        def __init__(
+                self,
+                node_pattern: NodePattern,
+                modules: Dict[str, torch.nn.Module],
+                root_node_getter: Callable = None):
+            super().__init__(node_pattern, modules, root_node_getter)
             self.observation_type = observation_type
             self.dtype_configs = dtype_configs
 
