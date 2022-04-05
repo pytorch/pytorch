@@ -5270,7 +5270,7 @@ class TestLinalg(TestCase):
         #       torch.linalg.lu_factor_ex
         #       torch.lu_unpack
         #       torch.linalg.lu_solve
-        make_arg_full = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
+        from torch.testing._internal.common_utils import random_matrix
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
         def run_test(A, pivot, singular, fn):
@@ -5324,8 +5324,8 @@ class TestLinalg(TestCase):
         pivots = (True, False) if self.device_type == "cuda" else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
-            shape = batch + ms
-            A = make_arg(shape) if singular else make_arg_full(*shape)
+            m, n = ms
+            A = random_matrix(m, n, *batch, singular=singular, dtype=dtype, device=device)
             # Just do one of them on singular matrices
             if A.numel() == 0 and not singular:
                 continue
@@ -6816,9 +6816,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIf(torch.version.cuda is not None
                 and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
-    # FIXME One of the backends of lu_factor fails in windows. I haven't investigated which or why
-    # https://github.com/pytorch/pytorch/issues/75225
-    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
