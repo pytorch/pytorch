@@ -159,13 +159,14 @@ class HierarchicalModelAverager(averagers.ModelAverager):
                 for param in params:
                     if isinstance(param, torch.nn.Parameter):
                         # model.parameters() input
-                        if param.grad is not None:
-                            filter_params.append(param)
+                        param_data = param
+                        if param_data.grad is not None:
+                            filter_params.append(param_data)
                     elif isinstance(param, dict):
                         # optimzer.param_groups input
                         for param_data in param["params"]:
                             if param_data.grad is not None:
-                                filter_params.append(param)
+                                filter_params.append(param_data)
                     else:
                         raise NotImplementedError
                 utils.average_parameters(filter_params, group)

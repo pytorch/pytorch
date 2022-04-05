@@ -124,5 +124,5 @@ class PeriodicModelAverager(ModelAverager):
                             filter_params.append(param_data)
                 else:
                     raise NotImplementedError
-            utils.average_parameters(iter(filter_params), self.process_group)
+            utils.average_parameters(filter_params, self.process_group)
         self.step += 1
