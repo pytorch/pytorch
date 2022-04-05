@@ -1722,10 +1722,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
               const auto idx_index_count = ptr_index_counts[idx];
               auto& idx_tid_offset = tid_offsets[idx];
               idx_tid_offset -= idx_index_count;
-              auto* write_location = ptr_selected_dim_indices
+              auto* out_location = ptr_selected_dim_indices
                 + (intersection_offset - intersection_counts)
                 + idx_tid_offset;
-              std::fill(write_location, write_location + idx_index_count, i);
+              std::fill_n(out_location, idx_index_count, i);
             }
         });
 
