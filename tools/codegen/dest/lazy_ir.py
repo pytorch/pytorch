@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import List, Union
 from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function

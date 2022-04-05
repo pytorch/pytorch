@@ -109,7 +109,7 @@ def main() -> None:
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     torch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
     aten_path = str(torch_root / "aten" / "src" / "ATen")
-    ir_gen_class = TSLazyIR if options.gen_ts_lowerings else default_args.lazy_ir_cls
+    ir_gen_class: Type[LazyIR] = TSLazyIR if options.gen_ts_lowerings else default_args.lazy_ir_cls
     run_gen_lazy_tensor(aten_path, options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
                         options.node_base, options.node_base_hdr,
                         options.tensor_class, options.tensor_class_hdr, options.shape_inference_hdr,
