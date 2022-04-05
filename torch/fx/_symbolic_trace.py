@@ -414,12 +414,15 @@ class Tracer(TracerBase):
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
                     if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
-                        torch._assert(out == x, f"{name} has been specialized to have value {x}")
+                        torch._assert(out == x, f"{name} has been specialized to have value {x} but got another value")
+                    elif type(x) == type(None):
+                        args = (out, f"{name} has been specialized to have value None but got another value")
+                        self.create_proxy('call_function', _assert_is_none, args, {})
                     else:
                         torch.warnings.warn(
-                            "Was not able to add assertion to guarantee correct inputs to "
-                            "specialized function. It is up to the user to make sure that your inputs match the "
-                            "inputs you specialized the function with."
+                            f"Was not able to add assertion to guarantee correct input {name} to "
+                            f"specialized function. It is up to the user to make sure that your inputs match the "
+                            f"inputs you specialized the function with."
                         )
 
                     return x
@@ -868,3 +871,8 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]],
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)
+
+
+@wrap
+def _assert_is_none(value, msg):
+    assert value is None, msg

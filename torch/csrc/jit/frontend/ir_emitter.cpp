@@ -21,10 +21,10 @@
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
-#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
@@ -637,7 +637,6 @@ struct WithLoopStatus {
   LoopStatus* prev_ptr_;
   LoopStatus prev_value_;
 };
-
 
 struct to_ir {
   to_ir(
@@ -5475,7 +5474,6 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
-
 void eraseListLiterals(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   Node* n = nullptr;
@@ -5486,7 +5484,9 @@ void eraseListLiterals(std::shared_ptr<Graph>& graph) {
 
     if (node->kind() == prim::EmptyListLiteral) {
       if (node->hasUses()) {
-        TORCH_INTERNAL_ASSERT(node->output()->type()->isSubtypeOf(ListType::ofTensors()));
+        TORCH_INTERNAL_ASSERT(
+            node->output()->type()->isSubtypeOf(ListType::ofTensors()));
+
         auto li = graph->createList(TensorType::get(), {});
         li->insertBefore(node);
         node->replaceAllUsesWith(li);
@@ -5499,7 +5499,6 @@ void eraseListLiterals(std::shared_ptr<Graph>& graph) {
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-
 
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
