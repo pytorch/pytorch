@@ -51,10 +51,6 @@ bool isDifferentiable(const Node* n) {
   static OperatorSet differentiable_ops = {
       "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
-      // "aten::_autocast_to_reduced_precision.optional(Tensor(a)? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)?",
-      // "aten::_autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)",
-      // "aten::_autocast_to_full_precision.optional(Tensor(a)? self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)?",
-      // "aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)",
   };
 
   // TODO: add support for the following fusible operators.
@@ -82,14 +78,8 @@ bool isDifferentiable(const Node* n) {
         n->is_constant(attr::implicit);
   }
 
-  std::cout << "checking node for autodiff: " << *n << std::endl;
-
   auto schema = n->maybeSchema();
-  if (schema) {
-    std::cout << "has schema: " << *schema << std::endl;
-  }
   if (schema && hasGradientInfoForSchema(*schema)) {
-    std::cout << "has grad info" << std::endl;
     return true;
   }
 

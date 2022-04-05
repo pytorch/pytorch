@@ -1089,12 +1089,6 @@ const FunctionSchema* Node::maybeSchema() const {
 const Operator* Node::maybeOperator() const {
   if (!op_) {
     const auto& candidates = getAllOperatorsFor(kind());
-    if (kind() == aten::_autocast_to_reduced_precision) {
-      printf("checking reduced op\n");
-      for (const auto& candidate : candidates) {
-        std::cout << "schema candidate: " << candidate->schema() << std::endl;
-      }
-    }
     for (const auto& candidate : candidates) {
       if (matches(candidate->schema())) {
         op_ = candidate.get();

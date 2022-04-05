@@ -149,8 +149,6 @@ void castTensorInputs(
   std::string op_name = cast_op.toQualString();
   op_name += "_optional";
   Symbol cast_optional_op = c10::Symbol::fromQualString(op_name);
-  std::cout << "old op string: " << cast_op.toQualString() << std::endl;
-  std::cout << "concatenated string: " << cast_optional_op.toQualString() << std::endl;
 
   std::unordered_set<Value*> casted_inputs;
   std::unordered_set<Value*> casted_optional;
@@ -179,7 +177,7 @@ void castTensorInputs(
   for (auto input : casted_inputs_ordered) {
     Value* new_input = nullptr;
     Symbol op = casted_optional.count(input) != 0 ? cast_optional_op : cast_op ;
-    
+
     if (cast_op == aten::_autocast_to_full_precision) {
       new_input = graph->insert(
           op,
@@ -503,6 +501,9 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 
+// Note: Initially we attempted to overload autocast functions with `Tensor`
+// input, but that turns out to be tricky for JIT, since overload doesn't work
+// well between `Tensor` & `Optional[Tensor]` in `Node::matches(FunctionSchema)`
 RegisterOperators reg_autocast_to_reduced_precision_optional({
     Operator(
         "aten::_autocast_to_reduced_precision_optional(Tensor(a)? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)?",
