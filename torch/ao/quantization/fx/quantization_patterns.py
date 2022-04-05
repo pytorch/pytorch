@@ -117,23 +117,10 @@ class QuantizeHandler(ABC):
         return self.is_standalone_module_
 
 @register_quant_pattern(operator.sub)
-@register_quant_pattern(operator.mul)
 @register_quant_pattern(operator.truediv)
-@register_quant_pattern(torch.add)
 @register_quant_pattern(torch.sub)
-@register_quant_pattern(torch.mul)
 @register_quant_pattern(torch.div)
 @register_quant_pattern(torch.bmm)
-@register_quant_pattern((torch.nn.ReLU, operator.add))
-@register_quant_pattern((torch.nn.ReLU, operator.mul))
-@register_quant_pattern((torch.nn.ReLU, torch.add))
-@register_quant_pattern((torch.nn.ReLU, torch.mul))
-@register_quant_pattern((torch.nn.functional.relu, operator.add))
-@register_quant_pattern((torch.nn.functional.relu, operator.mul))
-@register_quant_pattern((torch.nn.functional.relu, torch.add))
-@register_quant_pattern((torch.nn.functional.relu, torch.mul))
-@register_quant_pattern((torch.relu, operator.add))
-@register_quant_pattern((torch.relu, operator.mul))
 @register_quant_pattern(torch.matmul)
 class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(
