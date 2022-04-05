@@ -5,7 +5,9 @@ from io import BytesIO
 from torch.package import (
     PackageExporter,
 )
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -124,10 +126,12 @@ class TestDependencyHooks(PackageTestCase):
         self.assertEqual(my_externs, set(["module_a"]))
         self.assertEqual(my_mocks, set(["package_a"]))
 
+
 class TestDependencyHooksNoTorch(TestDependencyHooks):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

@@ -8,10 +8,19 @@ from pathlib import Path
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import PackageExporter, PackageImporter, is_from_package, PackagingError
+from torch.package import (
+    PackageExporter,
+    PackageImporter,
+    is_from_package,
+    PackagingError,
+)
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -289,11 +298,13 @@ class TestMisc(PackageTestCase):
         mod = pi.load_pickle("obj", "obj.pkl")
         mod()
 
+
 class TestMiscNoTorch(TestMisc):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

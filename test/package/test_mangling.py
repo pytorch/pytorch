@@ -9,9 +9,13 @@ from torch.package._mangling import (
     get_mangle_prefix,
     is_mangled,
 )
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -21,7 +25,6 @@ except ImportError:
 
 
 class TestMangling(PackageTestCase):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporter
@@ -115,11 +118,13 @@ class TestMangling(PackageTestCase):
         # Since `b` did not mangle this string, demangling should leave it alone.
         self.assertEqual(b.demangle(a_mangled), a_mangled)
 
+
 class TestManglingNoTorch(TestMangling):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

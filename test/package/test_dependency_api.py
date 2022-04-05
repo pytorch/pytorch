@@ -6,9 +6,19 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter, PackagingError
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
+from torch.package import (
+    EmptyMatchError,
+    Importer,
+    PackageExporter,
+    PackageImporter,
+    PackagingError,
+)
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:
@@ -353,11 +363,13 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+
 class TestDependencyAPINoTorch(TestDependencyAPI):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()
