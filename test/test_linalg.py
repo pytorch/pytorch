@@ -3151,24 +3151,6 @@ class TestLinalg(TestCase):
             expected = np.linalg.solve(A.cpu().numpy(), b.expand_as(x).cpu().numpy())
             self.assertEqual(x, expected)
 
-            # Check out= variant
-            out = torch.empty_like(x)
-            ans = torch.linalg.solve(A, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(x, out)
-
-            # Check out= variant with complex128 out tensor
-            out = torch.empty_like(x).to(torch.complex128)
-            ans = torch.linalg.solve(A, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(x.to(torch.complex128), out)
-
-            # Check empty out
-            out = torch.empty(0, dtype=dtype, device=device)
-            ans = torch.linalg.solve(A, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(x, out)
-
         batches = [(), (0, ), (3, ), (2, 3)]
         ns = [0, 5, 32]
         nrhs = [(), (1, ), (5, )]
@@ -3180,13 +3162,13 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_solve_errors_and_warnings(self, device, dtype):
         # solve expects batches of square matrices as input
-        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+        with self.assertRaisesRegex(RuntimeError, "Expected A to be a square matrix"):
             a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
             b = torch.randn(2, 3, 4, 1, dtype=dtype, device=device)
             torch.linalg.solve(a, b)
 
         # solve expects compatible shapes for A x = b
-        with self.assertRaisesRegex(RuntimeError, "Incompatible matrix sizes"):
+        with self.assertRaisesRegex(RuntimeError, "Incompatible shapes of A and B"):
             a = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
             b = torch.randn(2, 3, 2, 1, dtype=dtype, device=device)
             torch.linalg.solve(a, b)
@@ -3196,41 +3178,17 @@ class TestLinalg(TestCase):
             a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             a[n, -1, -1] = 0
             b = torch.randn(batch_dim, 3, 1, dtype=dtype, device=device)
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, 'the input matrix is singular'):
                 torch.linalg.solve(a, b)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-        # if out tensor with wrong shape is passed a warning is given
-        # matrix 'b' case
-        with warnings.catch_warnings(record=True) as w:
-            A = torch.eye(2, dtype=dtype, device=device).reshape((1, 2, 2)).repeat(2, 1, 1)
-            b = torch.randn(2, 2, 2, dtype=dtype, device=device)
-            out = torch.zeros(1, dtype=dtype, device=device)
-            # Trigger warning
-            torch.linalg.solve(A, b, out=out)
-            # Check warning occurs
-            self.assertEqual(len(w), 1)
-            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-
-        # if out tensor with wrong shape is passed a warning is given
-        # vector 'b' case
-        with warnings.catch_warnings(record=True) as w:
-            A = torch.eye(2, dtype=dtype, device=device)
-            b = torch.randn(2, dtype=dtype, device=device)
-            out = torch.zeros(1, dtype=dtype, device=device)
-            # Trigger warning
-            torch.linalg.solve(A, b, out=out)
-            # Check warning occurs
-            self.assertEqual(len(w), 1)
-            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-
         # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.solve(a, b, out=out)
 
         # device should match
@@ -3329,12 +3287,12 @@ class TestLinalg(TestCase):
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
         lu = torch.empty(0, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got solution with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.solve(b, a, out=(out, lu))
 
         out = torch.empty(0, dtype=dtype, device=device)
         lu = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got lu with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.solve(b, a, out=(out, lu))
 
         # device should match
@@ -5264,19 +5222,21 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_linalg_lu_factor_and_lu_and_lu_unpack(self, device, dtype):
+    def test_linalg_lu_family(self, device, dtype):
         # Tests torch.lu
         #       torch.linalg.lu_factor
         #       torch.linalg.lu_factor_ex
         #       torch.lu_unpack
         #       torch.linalg.lu_solve
-        from torch.testing._internal.common_utils import random_matrix
+        #       torch.linalg.solve
+        make_arg_full = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
         def run_test(A, pivot, singular, fn):
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
             check_errors = (fn == torch.linalg.lu_factor)
+            # Test linalg.lu_factor / linalg.lu_factor_ex / torch.lu
             if singular and check_errors:
                 # It may or may not throw as the LU decomposition without pivoting
                 # may still succeed for singular matrices
@@ -5293,29 +5253,46 @@ class TestLinalg(TestCase):
             if not pivot:
                 self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
 
+            # Test linalg.lu_unpack
             P, L, U = torch.lu_unpack(LU, pivots, unpack_pivots=pivot)
 
             self.assertEqual(P @ L @ U if pivot else L @ U, A)
 
+            # Test linalg.lu_
             PLU = torch.linalg.lu(A, pivot=pivot)
             self.assertEqual(P, PLU.P)
             self.assertEqual(L, PLU.L)
             self.assertEqual(U, PLU.U)
 
-            rhs = 3
             if not singular and A.size(-2) == A.size(-1):
-                for left in (True, False):
-                    shape_B = list(A.shape)
-                    dim = -1 if left else -2
-                    shape_B[dim] = rhs
+                nrhs = ((), (1,), (3,))
+                for left, rhs in product((True, False), nrhs):
+                    # Vector case when left = False is not allowed
+                    if not left and rhs == ():
+                        continue
+                    if left:
+                        shape_B = A.shape[:-1] + rhs
+                    else:
+                        shape_B = A.shape[:-2] + rhs + A.shape[-1:]
                     B = make_arg(shape_B)
+                    B_ = B.unsqueeze(-1) if rhs == () else B
+                    # Test linalg.lu_solve
                     for adjoint in (True, False):
                         X = torch.linalg.lu_solve(LU, pivots, B, left=left, adjoint=adjoint)
+                        X_ = X.unsqueeze(-1) if rhs == () else X
                         A_adj = A.mH if adjoint else A
                         if left:
-                            self.assertEqual(B, A_adj @ X)
+                            self.assertEqual(B_, A_adj @ X_)
                         else:
-                            self.assertEqual(B, X @ A_adj)
+                            self.assertEqual(B_, X_ @ A_adj)
+
+                    # Test linalg.solve
+                    X = torch.linalg.solve(A, B, left=left)
+                    X_ = X.unsqueeze(-1) if rhs == () else X
+                    if left:
+                        self.assertEqual(B_, A @ X_)
+                    else:
+                        self.assertEqual(B_, X_ @ A)
 
 
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
@@ -6305,40 +6282,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("baddbmm", b1, b2, ref, out_tensor)
-
-    # TODO: update to compare against NumPy
-    @onlyCUDA
-    def test_solve_methods_arg_device(self, device):
-        for b_device, A_device in itertools.product(['cpu', device], repeat=2):
-            if b_device == A_device:
-                continue
-
-            b = torch.randn(3, 1, device=b_device)
-            A = torch.randn(3, 3, device=A_device)
-
-            # solve and cholesky_solve goes through generic backend dispatch and hit kernel specific device check first
-            # triangular_solve goes through specific backend dispatch (CPU/CUDA) and hit auto-generated device check first
-            generic_backend_dispatch_err_str = "Expected b and A to be on the same device"
-            specific_backend_dispatch_err_str = "Expected all tensors to be on the same device"
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
-                torch.solve(b, A)
-
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
-                torch.cholesky_solve(b, A)
-
-            with self.assertRaisesRegex(RuntimeError, specific_backend_dispatch_err_str):
-                torch.triangular_solve(b, A)
-
-            # b and A have to be modified to match accepted inputs sizes for lu_solve
-            b = b.unsqueeze(0)
-            A = A.unsqueeze(0)
-            with self.assertRaisesRegex(RuntimeError, specific_backend_dispatch_err_str):
-                torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=A_device).int())
-
-            # This checks if a suitable error message is thrown
-            # when LU output and pivots are not on the same device
-            with self.assertRaisesRegex(RuntimeError, specific_backend_dispatch_err_str):
-                torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
