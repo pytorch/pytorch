@@ -427,6 +427,7 @@ class TestForeach(TestCase):
         self._minmax_test(op, inputs, True, 1)
 
     def _reduce_test(self, device, dtype, opinfo, is_fastpath):
+<<<<<<< HEAD
         for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
             if is_fastpath:
                 # note (mkozuki): Currently, only `ord` of 1 & 2 can go to the fast path, a.k.a. multi tensor apply
@@ -440,16 +441,39 @@ class TestForeach(TestCase):
                         n_expected_cudaLaunchKernels = 0
                     else:
                         n_expected_cudaLaunchKernels = N
+=======
+
+        def calc_n_expected_cudaLaunchKernels(n, ord, dtype, is_fastpath, is_foreach_norm):
+            if not is_fastpath:
+                return 0
+            # note (mkozuki): Currently, only `ord` of 1 & 2 can go to the fast path, a.k.a. multi tensor apply
+            if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
+                # The number of cuda kernel launches by fast path.
+                # 1 for tensor to store intermediate results, another for multi_tensor_apply, and the other for clean up kernel.
+                return 3
+>>>>>>> f99dc87d53... fix n_expected_cudaLaunchKernels
             else:
-                n_expected_cudaLaunchKernels = 0
+                if opinfo.name == "_foreach_norm":
+                    # for each tensor, slow path generally calculates the norm, applies power of ord, and accumulates before
+                    # the epilogue, i.e. taking the summation and root (and do optional type cast).
+                    # If ord is either 0 or 1, power operation for each input and root operation of the epilogue are skipped.
+                    n_expected_cudaLaunchKernels = (
+                        (3 - int(ord in (0, 1))) * n
+                        + (2 - int(ord in (0, 1)))
+                        + int(dtype in (torch.half, torch.bfloat16))
+                    )
+                else:
+                    n_expected_cudaLaunchKernels = n
+                return n_expected_cudaLaunchKernels
+
+        is_foreach_norm = opinfo.name == "_foreach_norm"
+        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
             low, high = (1.0, 2.0) if ord == -2 else (0, 0.1)
-            inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath, low=low, high=high),
-            if dtype == torch.float16:
-                if ord == 0:
-                    inputs = [[(t > high - 1e-2).to(dtype) for t in tensors] for tensors in inputs]
-                if ord == -2:
-                    inputs = [tensors[:N//2] for tensors in inputs]
-                    n_expected_cudaLaunchKernels //= 2
+            num_tensors = N
+            inputs = opinfo.sample_inputs(device, dtype, num_tensors, noncontiguous=not is_fastpath, low=low, high=high),
+            if dtype == torch.float16 and ord == 0:
+                inputs = [[(t > high - 1e-2).to(dtype) for t in tensors] for tensors in inputs]
+            n_expected_cudaLaunchKernels = calc_n_expected_cudaLaunchKernels(num_tensors, ord, dtype, is_fastpath, is_foreach_norm)
             op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
             ref_output = ref(inputs, ord=ord, is_foreach_norm=opinfo.name == "_foreach_norm")
             actual_output = op(inputs, self.is_cuda, is_fastpath, ord=ord)
