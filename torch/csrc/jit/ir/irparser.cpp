@@ -1,11 +1,17 @@
 #include <torch/csrc/jit/ir/irparser.h>
 
 #include <ATen/EmptyTensor.h>
-#include <ATen/ops/empty_strided.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <string>
 #include <vector>
