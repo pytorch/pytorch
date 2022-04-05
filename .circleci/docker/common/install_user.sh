@@ -3,8 +3,9 @@
 set -ex
 
 # Mirror jenkins user in container
-echo "jenkins:x:1014:1014::/var/lib/jenkins:" >> /etc/passwd
-echo "jenkins:x:1014:" >> /etc/group
+# jenkins user as ec2-user should have the same user-id
+echo "jenkins:x:1000:1000::/var/lib/jenkins:" >> /etc/passwd
+echo "jenkins:x:1000:" >> /etc/group
 
 # Create $HOME
 mkdir -p /var/lib/jenkins

@@ -272,6 +272,19 @@ class DeviceCheckType(Enum):
     NoCheck = 0
     ExactSame = 1
 
+class Tag(Enum):
+    inplace_view = 0
+
+    def __str__(self) -> str:
+        return self.name
+
+    @staticmethod
+    def parse(value: str) -> 'Tag':
+        for k, v in Tag.__members__.items():
+            if k == value:
+                return v
+        raise AssertionError(f'unknown tag {value}')
+
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
 # functions and legacy TH functions.  The legacy TH functions are gone,
@@ -379,7 +392,8 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    tags: Set[str]
+    # For now operators have at most one tag.
+    tag: Optional['Tag']
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -389,8 +403,7 @@ class NativeFunction:
     @staticmethod
     def from_yaml(
             ei: Dict[str, object],
-            loc: 'Location',
-            valid_tags: Set[str]
+            loc: 'Location'
     ) -> Tuple['NativeFunction', Dict[DispatchKey, Dict['OperatorName', 'BackendMetadata']]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
@@ -451,6 +464,7 @@ class NativeFunction:
 
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
+        assert python_module is None or Variant.method not in variants, 'functions in modules cannot be methods'
 
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
@@ -459,18 +473,9 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tags_s = e.pop('tags', '')
-        assert isinstance(tags_s, str)
-        tags: Set[str] = set()
-        if len(tags_s) > 0:
-            assert len(valid_tags) > 0
-            for t in tags_s.split(', '):
-                # TODO: verify that the tag is valid and has an entry in tags.yaml
-                if t in valid_tags:
-                    tags.add(t)
-                else:
-                    raise AssertionError(f'illegal tag {t}')
-        assert isinstance(tags, set)
+        tag_str = e.pop('tags', None)
+        assert tag_str is None or isinstance(tag_str, str), f'not a str: {tag_str}'
+        tag = Tag.parse(tag_str) if tag_str else None
 
         from tools.codegen.api import cpp
 
@@ -587,7 +592,7 @@ class NativeFunction:
             is_abstract=is_abstract,
             has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
             has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-            tags=tags,
+            tag=tag,
         ), backend_metadata
 
 
@@ -643,7 +648,7 @@ class NativeFunction:
     def is_view_op(self) -> bool:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
-        is_inplace_view = 'inplace_view' in self.tags
+        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
         is_wildcard_view = any(inp.annotation is not None and
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -1187,6 +1192,7 @@ BaseTy = Enum('BaseTy', (
     'QScheme',
     'Storage',
     'Stream',
+    'SymInt',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
