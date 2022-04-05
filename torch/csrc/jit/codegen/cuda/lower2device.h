@@ -54,9 +54,12 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
 
   kir::Kernel* kernel() const;
 
-  //! Returns the currently active lowering object
-  //! (or nullptr if no lowering is in progress)
+  //! Returns the currently active lowering object.
+  //! It's an error if no lowering is in progress.
   static GpuLower* current();
+
+  //! Query if lowering is in progress
+  static bool hasCurrent();
 
   ConcretizedBroadcastDomains& concretizedBroadcastDomains() {
     return concretized_broadcast_domains_;

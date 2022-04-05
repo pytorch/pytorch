@@ -31,7 +31,7 @@ class PointwiseParams {
   bool split_grid_y_dim = false;
 
   // Unroll or vectorization factor
-  int64_t inner_factor = 1;
+  size_t inner_factor = 1;
 
   std::string tag = "";
 

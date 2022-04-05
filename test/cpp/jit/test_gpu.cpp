@@ -18712,9 +18712,9 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
-  int64_t i167;
-  i167 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i167 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+  int64_t i173;
+  i173 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i173 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
@@ -18722,7 +18722,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T8[1];
     T8[0] = 0;
     T8[0]
-       = T0[i167];
+       = T0[i173];
     __half T10[1];
     float T3[1];
     T3[0]
@@ -18742,7 +18742,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
        = relu(T5[0]);
     T10[0]
        = __float2half(T6[0]);
-    T7[i167]
+    T7[i173]
        = T10[0];
   }
 }
@@ -21448,6 +21448,51 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexWithBroadcast_CUDA) {
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionVectorizeContigIndexPointwiseSchedule_CUDA) {
+  std::vector<int64_t> shape0{100, 14, 2, 14};
+  std::vector<int64_t> shape1{100, 2, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(shape0.size());
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(shape1.size());
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv1, {false, true, false, false});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape0, options);
+  auto t1 = at::randn(shape1, options);
+
+  auto lparams = schedulePointwise(&fusion, {t0, t1});
+
+  GpuLower gpulw(&fusion);
+  auto kernel = gpulw.kernel();
+
+  // The innermost two dimensions are merged and contiguous, so
+  // vectorization can be done against 2*14=28 rather than 14, so
+  // vector word size should be 4. Broadcasting of tv1 should not
+  // matter.
+  for (const auto& vec_info : kernel->summary().vectorized_set_info) {
+    TORCH_CHECK(
+        vec_info.word_size == 4,
+        "Invalid vector word size: ",
+        vec_info.word_size);
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1}, lparams);
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1.unsqueeze(-3);
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }

@@ -13,11 +13,14 @@ ContigIDs::ContigIDs(
     const std::vector<IterDomain*>& root_domain,
     const std::vector<bool>& root_contiguity,
     std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
-    std::unordered_map<IterDomain*, IterDomain*> p2c_id_map)
+    std::unordered_map<IterDomain*, IterDomain*> p2c_id_map,
+    bool ignore_halo_constraint,
+    bool ignore_indexability)
     : root_domain_(root_domain),
       root_contiguity_(root_contiguity),
       concrete_to_ref_(std::move(concrete_to_ref)),
-      p2c_id_map_(std::move(p2c_id_map)) {
+      p2c_id_map_(std::move(p2c_id_map)),
+      ignore_indexability_(ignore_indexability) {
   if (ids.empty()) {
     return;
   }
@@ -29,8 +32,10 @@ ContigIDs::ContigIDs(
       " != ",
       root_contiguity_.size());
 
-  TORCH_INTERNAL_ASSERT(
-      GpuLower::current() != nullptr, "GpuLower is not found");
+  // GpuLower is required to honor halo constraints
+  if (!ignore_halo_constraint) {
+    TORCH_INTERNAL_ASSERT(GpuLower::hasCurrent(), "GpuLower not found");
+  }
 
   for (const auto i : c10::irange(root_domain_.size())) {
     auto root_domain_i = root_domain_[i]->as<IterDomain>();
@@ -43,10 +48,11 @@ ContigIDs::ContigIDs(
     // RootAxisInfo. This should be safe as no rfactor tensor should
     // need halo.
     if (root_contiguity_[i] &&
-        !GpuLower::current()
-             ->haloInfo()
-             .getRootAxisInfo(root_domain_i)
-             .hasHalo()) {
+        (ignore_halo_constraint ||
+         !GpuLower::current()
+              ->haloInfo()
+              .getRootAxisInfo(root_domain_i)
+              .hasHalo())) {
       contig_ids_.emplace(root_domain_i);
       is_contig_root_[root_domain_i] = true;
       within_contig_ids_[root_domain_i] = std::unordered_set<IterDomain*>();
@@ -72,7 +78,7 @@ void ContigIDs::handle(Merge* merge) {
   }
 
   // Stop contig merging if the merge output is not indexable.
-  if (!isIndexable(out)) {
+  if (!ignore_indexability_ && !isIndexable(out)) {
     return;
   }
 
@@ -116,13 +122,12 @@ void ContigIDs::handle(Merge* merge) {
     if (root_copy.front() == ordered_inputs.front()) {
       root_copy.pop_front();
       ordered_inputs.pop_front();
-      // This is no longer causing an error in:
-      // ReductionSchedulerMultiDimNonFastest TODO: test reenablement to make
-      // sure it does what's expected
-      //  } else if (
-      //     root_copy.front()->isReduction() ||
-      //     root_copy.front()->isBroadcast()) {
-      //   root_copy.pop_front();
+    } else if (
+        root_copy.front()->isReduction() || root_copy.front()->isBroadcast()) {
+      // This was a cause of an error with
+      // ReductionSchedulerMultiDimNonFastest. The test no longer
+      // fails.
+      root_copy.pop_front();
     } else {
       break;
     }

@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
+#include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -1379,6 +1380,93 @@ std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
   }
 
   return multiples;
+}
+
+size_t collectMaxVectorizeSizeWithContigMerge(
+    TensorView* tv,
+    IterDomain* leaf_merged_domain,
+    size_t max_vector_size_in_byte,
+    ExpressionEvaluator& expression_evaluator) {
+  auto maybe_data_type = tv->getDataType();
+
+  // Do not vectorize on data with unknown type
+  if (!maybe_data_type.has_value()) {
+    return 1;
+  }
+
+  // Maybe too conservative, but only handles fully contiguous tensors
+  // TODO: Consider relaxing the contiguity constraint.
+  if (std::any_of(
+          tv->domain()->contiguity().begin(),
+          tv->domain()->contiguity().end(),
+          [](const auto contig) { return !contig; })) {
+    return 1;
+  }
+
+  size_t item_size = dataTypeSize(maybe_data_type.value());
+
+  const size_t max_vector_size = max_vector_size_in_byte / item_size;
+
+  // Assume no halo-related expression appears in the fusion. No
+  // broadcast is merged, so indexability can be assumed to be true.
+  ContigIDs contigIds(
+      {leaf_merged_domain},
+      tv->getMaybeRFactorDomain(),
+      tv->domain()->contiguity(),
+      {},
+      {},
+      true,
+      true);
+
+  auto innermost_root_id = tv->getMaybeRFactorDomain().back();
+  auto indexed_id = contigIds.rootToIndexedID().at(innermost_root_id);
+
+  size_t merged_size = 1;
+  // If the indexed ID is an contig merged domain, i.e., it is
+  // different from innermost_root_id, we accumulate the extents of
+  // all the root domains covered by the contig indexed ID. Otherwise,
+  // just look at the extent of the innermost root ID.
+  if (indexed_id != innermost_root_id) {
+    const auto& within_root = contigIds.withinContigIDs().at(indexed_id);
+    for (auto root_id : tv->getMaybeRFactorDomain()) {
+      if (within_root.find(root_id) == within_root.end()) {
+        continue;
+      }
+      auto maybe_dimension_size =
+          expression_evaluator.evaluate(root_id->extent());
+      TORCH_INTERNAL_ASSERT(
+          maybe_dimension_size.has_value(),
+          "Unknown extent of tv: ",
+          tv->toString(),
+          ", id: ",
+          root_id->toString());
+      merged_size *= maybe_dimension_size.value();
+    }
+  } else {
+    auto maybe_dimension_size =
+        expression_evaluator.evaluate(innermost_root_id->extent());
+    TORCH_INTERNAL_ASSERT(
+        maybe_dimension_size.has_value(),
+        "Unknown extent of tv: ",
+        tv->toString(),
+        ", id: ",
+        innermost_root_id->toString());
+    merged_size = maybe_dimension_size.value();
+  }
+
+  size_t vector_size = 1;
+  size_t next_vector_size = vector_size * 2;
+
+  // Try until vector size exceeds the max allowed size
+  while (next_vector_size <= max_vector_size) {
+    if (merged_size % next_vector_size != 0) {
+      break;
+    }
+    vector_size = next_vector_size;
+    next_vector_size *= 2;
+  }
+
+  return vector_size;
 }
 
 namespace matmul_utils {

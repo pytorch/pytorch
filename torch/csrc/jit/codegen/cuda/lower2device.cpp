@@ -373,6 +373,10 @@ GpuLower* GpuLower::current() {
   return active_gpu_lower;
 }
 
+bool GpuLower::hasCurrent() {
+  return active_gpu_lower != nullptr;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

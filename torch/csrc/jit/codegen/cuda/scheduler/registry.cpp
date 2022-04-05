@@ -504,46 +504,74 @@ void SchedulerRuntimeInfo::collectVectorizationInfo(
   }
 }
 
+// This can be made more aggressive in the presence of broadcasts. For
+// example, when the innermost is a broadcast, its stride may not matter.
 size_t SchedulerRuntimeInfo::collectMaxVectorizeSize(
     const at::Tensor& tensor,
     size_t max_vector_size_in_byte) {
-  size_t vector_size = 1;
-  size_t next_vector_size = 2;
-  bool next_size_compatible = true;
+  const size_t max_vector_size = max_vector_size_in_byte / tensor.itemsize();
 
-  while (next_size_compatible &&
-         next_vector_size * tensor.itemsize() <= max_vector_size_in_byte) {
-    // If inner most dimension size is not divisible by new word size
-    //  then we cannot vectorize with this width. But we do not
-    //  care if all dimensions of this tensor is 1, i.e.
-    //  input is actually a un-squeezed 0-dim tensor.
-    for (size_t i = tensor.ndimension(); i > 0; i--) {
-      if (tensor.size(i - 1) != 1) {
-        if (tensor.size(tensor.ndimension() - 1) % next_vector_size != 0 ||
-            tensor.stride(tensor.ndimension() - 1) != 1) {
-          next_size_compatible = false;
-        }
-        break;
-      }
+  // If all dimensions are size 1, do not impose any restriction on
+  // vector size.
+  const bool all_dim_size_one = std::all_of(
+      tensor.sizes().begin(), tensor.sizes().end(), [](const auto size) {
+        return size == 1;
+      });
+  if (all_dim_size_one) {
+    return max_vector_size;
+  }
+
+  int64_t vectorized_axis = -1;
+  int64_t innermost_size = 0;
+
+  for (const auto i : c10::irange(tensor.ndimension())) {
+    auto axis = tensor.ndimension() - 1 - i;
+    auto stride = tensor.stride(axis);
+    auto size = tensor.size(axis);
+    // If size is 1, the dimension is a broadcast and can be ignored.
+    if (size == 1) {
+      continue;
     }
+    // Vectorization isn't allowed if the stride is not 1.
+    if (stride != 1) {
+      return 1;
+    }
+    // Vectorize this dimension
+    vectorized_axis = axis;
+    innermost_size = size;
+  }
 
-    if (!next_size_compatible) {
+  if (vectorized_axis < 0) {
+    // No vectorized axis found
+    return 1;
+  }
+
+  size_t vector_size = 1;
+  size_t next_vector_size = vector_size * 2;
+
+  // Try until vector size exceeds the max allowed size
+  while (next_vector_size <= max_vector_size) {
+    if (innermost_size % next_vector_size != 0) {
       break;
     }
 
     // If any stride is not divisible by the next word size,
-    //  we cannot vectorize with this width.
-    for (auto stride : tensor.strides()) {
-      if (stride != 1 && stride % next_vector_size != 0) {
-        next_size_compatible = false;
+    //  we cannot vectorize with this width. Note that the innermost
+    //  stride is already validated to be 1.
+    bool stride_validated = true;
+    for (const auto i : c10::irange(vectorized_axis)) {
+      if (tensor.strides().at(i) % next_vector_size != 0) {
+        stride_validated = false;
         break;
       }
     }
 
-    if (next_size_compatible) {
-      vector_size = next_vector_size;
-      next_vector_size *= 2;
+    if (!stride_validated) {
+      break;
     }
+
+    vector_size = next_vector_size;
+    next_vector_size *= 2;
   }
 
   return vector_size;

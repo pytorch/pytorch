@@ -39,6 +39,14 @@ class ContigIDs : public OptInDispatch {
   //! analyzed, in which case producer-to-consumer maps should be
   //! passed.
   //!
+  //! If ignore_indexability and ignore_halo_constraint are true,
+  //! ignore the constraint on indexing and halo, respectively. It is
+  //! the caller that is responsible for its correctness.
+  //!
+  //! The function interface with many parameters looks ugly, but it
+  //! is also important to make ignore_indexability and
+  //! ignore_halo_constraint explicit to avoid any surprise.
+  //!
   //! Not really sure why but clang-tidy only complains about
   //! std::unordered_map if passed as a const reference.
   ContigIDs(
@@ -46,7 +54,9 @@ class ContigIDs : public OptInDispatch {
       const std::vector<IterDomain*>& root_domain,
       const std::vector<bool>& root_contiguity,
       std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
-      std::unordered_map<IterDomain*, IterDomain*> p2c_id_map = {});
+      std::unordered_map<IterDomain*, IterDomain*> p2c_id_map = {},
+      bool ignore_indexability = false,
+      bool ignore_halo_constraint = false);
 
   const std::unordered_set<IterDomain*>& contigIDs() const {
     return contig_ids_;
@@ -100,6 +110,7 @@ class ContigIDs : public OptInDispatch {
   //! Producer-to-consumer index map in the case of analyzing replayed
   //! producer tensors
   const std::unordered_map<IterDomain*, IterDomain*> p2c_id_map_;
+  const bool ignore_indexability_ = false;
 
   //! Mapping of root domain to bool indicating contiguity
   std::unordered_map<IterDomain*, bool> is_contig_root_;

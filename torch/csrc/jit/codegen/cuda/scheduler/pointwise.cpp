@@ -160,6 +160,156 @@ class DomainMap {
   ComputeAtMap ca_index_map_;
   std::vector<TensorView*> view_tvs_;
 };
+
+// Merge innermost domains for finding the widest vectorizable
+// size. Return the merged domain or nullptr if no merge is done.
+IterDomain* mergeInnermostDomains(
+    const std::vector<IterDomain*>& domain,
+    int num_merged_domains) {
+  const auto ndims = domain.size();
+  IterDomain* merged_id = nullptr;
+  bool is_merge_done = false;
+  for (const auto i : c10::irange(num_merged_domains)) {
+    auto id = domain.at(ndims - 1 - i);
+    // broadcast and reduction are ignored in schedulePointwise
+    if (id->isBroadcast() || id->isReduction()) {
+      continue;
+    }
+    if (merged_id == nullptr) {
+      merged_id = id;
+    } else {
+      auto id_inner = merged_id;
+      auto id_outer = id;
+      merged_id = IterDomain::merge(id_outer, id_inner);
+      is_merge_done = true;
+    }
+  }
+  return is_merge_done ? merged_id : nullptr;
+}
+
+void cleanUpInnermostMergedDomains(
+    const std::vector<IterDomain*>& root_domain,
+    IterDomain* merged_domain) {
+  TORCH_INTERNAL_ASSERT(merged_domain != nullptr);
+  TORCH_INTERNAL_ASSERT(!root_domain.empty());
+
+  std::unordered_set<Val*> root_set({root_domain.begin(), root_domain.end()});
+
+  auto vals = DependencyCheck::getAllValsBetween(root_set, {merged_domain});
+
+  for (auto it = vals.rbegin(); it != vals.rend(); ++it) {
+    TORCH_INTERNAL_ASSERT((*it)->isA<IterDomain>());
+    auto id = (*it)->as<IterDomain>();
+    if (root_set.find(id) != root_set.end()) {
+      continue;
+    }
+    Fusion* fusion = id->container()->as<Fusion>();
+    auto id_def = id->definition();
+    TORCH_INTERNAL_ASSERT(
+        id_def->isA<Merge>(),
+        "Invalid ID: ",
+        id->toString(),
+        ". Expected definition of a Merge expression: ",
+        (id_def != nullptr ? id_def->toString() : "nullptr"));
+    fusion->removeExpr(id_def);
+    fusion->removeVal(id);
+  }
+}
+
+//! Attempt to expand vectorized domains to contig merged domains.
+size_t expandVectorizationToContigMergedDomains(
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info,
+    const std::vector<TensorView*> vectorizable_inputs_outputs,
+    TensorView* reference_tv,
+    int break_point,
+    size_t default_word_size) {
+  // Don't vectorize when RNG is used
+  if (fusion->isStochastic() && disableRNGUnrolling()) {
+    return default_word_size;
+  }
+
+  auto ca_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX);
+
+  // Merge the domains right of the break point
+  const auto& ref_root = reference_tv->getMaybeRFactorDomain();
+  const int num_merged_domains =
+      static_cast<int>(ref_root.size()) - static_cast<int>(break_point);
+
+  // No expansion with no merged domain
+  if (num_merged_domains == 0) {
+    return default_word_size;
+  }
+
+  // Merge the domains but don't modify TensorDomain
+  auto merged_domain = mergeInnermostDomains(ref_root, num_merged_domains);
+
+  // No expansion is done if no merge is done.
+  if (merged_domain == nullptr) {
+    return default_word_size;
+  }
+
+  // Find the vectorizable word size with the merged domains
+  size_t word_size = scheduler_utils::collectMaxVectorizeSizeWithContigMerge(
+      reference_tv,
+      merged_domain,
+      runtime_info.getCommonAlignmentSize(),
+      runtime_info.expressionEvaluator());
+
+  cleanUpInnermostMergedDomains(ref_root, merged_domain);
+
+  // Stop if the reference doesn't get a larger word size.
+  if (word_size <= default_word_size) {
+    return default_word_size;
+  }
+
+  // Check the other TVs and take the minimum of the valid word sizes
+  for (const auto tv : vectorizable_inputs_outputs) {
+    if (tv == reference_tv) {
+      continue;
+    }
+
+    const auto& tv_root = tv->getMaybeRFactorDomain();
+
+    int tv_num_merged_domains = 0;
+    for (const auto i : c10::irange(num_merged_domains)) {
+      if (i == tv_root.size()) {
+        break;
+      }
+      auto ref_id = ref_root.at(ref_root.size() - 1 - i);
+      IterDomain* tv_id = tv_root.at(tv_root.size() - 1 - i);
+      // If not mapped, stop expanding.
+      if (!ca_map.areMapped(ref_id, tv_id)) {
+        break;
+      } else {
+        ++tv_num_merged_domains;
+      }
+    }
+
+    size_t tv_word_size = 1;
+    if (tv_num_merged_domains > 1) {
+      auto tv_merged_domain =
+          mergeInnermostDomains(tv_root, tv_num_merged_domains);
+      if (tv_merged_domain == nullptr) {
+        tv_word_size = runtime_info.getVectorizableWidth(tv);
+      } else {
+        tv_word_size = scheduler_utils::collectMaxVectorizeSizeWithContigMerge(
+            tv,
+            tv_merged_domain,
+            runtime_info.getCommonAlignmentSize(),
+            runtime_info.expressionEvaluator());
+        cleanUpInnermostMergedDomains(tv_root, tv_merged_domain);
+      }
+    } else {
+      tv_word_size = runtime_info.getVectorizableWidth(tv);
+    }
+
+    word_size = std::min(word_size, tv_word_size);
+  }
+
+  return word_size;
+}
+
 } // namespace
 
 c10::optional<PointwiseParams> getPointwiseHeuristics(
@@ -287,34 +437,6 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   PointwiseParams params;
   params.tag = "Pointwise heuristics";
 
-  // Don't try to vectorize if it's not recommended
-  params.inner_factor = 1;
-
-  // Vectorize as much as we can
-  size_t vectorize_factor = max_unroll_factor;
-
-  auto vectorizable_inputs_outputs_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
-          data_cache, [&largest_out]() {
-            return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getInputsOutputsWithInnerDim(
-                    largest_out, true));
-          });
-
-  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
-
-  for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
-    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
-  }
-
-  if (vectorize_factor == 1) {
-    params.vectorize = false;
-    params.inner_factor = max_unroll_factor;
-  } else {
-    params.vectorize = true;
-    params.inner_factor = vectorize_factor;
-  }
   /*
    * 2D pointwise scheduling logic. What is expected is there's some
    * broadcasting pattern which would make scheduling as a 2D problem more
@@ -335,7 +457,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
    */
 
   // Ideal break point location
-  int64_t break_point = 0;
+  int break_point = 0;
 
   // Elements on the right of break point (without break point all are on the
   // right)
@@ -448,7 +570,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
             ceilDiv(cur_right_elem_count, bdimy * bdimx * max_unroll_factor);
 
         // Use this break point
-        break_point = break_point_i;
+        break_point = static_cast<int>(break_point_i);
         min_total_transfer = cur_transfer_size;
         right_elem_count = cur_right_elem_count;
 
@@ -458,6 +580,51 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
         }
       }
     }
+  }
+
+  // Vectorizing innermost domains
+
+  // Don't try to vectorize if it's not recommended
+  params.inner_factor = 1;
+
+  // Vectorize as much as we can
+  size_t vectorize_factor = max_unroll_factor;
+
+  auto vectorizable_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
+          data_cache, [&largest_out]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getInputsOutputsWithInnerDim(
+                    largest_out, true));
+          });
+
+  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
+
+  for (auto tv : vectorizable_inputs_outputs) {
+    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
+    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
+  }
+
+  // Try expanding vectorization to contig merged domains
+  auto expanded_vector_word_size = expandVectorizationToContigMergedDomains(
+      fusion,
+      runtime_info,
+      vectorizable_inputs_outputs,
+      largest_out,
+      break_point,
+      vectorize_factor);
+  expanded_vector_word_size = std::min(
+      static_cast<size_t>(max_unroll_factor), expanded_vector_word_size);
+  if (expanded_vector_word_size > vectorize_factor) {
+    vectorize_factor = expanded_vector_word_size;
+  }
+
+  if (vectorize_factor == 1) {
+    params.vectorize = false;
+    params.inner_factor = max_unroll_factor;
+  } else {
+    params.vectorize = true;
+    params.inner_factor = vectorize_factor;
   }
 
   TORCH_INTERNAL_ASSERT(right_elem_count > 0 || params.break_point == 0);

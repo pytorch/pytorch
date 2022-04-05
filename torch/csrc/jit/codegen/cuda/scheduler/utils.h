@@ -10,6 +10,7 @@ namespace fuser {
 namespace cuda {
 
 class SchedulerRuntimeInfo;
+class ExpressionEvaluator;
 
 namespace scheduler_utils {
 
@@ -249,6 +250,15 @@ struct BroadcastMultiple {
 // reference_tv if reference_tv is an input or output. Count is multiplied by
 // data type size.
 std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv);
+
+//! Collect maximum vectorization word size of a tensor whose
+//! innermost domain is leaf_merged_domain. Contig merging is taken
+//! into account to expand vectorization if possible.
+size_t collectMaxVectorizeSizeWithContigMerge(
+    TensorView* tv,
+    IterDomain* leaf_merged_domain,
+    size_t max_word_size_in_byte,
+    ExpressionEvaluator& expression_evaluator);
 
 namespace matmul_utils {
 //! Utilities in this namespace facilitates scheduling matmul kernels with
