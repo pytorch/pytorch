@@ -19,7 +19,7 @@ namespace c10 {
 // It is INVALID to store a reference to a Tensor object in this way;
 // you should just use TensorImpl directly in that case!
 struct C10_API SafePyObject {
-  // Steals a reference to type_object
+  // Steals a reference to data
   SafePyObject(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : data_(data), pyinterpreter_(pyinterpreter) {}
 
