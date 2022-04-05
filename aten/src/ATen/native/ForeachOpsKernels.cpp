@@ -226,7 +226,7 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
 }
 
 std::vector<Tensor> foreach_tensor_norm_per_tensor_slow(TensorList tensors, const Scalar& ord) {
-  TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm supports int and float ord");
+  TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm_per_tensor supports int and float ord");
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
@@ -251,7 +251,7 @@ Tensor foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
     at::zeros({}, tensors[0].options().dtype(toOpMathType(result_scalar_type))),
     [&](const Tensor &cumulative_sum, const Tensor &t) {
       auto norm = at::linalg_vector_norm(t, ord);
-      return cumulative_sum + (p == 0.0 ? norm : at::pow(norm, ord));
+      return cumulative_sum + (p == 0.0 || p == 1.0 ? norm : at::pow(norm, ord));
     }
   );
   return (p == 0.0 ? result : at::pow(result, 1 / p)).to(result_scalar_type);
