@@ -518,7 +518,7 @@ void cacheInfo(int device, size_t* maxWorkspaceGuess) {
     if (pytorch_used_bytes[device] + guess > pytorch_memory_limits[device]) {
       err = cudaErrorMemoryAllocation;
     } else {
-      err = cudaMallocAsync(devPtr, guess, stream);
+      err = cudaMallocAsync(&dummy, guess, stream);
     }
 
     if (err == cudaSuccess) {
