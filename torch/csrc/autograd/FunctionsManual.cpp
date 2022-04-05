@@ -495,38 +495,6 @@ static Tensor generic_solve_jvp(
   return solve(A, dB, dA_contrib);
 }
 
-Tensor solve_jvp(
-  const Tensor& X,
-  const Tensor& A,
-  const Tensor& dA,
-  const Tensor& dB
-) {
-  return generic_solve_jvp(
-    [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-      return at::linalg_solve(A, dB - dA_contrib);
-    },
-    X, A, dA, dB
-  );
-}
-
-Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return at::linalg_solve(A.mH(), grad);
-}
-
-Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
-  at::NoTF32Guard disable_tf32;
-  Tensor grad_self = solve_backward_self(grad, self, A);
-  if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, solution.mH());
-  }
-  // if self was unsqueezed from (..., M) to (..., M, 1)
-  bool vector_case = at::native::linalg_solve_is_vector_rhs(A, self);
-  if (vector_case) {
-    return -at::matmul(grad_self.unsqueeze(-1), solution.unsqueeze(-1).mH());
-  }
-  return -at::matmul(grad_self, solution.mH());
-}
-
 Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
   // Trivial case
   if (grad.numel() <= 1 || grad.size(dim) == 1) {
@@ -4592,12 +4560,13 @@ Tensor i1e_backward(
 // After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
 
 Tensor linalg_lu_solve_LU(
-  const Tensor& grad,
+  const Tensor& gX,
   const Tensor& LU,
   const Tensor& pivots,
   const Tensor& X,
   const bool left,
   const bool adjoint) {
+  at::NoTF32Guard disable_tf32;
   // From linalg_lu_solve_jvp we have that:
   // left = True, adjoint = True: A^HX = B
   // left = True, adjoint = False: AX = B
@@ -4623,24 +4592,30 @@ Tensor linalg_lu_solve_LU(
   // gLU = gL + gU
   Tensor P, L, U;
   std::tie(P, L, U) = at::lu_unpack(LU, pivots, /*unpack_data=*/true, /*unpack_pivots=*/left == adjoint);
+
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
+  const auto gX_ = vector_case ? gX.unsqueeze(-1) : gX;
+  const auto X_ = vector_case ? X.unsqueeze(-1) : X;
   // TODO Optimise the order of the operations to avoid operating on large tensors unnecessarily
   //      The logic should be: if n < k == left then multiply the gX and X first (as it's done now)
   //      Otherwise multiply them last
+  Tensor ret;
   if (left != adjoint) {
     // gR = U^{-H}op_2(-gX)op_2(X)^H
-    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? grad : grad.mH()).matmul(left ? X.mH() : X), /*upper*/false);
+    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? gX_ : gX_.mH()).matmul(left ? X_.mH() : X_), /*upper*/false);
     // gL = (L^{-H} gR U^H).tril(-1)
     auto gL = at::linalg_solve_triangular(L.mH(), gR.matmul(U.mH()), /*upper*/true, /*left*/true, /*unitriangular*/true).tril(-1);;
-    return gL + gR.triu();
+    ret = gL + gR.triu();
   } else {
     // gR = -P^T op_3(X)op_1(op_2(gX))P
-    auto gR = -P.mT().matmul(left ? X : X.mH()).matmul(left ? grad.mH() : grad).matmul(P);
+    auto gR = -P.mT().matmul(left ? X_ : X_.mH()).matmul(left ? gX_.mH() : gX_).matmul(P);
     // gR = gR L^{-H}
     gR = at::linalg_solve_triangular(L.mH(), gR, /*upper*/true, /*left*/false, /*unitriangular*/true);
     // gU = (L^H gR U^{-H}).triu()
     auto gU = at::linalg_solve_triangular(U.mH(), L.mH().matmul(gR), /*upper*/false, /*left*/false).triu();
-    return gR.tril(-1) + gU;
+    ret = gR.tril(-1) + gU;
   }
+  return vector_case ? ret.squeeze(-1) : ret;
 }
 
 Tensor linalg_lu_solve_jvp(
@@ -4667,7 +4642,11 @@ Tensor linalg_lu_solve_jvp(
   // the JVP formula reads
   // dX = op_2(op_1(-U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)op_3(B)) + S
 
-  auto S = at::linalg_lu_solve(LU, pivots, dB, left, adjoint);
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
+  const auto dB_ = vector_case ? dB.unsqueeze(-1) : dB;
+  const auto X_ = vector_case ? X.unsqueeze(-1) : X;
+  auto S = at::linalg_lu_solve(LU, pivots, dB_, left, adjoint);
+  Tensor dX;
   if (left != adjoint) {
     // We see that when left != adjoint, op_1(A) = A, and we can substitute A^{-1}op_3(B) by op_2(X)
     // dX = op_2(-U^{-1}(dU + L^{-1}dL U)op_2(X)) + S
@@ -4676,7 +4655,7 @@ Tensor linalg_lu_solve_jvp(
     auto U = LU.triu();
     R = -at::linalg_solve_triangular(U, dLU.triu() + R.matmul(U), /*upper*/true);
     // dX = op_2(R op_2(X)) + S
-    return (left ? R.matmul(X) : X.matmul(R.mH())) + S;
+    dX = (left ? R.matmul(X_) : X_.matmul(R.mH())) + S;
   } else {
     // We see that when left == adjoint, op_1(A) = A^H
     // dX = op_2(op_1(-op_3(B)^H U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)) + S
@@ -4687,13 +4666,73 @@ Tensor linalg_lu_solve_jvp(
     Tensor P, L, U;
     std::tie(P, L, U) = at::lu_unpack(LU, pivots);
     // Compute V = op_3(X)^H
-    auto V = left ? X.mH() : X;
+    auto V = left ? X_.mH() : X_;
     // Compute the inner parens LdUU^{-1} + dL
     auto R = at::linalg_solve_triangular(U, L.matmul(dLU.triu()), /*upper*/true, /*left*/false) + dLU.tril(-1);
     // dX = op_2(op_1(-op_3(X)^H PRL^{-1} P^T)) + S
     R = at::linalg_solve_triangular(L, -V.matmul(P).matmul(R), /*upper*/false, /*left*/false, /*unitriangular*/true).matmul(P.mT());
     // dX = op_2(R^H) + S
-    return (left ? R.mH() : R) + S;
+    dX = (left ? R.mH() : R) + S;
+  }
+  return vector_case ? dX.squeeze(-1) : dX;
+}
+
+Tensor linalg_solve_jvp(
+  const Tensor& dA,
+  const Tensor& dB,
+  const Tensor& X,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const bool left,
+  const bool use_A_T) {
+  at::NoTF32Guard disable_tf32;
+  // For left=True (left=False is analogous)
+  // dX = A^{-1}(dB - dAX)
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
+  // This case is disallowed in the forward as A.shape = (*, 1, 1)
+  TORCH_INTERNAL_ASSERT(left || !vector_case);
+  auto X_ = vector_case ? X.unsqueeze(-1) : X;
+  auto R = left ? dA.matmul(X_) : X_.matmul(dA);
+  R = vector_case ? R.squeeze(-1) : R;
+  return at::linalg_lu_solve(LU, pivots, dB - R, left, /*adjoint*/use_A_T);
+}
+
+std::tuple<Tensor, Tensor> linalg_solve_backward(
+  const Tensor& gX,
+  const Tensor& X,
+  const Tensor& A,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const bool left,
+  const bool B_requires_grad) {
+  // for X = A^{-1}B
+  // gB = A^{-H}gX
+  // gA = -gB X^H
+  at::NoTF32Guard disable_tf32;
+  const auto A_requires_grad = A.requires_grad();
+  if (!gX.defined() || (!A_requires_grad && !B_requires_grad)) {
+    return {};
+  }
+  auto LU_ = LU;
+  auto pivots_ = pivots;
+  // If the user is going to compute higher order gradients, then we need to recompute the LU and the pivots
+  Tensor gB;
+  if (at::GradMode::is_enabled()) {
+    gB = at::linalg_solve(A.mH(), gX, left);
+  } else {
+    const auto use_A_T = A.is_contiguous() && !A.is_complex();
+    gB = at::linalg_lu_solve(LU, pivots, gX, left, /*adjoint*/!use_A_T);
+  }
+
+  if (!A_requires_grad) {
+    return std::make_tuple(Tensor{}, gB);
+  } else {
+    const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
+    auto gB_ = vector_case ? gB.unsqueeze(-1) : gB;
+    auto X_ = vector_case ? X.unsqueeze(-1) : X;
+    auto gA = left ? -gB_.matmul(X_.mH()) : -X_.mH().matmul(gB_);
+    return std::make_tuple(vector_case ? gA.squeeze(-1) : gA,
+                           B_requires_grad ? gB : Tensor{});
   }
 }
 
@@ -5357,6 +5396,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result) {
   Tensor grad_self, grad_src;
 
@@ -5377,7 +5417,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (grad * result).gather(dim, index) / src;
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = ones_like(grad);
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
@@ -5389,6 +5429,10 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
   }
 
   return std::make_tuple(grad_self, grad_src);

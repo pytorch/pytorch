@@ -17,7 +17,7 @@ from torch.ao.quantization.quantization_mappings import (
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
-from .utils import get_qparam_dict
+from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
@@ -26,6 +26,7 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
@@ -170,9 +171,9 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
-        if type(child) in [nn.Dropout]:
+        if type_before_parametrizations(child) in [nn.Dropout]:
             continue
-        elif type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
+        elif type_before_parametrizations(child) in [nnq.FloatFunctional, nnq.QFunctional]:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
@@ -182,23 +183,23 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         elif _has_special_act_post_process(child):
             special_act_post_process = _get_special_act_post_process(child)
             insert_activation_post_process(child, special_act_post_process)
-        elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
+        elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
             if needs_observation(child):
                 insert_activation_post_process(child)
-        elif needs_observation(child) and type(child) in custom_module_class_mapping:
-            observed_child = custom_module_class_mapping[type(child)].from_float(child)
+        elif needs_observation(child) and type_before_parametrizations(child) in custom_module_class_mapping:
+            observed_child = custom_module_class_mapping[type_before_parametrizations(child)].from_float(child)
             setattr(module, name, observed_child)
             # TODO: These are the modules that cannot be observed
             #       Once there are more, we should move them to a separate list
-            if custom_module_class_mapping[type(child)] not in no_observer_set():
+            if custom_module_class_mapping[type_before_parametrizations(child)] not in no_observer_set():
                 insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
-    if len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
-       and type(module) in qconfig_propagation_list:
+    if has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
+       and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
 def get_unique_devices_(module):
@@ -220,7 +221,7 @@ def add_quant_dequant(module):
         wraps the input module, the latter case only happens when the input
         module is a leaf module and we want to quantize it.
     """
-    if len(module._modules) == 0 and hasattr(module, 'qconfig') and module.qconfig:
+    if has_no_children_ignoring_parametrizations(module) and hasattr(module, 'qconfig') and module.qconfig:
         return QuantWrapper(module)
 
     for name, child in module.named_children():
