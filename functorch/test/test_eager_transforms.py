@@ -2776,6 +2776,9 @@ class TestFunctionalize(TestCase):
         # Check that outputs are the same
         self.assertEqual(actual_outputs, expected_outputs)
 
+        # Inputs might have been mutated by f: check that they were mutated properly
+        self.assertEqual(inpt1, inpt2)
+
     def test_simple_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(2, device=device)
