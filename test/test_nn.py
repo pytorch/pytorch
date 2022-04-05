@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, \
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest, instantiate_parametrized_tests
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -53,6 +53,7 @@ from torch.testing._internal.common_device_type import expectedFailureXLA, insta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
+from torch.testing import make_tensor
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
     GRADCHECK_NONDET_TOL
@@ -69,6 +70,7 @@ load_tests = load_tests
 
 if TEST_SCIPY:
     from scipy import stats
+    import scipy.signal
     import scipy.ndimage
 
 if TEST_NUMPY:
@@ -13586,6 +13588,45 @@ class TestNNDeviceType(NNTestCase):
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @dtypes(torch.float, torch.cfloat)
+    @parametrize_test("mode", ('valid', 'same'))
+    def test_conv1d_vs_scipy(self, device, dtype, mode):
+        t = make_tensor((1, 10), device=device, dtype=dtype)
+        feat_dim = t.shape[1]
+        weight_even = make_tensor((1, 1, 4), device=device, dtype=dtype)
+        weight_odd = make_tensor((1, 1, 5), device=device, dtype=dtype)
+
+        def _test(t, weight, mode):
+            # SciPy expects two 1-D inputs.
+            t_a = t.view(-1).cpu().numpy()
+            w_a = weight.view(-1).cpu().numpy()
+            expected = scipy.signal.convolve(t_a, w_a, mode=mode)
+
+            kwargs = {'padding': mode}
+            if mode == 'same':
+                # `same` padding in PyTorch conv1d is different
+                # from SciPy
+                p = weight.shape[2] // 2
+                t = torch.nn.functional.pad(t, (p, p))
+                # We have already taken care of padding
+                kwargs.pop("padding")
+
+            # second input is flipped in SciPy's convolve
+            weight_flipped = torch.flip(weight, (2,))
+            actual = torch.nn.functional.conv1d(t, weight_flipped, **kwargs).squeeze(0)
+            if mode == 'same':
+                actual = actual[:feat_dim]
+
+            self.assertEqual(actual, expected)
+
+        # Global dtype for this test suite is torch.double
+        # This leads to change in type-promotion
+        # and conv1d outputs `complex128` for `complex64` input.
+        with set_default_dtype(torch.float):
+            _test(t, weight_even, mode)
+            _test(t, weight_odd, mode)
 
     def test_conv2d_valid_padding_backward(self, device):
         # Test F.conv2d gradients work with padding='valid'
