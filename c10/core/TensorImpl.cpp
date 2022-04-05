@@ -20,43 +20,6 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
-namespace impl {
-
-static std::string noop_name_fn(const PyInterpreter*) {
-  return "<unloaded interpreter>";
-}
-
-static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
-  // no-op
-}
-
-static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-static void noop_dispatch_fn(
-    const PyInterpreter*,
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-void PyInterpreter::disarm() noexcept {
-  name_fn_ = &noop_name_fn;
-  decref_fn_ = &noop_decref_fn;
-  detach_fn_ = &noop_detach_fn;
-  dispatch_fn_ = &noop_dispatch_fn;
-}
-
-} // namespace impl
-
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
@@ -617,23 +580,6 @@ void TensorImpl::copy_tensor_metadata(
   if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
-}
-
-TorchDispatchTypeObject::TorchDispatchTypeObject(
-    PyObject* type_object,
-    c10::impl::PyInterpreter* pyinterpreter)
-    : data_(type_object), pyinterpreter_(pyinterpreter) {}
-
-TorchDispatchTypeObject::~TorchDispatchTypeObject() {
-  pyinterpreter_->decref(data_, /*is_tensor*/ false);
-}
-
-c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
-  return pyinterpreter_;
-}
-
-PyObject* TorchDispatchTypeObject::ptr() const {
-  return data_;
 }
 
 namespace impl {
