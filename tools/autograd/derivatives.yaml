@@ -983,7 +983,7 @@
 - name: maximum(Tensor self, Tensor other) -> Tensor
   self: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
   other: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
-  result: other_t + at::where(self_p == other_p, 0.5, (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
+  result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
   self: grad.masked_fill((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
@@ -1039,7 +1039,7 @@
 - name: minimum(Tensor self, Tensor other) -> Tensor
   self: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
   other: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
-  result: other_t + at::where(self_p == other_p, 0.5, (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
+  result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
   self: grad.masked_fill((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
