@@ -132,10 +132,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
 class LinearReLUQuantizeHandler(QuantizeHandler):
     pass
 
-@register_quant_pattern(torch.nn.BatchNorm2d)
-@register_quant_pattern(torch.nn.BatchNorm3d)
-@register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
-@register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
+# TODO: remove this class
 class BatchNormQuantizeHandler(QuantizeHandler):
     pass
 

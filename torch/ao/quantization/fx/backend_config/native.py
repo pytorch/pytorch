@@ -351,6 +351,42 @@ _CAT_CONFIG = {
     ]
 }
 
+def _get_bn_configs():
+    """ Get configs related to batchnorm
+    """
+    bn_configs = []
+    bn_to_fused_bn = {
+        torch.nn.BatchNorm2d: nni.BNReLU2d,
+        torch.nn.BatchNorm3d: nni.BNReLU3d,
+    }
+    for bn in [torch.nn.BatchNorm2d, torch.nn.BatchNorm3d]:
+        # TODO: enable these and remove entries in fusion_patterns.py
+        # bn_configs.append({
+        #     "pattern": (torch.nn.ReLU, bn),
+        #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        #     "dtype_configs": default_op_quint8_dtype_config,
+        #     "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+        # })
+        # bn_configs.append({
+        #     "pattern": (torch.nn.functional.relu, bn),
+        #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        #     "dtype_configs": default_op_quint8_dtype_config,
+        #     "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+        # })
+        bn_configs.append({
+            "pattern": bn,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": default_op_quint8_dtype_config,
+        })
+
+    for fused_bn in [nni.BNReLU2d, nni.BNReLU3d]:
+        bn_configs.append({
+            "pattern": fused_bn,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": default_op_quint8_dtype_config,
+        })
+    return bn_configs
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -363,5 +399,6 @@ def get_native_backend_config_dict():
             *_get_binary_op_configs(),
             _HARDSIGMOID_MODULE_CONFIG,
             _CAT_CONFIG,
+            *_get_bn_configs(),
         ],
     }
