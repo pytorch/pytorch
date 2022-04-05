@@ -1262,7 +1262,15 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.max_pool2d,
             "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
         }
+        ops_under_test_with_indices = {
+            "nn.functional with indices": torch.nn.functional.max_pool2d_with_indices,
+        }
 
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation, ceil_mode=ceil_mode)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             msg="{} results are off".format(name))
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
