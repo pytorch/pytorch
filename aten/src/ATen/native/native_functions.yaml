@@ -1878,6 +1878,7 @@
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_csr
+    QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
@@ -1949,6 +1950,7 @@
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
     Meta: empty_strided_meta
+    QuantizedCPU, QuantizedCUDA: empty_strided_unknown_quantized
 
 - func: erf(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
