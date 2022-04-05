@@ -7,9 +7,13 @@ from torch.package import (
     PackageImporter,
     sys_importer,
 )
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -52,11 +56,13 @@ class TestRepackage(PackageTestCase):
             pe.intern("**")
             pe.save_pickle("default", "model_b.py", model_b)
 
+
 class TestRepackageNoTorch(TestRepackage):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

@@ -10,9 +10,13 @@ from torch.package import (
     PackageImporter,
     sys_importer,
 )
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -23,6 +27,7 @@ except ImportError:
 
 class TestImporter(PackageTestCase):
     """Tests for Importer and derived classes."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporter
@@ -162,11 +167,13 @@ class TestImporter(PackageTestCase):
         self.assertIs(my_dtype, my_loaded_dtype)
         self.assertIs(my_dtype, my_loaded_dtype2)
 
+
 class TestImporterNoTorch(TestImporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

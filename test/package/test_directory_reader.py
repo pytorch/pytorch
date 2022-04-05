@@ -10,8 +10,12 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     IS_FBCODE,
@@ -288,14 +292,18 @@ class DirectoryReaderTest(PackageTestCase):
         ):
             with TemporaryDirectory() as temp_dir:
                 zip_file.extractall(path=temp_dir)
-                dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
+                dir_importer = self.PackageImporter(
+                    Path(temp_dir) / Path(filename).name
+                )
                 dir_mod = dir_importer.load_pickle("res", "mod.pkl")
+
 
 class DirectoryReaderTestNoTorch(DirectoryReaderTest):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageExporter = PackageExporterNoTorch
         self.PackageImporter = PackageImporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

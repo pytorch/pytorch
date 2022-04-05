@@ -1,6 +1,7 @@
-from collections import OrderedDict
 import weakref
+from collections import OrderedDict
 from typing import Any
+
 
 class RemovableHandle:
     """A handle which provides the capability to remove a hook."""
@@ -30,7 +31,7 @@ class RemovableHandle:
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
 
-    def __enter__(self) -> 'RemovableHandle':
+    def __enter__(self) -> "RemovableHandle":
         return self
 
     def __exit__(self, type: Any, value: Any, tb: Any) -> None:

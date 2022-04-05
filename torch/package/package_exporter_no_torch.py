@@ -3,6 +3,7 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
+import platform
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -21,7 +22,6 @@ from typing import (
     DefaultDict,
     Type,
 )
-import platform
 
 from ._digraph import DiGraph
 from ._hooks import RemovableHandle
@@ -35,6 +35,7 @@ from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
 ActionHook = Callable[["PackageExporter", str], None]
+
 
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
@@ -145,6 +146,7 @@ class PackagingError(Exception):
         self.dependency_graph = dependency_graph
         super().__init__(message.getvalue())
 
+
 class PackageExporter:
     """Exporters allow you to write packages of code, pickled Python data, and
     arbitrary binary and text resources into a self-contained package.
@@ -180,7 +182,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        zip_file_writer_type: Type[PackageZipFileWriter] = DefaultPackageZipFileWriter
+        zip_file_writer_type: Type[PackageZipFileWriter] = DefaultPackageZipFileWriter,
     ):
         """
         Create an exporter.
@@ -570,7 +572,6 @@ class PackageExporter:
         assert (pickle_protocol == 4) or (
             pickle_protocol == 3
         ), "torch.package only supports pickle protocols 3 and 4"
-
 
         def _persistent_id(obj):
             ret = self.persistent_id(obj)
