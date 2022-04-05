@@ -1,5 +1,6 @@
 import warnings
 from abc import ABC, abstractmethod
+import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
@@ -14,14 +15,11 @@ class ModelAverager(ABC):
                        will be used. (default: ``None``)
     """
 
-    def __init__(self, process_group=None, comm_memory_efficient=False):
+    def __init__(self, process_group=None):
         self.process_group = (
             process_group if process_group is not None else dist.group.WORLD
         )
         self.step = 0
-        # comm_memory_efficient is False, use a faster communication but more memory average strategy
-        # comm_memory_efficient is True, use a slower communication but less memory average strategy
-        self.comm_memory_efficient = comm_memory_efficient
 
     @abstractmethod
     def average_parameters(self, params):
@@ -84,10 +82,9 @@ class PeriodicModelAverager(ModelAverager):
         self,
         period,
         warmup_steps=0,
-        process_group=None,
-        comm_memory_efficient=False
+        process_group=None
     ):
-        super().__init__(process_group, comm_memory_efficient)
+        super().__init__(process_group)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
@@ -104,13 +101,28 @@ class PeriodicModelAverager(ModelAverager):
 
     def average_parameters(self, params):
         r"""
-        Averages parameters if ``step`` is no less than ``warmup_steps``
+        Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
+        params: average model.parameters() or parameter groups of an optimizer
         """
         if (
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            utils.average_parameters(params, self.process_group)
+            filter_params = []
+            for param in params:
+                if isinstance(param, torch.nn.Parameter):
+                    # model.parameters() input
+                    param_data = param
+                    if param_data.grad is not None:
+                        filter_params.append(param_data)
+                elif isinstance(param, dict):
+                    # optimizer.param_groups input
+                    for param_data in param["params"]:
+                        if param_data.grad is not None:
+                            filter_params.append(param_data)
+                else:
+                    raise NotImplementedError
+            utils.average_parameters(iter(filter_params), self.process_group)
         self.step += 1

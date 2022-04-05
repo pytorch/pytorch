@@ -11,7 +11,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
-
+import numpy as np
 import torch
 import torch.cuda
 import torch.distributed as dist
@@ -1029,6 +1029,9 @@ class DistributedTest:
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
+                    for params in model.parameters():
+                        # mock grad
+                        params.grad = torch.ones_like(param.data)
                     averager.average_parameters(model.parameters())
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         self.assertEqual(param.data, expected_avg_tensor)
@@ -1037,7 +1040,7 @@ class DistributedTest:
                         self.assertEqual(param.data, tensor)
 
         @skip_if_lt_x_gpu(2)
-        def test_periodic_model_averager_param_group_fast(self):
+        def test_periodic_model_averager_param_group(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1064,44 +1067,6 @@ class DistributedTest:
                                 if params.grad is None:
                                     continue
                                 self.assertEqual(param.data, torch.ones_like(param.data) * sum(range(world_size)) / world_size)
-                    else:
-                        # No model averaging, so the parameters are not updated.
-                        for param_group in opt.param_groups:
-                            for params in param_group["params"]:
-                                if params.grad is None:
-                                    continue
-                                self.assertEqual(param.data, torch.ones_like(param.data) * rank)
-
-        @skip_if_lt_x_gpu(2)
-        def test_periodic_model_averager_param_group_memory_efficient(self):
-            rank = dist.get_rank()
-            world_size = dist.get_world_size()
-            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
-            device_id = rank_to_GPU[rank][0]
-
-            model = nn.Linear(1, 5, bias=False).cuda(device_id)
-            param = next(model.parameters())
-            opt = torch.optim.SGD(model.parameters(), lr=0.1)
-
-            period = 4
-            for warmup_steps in [12, 13, 14, 15]:
-                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps, comm_memory_efficient=True)
-                for step in range(0, 20):
-                    # Reset the parameters at every step.
-                    for param_group in opt.param_groups:
-                        for params in param_group["params"]:
-                            # mock grad
-                            params.grad = torch.ones_like(param.data) * rank
-                            params.data = torch.ones_like(param.data) * rank
-
-                    averager.average_parameters(opt.param_groups)
-                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
-                        for param_group in opt.param_groups:
-                            for params in param_group["params"]:
-                                if params.grad is None:
-                                    continue
-                                self.assertEqual(param.data,
-                                                 torch.ones_like(param.data) * sum(range(world_size)) / world_size)
                     else:
                         # No model averaging, so the parameters are not updated.
                         for param_group in opt.param_groups:
@@ -1139,6 +1104,9 @@ class DistributedTest:
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
+                    for params in model.parameters():
+                        # mock grad
+                        params.grad = torch.ones_like(param.data)
                     averager.average_parameters(model.parameters())
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         self.assertEqual(param.data, expected_avg_tensor)
@@ -1183,12 +1151,19 @@ class DistributedTest:
             )
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
+            
+            real_group_ranks_res1 = list(_pg_group_ranks[subgroup1].keys())
+            real_group_ranks_res2 = list(_pg_group_ranks[subgroup2].keys())
+            expect_group_ranks_res1 = (rank // subgroup_size1 * subgroup_size1 + np.array(list(range(subgroup_size1)))).tolist()
+            expect_group_ranks_res2 = (rank // subgroup_size2 * subgroup_size2 + np.array(list(range(subgroup_size2)))).tolist()
+            self.assertEqual(real_group_ranks_res1, expect_group_ranks_res1)
+            self.assertEqual(real_group_ranks_res2, expect_group_ranks_res2)
 
             expected_avg_tensor_within_subgroup1 = (
-                torch.ones_like(param.data) * sum(list(_pg_group_ranks[subgroup1].keys())) / subgroup_size1
+                torch.ones_like(param.data) * sum(real_group_ranks_res1) / subgroup_size1
             )
             expected_avg_tensor_within_subgroup2 = (
-                torch.ones_like(param.data) * sum(list(_pg_group_ranks[subgroup2].keys())) / subgroup_size2
+                torch.ones_like(param.data) * sum(real_group_ranks_res2) / subgroup_size2
             )
             expected_global_avg_tensor = (
                 torch.ones_like(param.data) * sum(range(world_size)) / world_size
@@ -1196,6 +1171,9 @@ class DistributedTest:
             for step in range(0, 25):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
+                for params in model.parameters():
+                    # mock grad
+                    params.grad = torch.ones_like(param.data)
                 averager.average_parameters(model.parameters())
                 if step == 16 or step == 24:
                     # Run global model averaging when `step` can be divided by 8.
@@ -4896,7 +4874,7 @@ class DistributedTest:
                 loss = loss_fn(output, target)
                 loss.backward()
                 opt.step()
-                averager.average_parameters(opt.param_groups)
+                averager.average_parameters(net.parameters())
 
                 post_localSGD_opt.zero_grad()
                 output_using_post_localSGD_opt = net_using_post_localSGD_opt(input)

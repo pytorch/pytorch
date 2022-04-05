@@ -2,6 +2,7 @@
 import warnings
 from collections import OrderedDict
 import logging
+import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as utils
@@ -91,8 +92,8 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         `HierarchicalModelAverager` is experimental and subject to change.
     """
 
-    def __init__(self, period_group_size_dict=None, warmup_steps=0, process_group=None, comm_memory_efficient=False):
-        super().__init__(process_group, comm_memory_efficient)
+    def __init__(self, period_group_size_dict=None, warmup_steps=0, process_group=None):
+        super().__init__(process_group)
         if not period_group_size_dict:
             raise ValueError("Arg ``period_group_size_dict`` must not be empty.")
         self._periods = list(period_group_size_dict.keys())
@@ -143,14 +144,28 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def average_parameters(self, params):
         r"""
-        Averages parameters if ``step`` is no less than ``warmup_steps``
+        Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by a period in the keys of ``period_process_group_dict``,
         where ``step`` is increased by 1 at each iteration in the training loop.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         only the largest period is used, and the corresponding process group is used for averaging parameters.
+        params: average model.parameters() or parameter groups of an optimizer
         """
         if self.step >= self.warmup_steps:
             found, group = self._find_process_group()
             if found:
-                utils.average_parameters(params, group, self.comm_memory_efficient)
+                filter_params = []
+                for param in params:
+                    if isinstance(param, torch.nn.Parameter):
+                        # model.parameters() input
+                        if param.grad is not None:
+                            filter_params.append(param)
+                    elif isinstance(param, dict):
+                        # optimzer.param_groups input
+                        for param_data in param["params"]:
+                            if param_data.grad is not None:
+                                filter_params.append(param)
+                    else:
+                        raise NotImplementedError
+                utils.average_parameters(iter(filter_params), group)
         self.step += 1
