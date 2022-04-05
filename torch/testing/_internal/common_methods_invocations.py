@@ -6977,12 +6977,13 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
 
     reduce = op_info.variant_test_name
     sample_inputs = []
-    for args in test_cases:
+    for args, include_self in product(test_cases, [True, False]):
         inp_shape, dim, index, src_shape = args
         sample_inputs.append(
             SampleInput(
                 _tensor(inp_shape),
-                args=(dim, index, _tensor(src_shape), reduce)
+                args=(dim, index, _tensor(src_shape), reduce),
+                kwargs={'include_self': include_self}
             )
         )
 
@@ -11219,8 +11220,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv1d',
            aliases=('conv1d',),
            aten_name='conv1d',
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11229,6 +11231,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # AssertionError: None mismatch: torch.complex128 is not None
+               DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules',
+                            'test_custom_rules', dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
