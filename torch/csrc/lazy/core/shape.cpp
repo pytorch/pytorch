@@ -56,7 +56,11 @@ bool symbolicShapeEnabled() {
 }
 
 c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
-  auto ltc_tensor = GetLtcTensor(tensor);
+  auto ltc_tensor = TryGetLtcTensor(tensor);
+  if (!ltc_tensor) {
+    // Set Concrete sizes for Concrete tensors
+    return c10::SymbolicShape(tensor.sizes());
+  }
   const Shape& input_shape = ltc_tensor->GetIrValue()->shape();
   auto& is_symbolic = input_shape.is_symbolic();
   if (!is_symbolic.has_value()) {

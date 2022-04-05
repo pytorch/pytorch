@@ -113,7 +113,7 @@ Tensor tensorWithSymbolicShape(
   return torch::lazy::CreateAtenFromLtcTensor(lt);
 }
 
-TEST_F(LazyShapeTest, TestAddBasic) {
+TEST_F(LazyShapeTest, TestMulBasic) {
   // Basic propagation
   torch::Tensor a = tensorWithSymbolicShape({2, 2}, {true, false});
   torch::Tensor b = tensorWithSymbolicShape({2, 2}, {true, false});
@@ -140,6 +140,12 @@ TEST_F(LazyShapeTest, TestAddBasic) {
   b = tensorWithSymbolicShape({2, 1}, {true, false});
   res = torch::mul(a, b);
 
+  expected = {false, true};
+  EXPECT_EQ(getIsSymbolic(res), expected);
+
+  // Test correct handling of scalar values
+  a = tensorWithSymbolicShape({2, 2}, {false, true});
+  res = torch::mul(a, 3);
   expected = {false, true};
   EXPECT_EQ(getIsSymbolic(res), expected);
 };
