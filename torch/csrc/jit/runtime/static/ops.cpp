@@ -1404,9 +1404,8 @@ C10_ALWAYS_INLINE void toCopyFunctorImpl(
 
 template <bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
 void toCopyFunctor(ProcessedNode* p_node) {
-  toCopyFunctorImpl<
-      has_constant_non_tensor_dtype_and_flags,
-      has_memory_format>(p_node, nullptr);
+  toCopyFunctorImpl<has_constant_non_tensor_dtype_and_flags, has_memory_format>(
+      p_node, nullptr);
 }
 
 template <bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
@@ -1415,9 +1414,9 @@ void toMaybeCopyOutFunctor(ProcessedNode* p_node) {
   // time. However, we need to make account for the possibility that
   // the dtype (and layout, memory format, etc.) of self changed
   // between iterations.
-  ToArgs args = extractToArgs<
-      has_constant_non_tensor_dtype_and_flags,
-      has_memory_format>(p_node);
+  ToArgs args =
+      extractToArgs<has_constant_non_tensor_dtype_and_flags, has_memory_format>(
+          p_node);
   const auto& self = p_node->input(0).toTensor();
   if (CheckToWillAlias<
           has_constant_non_tensor_dtype_and_flags,
@@ -1927,8 +1926,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator
 
 namespace {
 
-c10::MaybeOwned<at::Tensor> borrowFromOptionalTensorIValue(
-    const IValue& iv) {
+c10::MaybeOwned<at::Tensor> borrowFromOptionalTensorIValue(const IValue& iv) {
   if (iv.isNone()) {
     return c10::MaybeOwned<at::Tensor>::owned(c10::in_place);
   }
@@ -2208,8 +2206,7 @@ SROperator quantizedLinearDynamicFP16Impl(Node* n) {
       // Weights could be quantized on the fly
       auto packed_weight_tmp =
           p_node->input(1).toCustomClass<LinearPackedParamsBase>();
-      applyDynamicOutFunctor<has_relu>(
-          packed_weight_tmp, input, out_t, false);
+      applyDynamicOutFunctor<has_relu>(packed_weight_tmp, input, out_t, false);
     };
   }
 }

@@ -357,17 +357,31 @@ uint8_t* MemoryPlanner::allocateBuffer(size_t num_bytes) {
   return start;
 }
 
+namespace {
+class DataPtrWrapper : public c10::intrusive_ptr_target {
+ public:
+  explicit DataPtrWrapper(at::DataPtr&& data_ptr)
+      : data_ptr_(std::move(data_ptr)) {}
+
+  uint8_t* get() const {
+    return static_cast<uint8_t*>(data_ptr_.get());
+  }
+
+ private:
+  at::DataPtr data_ptr_;
+};
+} // namespace
+
 void MemoryPlanner::allocateOutputTensors() {
   if (output_buffer_bytes_ == 0) {
     return;
   }
-  TORCH_CHECK(
-      !output_buffer_,
-      "Previously allocated output_buffer_ was not deallocated properly.");
-  output_buffer_ = allocate_buffer(output_buffer_bytes_);
+  auto output_buffer_ptr = c10::make_intrusive<DataPtrWrapper>(
+      allocate_buffer(output_buffer_bytes_));
+  auto* output_buffer = output_buffer_ptr.release();
 
   size_t offset = 0;
-  uint8_t* start = static_cast<uint8_t*>(output_buffer_.get());
+  uint8_t* start = output_buffer->get();
 
   for (const auto& ms : managed_output_tensors_) {
     auto tensor_size = ms.first;
@@ -377,31 +391,23 @@ void MemoryPlanner::allocateOutputTensors() {
     }
     DCHECK_LE(offset + tensor_size, output_buffer_bytes_);
     void* src = static_cast<void*>(start + offset);
-    // NOTE: Populating `ctx` enables clients to take the ownership of a
-    // tensor managed by Static Runtime. Some clients use "move" semantics to
-    // pass a Tensor object to another holding object (e.g., a thrift message)
-    // to avoid `memcpy`.
-    // `torch::distributed::detail::WireDumpOp::dumpTensorData is a concrete
-    // example of doing this (See `torch::distributed::detail::hasDeleter`).
-    // Since this output Tensor object is permanently owned by Static Runtime,
-    // this ownership passing does *not* have an intended effect of keeping the
-    // Tensor alive till the "owner" releases it: A premature call to
-    // `StaticRuntime::deallocateOutputTensors` can destruct such a Tensor
-    // object that a holding object believes to retain, causing it to read
-    // corrupted values from an already destructed Tensor object. Therefore, a
-    // client of receiving Static Runtime-managed Tensors needs to be very
-    // careful to call `StaticRuntime::deallocateOutputTensors` after these
-    // holding objects are gone.
-    tensor->storage().set_data_ptr_noswap(
-        at::DataPtr(src, /*ctx=*/src, nullptr, tensor->device()));
+    c10::raw::intrusive_ptr::incref(output_buffer);
+    tensor->storage().set_data_ptr_noswap(at::DataPtr(
+        src,
+        /*ctx=*/output_buffer,
+        [](void* ctx) {
+          auto* output_buffer = static_cast<DataPtrWrapper*>(ctx);
+          c10::raw::intrusive_ptr::decref(output_buffer);
+        },
+        tensor->device()));
     tensor->storage().set_nbytes(tensor_size);
     offset += tensor_size;
   }
+  c10::raw::intrusive_ptr::decref(output_buffer);
   DCHECK_EQ(offset, output_buffer_bytes_);
 }
 
 void MemoryPlanner::allocate() {
-  // TODO: Improve this once D31357486 is landed.
   allocateManagedTensors();
   allocateOutputTensors();
 }
@@ -413,6 +419,10 @@ void MemoryPlanner::deallocate() {
     *iv = IValue(old);
     c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(old);
   }
+  // deallocateOutputTensors needs to happen after we restore the IValues above
+  // to strong references, otherwise deallocateOutputTensors will destroy the
+  // last reference
+  deallocateOutputTensors();
   // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
   // that the objects pointed to by *iv may be reclaimed by reference counting
   for (auto& iv : unmanaged_ivalues_) {
@@ -430,14 +440,19 @@ void MemoryPlanner::deallocateOutputTensors() {
     auto* tensor = ms.second;
     size_t current_size =
         compute_aligned_tensor_size(tensor->storage().nbytes());
-    tensor->storage().unsafeGetStorageImpl()->reset();
+    *tensor = at::detail::empty_cpu(
+        {0},
+        c10::typeMetaToScalarType(tensor->dtype()),
+        tensor->layout(),
+        tensor->device(),
+        c10::nullopt,
+        c10::nullopt);
     if (current_size > ms.first) {
       ms.first = current_size;
     }
     output_buffer_bytes += ms.first;
   }
   output_buffer_bytes_ = output_buffer_bytes;
-  output_buffer_ = {};
 }
 
 StandardMemoryPlanner::StandardMemoryPlanner(

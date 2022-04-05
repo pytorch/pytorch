@@ -327,11 +327,6 @@ void testStaticRuntime(
           VLOG(2) << "actual: " << actual;
           compareResults(expect, actual, use_allclose, use_equalnan);
           VLOG(2) << "first run comparison done";
-          if (manage_output_tensors) {
-            actual = IValue();
-            runtime.deallocateOutputTensors();
-            runtime.checkOutputTensorMemoryLeaks();
-          }
 
           if (!args2.empty()) {
             auto* memory_planner = runtime.getMemoryPlanner();
@@ -345,11 +340,6 @@ void testStaticRuntime(
             VLOG(2) << "comparing with args2";
             compareResults(expect, actual, use_allclose, use_equalnan);
             VLOG(2) << "second run comparison done";
-            if (manage_output_tensors) {
-              actual = IValue();
-              runtime.deallocateOutputTensors();
-              runtime.checkOutputTensorMemoryLeaks();
-            }
 
             // The memory planner is allowed to get reallocated
             auto* new_memory_planner = runtime.getMemoryPlanner();
@@ -369,11 +359,6 @@ void testStaticRuntime(
             VLOG(2) << "comparing third run";
             compareResults(expect, actual, use_allclose, use_equalnan);
             VLOG(2) << "third run comparison done";
-            if (manage_output_tensors) {
-              actual = IValue();
-              runtime.deallocateOutputTensors();
-              runtime.checkOutputTensorMemoryLeaks();
-            }
           } else {
             // run static runtime again to exercise the memory planner
             // and allocate managed tensors.
@@ -382,19 +367,9 @@ void testStaticRuntime(
             VLOG(2) << "comparing second run with same args";
             compareResults(expect, actual, use_allclose, use_equalnan);
             VLOG(2) << "second run comparison done";
-            if (manage_output_tensors) {
-              actual = IValue();
-              runtime.deallocateOutputTensors();
-              runtime.checkOutputTensorMemoryLeaks();
-            }
             // third run to use the allocated managed tensors.
             actual = runtime(args, {});
             runtime.checkForMemoryLeak();
-            if (manage_output_tensors) {
-              actual = IValue();
-              runtime.deallocateOutputTensors();
-              runtime.checkOutputTensorMemoryLeaks();
-            }
           }
         }
       }

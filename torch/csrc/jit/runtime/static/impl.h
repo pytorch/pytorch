@@ -624,19 +624,6 @@ class TORCH_API BlockRunner {
       bool output_returned = true,
       bool recurse_on_sub_blocks = false);
 
-  // WARNING: Deallocate managed output tensors.  A client receiving Static
-  // Runtime-managed Tensors needs to be very careful to call
-  // `StaticRuntime::deallocateOutputTensors` after all references of output
-  // Tensors are gone.
-  void deallocateOutputTensors();
-
-  bool checkOutputTensorMemoryLeaks();
-
-  bool isManagedOutputTensor(const IValue& ivalue) const;
-  bool isManagedOutputTensorValue(const Value* value) const;
-
-  void disableManageOutputTensors();
-
   // This is the fallback path taken if we can't construct the memory planner
   // on the first iteration.
   // IMPORTANT: Nothing here should be able to throw!!!
@@ -875,8 +862,7 @@ class TORCH_API ProcessedNode {
   }
 
   c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef<const IValue>(
-        values_ + outputs_offset_, numOutputs());
+    return c10::ArrayRef<const IValue>(values_ + outputs_offset_, numOutputs());
   }
 
   uint16_t numInputs() const {
@@ -911,9 +897,7 @@ class TORCH_API ProcessedNode {
     return overlap_detected_;
   }
 
-  bool checkAndCorrectOverlapWith(
-      const at::Tensor& input,
-      c10::IValue& output);
+  bool checkAndCorrectOverlapWith(const at::Tensor& input, c10::IValue& output);
   void verifyAndCorrectMemoryOverlap();
 
   void setValues(IValue* values) {
@@ -973,11 +957,6 @@ class TORCH_API StaticRuntime {
       const KeywordArgs& kwargs = KeywordArgs());
 
   bool checkForMemoryLeak(bool output_returned = true);
-  bool checkOutputTensorMemoryLeaks();
-
-  void deallocateOutputTensors();
-  bool isManagedOutputTensor(const IValue& ivalue) const;
-  void disableManageOutputTensors();
 
   // Gets the top-level memory planner. Used for testing.
   const MemoryPlanner* getMemoryPlanner() const;

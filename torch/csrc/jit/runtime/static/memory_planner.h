@@ -113,8 +113,6 @@ class MemoryPlanner {
 
   void allocate();
   void deallocate();
-  void deallocateOutputTensors();
-
   // Make this function return true if something has gone horribly wrong during
   // the inference run and we should fall back to the StandardMemoryPlanner
   // strategy. Typically, this is due to performance related issues - perhaps
@@ -156,26 +154,6 @@ class MemoryPlanner {
     return output_buffer_bytes_;
   }
 
-  // Check if `ivalue` is contained as a managed tensor. Only used in DCHECK().
-  bool isManagedOutputTensor(const IValue& ivalue) const {
-    if (!output_buffer_ || // output buffer got already deallocated.
-        output_buffer_bytes_ == 0 || // memory planning is not yet initialized.
-        !ivalue.isTensor() // a non-tensor is never managed
-    ) {
-      return false;
-    }
-    const auto& tensor = ivalue.toTensor();
-    if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
-      return false;
-    }
-    // TODO: Improve this once D31357486 is landed.
-    uint8_t* tensor_ptr =
-        static_cast<uint8_t*>(tensor.storage().data_ptr().get());
-    uint8_t* buffer_start = static_cast<uint8_t*>(output_buffer_.get());
-    uint8_t* buffer_end = buffer_start + output_buffer_bytes_;
-    return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
-  }
-
   bool isManagedStorageImpl(const at::StorageImpl* impl) const {
     if (managed_tensor_storage_impls_.empty()) {
       return false;
@@ -190,6 +168,20 @@ class MemoryPlanner {
         managed_tensor_storage_impls_.data() +
         managed_tensor_storage_impls_.size());
     return impl_p >= start && impl_p < end;
+  }
+
+  // Only used in DCHECK()
+  bool isManagedOutputTensor(const at::Tensor& tensor) const {
+    if (output_buffer_bytes_ == 0 || output_buffer_start_ == nullptr) {
+      return false;
+    }
+    DCHECK_NE(output_buffer_end_, nullptr);
+    if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
+      return false;
+    }
+    auto* tensor_ptr = static_cast<uint8_t*>(tensor.storage().data_ptr().get());
+    return output_buffer_start_ <= tensor_ptr &&
+        tensor_ptr < output_buffer_end_;
   }
 
   bool overlapWithInternalBuffer(void* data_ptr) {
@@ -218,6 +210,8 @@ class MemoryPlanner {
       managed_tensor_storage_impls_{};
 
  private:
+  void deallocateOutputTensors();
+
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
@@ -235,10 +229,16 @@ class MemoryPlanner {
   at::DataPtr buffer_; // allocated each time we call Run()
   uint8_t* buffer_start_{nullptr};
   uint8_t* buffer_end_{nullptr};
+
+  // We don't own the output buffer, but we store the
+  // start/end of the last one we allocated for the debug checks
+  // (e.g. for isManagedOutputTensor)
+  uint8_t* output_buffer_start_{nullptr};
+  uint8_t* output_buffer_end_{nullptr};
+
   size_t num_managed_tensors_{0};
   size_t num_unmanaged_scalar_ivalues_{0};
 
-  at::DataPtr output_buffer_;
   size_t output_buffer_bytes_{0};
 
   virtual void allocateManagedTensors() = 0;

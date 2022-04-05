@@ -631,10 +631,6 @@ TEST(StaticRuntime, CleanUpMemory) {
             auto output_2 = outputs[0].toTensor();
             runtime.checkForMemoryLeak();
             EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
-            if (manage_output_tensors) {
-              runtime.deallocateOutputTensors();
-              runtime.checkOutputTensorMemoryLeaks();
-            }
           }
         }
       }
@@ -685,36 +681,21 @@ TEST(
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
-    // Do not manage intput value.
-    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
-    // Do not manage direct output value.
-    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
     IValue element = tuple.toTupleRef().elements()[0];
-    // Tensor to be managed, but not yet from the profile run.
-    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
-    tuple = IValue();
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
+    runtime.checkForMemoryLeak();
   }
   // Second run that manages output tensors.
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
-    // Do not manage intput value.
-    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
-    // Do not manage direct output value.
-    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTupleRef().elements()[0];
-    // Tensor to be managed, but not yet from the profile run.
-    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
-    tuple = IValue();
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
+    runtime.checkForMemoryLeak();
+    // Destruct tuple at the end of the scope, exercising the
+    // deallocation code.
   }
 }
 
-TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
+TEST(StaticRuntime, ManageOutputTensorsManyIters) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
@@ -732,122 +713,9 @@ TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
     auto wide = torch::randn({batch_size, num_features});
     std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
     runtime(input_tensors, {});
+    // Destruct the output tensors, exercising the deallocation code
     runtime.checkForMemoryLeak();
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
   }
-}
-
-TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
-  const int embedding_size = 32;
-  const int num_features = 50;
-  torch::jit::Module mod = getDeepAndWideSciptModel();
-
-  torch::jit::StaticModuleOptions opts{
-      /*enable_out_variant=*/true,
-      /*optimize_memory=*/true,
-      /*manage_output_tensors=*/true};
-  torch::jit::StaticModule smod(mod, false, opts);
-  torch::jit::StaticRuntime runtime(smod);
-  int batch_size = 8;
-  auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
-  auto user_emb = torch::randn({batch_size, 1, embedding_size});
-  auto wide = torch::randn({batch_size, num_features});
-  std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
-  // Profile run.
-  runtime(input_tensors, {});
-  runtime.deallocateOutputTensors();
-  // Run again to allocate output Tensors without deallocating them.
-  runtime(input_tensors, {});
-  // Memory leak checking fails.
-  EXPECT_THROW(runtime.checkOutputTensorMemoryLeaks(), std::exception);
-  // Calling the runtime without deallocation fails too.
-  EXPECT_THROW(runtime(input_tensors, {}), std::exception);
-  // After deallocation, everything works fine.
-  runtime.deallocateOutputTensors();
-  runtime.checkOutputTensorMemoryLeaks();
-  runtime(input_tensors, {});
-}
-
-TEST(StaticRuntime, DisableManageOutputTensors) {
-  const std::string test_graph = R"IR(
-    graph(%0 : Tensor):
-      # With manage_output_tensor enabled, this tensor is managed.
-      %1 : Tensor = aten::abs(%0)
-      # The output container object is never managed.
-      %2 : (Tensor) = prim::TupleConstruct(%1)
-      return (%2)
-  )IR";
-  auto g = std::make_shared<torch::jit::Graph>();
-  torch::jit::parseIR(test_graph, g.get());
-  torch::jit::StaticModuleOptions opts{
-      /*enable_out_variant=*/true,
-      /*optimize_memory=*/true,
-      /*manage_output_tensors=*/true};
-  auto a = at::randn({2, 2});
-  std::vector<at::IValue> args{a};
-  torch::jit::StaticModule smod(g, opts);
-  torch::jit::StaticRuntime runtime(smod);
-  // Profile run.
-  {
-    IValue tuple = runtime(args, {});
-    IValue element = tuple.toTupleRef().elements()[0];
-    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
-    tuple = IValue();
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
-  }
-  // Second run that manages output tensors.
-  {
-    IValue tuple = runtime(args, {});
-    IValue element = tuple.toTupleRef().elements()[0];
-    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
-    tuple = IValue();
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
-  }
-
-  // Reset the runtime and start profiling again.
-  runtime.disableManageOutputTensors();
-
-  IValue copied_output_tensor;
-  IValue original_output_tensor;
-  // New profile run.
-  {
-    IValue tuple = runtime(args, {});
-    IValue element = tuple.toTupleRef().elements()[0];
-    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
-    copied_output_tensor = element.deepcopy();
-    original_output_tensor = element;
-    tuple = IValue();
-    // No-op since manage_output_tensor is disabled now.
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
-  }
-  // Ensure that `original_output_tensor` is no longer managed: even after
-  // calling `runtime.deallocateOutputTensors();` `original_output_tensor` still
-  // contains a valid value.
-  EXPECT_TRUE(
-      original_output_tensor.toTensor().equal(copied_output_tensor.toTensor()));
-
-  // Ensure that the second optimized run does not manage the output tensor
-  // either.
-  {
-    IValue tuple = runtime(args, {});
-    IValue element = tuple.toTupleRef().elements()[0];
-    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
-    copied_output_tensor = element.deepcopy();
-    original_output_tensor = element;
-    tuple = IValue();
-    // No-op since manage_output_tensor is disabled now.
-    runtime.deallocateOutputTensors();
-    runtime.checkOutputTensorMemoryLeaks();
-  }
-  // Ensure that `original_output_tensor` is no longer managed: even after
-  // calling `runtime.deallocateOutputTensors();` `original_output_tensor` still
-  // contains a valid value.
-  EXPECT_TRUE(
-      original_output_tensor.toTensor().equal(copied_output_tensor.toTensor()));
 }
 
 TEST(StaticRuntime, FusionPass) {
@@ -960,8 +828,7 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
     ProcessedNode list_unpack_pnode(
         list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
-    EXPECT_TRUE(
-        list_unpack_pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+    EXPECT_TRUE(list_unpack_pnode.verifyNoMemoryOverlap(/* force_check*/ true));
   }
   {
     std::array<IValue, 3> values = {
