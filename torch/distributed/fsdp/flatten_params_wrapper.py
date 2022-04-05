@@ -10,6 +10,7 @@ import contextlib
 from itertools import accumulate
 from typing import (
     Any,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -205,7 +206,7 @@ class FlatParameter(nn.Parameter):
         parameters offsets within this range.
         """
 
-        sharded_param_offsets = []
+        sharded_param_offsets: List[Optional[ParamOffset]] = []
         for idx, offset in enumerate(self._param_offsets):
             if interval.begin > offset[1] or interval.end < offset[0]:
                 sharded_param_offsets.append(None)
@@ -334,7 +335,7 @@ class FlatParameter(nn.Parameter):
             self._param_names[param_indices],
             self._param_shapes[param_indices],
             self._param_numels[param_indices],
-            self._sharded_param_offsets[param_indices],
+            cast(List[ParamOffset], self._sharded_param_offsets[param_indices]),
         )
 
 
