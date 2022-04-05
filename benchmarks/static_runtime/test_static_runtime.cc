@@ -2026,6 +2026,27 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
       {input_2, weight_2});
 }
 
+TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
+  const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        %ret = aten::clone(%output, %bias)
+        return (%output)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_relu_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
 TEST(StaticRuntime, VarStack) {
   const auto var_stack_script = R"JIT(
     def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
