@@ -69,11 +69,6 @@ class RegularFuncWrapper:
                 return sum(ret)
             else:
                 return self.func(torch.stack(ret), ord=ord)
-            # result = global_norm if ord == 0 else torch.pow(global_norm, 1 / ord).to(dtype)
-            # result = result.to(dtype=dtype)
-            # if result.is_complex():
-            #     result = torch.view_as_real(result)[0]
-            # return result
 
 
 class ForeachFuncWrapper:
