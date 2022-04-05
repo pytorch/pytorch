@@ -31,8 +31,6 @@ from .utils import _replace_by_prefix
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
 
-ParamOffset = Tuple[int, int]
-SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
 
@@ -74,13 +72,31 @@ def _pre_load_state_dict_hook(
             _replace_by_prefix(state_dict, k, prefix + last_part)
 
 
+class Interval(NamedTuple):
+    begin: int
+    end: int
+
+    def is_empty(self):
+        return not (self.begin >= 0 and self.end >= 0 and self.end >= self.begin)
+
+
+ParamOffset = Interval
+SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
+
+
 class ParamInfo(NamedTuple):
     module_name: str
     module: nn.Module
     param_name: str
 
 
-class ShardMetadata(NamedTuple):
+class ParamMetadata(NamedTuple):
+    names: List[str]
+    shapes: List[torch.Size]
+    numels: List[int]
+
+
+class FlattenShardMetadata(NamedTuple):
     param_names: List[str]
     param_shapes: List[torch.Size]
     param_numels: List[int]
@@ -101,7 +117,9 @@ class FlatParameter(nn.Parameter):
     """
 
     def __new__(
-        cls, params: Sequence[nn.Parameter], requires_grad: bool = True
+        cls,
+        params: Sequence[nn.Parameter],
+        requires_grad: bool = True,
     ) -> "FlatParameter":
         """Make an object using the parent's __new__ function."""
 
@@ -141,7 +159,11 @@ class FlatParameter(nn.Parameter):
             cls, data, requires_grad=requires_grad
         )  # type: ignore[call-arg]
 
-    def __init__(self, params: Sequence[nn.Parameter], requires_grad: bool = True):
+    def __init__(
+        self,
+        params: Sequence[nn.Parameter],
+        requires_grad: bool = True,
+    ):
         self._is_sharded = False
         self._param_numels = [p.numel() for p in params]
         # The total element numbers. This is equal to the summation of the
@@ -167,45 +189,98 @@ class FlatParameter(nn.Parameter):
         # The indices (begin/end pair) of the parameters that are included in
         # this FlatParameter. The default value is all the parameters because
         # no sharding happen yet.
-        self._param_indice_in_shard = (0, len(self._param_infos) - 1)
+        self._param_indice_in_shard = Interval(0, len(self._param_infos) - 1)
         # The offsets in each parameter that is included in the FlatParameter.
-        self._sharded_param_offsets: List[ParamOffset] = [
-            (0, numel) for numel in self._param_numels
+        self._sharded_param_offsets: List[Optional[ParamOffset]] = [
+            ParamOffset(0, numel) for numel in self._param_numels
         ]
         # The number of padding elements.
         self.num_padded = 0
 
-    def shard_by_offsets(self, start: int, end: int, num_padded: int) -> None:
-        assert self._is_sharded
-        if start < 0 or end < 0 or end < start:
-            raise ValueError(
-                f"Shard the flatten parameter with an invalid offset pair {(start, end)}."
+    def get_sharded_param_offsets(
+        self, interval: Interval
+    ) -> List[Optional[ParamOffset]]:
+        r"""
+        Given the begin index and end index of the FlatParameter, this API returns the
+        parameters offsets within this range.
+        """
+
+        sharded_param_offsets = []
+        for idx, offset in enumerate(self._param_offsets):
+            if interval.begin > offset[1] or interval.end < offset[0]:
+                sharded_param_offsets.append(None)
+                continue
+            if interval.begin <= offset[0]:
+                sharded_param_begin = 0
+                sharded_param_end = min(offset[1], interval.end) - offset[0]
+            else:
+                sharded_param_begin = interval.begin - offset[0]
+                sharded_param_end = min(offset[1], interval.end) - offset[0]
+            sharded_param_offsets.append(
+                ParamOffset(sharded_param_begin, sharded_param_end)
             )
-        _shard_size = end - start + 1
+        assert len(sharded_param_offsets) == len(self._param_offsets)
+        return sharded_param_offsets
+
+    def get_global_offset_from_param_offsets(
+        self, param_offsets: List[Optional[ParamOffset]]
+    ) -> Interval:
+        r"""
+        Given a list of unflattened parameters offsets, this API maps the offsets
+        to the corresponding FlatParam offsets. The i-th element of the
+        input param_offsets represents the offsets of the i-th unflattened
+        parameters in the FlatParam. None represents the parameter is not within
+        the queried range.
+        """
+        begin = end = 0
+        found_not_none = False
+        for param_offset, param_numel in zip(param_offsets, self._param_numels):
+            if param_offset is None:
+                if found_not_none:
+                    break
+                begin += param_numel
+                end += param_numel
+                continue
+            assert 0 <= param_offset.begin < param_numel
+            assert 0 <= param_offset.end < param_numel
+            if not found_not_none:
+                begin += param_offset.begin
+                found_not_none = True
+                end = begin + (param_offset.end - param_offset.begin)
+            else:
+                assert param_offset.begin == 0
+                end += param_offset.end + 1
+        if begin >= self.full_numel:
+            begin = end = 0
+        return Interval(begin, end)
+
+    def shard_by_offsets(self, begin: int, end: int, num_padded: int) -> None:
+        assert self._is_sharded
+        if begin < 0 or end < 0 or end < begin:
+            raise ValueError(
+                f"Shard the flatten parameter with an invalid offset pair {(begin, end)}."
+            )
+        _shard_size = end - begin + 1
         self.num_padded = num_padded
         if self.num_padded > _shard_size:
             raise ValueError("The number of padding is larger than the shard size.")
-        self._sharded_param_offsets.clear()
+        self._sharded_param_offsets = self.get_sharded_param_offsets(
+            Interval(begin, end)
+        )
 
-        ranges = []
-        for idx, offset in enumerate(self._param_offsets):
-            if start > offset[1] or end < offset[0]:
-                continue
-            if start <= offset[0]:
-                sharded_param_start = 0
-                sharded_param_end = min(offset[1], end) - offset[0]
-            else:
-                sharded_param_start = start - offset[0]
-                sharded_param_end = min(offset[1], end) - offset[0]
-            ranges.append(idx)
-            self._sharded_param_offsets.append((sharded_param_start, sharded_param_end))
-        if ranges:
-            self._param_indice_in_shard = (ranges[0], ranges[-1])
-
-    def _offset_to_slice(self) -> slice:
-        if self._param_indice_in_shard[0] > self._param_indice_in_shard[1]:
+    def _offset_to_param_indices(self) -> slice:
+        begin = 0
+        for offsets in self._sharded_param_offsets:
+            if offsets is not None:
+                break
+            begin += 1
+        if begin >= len(self._sharded_param_offsets):
             return slice(0, 0)
-        return slice(self._param_indice_in_shard[0], self._param_indice_in_shard[1] + 1)
+        try:
+            end = self._sharded_param_offsets.index(None, begin)
+        except ValueError:
+            end = len(self._sharded_param_offsets)
+        return slice(begin, end)
 
     def get_param_views(
         self, external_data: Optional[Tensor] = None
@@ -243,20 +318,23 @@ class FlatParameter(nn.Parameter):
 
     def metadata(self) -> Tuple[List[str], List[torch.Size], List[int]]:
         """Return tuple of (names, shapes, numels) metadata for this flat parameter."""
-        return self._param_names, self._param_shapes, self._param_numels
+        return ParamMetadata(
+            self._param_names, self._param_shapes, self._param_numels
+        )
 
     def shard_metadata(
         self,
-    ) -> ShardMetadata:
+    ) -> FlattenShardMetadata:
         """
         Return tuple of (names, shapes, numels) metadata for the sharded parameter
         metadata of this flat parameter.
         """
-        return ShardMetadata(
-            self._param_names[self._offset_to_slice()],
-            self._param_shapes[self._offset_to_slice()],
-            self._param_numels[self._offset_to_slice()],
-            self._sharded_param_offsets[:],
+        param_indices = self._offset_to_param_indices()
+        return FlattenShardMetadata(
+            self._param_names[param_indices],
+            self._param_shapes[param_indices],
+            self._param_numels[param_indices],
+            self._sharded_param_offsets[param_indices],
         )
 
 

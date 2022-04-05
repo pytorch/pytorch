@@ -7,7 +7,8 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp.flatten_params_wrapper import (
     FlattenParamsWrapper,
-    ShardMetadata,
+    FlattenShardMetadata,
+    ParamOffset,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -173,7 +174,8 @@ class TestFlattenParams(TestCase):
 
         self.assertEqual(ref_pnorm_after_step, flat_pnorm_after_step)
 
-    def test_sharded_flat_param(self):
+    @staticmethod
+    def _create_flat_p():
         module = torch.nn.Sequential(
             torch.nn.Linear(10, 10, bias=False),
             torch.nn.ReLU(),
@@ -184,7 +186,10 @@ class TestFlattenParams(TestCase):
         )
         params_to_flatten = list(module.parameters())
         flat_module = FlattenParamsWrapper(module, params_to_flatten)
-        flat_p = flat_module.flat_param
+        return flat_module.flat_param
+
+    def test_sharded_flat_param(self):
+        flat_p = self._create_flat_p()
 
         def _test(kwargs, expected, exception=None, regex=None):
             flat_p._is_sharded = True
@@ -201,27 +206,27 @@ class TestFlattenParams(TestCase):
                 self.assertEqual(flat_p.num_padded, kwargs["num_padded"])
 
         _test(
-            kwargs={"start": -1, "end": -1, "num_padded": 0},
+            kwargs={"begin": -1, "end": -1, "num_padded": 0},
             expected=None,
             exception=ValueError,
             regex="Shard the flatten parameter with an invalid offset pair",
         )
         _test(
-            kwargs={"start": 1, "end": 0, "num_padded": 0},
+            kwargs={"begin": 1, "end": 0, "num_padded": 0},
             expected=None,
             exception=ValueError,
             regex="Shard the flatten parameter with an invalid offset pair",
         )
         _test(
-            kwargs={"start": 0, "end": 1, "num_padded": 3},
+            kwargs={"begin": 0, "end": 1, "num_padded": 3},
             expected=None,
             exception=ValueError,
             regex="The number of padding is larger than the shard size.",
         )
 
         _test(
-            kwargs={"start": 0, "end": 0, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 0, "end": 0, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.0.weight"],
                 param_shapes=[(10, 10)],
                 param_numels=[100],
@@ -229,8 +234,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 0, "end": 50, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 0, "end": 50, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.0.weight"],
                 param_shapes=[(10, 10)],
                 param_numels=[100],
@@ -238,8 +243,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 0, "end": 99, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 0, "end": 99, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.0.weight"],
                 param_shapes=[(10, 10)],
                 param_numels=[100],
@@ -247,8 +252,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 50, "end": 149, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 50, "end": 149, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.0.weight", "_fpw_module.2.weight"],
                 param_shapes=[(10, 10), (10, 10)],
                 param_numels=[100, 100],
@@ -256,8 +261,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 50, "end": 199, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 50, "end": 199, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.0.weight", "_fpw_module.2.weight"],
                 param_shapes=[(10, 10), (10, 10)],
                 param_numels=[100, 100],
@@ -265,8 +270,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 99, "end": 199, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 99, "end": 199, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.0.weight", "_fpw_module.2.weight"],
                 param_shapes=[(10, 10), (10, 10)],
                 param_numels=[100, 100],
@@ -274,8 +279,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 100, "end": 199, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 100, "end": 199, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.2.weight"],
                 param_shapes=[(10, 10)],
                 param_numels=[100],
@@ -283,8 +288,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 100, "end": 299, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 100, "end": 299, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.2.weight", "_fpw_module.4.weight"],
                 param_shapes=[(10, 10), (10, 10)],
                 param_numels=[100, 100],
@@ -292,8 +297,8 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 100, "end": 1000, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 100, "end": 1000, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.2.weight", "_fpw_module.4.weight"],
                 param_shapes=[(10, 10), (10, 10)],
                 param_numels=[100, 100],
@@ -301,14 +306,38 @@ class TestFlattenParams(TestCase):
             ),
         )
         _test(
-            kwargs={"start": 299, "end": 299, "num_padded": 0},
-            expected=ShardMetadata(
+            kwargs={"begin": 299, "end": 299, "num_padded": 0},
+            expected=FlattenShardMetadata(
                 param_names=["_fpw_module.4.weight"],
                 param_shapes=[(10, 10)],
                 param_numels=[100],
                 param_offsets=[(99, 99)],
             ),
         )
+
+    def test_get_global_offset_from_param_offsets(self):
+        flat_p = self._create_flat_p()
+
+        param_offsets = [None, None, None]
+        begin, end = flat_p.get_global_offset_from_param_offsets(param_offsets)
+        self.assertEqual((begin, end), (0, 0))
+
+        param_offsets = [ParamOffset(0, 50), None, None]
+        begin, end = flat_p.get_global_offset_from_param_offsets(param_offsets)
+        self.assertEqual((begin, end), (0, 50))
+
+        param_offsets = [ParamOffset(99, 99), ParamOffset(0, 99), None]
+        begin, end = flat_p.get_global_offset_from_param_offsets(param_offsets)
+        self.assertEqual((begin, end), (99, 199))
+
+        param_offsets = [None, ParamOffset(0, 99), None]
+        begin, end = flat_p.get_global_offset_from_param_offsets(param_offsets)
+        self.assertEqual((begin, end), (100, 199))
+
+        param_offsets = [None, ParamOffset(50, 99), ParamOffset(0, 99)]
+        begin, end = flat_p.get_global_offset_from_param_offsets(param_offsets)
+        self.assertEqual((begin, end), (150, 299))
+
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "test requires a GPU")
