@@ -3240,7 +3240,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('stft'),
         xfail('linalg.solve_triangular'),
         xfail('nn.functional.glu'),
-        xfail('nn.functional.prelu'),
         xfail('isclose'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.bilinear'),
