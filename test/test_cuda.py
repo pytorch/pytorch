@@ -7,7 +7,6 @@ import contextlib
 import ctypes
 import gc
 import io
-import os
 import pickle
 import queue
 import sys
