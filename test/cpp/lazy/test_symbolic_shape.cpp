@@ -7,6 +7,7 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/torch.h>
 #include <iostream>
@@ -26,11 +27,11 @@ static inline at::DeviceType DefaultDevice() {
   return torch::lazy::getBackend()->EagerFallbackDeviceType();
 }
 
-const Shape& getShapeFromLazyTensor(at::Tensor& lazy_tensor) {
+std::vector<bool> getIsSymbolic(at::Tensor& lazy_tensor) {
   auto ltc_tensor = GetLtcTensor(lazy_tensor);
   Value ir_val = ltc_tensor->GetIrValue();
-  // Bit of a hack around the const
-  return ir_val->shape();
+  const Shape& shape = ir_val->shape();
+  return shape.is_symbolic().value();
 }
 
 class LazyTsTest : public ::testing::Test {
@@ -64,26 +65,83 @@ void LazyTsTest::SetUp() {
   at::manual_seed(42);
   torch::lazy::LazyGraphExecutor::Get()->SetRngSeed(
       torch::lazy::BackendDevice(), 42);
+  FLAGS_ltc_enable_symbolic_shapes = true;
 }
 
-} // namespace
-void LazyTsTest::TearDown() {}
+class DynamicInputShapeNode : public Node {
+ public:
+  explicit DynamicInputShapeNode(Shape& shape)
+      : Node(
+            OpKind(),
+            /* num_outputs */ 1,
+            /* hash_func */
+            [&](bool /*bakeInSizes*/) -> hash_t { return 0; }),
+        shape_(shape) {}
+  ~DynamicInputShapeNode() override = default;
 
-TEST_F(LazyShapeTest, TestAdd) {
-  // TODO: Figure out if this test is needed for Milestone 2
-  // Currently missing some pieces needed for this test
-  /*
-  torch::Tensor a = torch::rand(
-      {2, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  // set_is_dynamic(a, {true, false});
-  torch::Tensor b = torch::rand(
-      {2, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  // set_is_dynamic(b, {true, false});
-  torch::Tensor c = torch::add(a, b);
+  const std::vector<Output>& operands() const override {
+    TORCH_INTERNAL_ASSERT(false, "Can't access operands of test node");
+  }
+
+  const Output& operand(size_t i) const override {
+    TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
+  }
+  const Shape& shape(size_t i) const override {
+    return shape_;
+  }
+  c10::ArrayRef<Shape> shapes() const override {
+    return {shape_};
+  }
+
+ private:
+  Shape shape_;
+};
+
+} // namespace
+void LazyTsTest::TearDown() {
+  FLAGS_ltc_enable_symbolic_shapes = true;
+}
+
+Tensor tensorWithSymbolicShape(
+    const std::vector<int64_t>& sizes,
+    const std::vector<bool>& is_symbolic) {
+  Shape shape = Shape(torch::kFloat32, sizes);
+  Shape shape_with_symbolic = shape.with_symbolic_dims(is_symbolic);
+  auto n = torch::lazy::MakeNode<DynamicInputShapeNode>(shape_with_symbolic);
+  auto device = BackendDevice();
+  auto lt = torch::lazy::LazyTensor::Create(n, device);
+  return torch::lazy::CreateAtenFromLtcTensor(lt);
+}
+
+TEST_F(LazyShapeTest, TestAddBasic) {
+  // Basic propagation
+  torch::Tensor a = tensorWithSymbolicShape({2, 2}, {true, false});
+  torch::Tensor b = tensorWithSymbolicShape({2, 2}, {true, false});
+  torch::Tensor res = torch::mul(a, b);
+
   std::vector<bool> expected = {true, false};
-  EXPECT_EQ(getShapeFromLazyTensor(c).is_symbolic(), expected);
-  */
-  ASSERT_TRUE(true);
+  EXPECT_EQ(getIsSymbolic(res), expected);
+
+  // Test when some inputs are symbolic
+  a = tensorWithSymbolicShape({2, 2}, {true, true});
+  b = tensorWithSymbolicShape({2, 2}, {true, false});
+  res = torch::mul(a, b);
+
+  // This is not {true, false}, as the SSA shape propagation
+  // is not able to simplify
+  // expandedSizes.append(sizeB if sizeA == 1 else sizeA)
+  // in broadcast() in shape_functions_1.h
+  // due to sizeA being symbolic
+  expected = {true, true};
+  EXPECT_EQ(getIsSymbolic(res), expected);
+
+  // Test correct handling of broadcasting dim
+  a = tensorWithSymbolicShape({2, 2}, {false, true});
+  b = tensorWithSymbolicShape({2, 1}, {true, false});
+  res = torch::mul(a, b);
+
+  expected = {false, true};
+  EXPECT_EQ(getIsSymbolic(res), expected);
 };
 #endif // FBCODE_CAFFE2
 

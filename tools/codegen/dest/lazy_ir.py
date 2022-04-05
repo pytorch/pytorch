@@ -237,9 +237,8 @@ class GenLazyNativeFuncDefinition:
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
         # Calculating which dimmensions are symbolic
-        # func_schema_str = "aten::" + str(func.func)
-        # TODO: figure out if `aten::` is needed here
-        func_schema_str = str(func.func)
+        # TODO: figure out how to detect which ops are not in aten::
+        func_schema_str = "aten::" + str(func.func)
         meta_str += f"""
         if(symbolicShapeEnabled()){{
             std::vector<jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};

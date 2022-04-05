@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/lazy/core/hash.h>
 
+C10_DECLARE_bool(ltc_enable_symbolic_shapes);
+
 namespace torch {
 namespace lazy {
 
@@ -41,12 +43,10 @@ class TORCH_API Shape {
   const at::optional<std::vector<bool>>& is_symbolic() const {
     return is_symbolic_;
   }
-  c10::SymbolicShape get_symbolic_shape() const;
 
-  // Only sets is_symbolic, doesn't set concrete sizes
-  // Also throws away any information about which symbolic dims
-  // are the same size
-  void set_from_symbolic(c10::SymbolicShape&);
+  // Makes a copy with symbolic dims applied
+  Shape with_symbolic_dims(
+      c10::optional<std::vector<bool>> symbolic_dims) const;
 
   size_t numel() const;
   hash_t hash(bool bakeInSizes) const;

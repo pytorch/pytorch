@@ -43,31 +43,38 @@ hash_t Shape::hash(bool bakeInSizes) const {
   }
 }
 
-c10::SymbolicShape Shape::get_symbolic_shape() const {
-  if (!is_symbolic_) {
-    return c10::SymbolicShape();
-  }
-  TORCH_INTERNAL_ASSERT(
-      sizes_.size() == is_symbolic_->size(),
-      "Dims of two values are not consistent");
-  std::vector<c10::optional<int64_t>> symbolic_dims;
-  for (int64_t i = 0; i < sizes_.size(); i++) {
-    if (is_symbolic_->at(i)) {
-      symbolic_dims.emplace_back(c10::nullopt);
-    } else {
-      symbolic_dims.emplace_back(sizes_.at(i));
-    }
-  }
-  return c10::SymbolicShape(symbolic_dims);
-}
-
-void Shape::set_from_symbolic(c10::SymbolicShape& ss) {
-  is_symbolic_ = ss.concreteDims();
+Shape Shape::with_symbolic_dims(
+    c10::optional<std::vector<bool>> symbolic_dims) const {
+  Shape copy = *this;
+  copy.is_symbolic_ = symbolic_dims;
+  return copy;
 }
 
 bool symbolicShapeEnabled() {
   static bool enabled = std::getenv("LTC_ENABLE_SYMBOLIC_SHAPES") != nullptr;
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
+}
+
+c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
+  auto ltc_tensor = GetLtcTensor(tensor);
+  const Shape& input_shape = ltc_tensor->GetIrValue()->shape();
+  auto& is_symbolic = input_shape.is_symbolic();
+  if (!is_symbolic.has_value()) {
+    return c10::SymbolicShape();
+  }
+  auto sizes = input_shape.sizes();
+  TORCH_INTERNAL_ASSERT(
+      sizes.size() == is_symbolic->size(),
+      "Dims of two values are not consistent");
+  std::vector<c10::optional<int64_t>> symbolic_dims;
+  for (int64_t i = 0; i < sizes.size(); i++) {
+    if (is_symbolic->at(i)) {
+      symbolic_dims.emplace_back(c10::nullopt);
+    } else {
+      symbolic_dims.emplace_back(sizes.at(i));
+    }
+  }
+  return c10::SymbolicShape(symbolic_dims);
 }
 
 void applySymbolicShapesOnLT(
@@ -80,15 +87,15 @@ void applySymbolicShapesOnLT(
       jit::getOperatorForLiteral(schema_str)->schema();
 
   for (auto& arg : args) {
-    if (arg.isTensor()) {
-      auto ltc_tensor = GetLtcTensor(arg.toTensor());
-      MaybeRef<Shape> input_shape_ref = ltc_tensor->shape();
-      if (!input_shape_ref.IsStored()) {
-        converted_args.emplace_back(c10::SymbolicShape());
-        continue;
+    // Handle list of tensors
+    if (arg.isTensorList()) {
+      at::List<at::Tensor> tensor_list = arg.toTensorList();
+      for (at::Tensor tensor : tensor_list) {
+        converted_args.emplace_back(get_symbolic_shape(tensor));
       }
-      const Shape& input_shape = input_shape_ref.Get();
-      converted_args.emplace_back(input_shape.get_symbolic_shape());
+    } else if (arg.isTensor()) {
+      auto ss = get_symbolic_shape(arg.toTensor());
+      converted_args.emplace_back(ss);
     } else {
       // If we need to support symbolic ints, here is the place
       // to add it.
@@ -97,14 +104,18 @@ void applySymbolicShapesOnLT(
   }
   auto res_symbolic = jit::calculateSymbolicShapesOnOp(&schema, converted_args);
   if (!res_symbolic) {
-    // Failed to calculate symbolic shapes
-    return;
+    for (int64_t i = 0; i < res_symbolic->size(); i++) {
+      result_shapes[i] = result_shapes[i].with_symbolic_dims(c10::nullopt);
+    }
   } else {
     TORCH_INTERNAL_ASSERT(
         res_symbolic->size() == result_shapes.size(),
         "Result shape size is not consistent");
     for (int64_t i = 0; i < res_symbolic->size(); i++) {
-      result_shapes[i].set_from_symbolic(res_symbolic->at(i));
+      auto sym_dims = res_symbolic->at(i).symbolicDims();
+      if (sym_dims.has_value()) {
+        result_shapes[i] = result_shapes[i].with_symbolic_dims(*sym_dims);
+      }
     }
   }
 }
