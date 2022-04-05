@@ -19,9 +19,6 @@ void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
                  std::vector<int64_t> stride,
                  c10::optional<int64_t> storage_offset);
 
-torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input,
-                  std::vector<int64_t> size);
-
 // Fills the input with the given value.
 void fill_(torch::lazy::LazyTensorPtr& input, const at::Scalar& value);
 

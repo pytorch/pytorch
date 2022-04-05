@@ -295,8 +295,11 @@ at::Tensor LazyNativeFunctions::empty_strided(
 at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
                                        at::IntArrayRef size, bool implicit) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::expand(
-      torch::lazy::TryGetLtcTensor(self), size.vec()));
+
+  auto input = GetLtcTensor(self);
+  auto view_info = ViewInfo(ViewInfo::Type::kExpand, Shape(input->dtype(), size), input->shape());
+
+  return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
 }
 
 at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,

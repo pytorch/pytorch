@@ -7,6 +7,9 @@
 namespace torch {
 namespace lazy {
 
+// Expand can be constructed as a regular view op, or a scalar expand.
+// For the latter, it loses the is_alias_of check capability provided by view ops.
+// The above might not hold true after functionalization (@bdhirsh).
 class TORCH_API Expand : public TsNode {
  public:
   Expand(const Value& input, std::vector<int64_t> size, bool is_scalar_expand);

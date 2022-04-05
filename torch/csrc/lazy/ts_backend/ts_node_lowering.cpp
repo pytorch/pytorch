@@ -7,7 +7,6 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
-#include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 #include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
@@ -15,6 +14,7 @@
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/diagonal.h>
+#include <torch/csrc/lazy/core/view_ops/expand.h>
 #include <torch/csrc/lazy/core/view_ops/narrow.h>
 #include <torch/csrc/lazy/core/view_ops/narrow_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/permute.h>

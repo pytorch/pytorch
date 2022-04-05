@@ -6,6 +6,7 @@
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/diagonal.h>
 #include <torch/csrc/lazy/core/view_ops/diagonal_view_update.h>
+#include <torch/csrc/lazy/core/view_ops/expand.h>
 #include <torch/csrc/lazy/core/view_ops/narrow.h>
 #include <torch/csrc/lazy/core/view_ops/narrow_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/permute.h>
@@ -61,12 +62,18 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
           view_info.diagonal->offset,
           view_info.diagonal->dim1,
           view_info.diagonal->dim2);
+    case ViewInfo::Type::kExpand:
+      return MakeNode<Expand>(
+          ir_value,
+          view_info.shape.sizes().vec(),
+          /*is_scalar_expand=*/false);
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Invalid view type: ", GetEnumValue(view_info.view_type));
   }
 }
 
+// TODO(@alanwaketan): Why do we need *ViewUpdate IRs?
 Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
   std::vector<Value> tmp_values({ir_value});
@@ -125,6 +132,12 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
             view_info.diagonal->offset,
             view_info.diagonal->dim1,
             view_info.diagonal->dim2);
+        break;
+      case ViewInfo::Type::kExpand:
+        result = MakeNode<Expand>(
+            ir_value,
+            view_info.shape.sizes().vec(),
+            /*is_scalar_expand=*/false);
         break;
       default:
         TORCH_INTERNAL_ASSERT(
