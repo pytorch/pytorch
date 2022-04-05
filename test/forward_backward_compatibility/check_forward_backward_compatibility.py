@@ -50,6 +50,9 @@ ALLOW_LIST = [
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
+    ("aten::linalg_solve", datetime.date(2022, 5, 31)),
+    ("aten::linalg_solve.out", datetime.date(2022, 5, 31)),
+    ("aten::_solve_helper", datetime.date(2022, 5, 31)),
     ("aten::gelu", datetime.date(2022, 3, 1)),
     ("aten::gelu_backward", datetime.date(2022, 3, 1)),
     ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
@@ -107,6 +110,7 @@ ALLOW_LIST = [
     ("aten::_s_where", datetime.date(2022, 9, 30)),
     ("quantized::conv2d_cudnn", datetime.date(2022, 3, 22)),
     ("quantized::conv2d_relu_cudnn", datetime.date(2022, 3, 22)),
+    ("quantized::softmax", datetime.date(2022, 4, 15)),
     ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
 ]
