@@ -5301,8 +5301,8 @@ class TestLinalg(TestCase):
         pivots = (True, False) if self.device_type == "cuda" else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
-            m, n = ms
-            A = random_matrix(m, n, *batch, singular=singular, dtype=dtype, device=device)
+            shape = batch + ms
+            A = make_arg(shape) if singular else make_arg_full(*shape)
             # Just do one of them on singular matrices
             if A.numel() == 0 and not singular:
                 continue
