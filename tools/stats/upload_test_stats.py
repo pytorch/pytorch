@@ -4,10 +4,10 @@ import requests
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Any
 import datetime
 
-import rockset
+import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
@@ -19,7 +19,7 @@ REQUEST_HEADERS = {
 S3_RESOURCE = boto3.resource("s3")
 
 
-def parse_xml_report(report: Path, workflow_id: int):
+def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     # Retrieve the job id from the report path. In our GHA workflows, we append
     # the job id to the end of the report name, so `report` looks like:
@@ -30,7 +30,7 @@ def parse_xml_report(report: Path, workflow_id: int):
     print(f"Parsing test report: {report}, job id: {job_id}")
     root = ET.parse(
         report,
-        ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)),  # type: ignore [call-arg]
+        ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)),  # type: ignore[call-arg]
     )
 
     test_cases = []
@@ -43,9 +43,9 @@ def parse_xml_report(report: Path, workflow_id: int):
     return test_cases
 
 
-def process_xml_element(element):
+def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     """Convert a test suite element into a JSON-serializable dict."""
-    ret = {}
+    ret: Dict[str, Any] = {}
 
     # Convert attributes directly into dict elements.
     # e.g.
@@ -86,7 +86,7 @@ def process_xml_element(element):
     #    {"foo": {"text": "hello"}}
     for child in element:
         # Special handling for comments.
-        if child.tag is ET.Comment:
+        if child.tag is ET.Comment:  # type: ignore[comparison-overlap]
             ret["comment"] = child.text
         else:
             ret[child.tag] = process_xml_element(child)
@@ -110,7 +110,7 @@ def get_artifact_urls(workflow_run_id: int) -> Dict[Path, str]:
     return artifact_urls
 
 
-def unzip(p: Path):
+def unzip(p: Path) -> None:
     """Unzip the provided zipfile to a similarly-named directory.
 
     Returns None if `p` is not a zipfile.
@@ -124,7 +124,7 @@ def unzip(p: Path):
         zip.extractall(unzipped_dir)
 
 
-def download_and_extract_artifact(artifact_name: Path, artifact_url: str):
+def download_and_extract_artifact(artifact_name: Path, artifact_url: str) -> None:
     response = requests.get(artifact_url, headers=REQUEST_HEADERS)
     print(f"Downloading and extracting {artifact_name}")
     with open(artifact_name, "wb") as f:
@@ -132,7 +132,7 @@ def download_and_extract_artifact(artifact_name: Path, artifact_url: str):
     unzip(artifact_name)
 
 
-def download_and_extract_s3_reports(workflow_run_id: int):
+def download_and_extract_s3_reports(workflow_run_id: int) -> None:
     bucket = S3_RESOURCE.Bucket("gha-artifacts")
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/artifact/test-reports"
