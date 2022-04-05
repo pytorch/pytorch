@@ -1031,9 +1031,6 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
-           tensor or a NumPy array, copying otherwise.
-
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
 
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
@@ -8548,7 +8545,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
 add_docstr(torch.scatter_reduce, r"""
-scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
+scatter_reduce(input, dim, index, src, reduce) -> Tensor
 
 Reduces all values from the :attr:`input` tensor to the indices specified in
 the :attr:`index` tensor. For each value in :attr:`input`, its output index is
@@ -8587,15 +8584,13 @@ Args:
     src (Tensor): the source elements to scatter and reduce
     reduce (str): the reduction operation to apply for non-unique indices
         (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
-    output_size (int, optional): the size of the output at dimension :attr:`dim`.
-        If set to :obj:`None`, will get automatically inferred according to
-        :obj:`index.max() + 1`
 
 Example::
 
-    >>> input = torch.tensor([1, 2, 3, 4, 5, 6])
+    >>> src = torch.tensor([1, 2, 3, 4, 5, 6])
     >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
-    >>> torch.scatter_reduce(input, 0, index, reduce="sum", output_size=3)
+    >>> input = torch.zeros(3)
+    >>> torch.scatter_reduce(input, 0, index, src, reduce="sum")
     tensor([4, 12, 5])
 
 """.format(**reproducibility_notes))
@@ -9800,10 +9795,10 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension(s). Elements that are shifted beyond the
-last position are re-introduced at the first position. If a dimension is not
-specified, the tensor will be flattened before rolling and then restored
-to the original shape.
+Roll the tensor :attr:`input` along the given dimension(s). Elements that are
+shifted beyond the last position are re-introduced at the first position. If
+:attr:`dims` is `None`, the tensor will be flattened before rolling and then
+restored to the original shape.
 
 Args:
     {input}
@@ -9821,6 +9816,11 @@ Example::
             [3, 4],
             [5, 6],
             [7, 8]])
+    >>> torch.roll(x, 1)
+    tensor([[8, 1],
+            [2, 3],
+            [4, 5],
+            [6, 7]])
     >>> torch.roll(x, 1, 0)
     tensor([[7, 8],
             [1, 2],

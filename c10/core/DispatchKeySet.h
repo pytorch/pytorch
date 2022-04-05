@@ -821,7 +821,8 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
   // treatment;
   return (s - autograd_dispatch_keyset_with_ADInplaceOrView -
-          autocast_dispatch_keyset)
+          autocast_dispatch_keyset -
+          DispatchKeySet({DispatchKey::PythonTLSSnapshot, DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 
