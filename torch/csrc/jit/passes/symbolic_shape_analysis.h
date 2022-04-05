@@ -54,8 +54,6 @@ calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs);
 
-
-
 struct TORCH_API CanonicalizedSymbolicShape {
   CanonicalizedSymbolicShape(
       c10::SymbolicShape& orig_shape,
