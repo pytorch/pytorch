@@ -18,6 +18,19 @@ class PackageImporter(DefaultPackageImporter):
         file_or_buffer: Union[str, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
+        """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
+        allowed by ``module_allowed``
+
+        Args:
+            file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
+                a string, or an ``os.PathLike`` object containing a filename.
+            module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
+                should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
+                does not support. Defaults to allowing anything.
+
+        Raises:
+            ImportError: If the package will use a disallowed module.
+        """
         super(PackageImporter, self).__init__(
             file_or_buffer,
             module_allowed,
