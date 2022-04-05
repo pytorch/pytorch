@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,

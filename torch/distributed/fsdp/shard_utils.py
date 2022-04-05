@@ -127,7 +127,8 @@ def reshard_flatten_tensor(
     size = input_tensor.size()
     if isinstance(size, int):
         raise ValueError("The input tensor has no dimensions.")
-    tensor_numel = input_tensor.size().numel()
+    else:
+        tensor_numel = input_tensor.size().numel()
     input_offsets = _sharding_spec_to_offsets(input_spec, tensor_numel, world_size)
     output_offsets = _sharding_spec_to_offsets(output_spec, tensor_numel, world_size)
     input_split_sizes, output_split_sizes = _offsets_to_split_sizes(
