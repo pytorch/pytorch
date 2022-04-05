@@ -6617,7 +6617,10 @@ def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_s
     if same_size:
         return [make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous, low=low, high=high) for _ in range(N)]
     else:
-        return [make_tensor((N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous, low=low, high=high) for i in range(N)]
+        return [
+            make_tensor((N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous, low=low, high=high)
+            for i in range(N)
+        ]
 
 
 def get_foreach_method_names(name):
