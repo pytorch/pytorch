@@ -860,21 +860,14 @@ Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
   return output;
 }
 
-// This function is needed because structured_delegate currently does not
-// support quantized backends. This function may be able to be omitted in the
-// future if support for quantized backends is enabled for structured_delegate
-Tensor reflection_pad1d_quantized_cpu(const Tensor& input, IntArrayRef padding) {
-  TORCH_CHECK(input.qscheme() == kPerTensorAffine, "Only per tensor quantization is supported");
-  Tensor output = at::_empty_affine_quantized({0}, input.options(),
-                                           input.q_scale(),
-                                           input.q_zero_point());
-  reflection_pad1d_out_template(output, input, padding);
-  return output;
-}
-
 TORCH_IMPL_FUNC(reflection_pad1d_out_cpu)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
   reflection_pad1d_out_template(output, input, padding);
+}
+
+TORCH_IMPL_FUNC(reflection_pad1d_out_quantized_cpu)
+(const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  // TODO: implement this function
 }
 
 TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output_,
