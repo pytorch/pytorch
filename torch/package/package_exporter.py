@@ -23,9 +23,10 @@ from typing import (
     DefaultDict,
     Type,
 )
-from torch.types import Storage
 
 import torch
+from torch.serialization import location_tag, normalize_storage_type
+from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
@@ -33,12 +34,11 @@ from ._importlib import _normalize_path
 from ._mangling import demangle, is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
+from ._zip_file import PackageZipFileWriter
+from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
-from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
-from ._zip_file import PackageZipFileWriter
-from torch.serialization import location_tag, normalize_storage_type
 
 _gate_torchscript_serialization = True
 
@@ -190,7 +190,9 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        zip_file_writer_type: Type[PackageZipFileWriter] = TorchScriptPackageZipFileWriter
+        zip_file_writer_type: Type[
+            PackageZipFileWriter
+        ] = TorchScriptPackageZipFileWriter,
     ):
         """
         Create an exporter.
