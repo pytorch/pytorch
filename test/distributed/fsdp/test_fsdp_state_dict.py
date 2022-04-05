@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+from contextlib import suppress
 from copy import deepcopy
 from functools import partial
 from typing import Any, Dict
@@ -290,9 +291,10 @@ class TestFSDPStateDict(FSDPTest):
     def test_state_dict_skip_module(self, double_nest):
         torch.cuda.set_device(self.rank)
 
-        def _create_module():
+        def _create_module(wrap_fsdp=True):
             LINEAR_SKIP = "linear_skip"
-            with enable_wrap(wrapper_cls=FSDP):
+            ctx = enable_wrap(wrapper_cls=FSDP) if wrap_fsdp else suppress()
+            with ctx:
                 module = SkipModel(double_nest=double_nest)
                 # Full name of linear_skip param tensors in SkipModel, as would be
                 # stored in checkpoint.
