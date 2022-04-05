@@ -12,6 +12,7 @@
 
 #include <string>
 #include <ATen/cuda/llvm_jit_strings.h>
+#include <limits>
 
 
 namespace at {
