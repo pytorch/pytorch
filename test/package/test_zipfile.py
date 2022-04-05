@@ -5,10 +5,20 @@ from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
-from torch.package._zip_file import DefaultPackageZipFileReader, DefaultPackageZipFileWriter
-from torch.package._zip_file_torchscript import TorchScriptPackageZipFileReader, TorchScriptPackageZipFileWriter
+from torch.package._zip_file import (
+    DefaultPackageZipFileReader,
+    DefaultPackageZipFileWriter,
+)
+from torch.package._zip_file_torchscript import (
+    TorchScriptPackageZipFileReader,
+    TorchScriptPackageZipFileWriter,
+)
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     IS_FBCODE,
@@ -106,15 +116,19 @@ class ZipfileTest(PackageTestCase):
         zip_file = self.ZipfileReader(filename)
         zip_file_contents = zip_file.get_all_records()
         self.assertCountEqual(
-            zip_file_contents, ['.data/version',
-                                '.data/python_version',
-                                'my_cool_resources/sekrit.txt',
-                                'my_cool_resources/bar.txt',
-                                'my_less_cool_resources/another_one.txt',
-                                'my_less_cool_resources/foo.txt',
-                                'foo/bar.py',
-                                '.data/extern_modules']
+            zip_file_contents,
+            [
+                ".data/version",
+                ".data/python_version",
+                "my_cool_resources/sekrit.txt",
+                "my_cool_resources/bar.txt",
+                "my_less_cool_resources/another_one.txt",
+                "my_less_cool_resources/foo.txt",
+                "foo/bar.py",
+                ".data/extern_modules",
+            ],
         )
+
 
 class ZipfileTestNoTorch(ZipfileTest):
     def __init__(self, *args, **kwargs):
@@ -123,6 +137,7 @@ class ZipfileTestNoTorch(ZipfileTest):
         self.ZipfileReader = TorchScriptPackageZipFileReader
         self.PackageExporter = PackageExporterNoTorch
         self.PackageImporter = PackageImporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

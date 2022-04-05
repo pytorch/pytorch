@@ -6,9 +6,13 @@ from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, sys_importer
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
-from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
-from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -239,7 +243,9 @@ class TestSaveLoad(PackageTestCase):
 
         # Should export without error.
         buffer2 = BytesIO()
-        with self.PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+        with self.PackageExporter(
+            buffer2, importer=(importer, sys_importer)
+        ) as exporter:
             exporter.intern("**")
             exporter.save_module(imported_obj2_module)
 
@@ -258,15 +264,19 @@ class TestSaveLoad(PackageTestCase):
 
         # Should export without error.
         buffer2 = BytesIO()
-        with self.PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+        with self.PackageExporter(
+            buffer2, importer=(importer, sys_importer)
+        ) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
+
 
 class TestSaveLoadNoTorch(TestSaveLoad):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
+
 
 if __name__ == "__main__":
     run_tests()

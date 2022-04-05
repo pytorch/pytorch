@@ -1,25 +1,34 @@
+import io
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Union, BinaryIO, Callable, Dict
+
 import torch
+from torch.serialization import _get_restore_location
+
 from ._directory_reader_torchscript import TorchScriptDirectoryReader
 from ._zip_file_torchscript import TorchScriptPackageZipFileReader
-from torch.serialization import _get_restore_location
 from .package_importer_no_torch import _maybe_decode_ascii
 from .package_importer_no_torch import PackageImporter as DefaultPackageImporter
-from contextlib import contextmanager
-from typing import Any, Union, BinaryIO, Callable, Dict
-from pathlib import Path
-import io
+
 
 class PackageImporter(DefaultPackageImporter):
-
     def __init__(
         self,
         file_or_buffer: Union[str, Path, BinaryIO],
-        module_allowed: Callable[[str], bool] = lambda module_name: True
+        module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
-        super(PackageImporter, self).__init__(file_or_buffer, module_allowed, zip_file_reader_type=TorchScriptPackageZipFileReader)
+        super(PackageImporter, self).__init__(
+            file_or_buffer,
+            module_allowed,
+            zip_file_reader_type=TorchScriptPackageZipFileReader,
+        )
 
     def persistent_load(self, typename, data):
-        assert isinstance(self.zip_reader, (TorchScriptDirectoryReader, TorchScriptPackageZipFileReader))
+        assert isinstance(
+            self.zip_reader,
+            (TorchScriptDirectoryReader, TorchScriptPackageZipFileReader),
+        )
 
         def load_tensor(dtype, size, key, location, restore_location):
             assert self.loaded_storages is not None

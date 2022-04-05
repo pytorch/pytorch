@@ -19,10 +19,10 @@ from ._importlib import (
 )
 from ._mangling import PackageMangler, demangle
 from ._package_unpickler import PackageUnpickler
+from ._zip_file import PackageZipFileReader, DefaultPackageZipFileReader
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from .importer import Importer
-from ._zip_file import PackageZipFileReader, DefaultPackageZipFileReader
 
 
 def _maybe_decode_ascii(bytes_str: Union[bytes, str]) -> str:
@@ -33,8 +33,9 @@ def _maybe_decode_ascii(bytes_str: Union[bytes, str]) -> str:
     # NOTE: This should only be used on internal keys (e.g., `typename` and
     #       `location` in `persistent_load` below!
     if isinstance(bytes_str, bytes):
-        return bytes_str.decode('ascii')
+        return bytes_str.decode("ascii")
     return bytes_str
+
 
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
@@ -75,7 +76,7 @@ class PackageImporter(Importer):
         self,
         file_or_buffer: Union[str, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
-        zip_file_reader_type: Type[PackageZipFileReader] = DefaultPackageZipFileReader
+        zip_file_reader_type: Type[PackageZipFileReader] = DefaultPackageZipFileReader,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
         allowed by ``module_allowed``
@@ -251,7 +252,10 @@ class PackageImporter(Importer):
             :class:`Directory`
         """
         return _create_directory_from_file_list(
-            self.zip_reader.get_filename(), self.zip_reader.get_all_records(), include, exclude
+            self.zip_reader.get_filename(),
+            self.zip_reader.get_all_records(),
+            include,
+            exclude,
         )
 
     def python_version(self):
@@ -628,8 +632,11 @@ class _PackageResourceReader:
     def resource_path(self, resource):
         # The contract for resource_path is that it either returns a concrete
         # file system path or raises FileNotFoundError.
-        if self.importer.zip_reader.is_directory() and self.importer.zip_reader.has_record(
-            os.path.join(self.fullname, resource)
+        if (
+            self.importer.zip_reader.is_directory()
+            and self.importer.zip_reader.has_record(
+                os.path.join(self.fullname, resource)
+            )
         ):
             return os.path.join(
                 self.importer.zip_reader.get_filename(), self.fullname, resource
