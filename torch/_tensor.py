@@ -24,9 +24,12 @@ def _wrap_type_error_to_not_implemented(f):
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
-    def wrapped(*args, **kwargs):
+    def wrapped(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(wrapped, (self, other), self, other)
+
         try:
-            return f(*args, **kwargs)
+            return f(self, other)
         except TypeError:
             return NotImplemented
     return wrapped
@@ -613,14 +616,10 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
     @_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
@@ -630,8 +629,6 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -679,8 +676,6 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
         return torch.matmul(other, self)
 
     __pos__ = _C._TensorBase.positive
@@ -844,6 +839,9 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage_type, (self,), self)
+
         return self.storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
