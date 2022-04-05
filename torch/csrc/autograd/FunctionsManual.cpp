@@ -190,8 +190,10 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
 }
 
 Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  // NB: zero entries of `norm` (and in one case, `self`) are replaced with something
-  // arbitrary (such as ones) to avoid division by zero.
+  // NB: zero entries of `norm` or `self` (for p < 1.0) are replaced with something
+  // arbitrary (such as ones) to avoid division by zero. Though output value will then
+  // later replaced with zeros after division, we cannot simply replace with inf from the
+  // outset because the numerator may also sometimes be zero.
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -224,8 +226,8 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     scale_v = grad / nb_max;
     return self_scaled * scale_v;
   } else if (p < 1.0) {
-    auto norm_eq_zero = norm == 0;
-    self_scaled = self.sgn() * self.abs().masked_fill_(self == 0, 1.).pow_(p - 1).masked_fill_(self == 0, 0);
+    auto self_eq_zero = self == 0;
+    self_scaled = self.sgn() * self.abs().masked_fill_(self_eq_zero, 1.).pow_(p - 1).masked_fill_(self_eq_zero, 0);
     return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
     auto norm_eq_zero = norm == 0;
