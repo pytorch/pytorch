@@ -43,7 +43,7 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
-TEST_CUDAMALLOCASYNC = (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
+TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
