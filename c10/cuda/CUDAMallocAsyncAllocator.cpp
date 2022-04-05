@@ -268,7 +268,7 @@ inline void free_impl(PtrInfo::iterator& it) {
   ptr_info.erase(it);
 }
 
-void free(void* ptr) {
+void freeAsync(void* ptr) {
   std::lock_guard<std::mutex> lk(general_mutex);
 
   auto it = ptr_info.find(ptr);
@@ -277,7 +277,7 @@ void free(void* ptr) {
 
   if (C10_UNLIKELY(capture_underway)) {
     if (!it->second.captured) {
-      TORCH_WARN_ONCE("free() was called on an uncaptured allocation during graph capture "
+      TORCH_WARN_ONCE("freeAsync() was called on an uncaptured allocation during graph capture "
                       "(address = ", ptr,
                       "). This may be benign, for example, a Python tensor in the capture "
                       "might happen to shadow (use the same name as) an unrelated temporary "
@@ -308,7 +308,7 @@ void free(void* ptr) {
 
 // Symmetric with NativeCachingAllocator::malloc for now,
 // although I don't think we absolutely need the symmetry.
-void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
+void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
   TORCH_INTERNAL_ASSERT(
       0 <= device && static_cast<size_t>(device) < device_count,
       "Invalid device index ",
@@ -382,7 +382,7 @@ struct CudaMallocAsyncAllocator : public Allocator {
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
-      malloc(&r, device, size, cuda::getCurrentCUDAStream(device));
+      mallocAsync(&r, device, size, cuda::getCurrentCUDAStream(device));
     }
     return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
   }
@@ -505,17 +505,31 @@ void cacheInfo(int device, size_t* maxWorkspaceGuess) {
   C10_CUDA_CHECK(cudaMemGetInfo(&free_upper_bound, &device_total));
   TORCH_INTERNAL_ASSERT(free_upper_bound + pytorch_used_bytes[device] <= device_total);
   size_t guess = std::min(free_upper_bound, pytorch_memory_limits[device] - pytorch_used_bytes[device]);
-
+  auto stream = c10::cuda::getCurrentCUDAStream();
   void* dummy;
+
+  // Defensively checks for preexisting CUDA error state.
+  auto err = cudaGetLastError();
+  C10_CUDA_CHECK(err);
+
   while(true) {
-    try {
-      malloc(&dummy, device, guess, c10::cuda::getCurrentCUDAStream());
-      free(dummy);
+    // Duplicates some logic from mallocAsync to work with the error state directly
+    // instead of repeatedly catching an exception thrown by mallocAsync.
+    if (pytorch_used_bytes[device] + guess > pytorch_memory_limits[device]) {
+      err = cudaErrorMemoryAllocation;
+    } else {
+      err = cudaMallocAsync(devPtr, guess, stream);
+    }
+
+    if (err == cudaSuccess) {
+      cudaFreeAsync(dummy, stream);
       *maxWorkspaceGuess = guess;
       return;
-    } catch (c10::CUDAOutOfMemoryError &e) {
+    } else if (err == cudaErrorMemoryAllocation) {
       cudaGetLastError(); // clear CUDA error
       guess >>= 1; // quick and dirty: try half the size next iteration
+    } else {
+      C10_CUDA_CHECK(err);
     }
   }
 }
@@ -603,7 +617,7 @@ DeviceStats getDeviceStats(int device) {
   // Their "struct Stat"s will contain zeroed values.
   DeviceStats stats;
 
-  // In the native allocator,
+  // In the native allocator:
   // allocated_bytes is the total bytes of blocks that have been malloc()ed
   // and not yet free()d.
   // active_bytes is the total bytes of blocks that have been malloc()ed but not yet
@@ -611,8 +625,9 @@ DeviceStats getDeviceStats(int device) {
   // as well as the bytes of "limbo state" blocks had have already been free()ed but
   // not yet free_block()ed back into a pool due to outstanding stream_uses.
   //
-  // Here, we simply ask the driver's opinion about active memory,
-  // and don't bother distinguishing between allocated_bytes and active_bytes.
+  // Here, in the cudaMallocAsync allocator:
+  // We simply ask the driver's opinion about active memory.
+  // We don't bother distinguishing between allocated_bytes and active_bytes.
   stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current = used_mem_current;
   stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak = used_mem_peak;
   stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].current = used_mem_current;
@@ -726,9 +741,9 @@ void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   // A: I don't think so.
   //    Those allocations survived capture because the user held
   //    explicit tensor references to them,
-  //    Those tensors' destructors will call free() on each pointer
+  //    Those tensors' destructors will call freeAsync() on each pointer
   //    when the user is done with them.
-  //    The free()s will probably incur
+  //    The freeAsync()s will probably incur
   //    TORCH_WARN("Attempting uncaptured free of a captured allocation..."
   //    but stale ptrs will not permanently leak into ptr_info.
 }
@@ -740,7 +755,7 @@ void* raw_alloc(size_t nbytes) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
+  mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
   return r;
 }
 
@@ -751,12 +766,12 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  malloc(&r, device, nbytes, stream);
+  mallocAsync(&r, device, nbytes, stream);
   return r;
 }
 
 void raw_delete(void* ptr) {
-  free(ptr);
+  freeAsync(ptr);
 }
 
 #else
