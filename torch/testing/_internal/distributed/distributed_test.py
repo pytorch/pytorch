@@ -1151,7 +1151,7 @@ class DistributedTest:
             )
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
-            
+
             real_group_ranks_res1 = list(_pg_group_ranks[subgroup1].keys())
             real_group_ranks_res2 = list(_pg_group_ranks[subgroup2].keys())
             expect_group_ranks_res1 = (rank // subgroup_size1 * subgroup_size1 + np.array(list(range(subgroup_size1)))).tolist()
