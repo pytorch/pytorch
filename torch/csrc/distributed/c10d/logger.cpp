@@ -329,6 +329,14 @@ void Logger::set_runtime_stats_and_log() {
     );
     return;
   }
+  if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
+    TORCH_WARN_ONCE(
+      "Time stats are currently only collected for CPU and CUDA devices. "
+      "Please refer to CpuTimer or CudaTimer for how to register timer "
+      "for other device type."
+    );
+    return;
+  }
   TORCH_INTERNAL_ASSERT(reducer_->timer_);
   calculate_avg_time(
       ddp_logging_data_->ints_map["avg_forward_compute_time"],
