@@ -4869,6 +4869,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.mul, operator.imul, torch.ops.quantized.mul)
         self._test_binary_op_float16_impl(operator.mul, operator.imul)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_sum(self):
         class Sum(torch.nn.Module):
             def forward(self, x):
@@ -4892,6 +4893,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=node_occurrence,
             custom_qconfig_dict=custom_qconfig_dict)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
             def __init__(self):
@@ -5441,6 +5443,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_gelu_reference(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -5465,6 +5468,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_softmax_reference(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -5488,6 +5492,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_silu_reference(self):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
@@ -5519,6 +5524,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_mish_reference(self):
         module = torch.nn.Mish
         functional = torch.nn.functional.mish

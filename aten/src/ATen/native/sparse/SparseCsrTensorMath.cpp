@@ -638,25 +638,19 @@ void add_out_dense_sparse_csr_cpu(
       " in add operation");
 
   auto src_values = src.values();
+  auto src_crow_indices = src.crow_indices();
+  auto src_col_indices = src.col_indices();
 
   resize_output(out, dense.sizes());
 
   Tensor resultBuffer = out;
+  Tensor valuesBuffer = src_values.to(commonDtype);
 
   if (out.scalar_type() != commonDtype) {
     resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(out, dense)) {
     resultBuffer.copy_(dense);
   }
-
-  if (src._nnz() == 0) {
-    return;
-  }
-
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
-  resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kHalf,
@@ -677,26 +671,27 @@ void add_out_dense_sparse_csr_cpu(
              &alpha,
              &src_crow_indices,
              &src_col_indices]() {
-              auto batch_count = resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
-              auto values_accessor = valuesBuffer.accessor<scalar_t, 2>();
+              auto values_accessor = valuesBuffer.accessor<scalar_t, 1>();
               scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
               scalar_t cast_value = alpha.to<scalar_t>();
 
               auto crow_indices_accessor =
-                  src_crow_indices.accessor<index_t, 2>();
+                  src_crow_indices.accessor<index_t, 1>();
               auto col_indices_accessor =
-                  src_col_indices.accessor<index_t, 2>();
-              auto out_strides = resultBuffer.strides();
+                  src_col_indices.accessor<index_t, 1>();
+              auto out_strides0 = resultBuffer.strides()[0];
+              auto out_strides1 = resultBuffer.strides()[1];
 
-              for (const auto batch_idx : c10::irange(batch_count)) {
-                for (const auto irow : c10::irange(src_crow_indices.size(-1) - 1)) {
-                  index_t start_index = crow_indices_accessor[batch_idx][irow];
-                  index_t end_index = crow_indices_accessor[batch_idx][irow + 1];
-                  for (const auto i : c10::irange(start_index, end_index)) {
-                    auto icol = col_indices_accessor[batch_idx][i];
-                    auto index = batch_idx * out_strides[0] + irow * out_strides[1] + icol * out_strides[2];
-                    out_ptr[index] += cast_value * values_accessor[batch_idx][i];
-                  }
+              for (index_t irow = 0; irow < src_crow_indices.size(0) - 1;
+                   ++irow) {
+                index_t start_index = crow_indices_accessor[irow];
+                index_t end_index = crow_indices_accessor[irow + 1];
+
+                for (index_t i = start_index; i < end_index; ++i) {
+                  auto icol = col_indices_accessor[i];
+                  auto index = resultBuffer.storage_offset() +
+                      irow * out_strides0 + icol * out_strides1;
+                  out_ptr[index] += cast_value * values_accessor[i];
                 }
               }
             });
