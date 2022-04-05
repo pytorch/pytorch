@@ -625,8 +625,6 @@ class TestOperators(TestCase):
         xfail('index_put', ''),
         xfail('lu_solve'),
         xfail('index_copy'),
-        xfail('nn.functional.gelu', device_type='cpu'),
-
         xfail('linalg.lu_factor', ''),
     })
 
@@ -703,9 +701,6 @@ class TestOperators(TestCase):
         xfail('nanquantile'),
         xfail('quantile'),
 
-        # RuntimeError: vmap: inplace arithmetic(self, *extra_args)
-        xfail('nn.functional.gelu', device_type='cpu'),
-
         # Not implemented
         xfail('scatter'),
 
@@ -778,7 +773,6 @@ class TestOperators(TestCase):
         xfail('maximum'),
         xfail('linalg.householder_product'),
         xfail('tensor_split'),
-        xfail('nn.functional.gelu', device_type='cpu'),
         xfail('quantile'),
         xfail('var_mean'),
         xfail('as_strided'),
