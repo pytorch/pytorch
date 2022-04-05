@@ -1615,7 +1615,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
                 else:
                     self.assertTrue(
-                        (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
+                        (base_op in FUNS_IO_TYPE_FP32) or \
+                        (base_op in MODS_IO_TYPE_FP32) or \
+                        (base_op in MODS_IO_TYPE_FP32_OR_INT8),
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
 
     @skipIfNoFBGEMM
