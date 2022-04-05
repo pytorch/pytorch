@@ -12,7 +12,7 @@ namespace c10 {
 struct IValue;
 class OperatorHandle;
 struct TensorImpl;
-struct TorchDispatchTypeObject;
+struct SafePyObject;
 } // namespace c10
 
 namespace torch {
@@ -124,7 +124,8 @@ struct C10_API PyInterpreter {
       const PyInterpreter*,
       const c10::OperatorHandle&,
       torch::jit::Stack* stack,
-      const std::shared_ptr<TorchDispatchTypeObject>& type);
+      // This is a Tensor subclass type object
+      const std::shared_ptr<SafePyObject>& type);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -170,7 +171,7 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
-      const std::shared_ptr<TorchDispatchTypeObject>& type) const {
+      const std::shared_ptr<SafePyObject>& type) const {
     return (*dispatch_fn_)(this, op, stack, type);
   }
 
