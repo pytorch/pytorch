@@ -34,7 +34,10 @@ from .quantization_patterns import (
     StandaloneModuleQuantizeHandler,
 )
 
-from .quantization_types import Pattern
+from .quantization_types import (
+    Pattern,
+    NodePattern
+)
 
 from ._equalize import (
     is_equalization_observer,
@@ -90,6 +93,7 @@ from .backend_config.utils import (
     get_pattern_to_input_type_to_index,
     get_module_to_qat_module,
     get_native_quant_patterns,
+    get_fusion_pattern_to_root_node_getter,
 )
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
@@ -180,7 +184,7 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
 
 def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
-    matched_nodes: Optional[List[Node]],
+    matched_node_pattern: Optional[NodePattern],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     backend_config_dict: Optional[Dict[str, Any]]
 ) -> bool:
@@ -189,14 +193,15 @@ def is_pattern_dtype_config_supported_by_backend(
     """
     if backend_config_dict is None or pattern is None:
         return True
-    assert matched_nodes is not None and len(matched_nodes) >= 1
+    assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
     dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
 
-    # TODO: this only checks one input and one output, need to generalize to multiple
+    # TODO: this only works for one input and one output patterns, need to generalize to multiple
     # inputs/output
-    input_node = matched_nodes[-1]
-    output_node = matched_nodes[0]
+    root_node = _default_root_node_getter(matched_node_pattern)
+    input_node = root_node
+    output_node = matched_node_pattern[0]
     for dtype_config in dtype_configs:
         # check if arg dtype are supported
         supported = True
@@ -246,6 +251,19 @@ def qat_swap_modules(
         root: torch.nn.Module,
         module_to_qat_module: Dict[Callable, Callable]) -> None:
     convert(root, mapping=module_to_qat_module, inplace=True, remove_qconfig=False)
+
+def add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: Set[str]):
+    if isinstance(matched_node_pattern, Node):
+        s.add(matched_node_pattern.name)
+    elif isinstance(matched_node_pattern, (list, tuple)):
+        for maybe_node in matched_node_pattern:
+            add_matched_node_name_to_set(maybe_node, s)
+
+# this is temporary, will be removed soon
+def _default_root_node_getter(node_pattern):
+    while not isinstance(node_pattern, Node):
+        node_pattern = node_pattern[-1]
+    return node_pattern
 
 # TODO: remove observed_op, looks like it's not used
 def insert_observer(
@@ -686,7 +704,7 @@ def maybe_insert_output_observer_for_node(
 
     If `node` does not need an output observer, returns None.
     """
-    root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+    root_node, _, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
 
     if qhandler is None:
@@ -839,7 +857,7 @@ def maybe_propagate_dtype_for_node(
     node_name_to_target_dtype[node.name]["input_activation_dtype"] = target_dtype
     node_name_to_target_dtype[node.name]["output_activation_dtype"] = target_dtype
     # if this is a copy node, propagate to first arg
-    root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+    root_node, _, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
     if qhandler is not None and qhandler.is_general_tensor_value_op():
         prev_node = node.args[0]
@@ -1078,7 +1096,7 @@ def insert_observers_for_model(
     # other nodes output dtype is specified by the qconfig
     modules = dict(model.named_modules(remove_duplicate=False))
     for node in model.graph.nodes:
-        root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+        root_node, _, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
         node_name_to_target_dtype[node.name] = get_target_activation_dtype_for_node(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
@@ -1119,7 +1137,7 @@ def insert_observers_for_model(
 
         elif node.op in ('call_module', 'call_method', 'call_function', 'output'):
             # check for matches
-            root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+            last_node, matched_node_pattern, pattern, qhandler, qconfig = matches.get(
                 node.name, (None, None, None, None, None))
             equalization_qconfig = equalization_config_map.get(node.name, None)
 
@@ -1138,15 +1156,14 @@ def insert_observers_for_model(
             )
 
             is_supported_by_backend = is_pattern_dtype_config_supported_by_backend(
-                pattern, matched_nodes, node_name_to_target_dtype, backend_config_dict)
+                pattern, matched_node_pattern, node_name_to_target_dtype, backend_config_dict)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
-                    assert matched_nodes is not None
+                    assert matched_node_pattern is not None
                     # add matched nodes to the observed node name set
-                    for n in matched_nodes:
-                        observed_node_names.add(n.name)
+                    add_matched_node_name_to_set(matched_node_pattern, observed_node_names)
 
                     # This is currently only used for equalization.
                     # Checks if the current node is in a branch in which the two
@@ -1176,7 +1193,8 @@ def insert_observers_for_model(
                     # TODO: this only works for sequential fusion right now, extend it
                     # it to automatically detect all input nodes based on the pattern
                     # need to change find_matches function to return this information
-                    is_input_node_of_the_pattern = matched_nodes[-1] is node
+                    root_node = _default_root_node_getter(matched_node_pattern)
+                    is_input_node_of_the_pattern = node is root_node
                     if is_input_node_of_the_pattern:
                         # this modifies node inplace
                         maybe_insert_input_observers_for_node(
@@ -1191,7 +1209,7 @@ def insert_observers_for_model(
                             node, equalization_qconfig, model, modules, graph,
                             node_name_to_target_dtype, is_quantized_branch)
 
-                    is_last_node_of_pattern = root_node is node
+                    is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
                         (qhandler is not None and qhandler.is_general_tensor_value_op())
 
@@ -1273,7 +1291,7 @@ def run_prepare_fx_on_standalone_modules(
     """
     for (
         node_name,
-        (root_node, matched_nodes, pattern, qhandler, qconfig),
+        (root_node, _, pattern, qhandler, qconfig),
     ) in matches.items():
         if qhandler is None:
             continue
@@ -1375,6 +1393,7 @@ def prepare(
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
         patterns = get_native_quant_patterns(additional_quant_patterns)
+        root_node_getter_mapping = {}
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
         patterns = sorted_patterns_dict(patterns)
@@ -1396,6 +1415,9 @@ def prepare(
                     index_dict[pattern].append(index)  # type: ignore[index]
                 else:
                     index_dict[pattern] = [index]  # type: ignore[index]
+
+        root_node_getter_mapping = \
+            get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
@@ -1443,8 +1465,8 @@ def prepare(
     custom_module_classes = get_custom_module_class_keys(
         prepare_custom_config_dict, "float_to_observed_custom_module_class")
     matches = find_matches(
-        model.graph, modules, patterns, qconfig_map, standalone_module_names,
-        standalone_module_classes, custom_module_classes)
+        model.graph, modules, patterns, root_node_getter_mapping, qconfig_map,
+        standalone_module_names, standalone_module_classes, custom_module_classes)
 
     input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
         "input_quantized_idxs", [])
