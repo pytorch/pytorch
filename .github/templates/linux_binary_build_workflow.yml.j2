@@ -148,12 +148,6 @@ jobs:
             echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
             popd
 {%- endif %}
-{%- if ( config["gpu_arch_type"] == "rocm" and "libtorch_variant" in config and
-       ( config["libtorch_variant"] == "shared-without-deps" or config["libtorch_variant"] == "static-without-deps" ) ) %}
-      - name: ROCm set LD_LIBRARY_PATH for without-deps testing
-        run: |
-          echo "LD_LIBRARY_PATH=/opt/rocm/lib" >> "${GITHUB_ENV}"
-{%- endif %}
       - name: Pull Docker image
         run: |
           !{{ common.add_retry_to_env() }}

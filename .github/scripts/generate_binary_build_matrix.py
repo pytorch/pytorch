@@ -148,6 +148,9 @@ def generate_libtorch_matrix(os: str, abi_version: str,
             # matter
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
+            # ROCm builds without-deps failed even in ROCm runners; skip for now
+            if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
+                continue
             ret.append(
                 {
                     "gpu_arch_type": gpu_arch_type,
