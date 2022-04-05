@@ -322,12 +322,17 @@ TEST(DispatchKeySet, getHighestPriorityBackendTypeId) {
   ASSERT_EQ(DispatchKey::CPU, c10::highestPriorityBackendTypeId(dense_cpu));
 
   // Functionalize isn't a backend key so it is ignored
-  DispatchKeySet sparse_cuda({DispatchKey::Functionalize, DispatchKey::SparseCUDA});
-  ASSERT_EQ(DispatchKey::SparseCUDA, c10::highestPriorityBackendTypeId(sparse_cuda));
+  DispatchKeySet sparse_cuda(
+      {DispatchKey::Functionalize, DispatchKey::SparseCUDA});
+  ASSERT_EQ(
+      DispatchKey::SparseCUDA, c10::highestPriorityBackendTypeId(sparse_cuda));
 
   // quantizedCUDA has higher priority than CUDA
-  DispatchKeySet quantized_cuda({DispatchKey::CUDA, DispatchKey::QuantizedCUDA});
-  ASSERT_EQ(DispatchKey::QuantizedCUDA, c10::highestPriorityBackendTypeId(quantized_cuda));
+  DispatchKeySet quantized_cuda(
+      {DispatchKey::CUDA, DispatchKey::QuantizedCUDA});
+  ASSERT_EQ(
+      DispatchKey::QuantizedCUDA,
+      c10::highestPriorityBackendTypeId(quantized_cuda));
 }
 
 TEST(DispatchKeySet, IteratorEmpty) {

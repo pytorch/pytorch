@@ -732,14 +732,15 @@ constexpr auto autograd_privateuse3_ks =
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 
 // This keyset has:
-// (1) the functionality bits corresponding to backends (dense, sparse, quantized)
-// (2) all of the backend bits set
-constexpr DispatchKeySet backend_functionality_keys = DispatchKeySet({
-    DispatchKey::Dense,
-    DispatchKey::Quantized,
-    DispatchKey::Sparse,
-}) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
-
+// (1) the functionality bits corresponding to backends (dense, sparse,
+// quantized) (2) all of the backend bits set
+constexpr DispatchKeySet backend_functionality_keys =
+    DispatchKeySet({
+        DispatchKey::Dense,
+        DispatchKey::Quantized,
+        DispatchKey::Sparse,
+    }) |
+    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
 struct OpTableOffsetAndMask {
   uint16_t offset;
@@ -818,8 +819,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
 // This is basically like highestBackendKey(), except that we have some
 // "functionality" bits that correspond to backends (Sparse, Quantized)
 inline DispatchKey highestPriorityBackendTypeId(DispatchKeySet ks) {
-  auto backend_key = (ks & backend_functionality_keys).highestPriorityTypeId();
-  return backend_key;
+  return (ks & backend_functionality_keys).highestPriorityTypeId();
 }
 
 // This API exists because we have a use case for checking
