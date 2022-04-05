@@ -1,11 +1,26 @@
-from torch.distributed.fsdp.shard_utils import (
-    _offsets_to_split_sizes,
+import torch
+from torch.distributed._shard.sharding_spec import (
+    ChunkShardingSpec,
+    EnumerableShardingSpec,
+)
+from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
+    Shard,
+    ShardMetadata,
+)
+from torch.distributed.distributed_c10d import _get_default_group
+from torch.testing._internal.common_fsdp import (
+    FSDPTest,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
 )
+from torch.distributed.fsdp.shard_utils import (
+    _offsets_to_split_sizes,
+    reshard_flatten_tensor,
+)
 
-class TestUtils(TestCase):
+class TestShardUtils(TestCase):
     def test_offsets_to_split_sizes(self):
         tensor_numel = 40
 
@@ -98,3 +113,73 @@ class TestUtils(TestCase):
             [0, 0, 0, 0, 0, 0],
         ]
         _get_and_check_split_sizes(world_size, in_offsets, out_offsets, in_split_sizes)
+
+class TestShardUtilsDistributed(FSDPTest):
+    @property
+    def world_size(self):
+        return 2
+
+    def _create_local_chunk(self, tensor):
+        chunk = tensor.chunk(2)[self.rank]
+        offsets = [0] if self.rank == 0 else [tensor.shape[0] - chunk.shape[0]]
+        shard = Shard.from_tensor_and_offsets(chunk, offsets, self.rank)
+        return init_from_local_shards([shard], tensor.numel())
+
+    def _create_enumerate_spec(self, tensor):
+        # Since placement is not used, always set placement to rank0 to mimic
+        # the actual usage.
+        metadata = [
+            ShardMetadata([0], [101], placement="rank0/cuda:0"),
+            ShardMetadata([101], [900], placement="rank0/cuda:0"),
+        ]
+        return EnumerableShardingSpec(metadata)
+
+    def _create_chunk_spec(self):
+        return ChunkShardingSpec(dim=0, placements=["rank0/cuda:0"])
+
+    def _create_tensor(self):
+        # Keep everything deterministic.
+        torch.manual_seed(0)
+        return torch.rand(1001).cuda()
+
+    def test_reshard_flatten_tensor(self):
+        def get_offsets(tensor, shard):
+            if self.rank == 0:
+                return [0]
+            else:
+                return [tensor.shape[0] - shard.shape[0]]
+
+        tensor = self._create_tensor()
+
+        shard = reshard_flatten_tensor(
+            self._create_local_chunk(tensor),
+            self._create_enumerate_spec(tensor),
+            self.world_size,
+            self.rank,
+            tensor.device,
+            _get_default_group(),
+        )
+        offsets = [0] if self.rank == 0 else [tensor.shape[0] - shard.shape[0]]
+        shard = Shard.from_tensor_and_offsets(shard, offsets, self.rank)
+        uneven_sharded_tensor = init_from_local_shards([shard], tensor.numel())
+
+        shard = reshard_flatten_tensor(
+            uneven_sharded_tensor,
+            self._create_chunk_spec(),
+            self.world_size,
+            self.rank,
+            tensor.device,
+            _get_default_group(),
+        )
+        offsets = [0] if self.rank == 0 else [tensor.shape[0] - shard.shape[0]]
+        shard = Shard.from_tensor_and_offsets(shard, offsets, self.rank)
+        even_sharded_tensor = init_from_local_shards([shard], tensor.numel())
+
+        output = torch.empty(tensor.shape).cuda() if self.rank == 0 else None
+        even_sharded_tensor.gather(0, output)
+        if self.rank == 0:
+            self.assertEqual(tensor, output)
+        output = torch.empty(tensor.shape).cuda() if self.rank == 0 else None
+        uneven_sharded_tensor.gather(0, output)
+        if self.rank == 0:
+            self.assertEqual(tensor, output)

@@ -100,7 +100,7 @@ def reshard_flatten_tensor(
     my_rank: int,
     device: torch.device,
     process_group: Optional[ProcessGroup],
-) -> ShardedTensor:
+) -> torch.Tensor:
     """
     Resharded a sharded flatten tensor, this is used by FSDP to do sharded
     state_dict. But the functionaility is not supported by ShardedTensor.
@@ -124,6 +124,9 @@ def reshard_flatten_tensor(
     """
 
     input_spec = input_tensor.sharding_spec()
+    size = input_tensor.size()
+    if isinstance(size, int):
+        raise ValueError("The input tensor has no dimensions.")
     tensor_numel = input_tensor.size().numel()
     input_offsets = _sharding_spec_to_offsets(input_spec, tensor_numel, world_size)
     output_offsets = _sharding_spec_to_offsets(output_spec, tensor_numel, world_size)
