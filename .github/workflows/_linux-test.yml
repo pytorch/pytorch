@@ -97,7 +97,7 @@ jobs:
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
           export COMMIT_MESSAGES
 
           # detached container should get cleaned up by teardown_ec2_linux
