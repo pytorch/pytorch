@@ -973,7 +973,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.poisson_nll_loss'),
         xfail('nn.functional.bilinear'),
-        xfail('nn.functional.prelu'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
