@@ -363,6 +363,22 @@ Tensor linalg_lu_solve_jvp(
   const Tensor& dB,
   const bool left,
   const bool adjoint);
+std::tuple<Tensor, Tensor> linalg_solve_backward(
+  const Tensor& gX,
+  const Tensor& X,
+  const Tensor& A,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const bool left,
+  const bool B_requires_grad);
+Tensor linalg_solve_jvp(
+  const Tensor& dA,
+  const Tensor& dB,
+  const Tensor& X,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const bool left,
+  const bool use_A_T);
 Tensor lu_unpack_backward(
   const Tensor& L_grad,
   const Tensor& U_grad,
@@ -490,6 +506,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result
 );
 
