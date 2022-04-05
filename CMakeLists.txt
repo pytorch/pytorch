@@ -320,6 +320,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
 cmake_dependent_option(
+    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
+    "USE_C10D_NCCL" OFF)
+cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
@@ -795,6 +798,8 @@ if(NOT MSVC)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
+    # sign-compare is not part of -Wall, see https://godbolt.org/z/s1YczM41T
+    string(APPEND CMAKE_CXX_FLAGS " -Wsign-compare")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
