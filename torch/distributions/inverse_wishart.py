@@ -175,14 +175,20 @@ class InverseWishart(ExponentialFamily):
 
     @property
     def mean(self):
+        r"""
+        .. warning::
+            If the covariance matrix is singular, elementwise variance of the
+            Inverse Wishart distribution can be caculated only for ndim > df + 3.
+        """
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        if nu.le(p + 1).any():
+
+        shifted_df = (nu - p - 1).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
+
+        if shifted_df.le(0).any():
             warnings.warn(
                 "Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1."
             )
-
-        shifted_df = (nu - p - 1).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
 
         return torch.where(
             shifted_df.gt(0),
@@ -199,22 +205,15 @@ class InverseWishart(ExponentialFamily):
     def variance(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        if nu.le(p + 3).any():
+        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
+
+        diag_V = V.diagonal(dim1=-2, dim2=-1)
+        shifted_df = (nu - p - 3).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
+
+        if shifted_df.le(0).any():
             warnings.warn(
                 "Elementwise variance of the Inverse Wishart distribution is finite only for df > ndim + 3."
             )
-
-        if nu.ge(p - 3).any():
-            warnings.warn(
-                """
-                In singular case, elementwise variance of the Inverse Wishart distribution
-                can be caculated only for ndim > df + 3.
-                """
-            )
-
-        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
-        diag_V = V.diagonal(dim1=-2, dim2=-1)
-        shifted_df = (nu - p - 3).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
 
         return torch.where(
             shifted_df.gt(0),
