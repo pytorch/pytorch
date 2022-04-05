@@ -930,13 +930,22 @@ class TestIndexing(TestCase):
         nt = np.array(tv)
         nm = np.array(mv)
 
-        terr = r"tensors used as indices must be long, byte or bool tensors"
+        if self.device_type == "xla":
+            tclass = RuntimeError
+            terr = (
+                r"Tensors used as indices must be long, byte or boolean tensors"
+                r", found scalar type"
+            )
+        else:
+            tclass = IndexError
+            terr = r"tensors used as indices must be long, byte or bool tensors"
+
         nerr = r"arrays used as indices must be of integer \(or boolean\) type"
 
         # torch
-        with self.assertRaisesRegex(IndexError, terr):
+        with self.assertRaisesRegex(tclass, terr):
             t[m, 0]
-        with self.assertRaisesRegex(IndexError, terr):
+        with self.assertRaisesRegex(tclass, terr):
             t[:, :, 0][m]
 
         # numpy
