@@ -1471,11 +1471,19 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           for (const auto i : c10::irange(start, end)) {
             const auto src_val = *ptr_src++;
             const auto src_val_lb = std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
-            if (*src_val_lb != src_val) continue;
+            // We cannot just use *src_val_lb != src_val because when
+            // src_val_lb == ptr_sorted_end, dereferencing past-the-end value
+            // is not well-defined.
+            if (src_val_lb == ptr_sorted_end || *src_val_lb != src_val) {
+              ++ptr_tid_src_int_idx;
+              ++ptr_tid_sorted_int_idx;
+              ++ptr_tid_int_counts;
+              continue;
+            }
             const auto src_val_ub = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
 
             const int64_t count = src_val_ub - src_val_lb;
-            const int64_t j = src_val_ub - ptr_sorted_start;
+            const int64_t j = src_val_lb - ptr_sorted_start;
 
             *ptr_tid_src_int_idx++ = i;
             *ptr_tid_sorted_int_idx++ = j;
@@ -1484,7 +1492,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       });
 
       const auto compressed_int_counts = int_counts.sum(-1);
-      const auto thread_offsets = compressed_int_counts.cumsum(0);
       const auto res_len = compressed_int_counts.sum().item<int64_t>();
 
       // Short-circuit if empty intersection
@@ -1496,175 +1503,37 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       auto selected_sorted = at::empty({res_len}, sorted.options());
       auto selected_src = at::empty({res_len}, src.options());
 
-      // Much faster than at::unique_dim
-      const auto unique_with_counts = [](
-          const Tensor& t, int64_t len, bool is_sorted = false
-      ) -> std::tuple<Tensor, Tensor, Tensor, int64_t> {
-        // t_unique will be modified to hold unique values in-place
-        Tensor t_unique, t_idx;
-        if (!is_sorted) {
-          std::tie(t_unique, t_idx) = at::sort(t);
-        }
-        else {
-          // faster than t_unique = t.clone()
-          t_unique = at::empty_like(t);
-          t_unique.copy_(t);
-          t_idx = at::arange(0, t.numel(), t.options());
-        }
+      auto* ptr_selected_sorted = selected_sorted.data_ptr<int64_t>();
+      auto* ptr_selected_src = selected_src.data_ptr<int64_t>();
 
-        auto t_counts = at::ones_like(t_unique);
-        int64_t len_unique;
-        {
-          auto* ptr_counts = t_counts.data_ptr<int64_t>();
-          auto* first = t_unique.data_ptr<int64_t>();
-          auto* last = first + len;
-          auto* curr = first;
-          auto* counts = ptr_counts;
-          while (++first != last) {
-            if (*curr != *first) {
-              ++counts;
-              if (++curr != first) {
-                *curr = *first;
-              }
-            }
-            else {
-              ++(*counts);
-            }
+      const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
+      const auto* ptr_sorted_idx = sorted_idx.data_ptr<int64_t>();
+      at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
+          const auto tid = at::get_thread_num();
+          const auto tid_offset = thread_offsets.data_ptr<int64_t>()[tid];
+          const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
+          const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+          const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+          auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
+          auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
+
+          for (const auto ii : c10::irange(start, end)) {
+            const auto count = *ptr_tid_int_counts++;
+            const auto i = *ptr_tid_src_int_idx++;
+            const auto j = *ptr_tid_sorted_int_idx++;
+            if (!count) continue;
+
+            std::fill_n(ptr_tid_selected_src, count, i);
+            std::copy_n(ptr_sorted_idx + j, count, ptr_tid_selected_sorted);
+
+            ptr_tid_selected_sorted += count;
+            ptr_tid_selected_src += count;
           }
-          len_unique = counts - ptr_counts + 1;
-        }
+      });
 
-        return std::make_tuple(t_idx, t_unique, t_counts, len_unique);
-      };
-
-      Tensor dim_sort_indices, dim_indices_unique, dim_indices_counts;
-      int64_t n_unique_dim_indices;
-      std::tie(dim_sort_indices, dim_indices_unique, dim_indices_counts, n_unique_dim_indices)
-        = unique_with_counts(
-            indices[dim], nnz,
-            // if self is coalesced and dim == 0,
-            // indices[dim] is already sorted
-            /*is_sorted=*/self.is_coalesced() && dim == 0
-          );
-
-      Tensor sel_sort_indices, sel_indices_unique, sel_indices_counts;
-      int64_t n_unique_sel_indices;
-      std::tie(sel_sort_indices, sel_indices_unique, sel_indices_counts, n_unique_sel_indices)
-        = unique_with_counts(nneg_index, index_len);
-
-      // index intersection is aka `set(indices[dim]) - set(index)`.
-      // If `dim_indices_unique[i] == sel_indices_unique[j]`, then
-      // nnz += dim_indices_counts[i] * sel_indices_unique[j]
-      const auto compute_index_intersections_and_nnz = [](
-          const Tensor& t1, const Tensor& c1, int64_t l1,
-          const Tensor& t2, const Tensor& c2, int64_t l2
-      ) -> std::tuple<Tensor, Tensor, int64_t, int64_t> {
-        const auto lmin = std::min(l1, l2);
-        auto t1_idx = at::empty({lmin}, t1.options());
-        auto t2_idx = at::empty({lmin}, t2.options());
-        int64_t nnz = 0;
-
-        auto* ptr_t1_idx = t1_idx.data_ptr<int64_t>();
-        auto* ptr_t2_idx = t2_idx.data_ptr<int64_t>();
-
-        auto* ptr_t1 = t1.data_ptr<int64_t>();
-        auto* ptr_c1 = c1.data_ptr<int64_t>();
-        auto* ptr_t2 = t2.data_ptr<int64_t>();
-        auto* ptr_c2 = c2.data_ptr<int64_t>();
-
-        // we assume search in t2
-        auto* first = ptr_t2;
-        auto* last = ptr_t2 + l2;
-
-        for (const auto i : c10::irange(l1)) {
-          const auto idx = ptr_t1[i];
-          const auto idx_pos = std::lower_bound(first, last, idx);
-          if (idx_pos != last && *idx_pos == idx) {
-            const auto j = idx_pos - first;
-            const auto count1 = ptr_c1[i];
-            const auto count2 = ptr_c2[j];
-            *ptr_t1_idx++ = i;
-            *ptr_t2_idx++ = j;
-            nnz += count1 * count2;
-          }
-        }
-        const auto n_intersect = ptr_t1_idx - t1_idx.data_ptr<int64_t>();
-
-        return std::make_tuple(t1_idx, t2_idx, n_intersect, nnz);
-      };
-
-      // we use analytic complexity value as a threshold to decide
-      // whether to use binary search on `index` or `indices[dim]`.
-      const auto search_in_index = (
-          n_unique_dim_indices * std::log2(n_unique_sel_indices) < std::log2(n_unique_dim_indices) * n_unique_sel_indices
-      );
-
-      Tensor dim_indices_intersect, index_intersect;
-      int64_t n_intersect, res_nnz;
-
-      if (search_in_index) {
-        std::tie(dim_indices_intersect, index_intersect, n_intersect, res_nnz)
-          = compute_index_intersections_and_nnz(
-              dim_indices_unique, dim_indices_counts, n_unique_dim_indices,
-              sel_indices_unique, sel_indices_counts, n_unique_sel_indices
-            );
-      }
-      else {
-        std::tie(index_intersect, dim_indices_intersect, n_intersect, res_nnz)
-          = compute_index_intersections_and_nnz(
-              sel_indices_unique, sel_indices_counts, n_unique_sel_indices,
-              dim_indices_unique, dim_indices_counts, n_unique_dim_indices
-            );
-      }
-
-      const auto compute_offsets = [](const Tensor& counts, int64_t len) {
-        const auto narrowed_counts = counts.narrow(-1, 0, len);
-        return narrowed_counts.cumsum(/*dim=*/0).sub_(narrowed_counts);
-      };
-
-      const auto dim_sort_indices_offsets = compute_offsets(dim_indices_counts, n_unique_dim_indices);
-      const auto sel_sort_indices_offsets = compute_offsets(sel_indices_counts, n_unique_sel_indices);
-
-      auto selected_dim_indices = at::empty({res_nnz}, dim_indices_unique.options());
-      auto res_dim_indices = at::empty({res_nnz}, sel_indices_unique.options());
-      {
-        auto* ptr_selected_dim_indices = selected_dim_indices.data_ptr<int64_t>();
-        auto* ptr_res_dim_indices = res_dim_indices.data_ptr<int64_t>();
-
-        const auto* ptr_dim_indices_intersect = dim_indices_intersect.data_ptr<int64_t>();
-        const auto* ptr_sel_indices_intersect = index_intersect.data_ptr<int64_t>();
-
-        const auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
-        const auto* ptr_sel_indices_counts = sel_indices_counts.data_ptr<int64_t>();
-
-        const auto* ptr_dim_sort_indices = dim_sort_indices.data_ptr<int64_t>();
-        const auto* ptr_sel_sort_indices = sel_sort_indices.data_ptr<int64_t>();
-
-        const auto* ptr_dim_indices_offsets = dim_sort_indices_offsets.data_ptr<int64_t>();
-        const auto* ptr_sel_indices_offsets = sel_sort_indices_offsets.data_ptr<int64_t>();
-
-        for (const auto ii : c10::irange(n_intersect)) {
-          const auto i_idx = *ptr_dim_indices_intersect++;
-          const auto j_idx = *ptr_sel_indices_intersect++;
-
-          const auto i_idx_count = ptr_dim_indices_counts[i_idx];
-          const auto j_idx_count = ptr_sel_indices_counts[j_idx];
-
-          const auto i_idx_offset = ptr_dim_indices_offsets[i_idx];
-          const auto j_idx_offset = ptr_sel_indices_offsets[j_idx];
-
-          const auto* src_dim_sort_indices = ptr_dim_sort_indices + i_idx_offset;
-          const auto* src_sel_sort_indices = ptr_sel_sort_indices + j_idx_offset;
-
-          const auto copy_chunk_len = i_idx_count * j_idx_count;
-          for (const auto chunk_elem_idx : c10::irange(copy_chunk_len)) {
-            *ptr_selected_dim_indices++ = *(src_dim_sort_indices + (chunk_elem_idx % i_idx_count));
-            *ptr_res_dim_indices++ = *(src_sel_sort_indices + (chunk_elem_idx % j_idx_count));
-          }
-        }
-      }
-
-      return std::make_tuple(selected_dim_indices, res_dim_indices);
+      return search_in_dim_indices
+        ? std::make_tuple(selected_sorted, selected_src)
+        : std::make_tuple(selected_src, selected_sorted);
     };
 
     // Converts a 1d sorted idx to a compressed 1d compressed idx,
