@@ -1,6 +1,4 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
-#include <torch/csrc/lazy/ts_backend/config.h>
-#include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 
 namespace {
@@ -16,37 +14,6 @@ namespace {
 
 namespace torch {
 namespace lazy {
-
-TsNode::TsNode(OpKind op, OpList operands,
-               const std::function<Shape()>& shape_fn,
-               size_t num_outputs, hash_t hash_seed)
-    : TsNode(op, operands, std::vector<Shape>{}, num_outputs, hash_seed) {
-  shapes_.push_back(GetOpShape(shape_fn));
-}
-
-void TsNode::SetShapeDeferred(
-    const std::function<Shape()>& shape_fn) {
-  shapes_.push_back(GetOpShape(shape_fn));
-}
-
-using ShapeCache = Cache<hash_t, Shape, HashReducer>;
-
-ShapeCache* GetShapeCache() {
-  static ShapeCache* cache = new ShapeCache(FLAGS_torch_lazy_ts_shape_cache_size);
-  return cache;
-}
-
-Shape TsNode::GetOpShape(
-    const std::function<Shape()>& shape_fn) const {
-  auto hash = hash_with_sizes();
-  ShapeCache* shape_cache = GetShapeCache();
-  auto shape = shape_cache->Get(hash);
-  if (shape == nullptr) {
-    shape = shape_cache->Add(hash,
-                             std::make_shared<Shape>(shape_fn()));
-  }
-  return *shape;
-}
 
 TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                          TSLoweringContext* loctx) const {

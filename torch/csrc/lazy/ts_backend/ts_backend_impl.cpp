@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
@@ -35,6 +36,8 @@ struct TSBackendDeviceType : public BackendDeviceType {
   }
 };
 
+using ShapeCache = Cache<hash_t, Shape, HashReducer>;
+
 class TSBackendImpl : public torch::lazy::BackendImplInterface {
  public:
   TSBackendImpl() : default_device_type_(at::kCPU) {
@@ -43,6 +46,16 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     auto type = (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = TSBackendDeviceType(type);
   }
+
+  Shape GenerateShape(std::function<Shape()> shape_fn, hash_t hash) const {
+    static ShapeCache* cache = new ShapeCache(FLAGS_torch_lazy_ts_shape_cache_size);
+    auto shape = cache->Get(hash);
+    if (shape == nullptr) {
+      shape = cache->Add(hash, std::make_shared<Shape>(shape_fn()));
+    }
+    return *shape;
+  }
+
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name,
       torch::lazy::BackendDevice device,

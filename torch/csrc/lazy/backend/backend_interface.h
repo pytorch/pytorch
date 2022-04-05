@@ -33,6 +33,13 @@ class TORCH_API BackendImplInterface {
   virtual void SetRngSeed(size_t seed) const = 0;
 
   /**
+   * IR Tracing
+   * */
+
+  // Generate the shape using the provided shape function with the given hash
+  virtual Shape GenerateShape(std::function<Shape()> shape_fn, hash_t hash=0) const;
+
+  /**
    * Data Transfer
    * */
 
