@@ -116,31 +116,10 @@ class QuantizeHandler(ABC):
     def is_standalone_module(self):
         return self.is_standalone_module_
 
-@register_quant_pattern(operator.sub)
-@register_quant_pattern(operator.truediv)
-@register_quant_pattern(torch.sub)
-@register_quant_pattern(torch.div)
-@register_quant_pattern(torch.bmm)
-@register_quant_pattern(torch.matmul)
+# TODO: remove this class, this is still exposed in torch.quantization
+# but we should be able to break bc
 class BinaryOpQuantizeHandler(QuantizeHandler):
-    def __init__(
-            self,
-            node_pattern: NodePattern,
-            modules: Dict[str, torch.nn.Module],
-            root_node_getter: Callable = None):
-        super().__init__(node_pattern, modules, root_node_getter)
-
-        # determine how many of the first two args are Tensors (versus scalars)
-        # this distinguishes things like "x + y" from "x + 2" or "2 + x"
-        self.num_tensor_args = 0
-        cache_for_no_tensor_check: Dict[Node, bool] = dict()
-        for arg_idx in range(len(self.root_node.args)):
-            arg = self.root_node.args[arg_idx]
-            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg, modules, cache_for_no_tensor_check)):
-                self.num_tensor_args += 1
-
-    def is_general_tensor_value_op(self) -> bool:
-        return self.num_tensor_args == 1
+    pass
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
@@ -178,14 +157,7 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     pass
 
-# we currently only support reference patterns for these ops so they have been removed
-# until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
-# @register_quant_pattern(torch.nn.GELU)
-# @register_quant_pattern(torch.nn.Softmax)
-# we currently only support reference patterns for these ops so they have been removed
-# until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
-# @register_quant_pattern(torch.nn.functional.gelu)
-# @register_quant_pattern(torch.nn.functional.softmax)
+# TODO: remove this class
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     """ Common quantized op, first input and first output will be quantized
     """

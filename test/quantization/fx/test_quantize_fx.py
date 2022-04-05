@@ -4855,10 +4855,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_binary_op_float16_impl(
             operator.add, operator.iadd)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_sub(self):
         self._test_binary_op_float16_impl(operator.sub, operator.isub)
         self._test_binary_op_float16_impl(torch.sub, None)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_div(self):
         self._test_binary_op_float16_impl(operator.truediv, operator.itruediv)
         self._test_binary_op_float16_impl(torch.div, None)
@@ -6479,6 +6481,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_qmatmul(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
