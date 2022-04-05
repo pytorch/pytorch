@@ -1671,6 +1671,16 @@ def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
 
 
+@parse_args("v", "is", "i")
+def amax(g, self, dim, keepdim):
+    return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
+
+
+@parse_args("v", "is", "i")
+def amin(g, self, dim, keepdim):
+    return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
+
+
 def exp(g, self):
     return g.op("Exp", self)
 
