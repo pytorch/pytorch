@@ -530,7 +530,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
     }
     if (result.numel() != 0) {
       // If vec is just a view on a number, we need to make it contiuous
-      auto vec_contiguous = vec->strides().front() == 0
+      auto vec_contiguous = vec.strides().front() == 0
                               ? vec.expect_contiguous()
                               : c10::MaybeOwned<Tensor>::borrowed(vec);
       const auto vec_stride = vec_contiguous->strides().front();
