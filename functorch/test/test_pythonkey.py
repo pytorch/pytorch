@@ -527,6 +527,19 @@ class TestPartitioning(TestCase):
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
 
+class TestContiguous(TestCase):
+    def test_contiguous(self):
+        # The test simulates the condition where transpose followed by view
+        # happens in the backward pass.
+        # https://discuss.pytorch.org/t/error-on-transpose-and-view/434
+        def f(x):
+            return x.view(2, 3).t()
+
+        inp = torch.randn(6, requires_grad=True)
+        out = aot_function(f, nop)(inp)
+        torch.autograd.grad(out, inp, torch.randn(3, 2))
+
+
 only_for = ("cpu")
 instantiate_device_type_tests(
     TestPythonKey,
