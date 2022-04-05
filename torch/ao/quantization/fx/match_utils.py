@@ -76,6 +76,7 @@ def find_matches(
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
         patterns: Dict[Pattern, QuantizeHandler],
+        root_node_getter_mapping: Dict[Pattern, Callable],
         qconfig_map: Dict[str, QConfigAny],
         standalone_module_names: List[str] = None,
         standalone_module_classes: List[Callable] = None,
@@ -114,29 +115,80 @@ def find_matches(
     match_map: Dict[str, MatchResult] = {}
     all_matched : Set[str] = set()
 
-    def record_match(pattern, node, matched):
+    def _recursive_record_node_in_match_map(
+            last_node,
+            match_map,
+            node_pattern,
+            matched_node_pattern,
+            pattern,
+            match_value,
+            qconfig):
+        if isinstance(node_pattern, Node):
+            match_map[node_pattern.name] = (
+                last_node, matched_node_pattern, pattern, match_value, qconfig)
+        else:
+            for n in node_pattern:
+                _recursive_record_node_in_match_map(last_node, match_map, n, matched_node_pattern, pattern, match_value, qconfig)
+
+    # TODO: 1. merge with fuse matcher 2. document the code
+    def record_match(
+            pattern,
+            node,
+            last_node,
+            matched_node_pattern,
+            match_map):
         if isinstance(pattern, tuple):
             s, *args = pattern
-            record_match(s, node, matched)
+            current_node_pattern: List[Node] = []
+            record_match(
+                s,
+                node,
+                last_node,
+                matched_node_pattern,
+                match_map)
             if pattern[0] is not getattr:
                 for subpattern, arg in zip(args, node.args):
-                    record_match(subpattern, arg, matched)
+                    record_match(
+                        subpattern,
+                        arg,
+                        node,
+                        current_node_pattern,
+                        match_map)
+            if len(current_node_pattern) > 1:
+                matched_node_pattern.append(tuple(current_node_pattern))
+            else:
+                matched_node_pattern.append(current_node_pattern[0])
         else:
-            matched.append(node)
+            matched_node_pattern.append(node)
 
-    cache_for_no_tensor_check: Dict[Node, bool] = dict()
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
-            for pattern, value in patterns.items():
-                if is_match(modules, node, pattern):
-                    matched: List[Any] = []
-                    record_match(pattern, node, matched)
-                    for n in matched:
-                        match_map[n.name] = (
-                            node, matched, pattern, value(node, modules),  # type: ignore[operator]
-                            qconfig_map[n.name])
-                        all_matched.add(n.name)
-                    # break after finding the first match
+            for pattern, quantize_handler_cls in patterns.items():
+                root_node_getter = root_node_getter_mapping.get(pattern, None)
+                if is_match(modules, node, pattern) and node.name not in match_map:
+                    matched_node_pattern: List[Node] = []
+                    record_match(
+                        pattern,
+                        node,
+                        node,
+                        matched_node_pattern,
+                        match_map)
+                    quantize_handler = quantize_handler_cls(  # type: ignore[operator]
+                        matched_node_pattern,
+                        modules,
+                        root_node_getter)
+                    last_node = node
+                    # record the match for all nodes in the pattern
+                    _recursive_record_node_in_match_map(
+                        last_node,
+                        match_map,
+                        # we need to record all nodes in the matched pattern in the match_map
+                        matched_node_pattern,
+                        # this is a part of the value corresponding to the node
+                        matched_node_pattern,
+                        pattern,
+                        quantize_handler,
+                        qconfig_map[node.name])
                     break
 
     # add custom module instances to the match result
@@ -146,7 +198,7 @@ def find_matches(
            type(modules[node.target]) in custom_module_classes:
             custom_module_qconfig = qconfig_map[node.name]
             match_map[node.name] = (
-                node, [node], None, CustomModuleQuantizeHandler(node, modules),
+                node, node, None, CustomModuleQuantizeHandler(node, modules),
                 custom_module_qconfig)
 
     def is_standalone_module(node_target: str, modules: Dict[str, torch.nn.Module]):
@@ -164,7 +216,7 @@ def find_matches(
             # add node to matched nodes
             custom_module_qconfig = qconfig_map[node.name]
             match_map[node.name] = (
-                node, [node], None,
+                node, node, None,
                 StandaloneModuleQuantizeHandler(node, modules),
                 custom_module_qconfig)
 
