@@ -291,6 +291,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
             lazy_ir_cls(backend_indices[backend_key], node_base),
             grouped_native_functions
         )),
+        'namespace_prologue': ns_helper.prologue,
+        'namespace_epilogue': ns_helper.epilogue,
     })
 
 
