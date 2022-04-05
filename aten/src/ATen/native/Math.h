@@ -2160,4 +2160,21 @@ calc_erfcx(T x)
   }
 }
 
+/*
+ * Logarithm of Gaussian cumulative distribution function.
+
+ * This implementation of log_ndtr and its helper functions
+ * follow SciPy's implementation
+ * See NOTICE for the licenses.
+ */
+template <typename T>
+static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
+  T t = x * M_SQRT1_2;
+  if (x < T{-1.0}) {
+    return std::log(calc_erfcx(-t) / 2) - t * t;
+  } else {
+    return std::log1p(-std::erfc(t) / 2);
+  }
+}
+
 C10_CLANG_DIAGNOSTIC_POP()

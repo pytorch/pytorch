@@ -2,8 +2,19 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
+#include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+
+namespace at {
+// This function is defined in the codegenerated RegisterDispatchKey.cpp file.
+// For the TorchScript backend, we have a special case where the registration does not happen
+// immediately (at static initialization time), so that if an external backend is loaded,
+// it has a chance to register itself, and TorchScript only registers itself if explicitly initialized
+extern TORCH_API void RegisterTorchScriptLazyNativeFunctions();
+extern TORCH_API void RegisterTorchScriptAutogradLazyNativeFunctions();
+}
 
 namespace torch {
 namespace lazy {
@@ -226,6 +237,9 @@ torch::lazy::BackendImplInterface* GetTSBackendImpl() {
 }
 
 void InitTorchScriptBackend() {
+  at::RegisterTorchScriptLazyNativeFunctions();
+  at::RegisterTorchScriptAutogradLazyNativeFunctions();
+  register_ts_ltc_eager_fallback();
   static std::unique_ptr<BackendRegistrar> s_registrar;
   s_registrar = std::make_unique<BackendRegistrar>(GetTSBackendImpl());
 }
