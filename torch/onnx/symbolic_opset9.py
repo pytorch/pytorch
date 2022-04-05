@@ -3205,6 +3205,11 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         return result
 
 
+@parse_args("v", "v", "i")
+def linalg_cross(g, input, other, dim=-1):
+    return cross(g, input, other, dim)
+
+
 @parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
@@ -3596,6 +3601,24 @@ def roll(g, self, shifts, dims):
         result = g.op("Concat", *shapes, axis_i=dims[i])
 
     return result
+
+
+@parse_args("v", "v", "i")
+def cross(g, input, other, dim=None):
+    dim = sym_help._get_dim_for_cross(input, dim)
+    # If we have two tensors such that
+    # A = [a, b, c], B = [d, e, f], we permute the tensor such that we have
+    # After first roll,
+    # A' = [b, c, a], B' = [f, d, e], so that we calculate (b*f, c*d, a*e)
+    roll_x_1 = roll(g, input, [2], [dim])
+    roll_y_1 = roll(g, other, [1], [dim])
+    # After second roll,
+    # A' = [c, a, b], B' = [e, f, d], so that we calculate (c*e, a*f, b*d)
+    roll_x_2 = roll(g, input, [1], [dim])
+    roll_y_2 = roll(g, other, [2], [dim])
+    # cross product is calculated as
+    # result = [(b*f - c*e), (c*d - a*f), (a*e - b*d)]
+    return sub(g, mul(g, roll_x_1, roll_y_1), mul(g, roll_x_2, roll_y_2))
 
 
 def broadcast_tensors(g, self):
