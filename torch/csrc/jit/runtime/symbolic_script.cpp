@@ -497,6 +497,42 @@ const std::vector<std::string> functions = {
 
             return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
 
+        # def _autocast_to_full_precision_optional(self : Optional[Tensor], cuda_enabled : bool, cpu_enabled : bool):
+        #     def backward(grad_output):
+        #         if self is not None:
+        #             self_dtype = self.dtype
+        #             grad_self = grad_output.to(self_dtype)
+        #         else:
+        #             grad_self = None
+
+        #         # Note: calling unchecked_unwrap_optional is only safe, when we
+        #         #       directly return grad_self directly back to self.
+        #         #       Because in the case where `self is None`, unwrapped
+        #         #       grad_self would just be pruned away.
+        #         return grad_self.unchecked_unwrap_optional, None, None
+
+        #     return torch._autocast_to_full_precision_optional(self, cuda_enabled, cpu_enabled), backward
+
+        # def _autocast_to_reduced_precision_optional(self : Optional[Tensor],
+        #                                   cuda_enabled : bool,
+        #                                   cpu_enabled : bool,
+        #                                   cuda_dtype : int,
+        #                                   cpu_dtype : int):
+        #     def backward(grad_output):
+        #         if self is not None:
+        #             self_dtype = self.dtype
+        #             grad_self = grad_output.to(self_dtype)
+        #         else:
+        #             grad_self = None
+
+        #         # Note: calling unchecked_unwrap_optional is only safe, when we
+        #         #       directly return grad_self directly back to self.
+        #         #       Because in the case where `self is None`, unwrapped
+        #         #       grad_self would just be pruned away.
+        #         return grad_self.unchecked_unwrap_optional, None, None, None, None
+
+        #     return torch._autocast_to_reduced_precision_optional(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):

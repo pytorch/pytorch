@@ -146,6 +146,11 @@ void castTensorInputs(
   }
 
   const auto graph = node->owningGraph();
+  std::string op_name = cast_op.toQualString();
+  op_name += "_optional";
+  Symbol cast_optional_op = c10::Symbol::fromQualString(op_name);
+  std::cout << "old op string: " << cast_op.toQualString() << std::endl;
+  std::cout << "concatenated string: " << cast_optional_op.toQualString() << std::endl;
 
   std::unordered_set<Value*> casted_inputs;
   std::unordered_set<Value*> casted_optional;
@@ -161,7 +166,7 @@ void castTensorInputs(
       casted_optional.insert(input);
     }
     // casting on tensor;
-    if (input_tensor_type && input->node()->kind() != cast_op) {
+    if (input_tensor_type && input->node()->kind() != cast_op && input->node()->kind() != cast_optional_op) {
       auto has_inserted = casted_inputs.insert(input);
       if (has_inserted.second) {
         casted_inputs_ordered.push_back(input);
@@ -173,16 +178,18 @@ void castTensorInputs(
 
   for (auto input : casted_inputs_ordered) {
     Value* new_input = nullptr;
+    Symbol op = casted_optional.count(input) != 0 ? cast_optional_op : cast_op ;
+    
     if (cast_op == aten::_autocast_to_full_precision) {
       new_input = graph->insert(
-          cast_op,
+          op,
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled))});
       node->replaceInputWith(input, new_input);
     } else if (cast_op == aten::_autocast_to_reduced_precision) {
       new_input = graph->insert(
-          cast_op,
+          op,
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled)),
@@ -193,12 +200,11 @@ void castTensorInputs(
       TORCH_INTERNAL_ASSERT(
           false, "unrecognized cast_op symbol: ", cast_op.toQualString());
     }
-    if (new_input != nullptr) {
-      if (casted_optional.count(input) != 0) {
-        new_input->setType(OptionalType::create(TensorType::get()));
-      } else {
-        new_input->setType(TensorType::get());
-      }
+    TORCH_INTERNAL_ASSERT(new_input != nullptr, "new_input should be assigned");
+    if (casted_optional.count(input) != 0) {
+      new_input->setType(OptionalType::create(TensorType::get()));
+    } else {
+      new_input->setType(TensorType::get());
     }
   }
 }
@@ -499,7 +505,7 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
 
 RegisterOperators reg_autocast_to_reduced_precision_optional({
     Operator(
-        "aten::_autocast_to_reduced_precision.optional(Tensor? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor?",
+        "aten::_autocast_to_reduced_precision_optional(Tensor(a)? self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)?",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto cpu_dtype = pop(stack).toScalarType();
@@ -522,7 +528,7 @@ RegisterOperators reg_autocast_to_reduced_precision_optional({
 
 RegisterOperators reg_autocast_to_full_precision_optional({
     Operator(
-        "aten::_autocast_to_full_precision.optional(Tensor? self, bool cuda_enabled, bool cpu_enabled) -> Tensor?",
+        "aten::_autocast_to_full_precision_optional(Tensor(a)? self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)?",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto cpu_enabled = pop(stack).toBool();
