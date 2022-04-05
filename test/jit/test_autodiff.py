@@ -1,6 +1,5 @@
 import torch
 
-from inspect import getargspec
 from torch.testing._internal.jit_utils import JitTestCase
 from typing import List
 
@@ -12,7 +11,6 @@ class TestAutodiffJit(JitTestCase):
             return r
 
         fn_s = torch.jit.script(fn)
-        # fn_s = fn
 
         a = torch.rand((3, 6), requires_grad=True)
         b = torch.rand((3, 10), requires_grad=True)
