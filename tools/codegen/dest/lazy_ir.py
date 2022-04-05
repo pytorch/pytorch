@@ -204,6 +204,7 @@ class GenLazyNativeFuncDefinition:
     class_method_name: str
     backend_index: BackendIndex
     tensor_class: str
+    gen_forced_fallback_code: bool
 
     @method_with_native_function
     def __call__(self, func: NativeFunction) -> List[str]:
@@ -215,7 +216,9 @@ class GenLazyNativeFuncDefinition:
         value_args = schema.filtered_args(values=True, scalars=False)
         returns_length = len(schema.returns)
 
-        fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
+        fallback_str = ""
+        if self.gen_forced_fallback_code:
+            fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
 
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
         assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"

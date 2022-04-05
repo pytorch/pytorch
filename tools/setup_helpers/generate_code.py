@@ -207,7 +207,8 @@ def main() -> None:
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
                             lazy_ir_cls=TSLazyIR,
-                            per_operator_headers=options.per_operator_headers)
+                            per_operator_headers=options.per_operator_headers,
+                            gen_forced_fallback_code=True)
 
 
 if __name__ == "__main__":
