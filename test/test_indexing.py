@@ -649,89 +649,42 @@ class TestIndexing(TestCase):
         self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
-    _advancedindex_input1 = [
-        [[0., 1.],
-         [2., 3.],
-         [4., 5.]],
-
-        [[6., 7.],
-         [8., 9.],
-         [10., 11.]],
-
-        [[12., 13.],
-         [14., 15.],
-         [16., 17.]],
-
-        [[18., 19.],
-         [20., 21.],
-         [22., 23.]]
-    ]
-
-    _advancedindex_input2 = [
-        [[24., 25.],
-         [26., 27.],
-         [28., 29.]],
-
-        [[30., 31.],
-         [32., 33.],
-         [34., 35.]],
-
-        [[36., 37.],
-         [38., 39.],
-         [40., 41.]],
-
-        [[42., 43.],
-         [44., 45.],
-         [46., 47.]]
-    ]
-
     # one mask tensor (2d)
     @dtypes(torch.float)
     def test_advancedindex_dim_1m_2d(self, device, dtype):
-        t = self._advancedindex_input1
+        t = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
 
         values = (
             # tensor, mask, result
             # case 0: everything
             (t,
-
-             [[1., 1., 1.],
-              [1., 1., 1.],
-              [1., 1., 1.],
-              [1., 1., 1.]],
-
-             # 0   1   2   3   4   5    6    7    8    9    10   11
-             [0., 2., 4., 6., 8., 10., 12., 14., 16., 18., 20., 22.]),
+             torch.ones(4, 3, device=device, dtype=dtype),
+             torch.arange(0, 24, 2, device=device, dtype=dtype)),
 
             # case 1: nothing
             (t,
-
-             [[0., 0., 0.],
-              [0., 0., 0.],
-              [0., 0., 0.],
-              [0., 0., 0.]],
-
-             []),
+             torch.zeros(4, 3, device=device, dtype=dtype),
+             torch.tensor([], device=device, dtype=dtype)),
 
             # case 2: random
             (t,
-
-             [[0., 0., 1.],   # 0  1  2
-              [0., 1., 0.],   # 3  4  5
-              [0., 0., 0.],   # 6  7  8
-              [0., 0., 1.]],  # 9 10 11
-
-             [4., 8., 22.]),
+             torch.tensor(
+                 [[0, 0, 1],
+                  [0, 1, 0],
+                  [0, 0, 0],
+                  [0, 0, 1]],
+                 device=device, dtype=dtype),
+             torch.tensor([4, 8, 22], device=device, dtype=dtype)),
         )
 
         for tv, mv, rv in values:
-            t = torch.tensor(tv, device=device, dtype=dtype)
-            m = torch.tensor(mv, device=device, dtype=dtype) > 0
-            r = torch.tensor(rv, device=device, dtype=dtype)
+            t = tv
+            m = mv > 0
+            r = rv
 
-            nt = np.array(tv)
-            nm = np.array(mv) > 0
-            nr = np.array(rv)
+            nt = np.array(tv.cpu())
+            nm = np.array(mv.cpu()) > 0
+            nr = np.array(rv.cpu())
 
             # https://github.com/pytorch/pytorch/issues/71673
             # check 0: compositionality
@@ -751,53 +704,41 @@ class TestIndexing(TestCase):
     # one mask tensor (2d), mask is not the very first index
     @dtypes(torch.float)
     def test_advancedindex_dim_1m_2d_2(self, device, dtype):
-        t = [
-            self._advancedindex_input1,
-            self._advancedindex_input2,
-        ]
+        t0 = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
+        t1 = torch.arange(24, 48, device=device, dtype=dtype).view(4, 3, 2)
+        t = torch.stack((t0, t1))
 
         values = (
             # tensor, mask, result
             # case 0: everything
             (t,
-
-             [[1., 1., 1.],
-              [1., 1., 1.],
-              [1., 1., 1.],
-              [1., 1., 1.]],
-
-             # 0    1    2    3    4    5    6    7    8    9    10   11
-             [24., 26., 28., 30., 32., 34., 36., 38., 40., 42., 44., 46]),
+             torch.ones(4, 3, device=device, dtype=dtype),
+             torch.arange(24, 48, 2, device=device, dtype=dtype)),
 
             # case 1: nothing
             (t,
-
-             [[0., 0., 0.],
-              [0., 0., 0.],
-              [0., 0., 0.],
-              [0., 0., 0.]],
-
-             []),
+             torch.zeros(4, 3, device=device, dtype=dtype),
+             torch.tensor([], device=device, dtype=dtype)),
 
             # case 2: random
             (t,
-
-             [[0., 0., 1.],   # 0  1  2
-              [0., 1., 0.],   # 3  4  5
-              [0., 0., 0.],   # 6  7  8
-              [0., 0., 1.]],  # 9 10 11
-
-             [28., 32., 46.]),
+             torch.tensor(
+                 [[0, 0, 1],
+                  [0, 1, 0],
+                  [0, 0, 0],
+                  [0, 0, 1]],
+                 device=device, dtype=dtype),
+             torch.tensor([28, 32, 46], device=device, dtype=dtype)),
         )
 
         for tv, mv, rv in values:
-            t = torch.tensor(tv, device=device, dtype=dtype)
-            m = torch.tensor(mv, device=device, dtype=dtype) > 0
-            r = torch.tensor(rv, device=device, dtype=dtype)
+            t = tv
+            m = mv > 0
+            r = rv
 
-            nt = np.array(tv)
-            nm = np.array(mv) > 0
-            nr = np.array(rv)
+            nt = np.array(tv.cpu())
+            nm = np.array(mv.cpu()) > 0
+            nr = np.array(rv.cpu())
 
             # https://github.com/pytorch/pytorch/issues/71673
             # check 0: compositionality
@@ -817,49 +758,41 @@ class TestIndexing(TestCase):
     # one mask tensor (3d)
     @dtypes(torch.float)
     def test_advancedindex_dim_1m_3d(self, device, dtype):
-        t = [
-            self._advancedindex_input1,
-            self._advancedindex_input2,
-        ]
+        t0 = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
+        t1 = torch.arange(24, 48, device=device, dtype=dtype).view(4, 3, 2)
+        t = torch.stack((t0, t1))
 
         values = (
             # tensor, mask, result
             # case 0: everything
             (t,
-
-             [[[1., 1., 1.], [1., 1., 1.], [1., 1., 1.], [1., 1., 1.]],
-              [[1., 1., 1.], [1., 1., 1.], [1., 1., 1.], [1., 1., 1.]]],
-
-             # 0  1   2   3   4   5    6    7    8    9    10   11
-             [0., 2., 4., 6., 8., 10., 12., 14., 16., 18., 20., 22.,
-              # 12 13   14   15   16   17   18   19   20   21   22   23
-              24., 26., 28., 30., 32., 34., 36., 38., 40., 42., 44., 46.]),
+             torch.ones(2, 4, 3, device=device, dtype=dtype),
+             torch.arange(0, 48, 2, device=device, dtype=dtype)),
 
             # case 1: nothing
             (t,
-
-             [[[0., 0., 0.], [0., 0., 0.], [0., 0., 0.], [0., 0., 0.]],
-              [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.], [0., 0., 0.]]],
-
-             []),
+             torch.zeros(2, 4, 3, device=device, dtype=dtype),
+             torch.tensor([], device=device, dtype=dtype)),
 
             # case 2: random
             (t,
-
-             [[[1., 0., 1.], [0., 1., 1.], [0., 0., 0.], [1., 1., 1.]],
-              [[0., 1., 0.], [1., 1., 0.], [0., 0., 1.], [0., 0., 0.]]],
-
-             [0., 4., 8., 10., 18., 20., 22., 26., 30., 32., 40.]),
+             torch.tensor(
+                 [[[1, 0, 1], [0, 1, 1], [0, 0, 0], [1, 1, 1]],
+                  [[0, 1, 0], [1, 1, 0], [0, 0, 1], [0, 0, 0]]],
+                 device=device, dtype=dtype),
+             torch.tensor(
+                 [0, 4, 8, 10, 18, 20, 22, 26, 30, 32, 40],
+                 device=device, dtype=dtype)),
         )
 
         for tv, mv, rv in values:
-            t = torch.tensor(tv, device=device, dtype=dtype)
-            m = torch.tensor(mv, device=device, dtype=dtype) > 0
-            r = torch.tensor(rv, device=device, dtype=dtype)
+            t = tv
+            m = mv > 0
+            r = rv
 
-            nt = np.array(tv)
-            nm = np.array(mv) > 0
-            nr = np.array(rv)
+            nt = np.array(tv.cpu())
+            nm = np.array(mv.cpu()) > 0
+            nr = np.array(rv.cpu())
 
             # https://github.com/pytorch/pytorch/issues/71673
             # check 0: compositionality
@@ -879,29 +812,28 @@ class TestIndexing(TestCase):
     # two mask tensors (1d)
     @dtypes(torch.float)
     def test_advancedindex_dim_2m_1d(self, device, dtype):
-        t = [
-            self._advancedindex_input1,
-            self._advancedindex_input2,
-        ]
+        t0 = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
+        t1 = torch.arange(24, 48, device=device, dtype=dtype).view(4, 3, 2)
+        t = torch.stack((t0, t1))
 
         values = (
             # tensor, mask1, mask2, result
             (t,
-             [0., 1.],
-             [1., 0., 1.],
-             [25., 29.]),
+             torch.tensor([0, 1], device=device, dtype=dtype),
+             torch.tensor([1, 0, 1], device=device, dtype=dtype),
+             torch.tensor([25, 29], device=device, dtype=dtype)),
         )
 
         for tv, mv, nv, rv in values:
-            t = torch.tensor(tv, device=device, dtype=dtype)
-            m = torch.tensor(mv, device=device, dtype=dtype) > 0
-            n = torch.tensor(nv, device=device, dtype=dtype) > 0
-            r = torch.tensor(rv, device=device, dtype=dtype)
+            t = tv
+            m = mv > 0
+            n = nv > 0
+            r = rv
 
-            nt = np.array(tv)
-            nm = np.array(mv) > 0
-            nn = np.array(nv) > 0
-            nr = np.array(rv)
+            nt = np.array(tv.cpu())
+            nm = np.array(mv.cpu()) > 0
+            nn = np.array(nv.cpu()) > 0
+            nr = np.array(rv.cpu())
 
             # https://github.com/pytorch/pytorch/issues/71673
             # check 0: compositionality
@@ -921,13 +853,13 @@ class TestIndexing(TestCase):
     # one mask tensor (0d), invalid
     @dtypes(torch.float)
     def test_advancedindex_dim_1m_0d_invalid(self, device, dtype):
-        tv = self._advancedindex_input1
+        tv = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
         mv = 42.
 
-        t = torch.tensor(tv, device=device, dtype=dtype)
+        t = tv
         m = torch.tensor(mv, device=device, dtype=dtype)
 
-        nt = np.array(tv)
+        nt = np.array(tv.cpu())
         nm = np.array(mv)
 
         if self.device_type == "xla":
