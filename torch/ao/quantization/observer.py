@@ -98,9 +98,10 @@ class ObserverBase(ABC, nn.Module):
         dtype: Quantized data type
     """
 
-    def __init__(self, dtype):
+    def __init__(self, dtype, is_dynamic=None):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
+        self.is_dynamic=is_dynamic
 
     @abstractmethod
     def forward(self, x):
@@ -171,9 +172,10 @@ class _ObserverBase(ObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(_ObserverBase, self).__init__(dtype=dtype)
+        super(_ObserverBase, self).__init__(dtype=dtype, is_dynamic=is_dynamic)
         self.qscheme = qscheme
         if reduce_range:
             warnings.warn(
@@ -349,6 +351,7 @@ class MinMaxObserver(_ObserverBase):
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -408,6 +411,7 @@ class MinMaxObserver(_ObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False
     ) -> None:
 
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
@@ -424,6 +428,7 @@ class MinMaxObserver(_ObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
             eps=eps,
+            is_dynamic=is_dynamic
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
@@ -483,6 +488,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
+
 
     The moving average min/max is computed as follows
 
@@ -520,6 +527,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         quant_min=None,
         quant_max=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
         **kwargs
     ) -> None:
         self.averaging_constant = averaging_constant
@@ -530,6 +538,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             quant_min=quant_min,
             quant_max=quant_max,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs
         )
 
@@ -568,6 +577,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
@@ -590,6 +600,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False
     ) -> None:
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -599,6 +610,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
             eps=eps,
+            is_dynamic=is_dynamic
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
@@ -753,6 +765,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MovingAverageMinMaxObserver`, with the
@@ -773,6 +786,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         quant_min=None,
         quant_max=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
         **kwargs
     ) -> None:
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
@@ -783,6 +797,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             quant_min=quant_min,
             quant_max=quant_max,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs
         )
         self.averaging_constant = averaging_constant
@@ -827,6 +842,7 @@ class HistogramObserver(_ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
 
     The scale and zero point are computed as follows:
 
@@ -854,6 +870,7 @@ class HistogramObserver(_ObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
     ) -> None:
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(
@@ -864,6 +881,7 @@ class HistogramObserver(_ObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
             eps=eps,
+            is_dynamic=is_dynamic,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.bins = bins
@@ -1213,8 +1231,9 @@ class FixedQParamsObserver(ObserverBase):
                  dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine,
                  quant_min=0,
-                 quant_max=255):
-        super(FixedQParamsObserver, self).__init__(dtype=dtype)
+                 quant_max=255,
+                 is_dynamic=False):
+        super(FixedQParamsObserver, self).__init__(dtype=dtype, is_dynamic=is_dynamic)
         self.quant_min = quant_min
         self.quant_max = quant_max
         self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
@@ -1242,12 +1261,13 @@ class PlaceholderObserver(ObserverBase):
         dtype: Quantized data type
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
     """
 
     def __init__(
-        self, dtype=torch.float32, custom_op_name="", compute_dtype=None
+        self, dtype=torch.float32, custom_op_name="", compute_dtype=None, is_dynamic=False
     ) -> None:
-        super(PlaceholderObserver, self).__init__(dtype=dtype)
+        super(PlaceholderObserver, self).__init__(dtype=dtype, is_dynamic=is_dynamic)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
@@ -1274,6 +1294,7 @@ class RecordingObserver(_ObserverBase):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
@@ -1306,10 +1327,11 @@ class NoopObserver(ObserverBase):
         dtype: Quantized data type
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
+        is_dynamic: Indicator that dynamic quantization will be used for observed module.
     """
 
-    def __init__(self, dtype=torch.float16, custom_op_name="") -> None:
-        super(NoopObserver, self).__init__(dtype=dtype)
+    def __init__(self, dtype=torch.float16, custom_op_name="", is_dynamic=False) -> None:
+        super(NoopObserver, self).__init__(dtype=dtype, is_dynamic=is_dynamic)
         self.dtype = dtype
         self.custom_op = custom_op_name
 
@@ -1470,14 +1492,14 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.float, compute_dtype=torch.quint8
+    dtype=torch.float, compute_dtype=torch.quint8, is_dynamic=True
 )
 """
 Default observer for dynamic quantization.
 """
 
 default_float_qparams_observer = PerChannelMinMaxObserver.with_args(
-    dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0
+    dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0, is_dynamic=True
 )
 """
 Default observer for a floating point zero-point.

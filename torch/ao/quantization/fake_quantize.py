@@ -155,6 +155,7 @@ class FakeQuantize(FakeQuantizeBase):
             'Only per channel and per tensor quantization are supported in fake quantize' + \
             ' got qscheme: ' + str(self.qscheme)
         self.is_per_channel = _is_per_channel(self.qscheme)
+        self.is_dynamic = self.activation_post_process.is_dynamic
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -347,7 +348,7 @@ Observer is memoryless since averaging_constant is 1.
 """
 
 default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
-                                                    dtype=torch.quint8, averaging_constant=1)
+                                                    dtype=torch.quint8, averaging_constant=1, is_dynamic=True)
 """
 Default dynamic fake_quant for activations.
 """
@@ -372,7 +373,8 @@ default_embedding_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerC
                                                       quant_min=0,
                                                       quant_max=255,
                                                       ch_axis=0,
-                                                      averaging_constant=1)
+                                                      averaging_constant=1,
+                                                      is_dynamic=True)
 """
 Default fake_quant for embeddings.
 Observer is memoryless since averaging_constant is 1.
@@ -382,7 +384,8 @@ default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=MovingAverag
                                                            qscheme=torch.per_channel_affine_float_qparams,
                                                            ch_axis=0,
                                                            dtype=torch.quint4x2,
-                                                           averaging_constant=1)
+                                                           averaging_constant=1,
+                                                           is_dynamic=True)
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,

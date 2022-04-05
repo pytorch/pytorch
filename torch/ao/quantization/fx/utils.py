@@ -120,6 +120,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
     compute_dtype = None
+    is_dynamic = activation_post_process.is_dynamic
     if hasattr(activation_post_process, "compute_dtype"):
         compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
@@ -139,7 +140,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
-    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+    # elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+    elif is_dynamic:
         # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
