@@ -1,9 +1,12 @@
-import torch
-from ._zip_file import PackageZipFileReader, PackageZipFileWriter
-from ._directory_reader_torchscript import TorchScriptDirectoryReader, _HasStorage
-from pathlib import Path
 import os.path
+from pathlib import Path
 from typing import List, BinaryIO, Union, Optional
+
+import torch
+
+from ._directory_reader_torchscript import TorchScriptDirectoryReader, _HasStorage
+from ._zip_file import PackageZipFileReader, PackageZipFileWriter
+
 
 class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
     """
@@ -21,9 +24,10 @@ class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
 
         self.zip_file_writer = torch._C.PyTorchFileWriter(f)
         self.zip_file_writer.set_min_version(6)
-        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file_writer)
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(
+            self.zip_file_writer
+        )
         self.storage_context = self.script_module_serializer.storage_context()
-
 
     def write_record(self, f: str, str_or_bytes: Union[str, bytes], size: int):
         if isinstance(str_or_bytes, str):
@@ -35,16 +39,21 @@ class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
         if self.buffer:
             self.buffer.flush()
 
+
 class TorchScriptPackageZipFileReader(PackageZipFileReader):
     """
     Class to allow PackageImporter to operate torchscript objects.  This
     is a wrapper around the PyTorchReader class.
     """
 
-    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO]):
+    def __init__(
+        self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO]
+    ):
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = "<pytorch_file_reader>"
-            self.zip_reader: Union[torch._C.PyTorchFileReader, TorchScriptDirectoryReader] = file_or_buffer
+            self.zip_reader: Union[
+                torch._C.PyTorchFileReader, TorchScriptDirectoryReader
+            ] = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
@@ -67,7 +76,9 @@ class TorchScriptPackageZipFileReader(PackageZipFileReader):
     def get_all_records(self) -> List[str]:
         return self.zip_reader.get_all_records()  # type: ignore[union-attr]
 
-    def get_storage_from_record(self, name: str, numel: int, dtype: torch.dtype) -> _HasStorage:
+    def get_storage_from_record(
+        self, name: str, numel: int, dtype: torch.dtype
+    ) -> _HasStorage:
         return self.zip_reader.get_storage_from_record(name, numel, dtype)  # type: ignore[union-attr]
 
     def get_filename(self) -> str:
