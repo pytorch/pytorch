@@ -606,6 +606,9 @@ class Operator:
     def __repr__(self):
         return f'Operator("{self.name}")'
 
+    def __hash__(self):
+        return hash(self.name)
+
     def no_opinfos_skip_test(self, test_name):
         """Returns NO if any opinfos have a skip or xfail for the test"""
         if not self.has_opinfo():
@@ -679,6 +682,12 @@ class Operator:
 
     def supports_jvpvjp(self):
         if self.name in FACTORY_FNS:
+            return Support.YES
+        exemptions = {
+            # we have support (see OpInfo), testing artifact
+            'torch.nn.functional.dropout2d',
+        }
+        if self.name in exemptions:
             return Support.YES
         return self.no_opinfos_skip_test('test_jvpvjp')
 
@@ -785,15 +794,19 @@ result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
 
 print("=" * 30 + " Top 125 Summary " + "=" * 30)
 opset = OperatorSet.from_top125()
-result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
-pprint.pprint(result)
+# result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
 result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
 pprint.pprint(result)
+# result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+# result = opset.query(Operator.supports_fast_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
 # pprint.pprint(result)
 print(opset.summary())
 
 print("=" * 30 + " Top 160 Summary " + "=" * 30)
 opset = OperatorSet.from_top160()
-result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
-# pprint.pprint(result)
+result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
 print(opset.summary())
