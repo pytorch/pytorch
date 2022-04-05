@@ -3744,9 +3744,9 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.bucketize(input, boundaries), \
                     torch.bucketize(input, boundaries, right=True)
 
-        src = torch.tensor([[2, 5, 10], [6, 8, 3]])
-        index = torch.tensor([1, 5, 7, 8, 10])
-        self.run_test(BucketModel(), (src, index))
+        input = torch.tensor([[2, 5, 10], [6, 8, 3]])
+        boundaries = torch.tensor([1, 5, 7, 8, 10])
+        self.run_test(BucketModel(), (input, boundaries))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
