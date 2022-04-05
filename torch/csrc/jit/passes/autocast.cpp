@@ -164,7 +164,8 @@ void castTensorInputs(
       casted_optional.insert(input);
     }
     // casting on tensor;
-    if (input_tensor_type && input->node()->kind() != cast_op && input->node()->kind() != cast_optional_op) {
+    if (input_tensor_type && input->node()->kind() != cast_op &&
+        input->node()->kind() != cast_optional_op) {
       auto has_inserted = casted_inputs.insert(input);
       if (has_inserted.second) {
         casted_inputs_ordered.push_back(input);
@@ -176,7 +177,7 @@ void castTensorInputs(
 
   for (auto input : casted_inputs_ordered) {
     Value* new_input = nullptr;
-    Symbol op = casted_optional.count(input) != 0 ? cast_optional_op : cast_op ;
+    Symbol op = casted_optional.count(input) != 0 ? cast_optional_op : cast_op;
 
     if (cast_op == aten::_autocast_to_full_precision) {
       new_input = graph->insert(
@@ -518,7 +519,12 @@ RegisterOperators reg_autocast_to_reduced_precision_optional({
             c10::optional<at::Tensor> ret = c10::nullopt;
 
             if (self.has_value()) {
-              ret = at::native::_autocast_to_reduced_precision(self.value(), cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype);
+              ret = at::native::_autocast_to_reduced_precision(
+                  self.value(),
+                  cuda_enabled,
+                  cpu_enabled,
+                  cuda_dtype,
+                  cpu_dtype);
             }
             push(stack, IValue(ret));
           };
@@ -539,7 +545,8 @@ RegisterOperators reg_autocast_to_full_precision_optional({
             c10::optional<at::Tensor> ret = c10::nullopt;
 
             if (self.has_value()) {
-              ret = at::native::_autocast_to_full_precision(self.value(), cuda_enabled, cpu_enabled);
+              ret = at::native::_autocast_to_full_precision(
+                  self.value(), cuda_enabled, cpu_enabled);
             }
             push(stack, IValue(ret));
           };
