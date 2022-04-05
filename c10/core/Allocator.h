@@ -219,7 +219,7 @@ struct AllocatorRegisterer {
 
 #define REGISTER_ALLOCATOR(t, f)                  \
   namespace {                                     \
-  static AllocatorRegisterer<t> g_allocator_d(f); \
+  static c10::AllocatorRegisterer<t> g_allocator_d(f); \
   }
 
 // An interface for reporting thread local memory usage

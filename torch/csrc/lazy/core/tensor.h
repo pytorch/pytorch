@@ -133,6 +133,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // Applies the queue of operations in preparation for using the data.
   void ApplyPendingGraph();
 
+  const c10::Storage& Storage() const { return storage_; }
+
  private:
   LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
   LazyTensor(Value ir_value, const BackendDevice& device);
@@ -177,6 +179,12 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   static int64_t GetNextTensorId();
 
   std::shared_ptr<Data> data_;
+  // Temporarily used to suport Tensor.is_alias_of().
+  // This is a fake storage that doesn't store anything.
+  // Instead it serves as a marker to mark LazyTensors that
+  // points to the same storage, and thus alias of each other.
+  // FIXME(alanwaketan): Remove this once we have functionalization (bdhirsh).
+  c10::Storage storage_;
 };
 
 // Utils to convert at::Tensor to LazyTensor, and vice versa.
