@@ -277,16 +277,16 @@ class _AllGather(Function):
     def forward(ctx, group, tensor):
         ctx.group = group
         out_tensor_list = [
-            torch.empty_like(tensor) for i in range(dist.get_world_size(group=group))
+            torch.empty_like(tensor) for _ in range(dist.get_world_size(group=group))
         ]
         dist.all_gather(out_tensor_list, tensor, group=group)
         return tuple(out_tensor_list)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
-        gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
-        gx = torch.sum(torch.stack(gxs), dim=0)
+        rank = dist.get_rank()
+        gx = torch.empty_like(grad_outputs[rank])
+        dist.reduce_scatter(gx, list(grad_outputs), op=dist.ReduceOp.SUM, group=ctx.group)
         return (None, gx)
 
 
