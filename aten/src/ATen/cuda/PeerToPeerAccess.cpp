@@ -39,8 +39,8 @@ bool get_p2p_access(int dev, int dev_to_access) {
               dev_to_access, " is not a device");
   TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
 
-  static bool using_cudaMallocAsync = (CUDACachingAllocator::allocatorBackend() ==
-                                       CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
+  bool using_cudaMallocAsync = (CUDACachingAllocator::allocatorBackend() ==
+                                CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
 
   auto &cache = p2pAccessEnabled_[dev * num_devices_ + dev_to_access];
 

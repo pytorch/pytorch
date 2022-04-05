@@ -96,8 +96,8 @@ void copy_device_to_device(TensorIterator& iter,
       // Due to bizarre cuda driver intricacies, copies of
       // cudaMallocAsynced memory between devices that aren't
       // peer-to-peer-capable need "cudaMemcpyPeerAsync".
-      static bool using_cudaMallocAsync = (CUDACachingAllocator::allocatorBackend() ==
-                                           CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
+      bool using_cudaMallocAsync = (CUDACachingAllocator::allocatorBackend() ==
+                                    CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
       bool needs_MemcpyPeer = (src_device != dst_device &&
                                using_cudaMallocAsync &&
                                !p2p_enabled);
