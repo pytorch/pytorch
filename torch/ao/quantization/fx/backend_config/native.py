@@ -343,6 +343,14 @@ _HARDSIGMOID_MODULE_CONFIG = {
     ],
 }
 
+_CAT_CONFIG = {
+    "pattern": torch.cat,
+    "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+    "dtype_configs": [
+        default_op_quint8_dtype_config,
+    ]
+}
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -354,5 +362,6 @@ def get_native_backend_config_dict():
             *_get_conv_configs(),
             *_get_binary_op_configs(),
             _HARDSIGMOID_MODULE_CONFIG,
+            _CAT_CONFIG,
         ],
     }
