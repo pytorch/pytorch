@@ -482,7 +482,7 @@ inline constexpr
 bool
 operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
 {
-    return (__x.real() || __y.imag()) && (__x.imag() || __y.real());
+    return (__x.real() || __x.imag()) && (__y.real() || __y.imag());
 }
 
 // 26.3.7 values:
