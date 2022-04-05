@@ -785,16 +785,14 @@ void ComputeAt::updateSiblings() {
             id->parallelize(sibling_id->getParallelType());
           }
         }
-        if (tv->getComputeAtPosition() > sibling_tv->getComputeAtPosition()) {
-          auto sibling_domain = TransformReplay::fullSelfReplay(
-              sibling_tv->domain(), tv->domain());
-          validateDomain(sibling_tv, sibling_domain);
-          sibling_tv->setDomain(sibling_domain);
-          sibling_tv->setComputeAt(tv->getComputeAtPosition());
-          sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
-          auto consumer_tvs = ir_utils::consumerTvsOf(sibling_tv);
-          consumers_to_update.insert(consumer_tvs.begin(), consumer_tvs.end());
-        }
+        auto sibling_domain =
+            TransformReplay::fullSelfReplay(sibling_tv->domain(), tv->domain());
+        validateDomain(sibling_tv, sibling_domain);
+        sibling_tv->setDomain(sibling_domain);
+        sibling_tv->setComputeAt(tv->getComputeAtPosition());
+        sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
+        auto consumer_tvs = ir_utils::consumerTvsOf(sibling_tv);
+        consumers_to_update.insert(consumer_tvs.begin(), consumer_tvs.end());
       }
     }
 
