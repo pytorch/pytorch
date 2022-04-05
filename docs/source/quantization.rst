@@ -103,7 +103,7 @@ The following table compares the differences between Eager Mode Quantization and
 There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
-   floating point and quantized for compute.)
+   floating point and quantized for compute)
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
 3. static quantization aware training (weights quantized, activations quantized,
@@ -488,6 +488,17 @@ and supported quantized modules and functions.
     quantization-support
     torch.ao.ns._numeric_suite
     torch.ao.ns._numeric_suite_fx
+
+Quantization Backend Configuration
+----------------------------------
+
+The :doc:`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
+on how to configure the quantization workflows for various backends.
+
+.. toctree::
+    :hidden:
+
+    quantization-backend-configuration
 
 Quantized Tensors
 ---------------------------------------
