@@ -257,10 +257,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
-#if CUDA_VERSION >= 11040
+#if CUDA_VERSION >= 11060
               activation_to_gemm_and_blas_arg(activation)
 #else
               // GELU is not supported (and does not compile!) prior to CUDA 11.4.
+              // Have observed accuracy issues with GELU epilogue in
+              // 11.4; bumping requirement to 11.6 as a first guess.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
               : cuda::blas::GEMMAndBiasActivationEpilogue::None
@@ -308,7 +310,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
   }
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && CUDA_VERSION < 11040 && !defined(_MSC_VER)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && CUDA_VERSION < 11060 && !defined(_MSC_VER)
   if (useLtInterface && activation == Activation::GELU) {
     result_ = c10::MaybeOwned<Tensor>::owned(at::gelu(*result_));
   }
