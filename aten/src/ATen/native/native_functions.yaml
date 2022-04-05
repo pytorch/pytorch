@@ -2978,10 +2978,6 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool3d_backward
 
-- func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
-  dispatch:
-    QuantizedCPU: quantized_max_pool1d
-
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
