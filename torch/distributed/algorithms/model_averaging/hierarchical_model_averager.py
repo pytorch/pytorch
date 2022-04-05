@@ -168,5 +168,5 @@ class HierarchicalModelAverager(averagers.ModelAverager):
                                 filter_params.append(param)
                     else:
                         raise NotImplementedError
-                utils.average_parameters(iter(filter_params), group)
+                utils.average_parameters(filter_params, group)
         self.step += 1

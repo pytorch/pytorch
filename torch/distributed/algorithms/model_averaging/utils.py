@@ -1,12 +1,12 @@
 # flake8: noqa C101
 import itertools
-from typing import Iterator
+from typing import List
 
 import torch
 import torch.distributed as dist
 
 def average_parameters(
-    params: Iterator[torch.nn.Parameter], process_group: dist.ProcessGroup
+    params: List[torch.nn.Parameter], process_group: dist.ProcessGroup
 ):
     """
     Averages all the given parameters.
