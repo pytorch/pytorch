@@ -199,7 +199,7 @@ void runConv(
 
 } // unnamed namespace
 
-constexpr size_t kIters = 20;
+constexpr int  kIters = 20;
 
 TEST(DEPTHWISE3x3, Conv) {
   for (int i = 0; i < kIters; ++i) {
