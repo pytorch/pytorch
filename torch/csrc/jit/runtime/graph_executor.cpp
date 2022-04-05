@@ -305,6 +305,12 @@ struct DifferentiableGraphBackward : public autograd::Node {
         outputs.emplace_back();
       }
     }
+    TORCH_INTERNAL_ASSERT(
+        num_outputs() == outputs.size(),
+        "DifferentiableGraphBackward: expected ",
+        num_outputs(),
+        " outputs but found ",
+        outputs.size());
     return outputs;
   }
 
