@@ -103,6 +103,19 @@ const std::vector<Expr*>& Val::uses() const {
   return uses_;
 }
 
+void Val::resolveIndexDtype() {
+  TORCH_INTERNAL_ASSERT(
+      vtype_ == ValType::TensorView,
+      "Resolving index type is currently only supported on tensor view values.");
+  TORCH_INTERNAL_ASSERT(
+      dtype_ == DataType::Index,
+      "Can only resolve index type if a tensor has an Index DataType.");
+  TORCH_INTERNAL_ASSERT(
+      container()->isA<kir::Kernel>(),
+      "Index type can only be resolved at compile time.");
+  dtype_ = container()->as<kir::Kernel>()->indexType();
+}
+
 namespace {
 
 // Traverse definition of all values involved in constructing the provided val.
@@ -178,6 +191,16 @@ bool Val::isZeroInt() const {
 bool Val::isOneInt() const {
   auto int_val = getInt();
   return int_val.has_value() && int_val.value() == 1;
+}
+
+bool Val::isDefinitionType(ExprType expression_type) const {
+  if (definition() != nullptr) {
+    auto def_expr_type = definition()->getExprType();
+    if (def_expr_type.has_value() && def_expr_type.value() == expression_type) {
+      return true;
+    }
+  }
+  return false;
 }
 
 c10::optional<DataType> Val::getDataType() const {

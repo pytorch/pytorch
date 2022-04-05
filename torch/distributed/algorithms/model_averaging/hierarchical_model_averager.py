@@ -131,16 +131,17 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def _find_process_group(self):
         """
-        Returns a tuple consisting of whether ``step`` can be divided by
-        a period in the keys of ``period_process_group_dict`` and the associated process group if any.
+        Returns a process group as the value of an ``period_process_group_dict`` entry,
+        if ``step`` can be divided by a period in the keys of ``period_process_group_dict``.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         then the returned process group is the one corresponding to the largest period,
         since this process group will be used for averaging parameters at this ``step``.
+        Returns ``None`` if not found.
         """
         for period in reversed(self._periods):
             if self.step % period == 0:
-                return (True, self.period_process_group_dict[period])
-        return (False, None)
+                return self.period_process_group_dict[period]
+        return None
 
     def average_parameters(self, params):
         r"""
@@ -152,8 +153,8 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         params: average model.parameters() or parameter groups of an optimizer
         """
         if self.step >= self.warmup_steps:
-            found, group = self._find_process_group()
-            if found:
+            group = self._find_process_group()
+            if group is not None:
                 filter_params = []
                 for param in params:
                     if isinstance(param, torch.nn.Parameter):
