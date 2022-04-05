@@ -407,4 +407,28 @@ Tensor histogram_histc_cpu(const Tensor& self, int64_t bin_ct,
     return histogram_histc_cpu_out(self, bin_ct, min, max, hist);
 }
 
+std::tuple<Tensor, std::vector<Tensor>> histogramdd(
+    const Tensor &self, TensorList bins, c10::optional<ArrayRef<double>> /*range*/,
+    const c10::optional<Tensor> &weight, bool density) {
+  auto hist = at::_histogramdd_from_bin_tensors(self, bins, weight, density);
+  return std::tuple<Tensor, std::vector<Tensor>>{
+      std::move(hist), bins.vec()};
+}
+
+std::tuple<Tensor, std::vector<Tensor>> histogramdd(
+    const Tensor &self, IntArrayRef bins, c10::optional<ArrayRef<double>> range,
+    const c10::optional<Tensor> &weight, bool density) {
+  auto bin_edges = at::_histogramdd_bin_edges(self, bins, range, weight, density);
+  auto hist = at::_histogramdd_from_bin_cts(self, bins, range, weight, density);
+  return std::tuple<Tensor, std::vector<Tensor>>{
+      std::move(hist), std::move(bin_edges)};
+}
+
+std::tuple<Tensor, std::vector<Tensor>> histogramdd(
+    const Tensor &self, int64_t bins, c10::optional<ArrayRef<double>> range,
+    const c10::optional<Tensor> &weight, bool density) {
+  DimVector bins_v(self.size(-1), bins);
+  return at::native::histogramdd(self, bins_v, range, weight, density);
+}
+
 }} // namespace at::native

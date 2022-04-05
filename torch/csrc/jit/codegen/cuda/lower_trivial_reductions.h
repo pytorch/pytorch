@@ -20,6 +20,8 @@ class TORCH_CUDA_CU_API TrivialReductionInfo {
   void build(Fusion* fusion);
 
   bool isDerived(IterDomain* id) const;
+
+  // TODO: Not used, cleanup
   bool isDerivedFromRoot(IterDomain* id) const;
 
  private:
