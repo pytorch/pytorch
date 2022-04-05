@@ -293,7 +293,6 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
 
 namespace {
 
-
 void assertShapeEqual(
     c10::optional<std::vector<c10::SymbolicShape>>& actual,
     std::vector<c10::optional<int64_t>> expected) {
