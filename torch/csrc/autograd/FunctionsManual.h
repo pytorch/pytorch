@@ -113,6 +113,7 @@ at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & m
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
+at::Tensor cholesky_inverse_jvp(const at::Tensor& F, const at::Tensor& dF, const at::Tensor& X, bool upper);
 Tensor pinv_jvp(
   const Tensor& A,
   const Tensor& pinvA,
