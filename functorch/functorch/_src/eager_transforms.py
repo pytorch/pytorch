@@ -1224,10 +1224,10 @@ def functionalize(func: Callable) -> Callable:
             func_args = _wrap_all_tensors_to_functional(args, func_level)
             func_kwargs = _wrap_all_tensors_to_functional(kwargs, func_level)
 
-            flattened_unwrapped_args = tree_flatten(args)
-            flattened_wrapped_args = tree_flatten(func_args)
-            flattened_unwrapped_kwargs = tree_flatten(kwargs)
-            flattened_wrapped_kwargs = tree_flatten(func_kwargs)
+            flattened_unwrapped_args, _ = tree_flatten(args)
+            flattened_wrapped_args, _ = tree_flatten(func_args)
+            flattened_unwrapped_kwargs, _ = tree_flatten(kwargs)
+            flattened_wrapped_kwargs, _ = tree_flatten(func_kwargs)
 
             func_outputs = func(*func_args, **func_kwargs)
             outputs = _unwrap_all_tensors_from_functional(func_outputs)
