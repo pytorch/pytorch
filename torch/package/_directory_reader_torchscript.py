@@ -2,6 +2,7 @@ from typing import cast
 
 import torch
 from torch.types import Storage
+
 from ._directory_reader import DirectoryReader
 
 # because get_storage_from_record returns a tensor!?
