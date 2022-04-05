@@ -259,9 +259,9 @@ c10::SymbolicShape extractListShape(
 // means that we do know its concrete value statically but we can asssign sets
 // of tensor dimensions which must be equal at runtime.
 
-using SsaArgument = c10::variant<ShapeArguments, IValue>;
+using SSArgument = c10::variant<ShapeArguments, IValue>;
 
-std::ostream& operator<<(std::ostream& out, const SsaArgument& sa) {
+std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
   if (const IValue* iv = c10::get_if<IValue>(&sa)) {
     out << *iv;
   } else {
@@ -273,7 +273,7 @@ std::ostream& operator<<(std::ostream& out, const SsaArgument& sa) {
 struct SymbolicShapeOpAnalyzer {
   std::shared_ptr<Graph> shape_compute_graph_;
   const FunctionSchema* schema_;
-  std::vector<SsaArgument> inputs_;
+  std::vector<SSArgument> inputs_;
 
   // For the case where we have a JIT graph,
   // subsititute optional types for their component types
@@ -344,7 +344,7 @@ struct SymbolicShapeOpAnalyzer {
     for (size_t op_in_index = 0;
          op_in_index < shape_compute_graph_->inputs().size();
          op_in_index++) {
-      SsaArgument& argument = inputs_[op_in_index];
+      SSArgument& argument = inputs_[op_in_index];
       Value* graph_in_var = shape_compute_graph_->inputs().at(op_in_index);
 
       if (IValue* cur_val = c10::get_if<IValue>(&argument)) {
@@ -569,7 +569,7 @@ struct SymbolicShapeOpAnalyzer {
   }
 
   c10::optional<std::vector<c10::SymbolicShape>> run(
-      std::vector<SsaArgument>& inputs) {
+      std::vector<SSArgument>& inputs) {
     if (!shape_compute_graph_) {
       return c10::nullopt;
     }
@@ -584,7 +584,7 @@ struct SymbolicShapeOpAnalyzer {
   }
 };
 
-SsaArgument tensorShapeArg(Value* tensor_v) {
+SSArgument tensorShapeArg(Value* tensor_v) {
   auto tt = tensor_v->type()->expect<TensorType>();
   c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
 
@@ -606,7 +606,7 @@ SsaArgument tensorShapeArg(Value* tensor_v) {
   return symbolic_shapes;
 }
 
-std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
+std::vector<SSArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
   // TODO: fix the List of integers implementation, and
   // extract out the shape changes, otherwise this is complete
   // NB: shape compute graphs may have less inputs than their node
@@ -614,7 +614,7 @@ std::vector<SsaArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
   // so iterate on # of shape inputs
   // We make lists of Tensor inputs variadic, which results in
   // offset between a node index and its corresponding graph index
-  std::vector<SsaArgument> input_shapes = std::vector<SsaArgument>();
+  std::vector<SSArgument> input_shapes = std::vector<SSArgument>();
 
   for (size_t node_index = 0; node_index < n->inputs().size(); ++node_index) {
     auto type = n->input(node_index)->type();
@@ -1075,7 +1075,7 @@ TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs) {
-  std::vector<SsaArgument> ssa_args;
+  std::vector<SSArgument> ssa_args;
   for (auto& arg : inputs) {
     if (const IValue* ival = c10::get_if<IValue>(&arg)) {
       ssa_args.emplace_back(*ival);
