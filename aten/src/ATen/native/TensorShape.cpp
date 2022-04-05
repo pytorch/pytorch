@@ -1451,7 +1451,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           1, std::min<int64_t>((src_len + src_grain_size - 1) / src_grain_size, at::get_num_threads())
       );
 
-      const auto src_n_threads_shape = {n_threads_src, (src_len + n_threads_src - 1) / n_threads_src};
+      const std::vector<int64_t> src_n_threads_shape = {
+        n_threads_src, (src_len + n_threads_src - 1) / n_threads_src
+      };
       auto src_int_idx = at::empty(src_n_threads_shape, src.options());
       auto sorted_int_idx = at::empty_like(src_int_idx);
       auto int_counts = at::zeros_like(src_int_idx);
