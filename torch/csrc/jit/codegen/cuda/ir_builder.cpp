@@ -47,6 +47,7 @@ IR_BUILDER_INSTANTIATE(TensorView)
 IR_BUILDER_INSTANTIATE(Bool)
 IR_BUILDER_INSTANTIATE(Double)
 IR_BUILDER_INSTANTIATE(Int)
+IR_BUILDER_INSTANTIATE(ComplexDouble)
 IR_BUILDER_INSTANTIATE(NamedScalar)
 
 // Exprs
@@ -55,12 +56,14 @@ IR_BUILDER_INSTANTIATE(Merge)
 IR_BUILDER_INSTANTIATE(TransposeOp)
 IR_BUILDER_INSTANTIATE(ShiftOp)
 IR_BUILDER_INSTANTIATE(GatherOp)
+IR_BUILDER_INSTANTIATE(ViewDtypeOp)
 IR_BUILDER_INSTANTIATE(ViewOp)
 IR_BUILDER_INSTANTIATE(UnaryOp)
 IR_BUILDER_INSTANTIATE(BinaryOp)
 IR_BUILDER_INSTANTIATE(TernaryOp)
 IR_BUILDER_INSTANTIATE(ReductionOp)
 IR_BUILDER_INSTANTIATE(WelfordOp)
+IR_BUILDER_INSTANTIATE(MmaOp)
 IR_BUILDER_INSTANTIATE(BroadcastOp)
 
 Val* IrBuilder::newResult(DataType dtype) {
@@ -266,6 +269,61 @@ Val* SimplifyingIrBuilder::addExpr(Val* lhs, Int::ScalarType rhs) {
 
 Val* SimplifyingIrBuilder::subExpr(Val* lhs, Val* rhs) {
   return addExpr(lhs, negExpr(rhs));
+}
+
+Val* SimplifyingIrBuilder::mulExpr(Int* lhs, Int::ScalarType rhs) {
+  if (rhs == 0) {
+    return lhs->container()->zeroVal();
+  } else if (rhs == 1) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return IrBuilder::create<Int>(rhs);
+  } else if (lhs->isConst()) {
+    return IrBuilder::create<Int>(lhs->value().value() * rhs);
+  } else {
+    return IrBuilder::mulExpr(lhs, IrBuilder::create<Int>(rhs));
+  }
+}
+
+Val* SimplifyingIrBuilder::mulExpr(Val* lhs, Int::ScalarType rhs) {
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  if (lhs_int != nullptr) {
+    return mulExpr(lhs_int, rhs);
+  } else {
+    return IrBuilder::mulExpr(lhs, IrBuilder::create<Int>(rhs));
+  }
+}
+
+Val* SimplifyingIrBuilder::mulExpr(Int* lhs, Int* rhs) {
+  if (rhs == nullptr) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return rhs;
+  } else if (lhs->isConst()) {
+    return mulExpr(rhs, lhs->value().value());
+  } else if (rhs->isConst()) {
+    return mulExpr(lhs, rhs->value().value());
+  } else {
+    return IrBuilder::mulExpr(lhs, rhs);
+  }
+}
+
+Val* SimplifyingIrBuilder::mulExpr(Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
+  if (lhs == nullptr || lhs->isOneInt()) {
+    return rhs;
+  } else if (rhs == nullptr || rhs->isOneInt()) {
+    return lhs;
+  } else if (lhs->isZeroInt() || rhs->isZeroInt()) {
+    return lhs->container()->zeroVal();
+  }
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  auto rhs_int = dynamic_cast<Int*>(rhs);
+  if (lhs_int != nullptr && rhs_int != nullptr) {
+    return mulExpr(lhs_int, rhs_int);
+  } else {
+    return IrBuilder::mulExpr(lhs, rhs);
+  }
 }
 
 Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {

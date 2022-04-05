@@ -66,6 +66,7 @@ torch/_C/__init__.pyi
 torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
 torch/_VF.pyi
+torch/return_types.pyi
 torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
@@ -139,6 +140,7 @@ scripts/release_notes/*.json
 compile_commands.json
 *.egg-info/
 docs/source/scripts/activation_images/
+docs/source/scripts/quantization_backend_configs/
 
 ## General
 

@@ -21,7 +21,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       ;;
   esac
 
-  mkdir /opt/conda
+  mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
   # Work around bug where devtoolset replaces sudo and breaks it.
@@ -94,21 +94,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   conda_install nnpack -c killeent
 
   # Install some other packages, including those needed for Python test reporting
-  # Pin SciPy because of failing distribution tests (see #60347)
-  # Pin MyPy version because new errors are likely to appear with each release
-  # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
-  as_jenkins pip install --progress-bar off pytest \
-    scipy==1.6.3 \
-    scikit-image \
-    psutil \
-    "unittest-xml-reporting<=3.2.0,>=2.0.0" \
-    boto3==1.16.34 \
-    hypothesis==4.53.2 \
-    expecttest==0.1.3 \
-    mypy==0.812 \
-    tb-nightly \
-    librosa>=0.6.2
+  as_jenkins pip install --progress-bar off -r /opt/conda/requirements-ci.txt
 
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
