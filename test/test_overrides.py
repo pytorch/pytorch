@@ -7,6 +7,7 @@ import functools
 import pprint
 import pickle
 import collections
+import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
@@ -621,6 +622,9 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(torch.float32)
                 elif t == 'c10::string_view':
                     func_args.append('')
+                elif t == 'SymInt':
+                    # TODO: generate actual SymbolicInt
+                    func_args.append(1)
                 else:
                     raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
         else:
@@ -690,7 +694,10 @@ def generate_tensor_like_override_tests(cls):
         test_method.__name__ = name
         setattr(cls, name, test_method)
 
-# generate_tensor_like_override_tests(TestTorchFunctionOverride)
+generate_tensor_like_override_tests(TestTorchFunctionOverride)
+TestTorchFunctionOverride.test_torch_functional_histogramdd = unittest.skip(
+    "histogramdd is missing __torch_function__ support")(
+        TestTorchFunctionOverride.test_torch_functional_histogramdd)
 
 class Wrapper:
     "Basic data container that knows how to unwrap itself"
