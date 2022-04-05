@@ -201,6 +201,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     grad = unsqueeze_multiple(grad, dim, ndim);
     norm = unsqueeze_multiple(norm, dim, ndim);
   }
+  Tensor norm_eq_zero = norm == 0;  // Optimization: this is unnecessary for the p = 0 or 1
 
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -208,7 +209,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
-    scale_v = grad / at::where(norm == 0, 1., norm);
+    scale_v = grad / norm.masked_fill(norm_eq_zero, 1.);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
@@ -225,18 +226,18 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else if (p < 2.0) {
     if (p < 1.0) {
       // We must create a ones tensor here in case self is complex
-      self_scaled = self.sgn() * at::where(self == 0, at::ones({}, self.options()), self).abs().pow(p - 1);
+      self_scaled = self.sgn() * self.masked_fill(self == 0, 1.).abs().pow(p - 1);
       self_scaled.masked_fill_(self == 0, 0);
     } else {
       self_scaled = self.sgn() * self.abs().pow(p - 1);
     }
-    scale_v = grad / at::where(norm == 0, 1., norm).pow(p - 1);
+    scale_v = grad / norm.masked_fill(norm_eq_zero, 1.).pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
-    scale_v = grad / at::where(norm == 0, 1., norm).pow(p - 1);
+    scale_v = grad / norm.masked_fill(norm_eq_zero, 1.).pow(p - 1);
   }
   // handle case at 0 where we return a subgradient containing 0
-  scale_v.masked_fill_(norm == 0, 0);
+  scale_v.masked_fill_(norm_eq_zero, 0);
   return self_scaled * scale_v;
 }
 
@@ -261,10 +262,12 @@ Tensor norm_jvp(
     result = at::real(result);
     return result.sum(dim, keepdim);
   } else if (p == 2.0) {
+    Tensor norm_eq_zero = norm == 0;
     auto result = self_p.mul(self_t.conj());
     result = at::real(result);
     result = result.sum(dim, keepdim);
-    return result.div_(at::where(norm == 0, 1., norm)).masked_fill_(norm == 0, 0);
+    // Optimization: fill with a inf, to avoid masking a second time? also check other cases
+    return result.div_(norm.masked_fill(norm_eq_zero, 1.)).masked_fill_(norm_eq_zero, 0);
   } else if (std::isinf(p)) {
     if (!keepdim && self_p.dim() != 0) {
       norm = unsqueeze_multiple(norm, dim, ndim);
@@ -282,19 +285,20 @@ Tensor norm_jvp(
     return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
   } else if (p < 2.0) {
     Tensor sumpow_t;
+    Tensor norm_eq_zero = norm == 0;
     if (p < 1.0) {
-      // We must create a ones tensor here in case self is complex
-      Tensor ones = at::ones({}, self_p.options());
-      sumpow_t = (at::where(self_p == 0, ones, self_p).abs().pow_(p - 1).masked_fill_(self_p == 0, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+      Tensor self_p_eq_zero = self_p == 0;
+      sumpow_t = (self_p.abs().masked_fill_(self_p_eq_zero, 1.).pow_(p - 1).masked_fill_(self_p_eq_zero, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
     } else {
       sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
     }
-    auto out = sumpow_t / at::where(norm == 0, 1., norm).pow(p - 1);
-    return out.masked_fill_(norm == 0, 0);
+    auto out = sumpow_t / norm.masked_fill(norm_eq_zero, 1.).pow(p - 1);
+    return out.masked_fill_(norm_eq_zero, 0);
   } else {
+    Tensor norm_eq_zero = norm == 0;
     auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
-    auto out = sumpow_t / at::where(norm == 0, 1., norm).pow(p - 1);
-    return out.masked_fill_(norm == 0, 0);
+    auto out = sumpow_t / norm.masked_fill(norm_eq_zero, 1.).pow(p - 1);
+    return out.masked_fill_(norm_eq_zero, 0);
   }
 }
 
