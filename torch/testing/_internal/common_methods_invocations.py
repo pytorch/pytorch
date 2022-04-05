@@ -1117,6 +1117,7 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
     with sparse csr layouts.
     """
     inputs: List[SampleInput] = []
+
     if op_info.supports_sparse_csr:
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             if not (sample_input.input.ndim == 2 and sample_input.kwargs.get('keepdim')):
@@ -1133,19 +1134,6 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
                 inputs.append(SampleInput(sample_input.input.to_sparse_csr(),
                                           args=sample_input.args, kwargs=sample_input.kwargs))
 
-            if sample_input.kwargs['dim'] == 0:
-                # Reductions of CSR tensors use different implementations for
-                # inner and/or outer dimensions. So, as a minimum of testing CSR
-                # implementations the following kwargs must be generated:
-                #   dict(dim=0, keepdim=True)
-                #   dict(dim=1, keepdim=True)
-                #   dict(dim=(0, 1), keepdim=True)
-                # Here we generate the dim=1 case from the dim=0 case.
-                sample_input = inputs[-1]
-                sample_input_kwargs = sample_input.kwargs.copy()
-                sample_input_kwargs.update(dim=1)
-                inputs.append(SampleInput(sample_input.input.clone(),
-                                          args=sample_input.args, kwargs=sample_input_kwargs))
     return inputs
 
 
@@ -6989,12 +6977,13 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
 
     reduce = op_info.variant_test_name
     sample_inputs = []
-    for args in test_cases:
+    for args, include_self in product(test_cases, [True, False]):
         inp_shape, dim, index, src_shape = args
         sample_inputs.append(
             SampleInput(
                 _tensor(inp_shape),
-                args=(dim, index, _tensor(src_shape), reduce)
+                args=(dim, index, _tensor(src_shape), reduce),
+                kwargs={'include_self': include_self}
             )
         )
 
@@ -15549,7 +15538,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_sparse=True,
-        supports_sparse_csr=True,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -15630,6 +15618,46 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
+        '_masked.argmax',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmax): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmax
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.argmin',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmin): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmin
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
         '_masked.mean',
         ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         method_variant=None,
@@ -15691,8 +15719,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         decorators=[
-            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
-                                            torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestReductions', 'test_reference_masked'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestReductions', 'test_ref_small_input'),
