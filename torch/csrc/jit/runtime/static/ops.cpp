@@ -2177,7 +2177,11 @@ void apply_dynamic_out_functor<true>(
     const at::Tensor& input,
     at::Tensor& out,
     bool reduce_range) {
-  packed_weight->apply_dynamic_relu_out(input, out, reduce_range);
+  // The implementation of PackedLinearWeightFp16::apply_dynamic_impl does not
+  // handle relu. Currently, it ignores the `ReluFused` template parameter.
+  // So, we explicitly do the relu here.
+  packed_weight->apply_dynamic_out(input, out, reduce_range);
+  out.relu_();
 }
 
 template <bool has_relu>
