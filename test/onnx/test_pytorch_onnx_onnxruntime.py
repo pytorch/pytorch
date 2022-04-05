@@ -7358,6 +7358,12 @@ class _TestONNXRuntime:
         self.run_test(torch.nn.CosineSimilarity(dim=2), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pairwise_distance(self):
+        x = torch.randn(5, 3, 2)
+        y = torch.randn(5, 3, 2)
+        self.run_test(torch.nn.PairwiseDistance(p=2.0), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_cross(self):
         class Cross(torch.nn.Module):
             def forward(self, x, y):
@@ -7367,6 +7373,16 @@ class _TestONNXRuntime:
         x = torch.randn(5, 3, 2, 3)
         y = torch.randn(5, 3, 2, 3)
         self.run_test(Cross(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist(self):
+        class Cdist(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cdist(x, y)
+
+        x = torch.randn(5, 3, 3)
+        y = torch.randn(5, 2, 3)
+        self.run_test(Cdist(), input=(x, y))        
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):

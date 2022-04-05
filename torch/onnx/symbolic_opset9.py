@@ -1660,6 +1660,13 @@ def cosine_similarity(g, x1, x2, dim, eps):
     return div(g, cross, div_tens)
 
 
+def pairwise_distance(g, input1, input2, p, eps, keepdim):
+    inv_p = div(g, g.op("Constant", value_t=torch.tensor([1], dtype=torch.float)), p)
+    sum = sym_help._reducesum_helper(g, pow(g, sub(g, input1, input2), p),
+                                     axes_i=[-1], keepdims_i=_parse_arg(keepdim, "i"))
+    return pow(g, sum, inv_p)
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input, unused_memory_format):
     return input
@@ -3619,6 +3626,17 @@ def cross(g, input, other, dim=None):
     # cross product is calculated as
     # result = [(b*f - c*e), (c*d - a*f), (a*e - b*d)]
     return sub(g, mul(g, roll_x_1, roll_y_1), mul(g, roll_x_2, roll_y_2))
+
+
+def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
+    # X1.shape = (B * P * D), X2.shape = (B * R * D)
+    # In order to respect numpy style broadcasting as demonstrated in
+    # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
+    # we unsqueeze both input tensors
+    rank = sym_help._get_tensor_rank(x1)
+    broadcasted_x1 = sym_help._unsqueeze_helper(g, x1, [rank - 1])
+    broadcasted_x2 = sym_help._unsqueeze_helper(g, x2, [rank - 2])
+    return pairwise_distance(g, broadcasted_x1, broadcasted_x2, p, eps=1e-06, keepdim=False)
 
 
 def broadcast_tensors(g, self):
