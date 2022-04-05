@@ -77,7 +77,7 @@ def slice(
         end_val += self[dim]
     if start_val < 0:
         start_val = 0
-    elif start_val >= self[dim]:
+    elif start_val > self[dim]:
         start_val = self[dim]
     if end_val < start_val:
         end_val = start_val
