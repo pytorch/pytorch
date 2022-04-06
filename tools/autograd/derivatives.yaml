@@ -1460,9 +1460,11 @@
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), maybe_multiply(-grad, alpha.conj()))
   other: handle_r_to_c(other.scalar_type(), grad)
+  result: -maybe_multiply(self_t, alpha) + other_t
 
 - name: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), maybe_multiply(-grad, alpha.conj()))
+  result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes())

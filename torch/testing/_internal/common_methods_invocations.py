@@ -12698,6 +12698,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('__rsub__',
                     op=torch.Tensor.__rsub__,
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
                     supports_out=False,
                     supports_two_python_scalars=True,
                     skips=(
@@ -12713,6 +12715,8 @@ op_db: List[OpInfo] = [
                     autodiff_nonfusible_nodes=['aten::rsub'],),
     BinaryUfuncInfo('rsub',
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
                     supports_out=False,
                     supports_inplace_autograd=False,
                     assert_autodiffed=None,
