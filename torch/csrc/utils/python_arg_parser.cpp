@@ -278,6 +278,12 @@ auto handle_torch_function_no_python_arg_parser(
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     for (auto& arg : overloaded_args) {
+      // See https://github.com/pytorch/pytorch/issues/63767
+      if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg)) {
+        TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
+                   "will be an error in future, please define it as a classmethod.");
+      }
+
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
@@ -992,9 +998,9 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, Py_ssiz
 
 bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               bool raise_exception) {
-  auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
+  size_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
   auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  Py_ssize_t arg_pos = 0;
+  size_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
@@ -1159,7 +1165,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-  auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
+  size_t num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<unsigned> plausible_idxs;
   unsigned i = 0;
   for (auto& signature : signatures_) {
