@@ -11532,7 +11532,7 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: leaky_relu_backward
+           supports_fwgrad_bwgrad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
     OpInfo('nn.functional.avg_pool2d',
            aten_name='avg_pool2d',
