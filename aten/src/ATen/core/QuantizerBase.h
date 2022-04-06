@@ -55,7 +55,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
    */
   virtual QScheme qscheme() const = 0;
 
-  ScalarType scalar_type() {
+  ScalarType scalar_type() const {
     return scalar_type_;
   }
 
