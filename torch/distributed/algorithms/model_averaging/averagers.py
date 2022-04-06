@@ -1,5 +1,6 @@
 import warnings
 from abc import ABC, abstractmethod
+from typing import Union, Iterable, Dict
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
@@ -99,12 +100,14 @@ class PeriodicModelAverager(ModelAverager):
             )
         self.period = period
 
-    def average_parameters(self, params):
-        r"""
+    def average_parameters(self, params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
+        """
+        Args:
+            params: average model.parameters() or parameter groups of an optimizer
+            
         Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
-        params: average model.parameters() or parameter groups of an optimizer
         """
         if (
             self.step >= self.warmup_steps
@@ -123,6 +126,6 @@ class PeriodicModelAverager(ModelAverager):
                         if param_data.grad is not None:
                             filter_params.append(param_data)
                 else:
-                    raise NotImplementedError
+                    raise NotImplementedError(f"Parameter input of type {type(param)} is not supported")
             utils.average_parameters(filter_params, self.process_group)
         self.step += 1
