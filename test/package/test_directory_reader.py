@@ -10,6 +10,12 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     IS_FBCODE,
@@ -44,6 +50,11 @@ packaging_directory = Path(__file__).parent
 class DirectoryReaderTest(PackageTestCase):
     """Tests use of DirectoryReader as accessor for opened packages."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageExporter = PackageExporter
+        self.PackageImporter = PackageImporter
+
     @skipIfNoTorchVision
     def test_loading_pickle(self):
         """
@@ -52,7 +63,7 @@ class DirectoryReaderTest(PackageTestCase):
         resnet = resnet18()
 
         filename = self.temp()
-        with PackageExporter(filename) as e:
+        with self.PackageExporter(filename) as e:
             e.intern("**")
             e.save_pickle("model", "model.pkl", resnet)
 
@@ -60,7 +71,7 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             dir_mod = importer.load_pickle("model", "model.pkl")
             input = torch.rand(1, 3, 224, 224)
             self.assertEqual(dir_mod(input), resnet(input))
@@ -72,14 +83,14 @@ class DirectoryReaderTest(PackageTestCase):
         import package_a
 
         filename = self.temp()
-        with PackageExporter(filename) as e:
+        with self.PackageExporter(filename) as e:
             e.save_module("package_a")
 
         zip_file = zipfile.ZipFile(filename, "r")
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             dir_mod = dir_importer.import_module("package_a")
             self.assertEqual(dir_mod.result, package_a.result)
 
@@ -90,14 +101,14 @@ class DirectoryReaderTest(PackageTestCase):
         import package_a  # noqa: F401
 
         filename = self.temp()
-        with PackageExporter(filename) as e:
+        with self.PackageExporter(filename) as e:
             e.save_module("package_a")
 
         zip_file = zipfile.ZipFile(filename, "r")
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             self.assertTrue(dir_importer.zip_reader.has_record("package_a/__init__.py"))
             self.assertFalse(dir_importer.zip_reader.has_record("package_a"))
 
@@ -105,7 +116,7 @@ class DirectoryReaderTest(PackageTestCase):
     def test_resource_reader(self):
         """Tests DirectoryReader as the base for get_resource_reader."""
         filename = self.temp()
-        with PackageExporter(filename) as pe:
+        with self.PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
             #    ├── one/
@@ -132,7 +143,7 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             reader_one = importer.get_resource_reader("one")
 
             # Different behavior from still zipped archives
@@ -187,7 +198,7 @@ class DirectoryReaderTest(PackageTestCase):
             """
         )
         filename = self.temp()
-        with PackageExporter(filename) as pe:
+        with self.PackageExporter(filename) as pe:
             pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
@@ -195,7 +206,7 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             self.assertEqual(
                 dir_importer.import_module("foo.bar").secret_message(),
                 "my sekrit plays",
@@ -204,7 +215,7 @@ class DirectoryReaderTest(PackageTestCase):
     @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_importer_access(self):
         filename = self.temp()
-        with PackageExporter(filename) as he:
+        with self.PackageExporter(filename) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -222,7 +233,7 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             m = dir_importer.import_module("main")
             self.assertEqual(m.t, "my string")
             self.assertEqual(m.b, "my string".encode("utf-8"))
@@ -233,7 +244,7 @@ class DirectoryReaderTest(PackageTestCase):
         Tests that packaged code can used importlib.resources.path.
         """
         filename = self.temp()
-        with PackageExporter(filename) as e:
+        with self.PackageExporter(filename) as e:
             e.save_binary("string_module", "my_string", "my string".encode("utf-8"))
             src = dedent(
                 """\
@@ -251,7 +262,7 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
             m = dir_importer.import_module("main")
             self.assertEqual(m.s, "my string")
 
@@ -260,12 +271,16 @@ class DirectoryReaderTest(PackageTestCase):
         Test basic saving and loading of a ScriptModule in a directory.
         Currently not supported.
         """
+
+        if self.PackageExporter != PackageExporter:
+            return
+
         from package_a.test_module import ModWithTensor
 
         scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         filename = self.temp()
-        with PackageExporter(filename) as e:
+        with self.PackageExporter(filename) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
         zip_file = zipfile.ZipFile(filename, "r")
@@ -277,8 +292,17 @@ class DirectoryReaderTest(PackageTestCase):
         ):
             with TemporaryDirectory() as temp_dir:
                 zip_file.extractall(path=temp_dir)
-                dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+                dir_importer = self.PackageImporter(
+                    Path(temp_dir) / Path(filename).name
+                )
                 dir_mod = dir_importer.load_pickle("res", "mod.pkl")
+
+
+class DirectoryReaderTestNoTorch(DirectoryReaderTest):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageExporter = PackageExporterNoTorch
+        self.PackageImporter = PackageImporterNoTorch
 
 
 if __name__ == "__main__":
