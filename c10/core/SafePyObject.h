@@ -35,6 +35,7 @@ struct C10_API SafePyObject {
   c10::impl::PyInterpreter* pyinterpreter() const {
     return pyinterpreter_;
   }
+  bool has_same_interpreter(const c10::impl::PyInterpreter*) const;
   PyObject* ptr(const c10::impl::PyInterpreter*) const;
 
  private:

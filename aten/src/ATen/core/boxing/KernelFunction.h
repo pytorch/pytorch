@@ -256,7 +256,7 @@ public:
   std::string dumpState() const;
   // For testing internal invariants only
   bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
-
+  bool is_valid_call(const c10::impl::PyInterpreter* ip) const;
 private:
 
   explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);

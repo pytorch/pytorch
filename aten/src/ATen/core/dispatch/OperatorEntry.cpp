@@ -57,6 +57,10 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
+const OperatorEntry::AnnotatedKernelContainer& OperatorEntry::get_kernels(const DispatchKey& dispatch_key) {
+  return kernels_[dispatch_key];
+}
+
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {

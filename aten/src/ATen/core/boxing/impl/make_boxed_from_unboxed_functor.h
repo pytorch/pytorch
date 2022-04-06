@@ -81,6 +81,9 @@ class OperatorHandle;
  * See below for how to register this kernel with PyTorch.
  */
 struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
+  virtual bool is_valid_call(const c10::impl::PyInterpreter* ip) const {
+    return true;
+  }
   virtual ~OperatorKernel() = default;
 };
 

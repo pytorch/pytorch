@@ -112,6 +112,8 @@ public:
 #endif
   using AnnotatedKernelContainerIterator = AnnotatedKernelContainer::iterator;
 
+  const AnnotatedKernelContainer& get_kernels(const DispatchKey& dispatch_key);
+
   // Why are kernels and fallback asymmetric?  It has to do with ownership.
   // Kernels and the computed dispatch tables for them are canonically
   // owned by OperatorEntry, but backend fallbacks are specified once

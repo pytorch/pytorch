@@ -334,6 +334,9 @@ public:
     return operatorDef_->op.hasKernelForDispatchKey(k);
   }
 
+  const impl::OperatorEntry::AnnotatedKernelContainer& get_all_saved_kernels(const DispatchKey& dispatch_key) const {
+    return operatorDef_->op.get_kernels(dispatch_key);
+  }
 
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();

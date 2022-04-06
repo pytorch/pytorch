@@ -61,4 +61,8 @@ bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
 
+bool KernelFunction::is_valid_call(const c10::impl::PyInterpreter* ip) const {
+  return static_cast<const OperatorKernel*>(functor_.get())->is_valid_call(ip);
+}
+
 } // namespace c10

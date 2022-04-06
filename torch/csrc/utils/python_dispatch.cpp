@@ -1,5 +1,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #include <torch/library.h>
 #include <ATen/ATen.h>
@@ -8,6 +10,7 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
+#include <c10/core/SafePyObject.h>
 #include <iostream>
 
 namespace py = pybind11;
@@ -49,6 +52,92 @@ inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
     return f;
   }
 }
+
+class PythonKernelHolder : public c10::OperatorKernel {
+  SafePyObject* func_;
+public:
+  PythonKernelHolder(py::object func) : func_(new SafePyObject(func.release().ptr(), getPyInterpreter())) {}
+  bool is_valid_call(const c10::impl::PyInterpreter* ip) const {
+    return func_->has_same_interpreter(ip);
+  }
+  // This is a generally useful pattern and safer than directly using pybind11's
+  // py::object destructor.  This is because this object may outlive
+  // libtorch_python, so we want to disarm the deallocation if that happens.
+  // PyInterpreter does this correctly, pybind11 does not.
+  ~PythonKernelHolder() {
+    getPyInterpreter()->decref(func_->ptr(getPyInterpreter()), /*is_tensor*/ false);
+  }
+
+  void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet keyset, torch::jit::Stack* stack) {
+    // If there are multiple python interpreters overriding the same op, then the op registered by the last
+    // interpreter will be available in the dispatch table. This can lead different interpreters to call into
+    // PyObjects from a different python program.
+    // Thankfully, we maintain a list of kernels that were ever registered (and haven't been deregistered yet),
+    // so if the PyInterpreter of func_ doesn't match with the current PyInterpreter, we look up into previously
+    // registered kernels.
+    // This is also useful when one PyInterpreter overrides an op, but another PyInterpreter just wants to call into
+    // the native operation.
+    if (!func_->has_same_interpreter(getPyInterpreter())) {
+      const auto& kernels = op.get_all_saved_kernels(keyset.highestPriorityTypeId());
+      for (const auto& ker: kernels) {
+        // auto k = dynamic_cast<const PythonKernelHolder*>(ker.kernel.getFunctor_()); // k is OperatorKernel
+        // bool call_k = (k == nullptr) || k->is_same_interpreter(getPyInterpreter());
+        if (ker.kernel.is_valid_call(getPyInterpreter())) {
+          return ker.kernel.callBoxed(op, keyset, stack);
+        }
+      }
+      TORCH_CHECK(false, "error out nicely");
+    }
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+
+    const auto num_arguments = schema.arguments().size();
+    auto arguments = torch::jit::pop(*stack, num_arguments);
+
+    // TODO: Some duplication with torch/csrc/autograd/python_variable.cpp
+
+    py::gil_scoped_acquire g;
+
+    // Pre-scan for arguments that match defaults
+    int64_t default_suffix_len = 0;
+    for (int64_t idx = arguments.size() - 1; idx >= 0; idx--) {
+      const auto& arg = schema.arguments()[idx];
+      if (!arg.default_value().has_value()) {
+        break;
+      }
+      const auto& default_ivalue = *arg.default_value();
+      const auto& ivalue = arguments[idx];
+      if (default_ivalue != ivalue) {
+        break;
+      }
+      default_suffix_len++;
+    }
+
+    auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments - default_suffix_len));
+
+    // TODO: actually populate kwargs sometimes?  At the moment, every argument
+    // just gets passed positionally
+    py::dict kwargs;
+
+    for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
+      PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
+    }
+
+    auto out = py::reinterpret_steal<py::object>(PyObject_Call(func_->ptr(getPyInterpreter()), args.ptr(), kwargs.ptr()));
+    if (out.ptr() == nullptr) {
+      throw python_error();
+    }
+
+    if (op.schema().returns().size() == 1) {
+      torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
+    } else {
+      auto outs = py::cast<py::sequence>(out);
+      for (unsigned idx = 0; idx < outs.size(); idx++) {
+        torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
+      }
+    }
+  }
+};
 
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -122,6 +211,12 @@ void initDispatchBindings(PyObject* module) {
       );
       return self;
     }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("debug") = "")
+    .def("impl", [](py::object self, const char* name, const char* dispatch, py::object func) {
+      self.cast<torch::Library&>().impl(
+        name,
+        dispatch_str(dispatch, CppFunction::makeFromBoxedFunctor(std::make_unique<PythonKernelHolder>(std::move(func))))
+      );
+    }, "", py::arg("name"), py::arg("dispatch"), py::arg("func"))
     .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
       self.cast<torch::Library&>().fallback(
         dispatch_str(dispatch, CppFunction::makeFallthrough())
