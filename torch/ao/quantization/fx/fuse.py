@@ -47,10 +47,7 @@ def fuse(
     # TODO: remove this branch after we define the configurations for the
     # default/native backend
     if backend_config_dict is None:
-        additional_fusion_patterns = \
-            fuse_custom_config_dict.get("additional_fusion_pattern", {})
-        fusion_pattern_to_fuse_handler_cls = get_combined_dict(
-            get_default_fusion_patterns(), additional_fusion_patterns)
+        fusion_pattern_to_fuse_handler_cls = get_default_fusion_patterns()
         fuser_method_mapping = None
         fusion_pattern_to_root_node_getter = {}
         fusion_pattern_to_extra_inputs_getter = {}
