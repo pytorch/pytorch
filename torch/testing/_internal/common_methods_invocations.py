@@ -6977,12 +6977,13 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
 
     reduce = op_info.variant_test_name
     sample_inputs = []
-    for args in test_cases:
+    for args, include_self in product(test_cases, [True, False]):
         inp_shape, dim, index, src_shape = args
         sample_inputs.append(
             SampleInput(
                 _tensor(inp_shape),
-                args=(dim, index, _tensor(src_shape), reduce)
+                args=(dim, index, _tensor(src_shape), reduce),
+                kwargs={'include_self': include_self}
             )
         )
 
@@ -11378,6 +11379,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=False,
            supports_forward_ad=True,
@@ -11831,6 +11833,30 @@ op_db: List[OpInfo] = [
         'nn.functional.silu',
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        supports_fwgrad_bwgrad=True,
+        assert_autodiffed=False,
+        supports_out=False,
+        inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-3, rtol=1e-3),
+                    torch.bfloat16: tol(atol=1e-4, rtol=1e-4)
+                }),
+                'TestUnaryUfuncs', device_type='cuda',
+            ), ],
+    ),
+    # TODO: combine this with the nn.functional.silu OpInfo when
+    # complex autodiff for silu is supported.
+    UnaryUfuncInfo(
+        'nn.functional.silu',
+        variant_test_name='complex',
+        ref=lambda x, inplace=False:
+            x / (1 + np.exp(-x)),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=False,
@@ -11854,6 +11880,7 @@ op_db: List[OpInfo] = [
         'nn.functional.hardsigmoid',
         ref=reference_hardsigmoid,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_autograd=True,
         assert_autodiffed=False,
@@ -11878,11 +11905,24 @@ op_db: List[OpInfo] = [
         aten_name="log_sigmoid",
         ref=reference_logsigmoid,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+        ],
     ),
     UnaryUfuncInfo(
         'nn.functional.mish',
@@ -12090,6 +12130,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.softshrink',
            aten_name="softshrink",
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            supports_forward_ad=True,
@@ -12102,6 +12143,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            assert_autodiffed=True,
@@ -15137,7 +15179,7 @@ op_db: List[OpInfo] = [
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
-        dtypes=floating_types(),
+        dtypes=floating_types_and(torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
@@ -15160,6 +15202,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_softplus,
         supports_forward_ad=True,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
     ),
@@ -15603,6 +15646,46 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.argmax',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmax): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmax
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.argmin',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmin): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmin
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
