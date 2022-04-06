@@ -584,20 +584,25 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
 std::unordered_set<IterDomain*> ComputeAtRootDomainMap::getMappableDims(
     const TensorDomain* producer,
     const TensorDomain* consumer) const {
+  //! This funciton previously used mapBestEffort but it can fail when
+  //! a domain is mapped to multitple domains, which can happen with
+  //! views. Since we only need to find mappable domains, just
+  //! grab any domain that is mapped in a pairwise way.
+
   const auto& producer_root = producer->getMaybeRFactorDomain();
   const auto& consumer_root = consumer->getRootDomain();
 
-  std::unordered_map<IterDomain*, IterDomain*> id_map =
-      mapBestEffort(producer, producer_root, consumer, consumer_root);
-
   std::unordered_set<IterDomain*> mappable_ids;
 
-  for (auto& from_id : producer_root) {
-    if (id_map.find(from_id) != id_map.end()) {
-      mappable_ids.emplace(from_id);
-      mappable_ids.emplace(id_map.at(from_id));
+  for (const auto& p_id : producer_root) {
+    for (const auto& c_id : consumer_root) {
+      if (canMap(producer, p_id, consumer, c_id)) {
+        mappable_ids.emplace(p_id);
+        mappable_ids.emplace(c_id);
+      }
     }
   }
+
   return mappable_ids;
 }
 
@@ -905,50 +910,77 @@ void ComputeAtRootDomainMapBuilder::handle(GatherOp* op) {
   }
 }
 
-bool ComputeAtRootDomainMapBuilder::mapAllConsumers(
-    const DomainKey& producer_key) {
-  auto it = pending_map_.find(producer_key);
+void ComputeAtRootDomainMapBuilder::mapAllPendingMappings(
+    const DomainKey& key) {
+  auto it = pending_map_.find(key);
   if (it == pending_map_.end()) {
-    return false;
+    return;
   }
-  const auto& consumer_set = it->second;
+  const auto& pending_set = it->second;
   // All entries in key_set must be equivalent with each other.
-  TORCH_INTERNAL_ASSERT(consumer_set.size() > 0);
-  bool consistent = safeToMap(consumer_set);
-  for (const auto pending_consumer : consumer_set) {
+  TORCH_INTERNAL_ASSERT(pending_set.size() > 0);
+  bool consistent = safeToMap(pending_set);
+  for (const auto pending_key : pending_set) {
     if (consistent) {
-      setMapped(producer_key, pending_consumer);
+      setMapped(key, pending_key);
     } else {
-      setInvalid(producer_key, pending_consumer);
+      setInvalid(key, pending_key);
     }
   }
   // This entry should never be used again, so remove it.
   pending_map_.erase(it);
-  return consistent;
+}
+
+void ComputeAtRootDomainMapBuilder::mapAllPendingMappings(
+    const TensorDomain* td,
+    IterDomain* id) {
+  if (id->isBroadcast()) {
+    for (const auto& key : root_map_.getConcretizedKeys(td, id)) {
+      mapAllPendingMappings(key);
+    }
+  } else {
+    mapAllPendingMappings(DomainKey(td, id));
+  }
 }
 
 void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
   const TensorDomain* td = tv->domain();
-  const auto root = TensorDomain::noReductions(td->getMaybeRFactorDomain());
-  for (auto id : root) {
+  const auto rfactor = TensorDomain::noReductions(td->getMaybeRFactorDomain());
+  for (auto id : rfactor) {
     if (id->isBroadcast()) {
       initializeBcastMap(tv, id);
-      for (const auto& key : root_map_.getConcretizedKeys(td, id)) {
-        mapAllConsumers(key);
-      }
-    } else {
-      mapAllConsumers(DomainKey(td, id));
     }
+    mapAllPendingMappings(td, id);
   }
-  // There can be broadcast domains that appear at root domains but
-  // are removed at rfactor domains as they are merged into
-  // non-reduction domains. Initialize the map for those broadcast
-  // domains.
+
+  // When tv has a rfactor domain, propagate the domain mappings from
+  // each of the rfactor axes to the dependent root axes.
   if (td->hasViewLikeRFactor()) {
-    for (auto id : TensorDomain::noReductions(td->getRootDomain())) {
+    std::unordered_set<Val*> root_set(
+        {td->getRootDomain().begin(), td->getRootDomain().end()});
+    for (auto rf_id : rfactor) {
+      if (!rf_id->isRFactorProduct()) {
+        continue;
+      }
+      auto dep = DependencyCheck::getAllValsBetween(root_set, {rf_id});
+      for (auto id : ir_utils::filterByType<IterDomain>(dep)) {
+        if (root_set.find(id) == root_set.end() || rf_id == id) {
+          continue;
+        }
+        setMaybeMapped(td, id, td, rf_id);
+      }
+    }
+    // Once mappings for rfactor axes are propagated to root axes,
+    // aggregates them at each root axis
+    for (auto id : tv->getRootDomain()) {
       if (id->isBroadcast()) {
+        // There can be broadcast domains that appear at root domains but
+        // are removed at rfactor domains as they are merged into
+        // non-reduction domains. Initialize the map for those broadcast
+        // domains.
         initializeBcastMap(tv, id);
       }
+      mapAllPendingMappings(td, id);
     }
   }
 }

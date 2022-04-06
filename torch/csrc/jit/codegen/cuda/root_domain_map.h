@@ -205,6 +205,12 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
 //! example:
 //!    T2 [i0,i1] = T1[i2,i3] + T0[i4,i5]
 //! This will create mappings between i0, i2 and i4.
+//!
+//! Note that with views, there can be multiple domains mapped with
+//! the same domain. Thus, obtaining one-to-one maps can
+//! fail. Currently, the only use of this class is getMappableDims,
+//! which just grabs any domain that is mappable, which works no
+//! matter view is used or not.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   friend class ComputeAtRootDomainMapBuilder;
   friend TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap&);
@@ -253,7 +259,11 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   //! be a producer-consumer pair. Since they may not be a
   //! producer-consumer pair, this function requires proper root
   //! domains, which may be root or rfactor domains. Also, no error
-  //! check is done as we do not assume producer-consumer relationship.
+  //! check is done as we do not assume producer-consumer
+  //! relationship.
+  //!
+  //! Note that an exception is thrown when a domain is found to be
+  //! mapped to multiple domains, which can happen with views.
   //!
   //! \param from_td A TensorDomain from which a map is created
   //! \param from_root A root domain of from_td
@@ -418,11 +428,15 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
 
   void handle(TensorView* tv) override;
 
-  //! Maps all consumers with a producer.
+  //! Maps all pending mappings.
   //! This is called for each of TensorViews in a backward traversal,
   //! recursively building mappings from the output tensors to the
   //! input tensors.
-  bool mapAllConsumers(const DomainKey& producer_key);
+  void mapAllPendingMappings(const DomainKey& key);
+
+  //! Maps all pending mappings for id of td. When id is a broadcast,
+  //! mapping is done separately for each concrete domain.
+  void mapAllPendingMappings(const TensorDomain* td, IterDomain* id);
 
   bool hasMatchingDomains(const std::vector<DomainKey>& unique_domains);
 

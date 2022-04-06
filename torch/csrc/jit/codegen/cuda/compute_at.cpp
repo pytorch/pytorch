@@ -472,7 +472,10 @@ unsigned int ComputeAt::backwardComputeAt_impl(
   }
 
   auto replay_producer_pair = TransformReplay::replayPasC(
-      producer, consumer, (int)consumer_compute_at_pos, root_map_);
+      producer,
+      consumer,
+      (int)consumer_compute_at_pos,
+      PairwiseRootDomainMap(producer, consumer));
 
   if (replay_producer_pair.second == 0) {
     return 0;
@@ -544,7 +547,10 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   }
 
   auto replay_consumer_pair = TransformReplay::replayCasP(
-      consumer, producer, (int)producer_compute_at_pos, root_map_);
+      consumer,
+      producer,
+      (int)producer_compute_at_pos,
+      PairwiseRootDomainMap(producer, consumer));
 
   if (producer_compute_at_pos > producer->getComputeAtPosition()) {
     if (!producer->isFusionInput()) {
@@ -652,7 +658,6 @@ void ComputeAt::traverseBackward() {
       running_consumer = running_producer;
       running_producer = tv_chain.back();
       tv_chain.pop_back();
-
       running_consumer_pos = backwardComputeAt_impl(
           running_producer, running_consumer, running_consumer_pos);
     }

@@ -922,6 +922,45 @@ TEST_F(NVFuserTest, FusionFlattenAfterUnsqueezeOutput_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionComputeAtRootDomainMapWithView_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int64_t> input_shape1{10, 12};
+  const std::vector<int64_t> input_shape2{10, 3, 4};
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+
+  // reduction followed by broadcast
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true, true});
+
+  // Path with a view
+  auto tv4 = view(tv1, input_shape1, input_shape2);
+
+  // Join the reduciton+broadcast and view paths together
+  auto tv5 = add(tv3, tv4);
+  fusion.addOutput(tv5);
+
+  fusion.printMath();
+
+  ComputeAtRootDomainMap map;
+  map.build();
+
+  // It's not possible to compute tv1 at the -1 position of
+  // t2. ComputeAtRootDomainMap should tell that by not mapping the
+  // second axis.
+  auto tv1_tv2_mappable_dims =
+      map.getMappableDims(tv1->domain(), tv2->domain());
+  TORCH_CHECK(
+      tv1_tv2_mappable_dims.find(tv1->axis(1)) == tv1_tv2_mappable_dims.end(),
+      "Invalid ComputeAtRootDomainMap. Domain should not be mappable: ",
+      tv1->axis(1)->toString());
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
