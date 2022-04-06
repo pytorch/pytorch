@@ -19,6 +19,23 @@
 namespace at {
 
 /**
+ * UnknownQuantizer is a placeholder quantizer for functions that implement
+ * quantization in a two step process.  First a tensor is allocated but with
+ * unknown quantizer, and then the quantization kernel decides what the final
+ * quantizer will be.
+ */
+struct TORCH_API UnknownQuantizer : public Quantizer {
+  explicit UnknownQuantizer(ScalarType scalar_type)
+    : Quantizer(scalar_type) {}
+
+  Tensor quantize(const Tensor& tensor) override;
+  Tensor dequantize(const Tensor& qtensor) override;
+  Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
+  QScheme qscheme() const override;
+  bool equalTo(QuantizerPtr other) override;
+};
+
+/**
  * UniformQuantizer is the parent class for all uniform quantizers.
  * These quantization scheme will map float value uniformly to
  * the quantized value. For example, affine quantizer is
@@ -221,6 +238,8 @@ TORCH_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& zero_points,
     int64_t axis,
     ScalarType scalar_type);
+
+TORCH_API QuantizerPtr make_unknown_quantizer(ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
 TORCH_API Tensor new_qtensor(
