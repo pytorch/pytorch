@@ -221,9 +221,11 @@ class GenLazyNativeFuncDefinition:
         if func.structured or func.structured_delegate is not None:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
+
                 def this_shape(i: int) -> str:
                     return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
-                shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
+
+                shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
@@ -237,7 +239,6 @@ class GenLazyNativeFuncDefinition:
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
         # Calculating which dimmensions are symbolic
-        # TODO: figure out how to detect which ops are not in aten::
         func_schema_str = "aten::" + str(func.func)
         meta_str += f"""
         if(symbolicShapeEnabled()){{
@@ -257,10 +258,14 @@ class GenLazyNativeFuncDefinition:
         value_args = schema.filtered_args(values=True, scalars=False)
         returns_length = len(schema.returns)
 
-        fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
+        fallback_str = gen_fallback_code(
+            schema, overload_name=func.func.name.overload_name
+        )
 
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        assert (
+            len(value_types_names) > 0
+        ), "Code below assumes there is at least one tensor arg"
         get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
         TORCH_INTERNAL_ASSERT(common_device);
         """
@@ -283,13 +288,15 @@ class GenLazyNativeFuncDefinition:
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
-            assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
-                                        f"and has tuple outputs, but got tuple of len {returns_length}."
+            assert returns_length == 1, (
+                "We assumed there was no such case where an op is an in-place variant "
+                f"and has tuple outputs, but got tuple of len {returns_length}."
+            )
             bridge_str = f"""lazy_{first_tensor_name}->SetInPlaceIrValue(node);
         auto& result = {first_tensor_name};"""
 
-
-        return [f"""\
+        return [
+            f"""\
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {fallback_str}
         TORCH_LAZY_FN_COUNTER("lazy::");
@@ -300,7 +307,9 @@ class GenLazyNativeFuncDefinition:
         {bridge_str}
         return result;
     }};\n
-    """]
+    """
+        ]
+
 
 class ComputeShapeSignature:
     """

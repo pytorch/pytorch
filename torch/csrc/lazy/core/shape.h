@@ -40,7 +40,7 @@ class TORCH_API Shape {
     sizes_.at(dim) = size;
   }
 
-  const at::optional<std::vector<bool>>& is_symbolic() const {
+  const c10::optional<std::vector<bool>>& is_symbolic() const {
     return is_symbolic_;
   }
 
@@ -59,7 +59,7 @@ class TORCH_API Shape {
   // Stores which dimmensions are symbolic
   // If nullopt, either it hasn't been initialized or the symbolic
   // dimmensions are not calculatable
-  at::optional<std::vector<bool>> is_symbolic_ = c10::nullopt;
+  c10::optional<std::vector<bool>> is_symbolic_ = c10::nullopt;
   // Sizes are the upper bound sizes for a tensor, used by XLA.
   std::vector<int64_t> sizes_;
 };

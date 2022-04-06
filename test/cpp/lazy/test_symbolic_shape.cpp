@@ -34,39 +34,19 @@ std::vector<bool> getIsSymbolic(at::Tensor& lazy_tensor) {
   return shape.is_symbolic().value();
 }
 
-class LazyTsTest : public ::testing::Test {
- protected:
-  void SetUp() override;
-
-  void TearDown() override;
-
-  static void CommonSetup() {}
-
-  void ExpectCounterNotChanged(
-      const std::string& counter_regex,
-      const std::unordered_set<std::string>* ignore_set) {}
-
-  void ExpectCounterChanged(
-      const std::string& counter_regex,
-      const std::unordered_set<std::string>* ignore_set) {}
-
-  void ResetCounters() {}
-
- private:
-  void MakeEndSnapshot() {}
-};
-
-class LazyShapeTest : public LazyTsTest {
+class LazyShapeTest : public ::testing::Test {
  protected:
   static void SetUpTestCase() {}
+  void SetUp() override {
+    at::manual_seed(42);
+    torch::lazy::LazyGraphExecutor::Get()->SetRngSeed(
+        torch::lazy::BackendDevice(), 42);
+    FLAGS_ltc_enable_symbolic_shapes = true;
+  }
+  void TearDown() override {
+    FLAGS_ltc_enable_symbolic_shapes = false;
+  }
 };
-
-void LazyTsTest::SetUp() {
-  at::manual_seed(42);
-  torch::lazy::LazyGraphExecutor::Get()->SetRngSeed(
-      torch::lazy::BackendDevice(), 42);
-  FLAGS_ltc_enable_symbolic_shapes = true;
-}
 
 class DynamicInputShapeNode : public Node {
  public:
@@ -98,9 +78,6 @@ class DynamicInputShapeNode : public Node {
 };
 
 } // namespace
-void LazyTsTest::TearDown() {
-  FLAGS_ltc_enable_symbolic_shapes = true;
-}
 
 Tensor tensorWithSymbolicShape(
     const std::vector<int64_t>& sizes,
