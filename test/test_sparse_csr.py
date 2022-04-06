@@ -1558,7 +1558,7 @@ class TestSparseCSR(TestCase):
             self.assertIs(actual, sample.input)
             self.assertEqual(actual, expect)
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)())
     def test_pow_check_error(self, device, dtype):
         inp = make_tensor((1, 2), dtype=dtype, device=device).to_sparse_csr()
         for is_out in (True, False):
@@ -1569,7 +1569,7 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "not supported"):
                     torch.pow(inp, exp, out=out) if is_out else torch.pow(inp, exp)
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)())
     def test_pow_scalar_exponent(self, device, dtype):
         from torch.testing._internal.common_methods_invocations import sample_inputs_pow
 
