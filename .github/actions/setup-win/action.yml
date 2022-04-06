@@ -36,6 +36,8 @@ runs:
       run: |
         $pytorch_root=[string](Get-Location)
         Add-MpPreference -ExclusionPath $pytorch_root
+        $preference = Get-MpPreference
+        echo $preference.ExclusionPath
 
     - name: Install Visual Studio 2019 toolchain
       shell: powershell
