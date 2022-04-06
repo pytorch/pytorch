@@ -56,6 +56,13 @@ default_op_fp16_dtype_config = {
     "output_dtype": torch.float16,
 }
 
+default_dynamic_int8_dtype_config = {
+    "input_dtype": torch.quint8,
+    "weight_dtype": torch.qint8,
+    "output_dtype": torch.quint8,
+    "is_dynamic": True,
+}
+
 # ======================
 # |  OPERATOR CONFIGS  |
 # ======================
@@ -484,6 +491,21 @@ def _get_share_qparams_op_configs():
     ]
     return [_get_share_qprams_op_backend_config(op) for op in share_qparams_ops]
 
+def _get_rnn_op_configs():
+    rnn_op_configs = []
+    for rnn_op in [
+            torch.nn.GRUCell,
+            torch.nn.LSTMCell,
+            torch.nn.RNNCell,
+            torch.nn.LSTM,
+    ]:
+        rnn_op_configs.append({
+            "pattern": rnn_op,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [default_dynamic_int8_dtype_config],
+        })
+    return rnn_op_configs
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -498,5 +520,6 @@ def get_native_backend_config_dict():
             _CAT_CONFIG,
             *_get_bn_configs(),
             *_get_share_qparams_op_configs(),
+            *_get_rnn_op_configs(),
         ],
     }

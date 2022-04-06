@@ -134,11 +134,7 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
     def input_output_observed(self) -> bool:
         return False
 
-# TODO (maybe): merge with embedding quantize handler
-@register_quant_pattern(torch.nn.GRUCell)
-@register_quant_pattern(torch.nn.LSTMCell)
-@register_quant_pattern(torch.nn.RNNCell)
-@register_quant_pattern(torch.nn.LSTM)
+# TODO: remove this class
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     pass
 
