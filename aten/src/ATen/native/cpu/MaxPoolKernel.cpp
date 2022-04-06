@@ -57,7 +57,7 @@ void cpu_max_pool(
       scalar_t* input_ptr = input_data + c * input_height * input_width;
       // compute local max
       int64_t maxindex = ih0 * input_width + iw0;
-      accscalar_t maxval = input.is_quantized() ? std::numeric_limits<accscalar_t>::min()
+      accscalar_t maxval = input.is_quantized() ? std::numeric_limits<accscalar_t>::lowest()
                                                 : -std::numeric_limits<accscalar_t>::infinity();
 
       for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
@@ -149,7 +149,7 @@ void cpu_max_pool_channels_last(
 
       // Pass I: init out lane
       iVec index0_vec = iVec(ih0 * input_width + iw0);
-      Vec out_vec = Vec(input.is_quantized() ? std::numeric_limits<scalar_t>::min() : -std::numeric_limits<scalar_t>::infinity());
+      Vec out_vec = Vec(input.is_quantized() ? std::numeric_limits<scalar_t>::lowest() : -std::numeric_limits<scalar_t>::infinity());
       int64_t d1 = 0;
       for (; d1 < len; d1 += Vec::size()) {
         index0_vec.store(index_buffer.get() + d1);
@@ -157,7 +157,7 @@ void cpu_max_pool_channels_last(
       }
       for (; d1 < size; d1++) {
         ind[d1] = ih0 * input_width + iw0;
-        out[d1] = input.is_quantized() ? std::numeric_limits<scalar_t>::min() : -std::numeric_limits<scalar_t>::infinity();
+        out[d1] = input.is_quantized() ? std::numeric_limits<scalar_t>::lowest() : -std::numeric_limits<scalar_t>::infinity();
       }
       // Pass II: compute local max
       for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
