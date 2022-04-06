@@ -10,6 +10,7 @@ import operator
 
 import torch
 from torch.nn import functional
+from torch.profiler import profile, ProfilerActivity
 
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -4385,6 +4386,30 @@ class TestCudaFuser(JitTestCase):
             FileCheck().check("aten::add").run(graph_ir)
         finally:
             torch._C._jit_nvfuser_clear_comparison_callback()
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires NVFuser")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_cuda_fusion_guard_backward(self):
+        old_guard = torch._C._jit_set_nvfuser_guard_mode(True)
+
+        inp = torch.randn(10, device="cuda", requires_grad=True)
+        grad = torch.randn(10, device="cuda")
+
+        def f(x):
+            a = x.cos().cos()
+            return a
+        scripted = torch.jit.script(f)
+
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            for _ in range(5):
+                inp.grad = None
+                out = scripted(inp)
+                out.backward(grad)
+
+        # check that we do not have fallback triggered
+        self.assertEqual(prof.events().table().find("fallback"), -1)
+        torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
