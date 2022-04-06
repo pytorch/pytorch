@@ -88,7 +88,7 @@ def _communicate_optim_state(
     otherwise (where the plus 1 comes from all-gathering the padding per rank).
 
     Args:
-        flat_param (FlatParameter): The flattened parameter. flat_param_state
+        flat_param (FlatParameter): The flattened parameter.
         flat_param_state (Dict[str, Any]): The entry in the "state" part of the
             optimizer state dict corresponding to the flattened parameter.
 
