@@ -678,8 +678,8 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-rocm4.5-py3.7-distributed",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        build_environment="linux-bionic-rocm5.0-py3.7-distributed",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm5.0-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         enable_default_test=False,
         ciflow_config=CIFlowConfig(
