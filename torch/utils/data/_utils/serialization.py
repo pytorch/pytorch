@@ -26,11 +26,11 @@ def serialize_fn(fn):
     Returns a tuple of serialized function and SerializationType indicating the serialization method.
     """
     try:
-        return pickle.dumps(fn), SerializationType("pickle")
+        return fn, SerializationType("pickle")
     except (pickle.PickleError, AttributeError):
         if DILL_AVAILABLE:
             return dill.dumps(fn, recurse=True), SerializationType("dill")
-    return pickle.dumps(fn), SerializationType("pickle")
+    return fn, SerializationType("pickle")
 
 
 def deserialize_fn(serialized_fn_with_method):
@@ -39,7 +39,7 @@ def deserialize_fn(serialized_fn_with_method):
     """
     serialized_fn, method = serialized_fn_with_method
     if method == SerializationType("pickle"):
-        return pickle.loads(serialized_fn)
+        return serialized_fn
     elif method == SerializationType("dill"):
         if DILL_AVAILABLE:
             return dill.loads(serialized_fn)
