@@ -61,6 +61,9 @@ class TestComposability(TestCase):
         model(input)
         tq.convert(model, inplace=True)
 
+    def _calculate_sparsity(self, tensor):
+        return ((tensor == 0).sum() / tensor.numel()).item()
+
     def test_q_prep_before_s_prep(self):
         (
             mod,
@@ -92,3 +95,27 @@ class TestComposability(TestCase):
         )
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
+
+    def test_convert_without_squash_mask(self):
+        (
+            mod,
+            sparsifier,
+            sparse_config,
+        ) = self._get_model_and_sparsifier_and_sparse_config()
+
+        sparsifier.prepare(mod, config=sparse_config)
+        torch.quantization.prepare(mod, inplace=True)
+        self._check_parametrizations_and_observers(mod)
+        sparsifier.step()
+        mod(torch.randn(1, 4, 4, 4))
+        sparsity_level = self._calculate_sparsity(mod[5].weight)
+        tq.convert(mod, inplace=True)
+        self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
+        self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
+
+        cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
+        self.assertGreaterAlmostEqual(cur_sparsity, sparsity_level)
+        self.assertGreaterAlmostEqual(
+            sparsity_level, sparse_config[0]["sparsity_level"]
+        )
+        self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
