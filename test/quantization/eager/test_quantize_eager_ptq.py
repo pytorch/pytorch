@@ -77,10 +77,52 @@ class TestQuantizeEagerPTQStaticCUDA(QuantizationTestCase):
     def test_resnet18(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
-        eager_quantizable_model = quantized_models.__dict__["resnet18"](pretrained=False, quantize=False).to(device="cuda").eval().float()
-        # model = models.__dict__[name](pretrained=False).eval().float()
-        # self._test_model_impl(
-        #     'ddp', 'resnet18', model, eager_quantizable_model)
+        from torch.ao.quantization.quantize_fx import (
+            get_tensorrt_backend_config_dict,
+        )
+        name="resnet18"
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).to(device="cuda").eval().float()
+
+        input_value = torch.rand(1, 16, 10, 7).to(device="cuda")
+        output_value = torch.randint(0, 1, (1,))
+
+        qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.observer.HistogramObserver.with_args(
+                qscheme=torch.per_tensor_symmetric, dtype=torch.qint8   # what dtype?
+            ),
+            weight=torch.ao.quantization.default_weight_observer
+        )
+        qconfig_dict = get_tensorrt_backend_config_dict() # this was imported from fx?
+
+        if eager_quantizable_model is not None:
+            # comparing to eager mode quantization
+            qeager = eager_quantizable_model
+            ref_out = qeager(input_value)
+            qeager.qconfig = qconfig
+            qeager.fuse_model()
+            prepare(qeager, inplace=True)
+
+            # calibration
+            # if mode == 'ddp':
+            #     mp.spawn(run_ddp,
+            #              args=(world_size, qeager),
+            #              nprocs=world_size,
+            #              join=True)
+            # elif mode == 'qat':
+            #     assert qeager.training, 'qeager should be in training mode for qat'
+            #     optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
+            #     train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
+            # else:
+            #     for i in range(10):
+            #         qeager(input_value)
+
+            convert(qeager, inplace=True)
+            qeager.eval()
+
+            qeager_out = qeager(input_value)
+            qeager_script = torch.jit.script(qeager)
+            qscript_out = qeager_script(input_value)
+
 
 class TestQuantizeEagerOps(QuantizationTestCase):
     @override_qengines
