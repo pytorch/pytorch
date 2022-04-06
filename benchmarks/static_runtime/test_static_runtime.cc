@@ -406,13 +406,6 @@ TEST(StaticRuntime, LayerNorm) {
         return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False).clone()
   )JIT";
 
-#ifdef FBCODE_CAFFE2
-  script::Module module("module");
-  module.define(layer_norm_with_weights);
-  torch::jit::StaticModule smodule(module);
-  ASSERT_EQ(getNodeWithKind(smodule, "aten::layer_norm"), nullptr);
-  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::layer_norm"), nullptr);
-#endif
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
@@ -1272,13 +1265,23 @@ TEST(StaticRuntime, Full) {
         return (a.clone())
   )JIT";
 
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   c10::List<int64_t> size0{2, 5};
-  std::vector<IValue> args{size0, 4, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args{
+      size0, 4, at::ScalarType::Int, at::kStrided, cpu, false};
+  std::vector<IValue> args1{
+      size0, 4, at::ScalarType::Float, at::kStrided, cpu, false};
   c10::List<int64_t> size1{5, 6};
-  std::vector<IValue> args2{size1, 5, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args2{
+      size1, 5, at::ScalarType::Float, at::kStrided, cpu, false};
   testStaticRuntime(full_script, args);
+  testStaticRuntime(
+      full_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_script, args, args2);
 }
 
@@ -1304,13 +1307,39 @@ TEST(StaticRuntime, FullLike) {
 
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 4, 2});
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   std::vector<IValue> args{
-      a, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      a,
+      4,
+      at::ScalarType::Int,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args1{
+      a,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   std::vector<IValue> args2{
-      b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      b,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   testStaticRuntime(full_like_script, args);
+  testStaticRuntime(
+      full_like_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_like_script, args, args2);
 }
 
@@ -1659,6 +1688,28 @@ TEST(StaticRuntime, Index) {
   testStaticRuntime(index_with_two_tensors_script, args_c, args_d);
 }
 
+TEST(StaticRuntime, IndexSelect) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dim: int, %index: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::index_select(%self, %dim, %index)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6});
+  auto dim0 = 0;
+  auto index0 = at::randint(0, 5, {6}, torch::kInt32);
+  std::vector<IValue> args{self0, dim0, index0};
+  testStaticRuntime(script, args);
+
+  auto self1 = at::rand({128});
+  auto dim1 = 0;
+  auto index1 = at::randint(0, 127, {127}, torch::kInt32);
+  std::vector<IValue> args2{self1, dim1, index1};
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, ClampMin) {
   const auto clamp_min_int_script = R"JIT(
     def forward(self, a: Tensor, b: int):
@@ -1997,6 +2048,27 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
 
   testStaticRuntime(
       quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
+TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
+  const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        %ret = aten::clone(%output, %bias)
+        return (%output)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_relu_dynamic_fp16_script,
       {input, weight},
       {input_2, weight_2});
 }
@@ -2963,6 +3035,35 @@ TEST(StaticRuntime, IfThenElse) {
   testStaticRuntime(src, args2);
 }
 
+TEST(StaticRuntime, EmptyIfBlock) {
+  const auto src =
+      R"JIT(
+      def forward(self, cond: bool, a: Tensor, b: Tensor):
+          l = []
+          if cond:
+              l.append((a + b).clone())
+          return l
+  )JIT";
+
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
+TEST(StaticRuntime, EmptyNestedIfBlock) {
+  const auto src =
+      R"JIT(
+      def forward(self, cond: bool, a: Tensor, b: Tensor):
+          l = []
+          if cond:
+              if cond:
+                  l.append((a + b).clone())
+          return l
+  )JIT";
+
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
 TEST(StaticRuntime, StackEmpty) {
   const auto src = R"JIT(
     def forward(self):
@@ -2989,4 +3090,47 @@ TEST(StaticRuntime, ConcatEmpty) {
 
   torch::jit::StaticModule smod(mod);
   EXPECT_THROW(smod({}), c10::Error);
+}
+
+TEST(StaticRuntime, IntImplicit) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  testStaticRuntime(src, {at::tensor({1}, at::kInt).squeeze()});
+}
+
+TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  torch::jit::StaticModule smod(graph);
+  // Not 0D tensor
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  // Wrong dtype
+  EXPECT_THROW(
+      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+}
+
+TEST(StaticRuntime, Select) {
+  const auto src = R"IR(
+    graph(%a: Tensor, %dim: int, %index: int):
+        %none: NoneType = prim::Constant()
+        %b: Tensor = aten::select(%a, %dim, %index)
+        %c: Tensor = aten::clone(%b, %none)
+        return (%c)
+  )IR";
+  testStaticRuntime(src, {at::randn({2, 2}), 0, 1});
+}
+
+TEST(StaticRuntime, ReshapeAs) {
+  const auto src = R"JIT(
+    def forward(self, a, b):
+        return a.reshape_as(b).clone()
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
 }

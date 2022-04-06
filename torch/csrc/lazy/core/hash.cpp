@@ -89,5 +89,23 @@ std::string HashToString(const hash_t& a) {
   return ss.str();
 }
 
+hash_t Hash(const std::vector<bool>& values){
+  // We can't assume a DataHash size/dataptr approach here bc
+  // vector<bool> can be optimized as vector<bit> and storage details
+  // are decoupled from actual size of 'bool' type
+  hash_t h(static_cast<uint64_t>(0xad2ed1983bbf2e28));
+  static const hash_t h_true(static_cast<uint64_t>(0x74f6b5198daa2b2));
+  static const hash_t h_false(static_cast<uint64_t>(0xe39f30789cab5382));
+  for (const auto& b: values) {
+    if(b) {
+      h = HashCombine(h, h_true);
+    } else {
+      h = HashCombine(h, h_false);
+    }
+  }
+  return h;
+}
+
+
 } // namespace lazy
 } // namespace torch

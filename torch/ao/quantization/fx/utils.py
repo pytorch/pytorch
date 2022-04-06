@@ -12,6 +12,7 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
+from collections import namedtuple
 import operator
 import warnings
 
@@ -471,6 +472,74 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         cache[node] = result
     return result
 
+def all_node_args_except_first(node: Node) -> List[int]:
+    """
+    Returns all node arg indices after first
+    """
+    return list(range(1, len(node.args)))
+
+def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
+    """
+    Constructs a function that takes a node as arg and returns the arg_indices
+    that are valid for node.args
+    """
+    def arg_indices_func(node: Node) -> List[int]:
+        return [i for i in arg_indices if i < len(node.args)]
+    return arg_indices_func
+
+NodeInfo = namedtuple("NodeInfo", "op target")
+
+# this dict identifies which indices of a node are non tensors
+# so that they can be propagated correctly since inserting observers
+# for them would cause errors
+
+NON_OBSERVABLE_ARG_DICT: Dict[NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
+    NodeInfo("call_method", "masked_fill") : {
+        torch.bool: return_arg_list([1]),
+        float: return_arg_list([2])
+    },
+    NodeInfo("call_method", "permute") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "repeat") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "reshape") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "size") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "transpose") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", torch.transpose) : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "unsqueeze") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "unsqueeze_") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", torch.unsqueeze) : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "view") : {
+        int: all_node_args_except_first
+    },
+}
+
+EMPTY_ARG_DICT: Dict[Union[type, torch.dtype], Callable[[Node], List[int]]] = {}
+
+def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
+    """
+    Returns a dict with of non float tensor types as keys and values which correspond to a
+    function to retrieve the list (which takes the node as an argument)
+    """
+    info = NodeInfo(node.op, node.target)
+
+    return NON_OBSERVABLE_ARG_DICT.get(info, EMPTY_ARG_DICT)
 
 def node_return_type_is_int(node: Node) -> bool:
     """
@@ -479,13 +548,6 @@ def node_return_type_is_int(node: Node) -> bool:
     """
     return node.op == 'call_method' and node.target == 'size'
 
-def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
-    """
-    Returns indexes of boolean Tensor args
-    """
-    if node.op == "call_method" and node.target == "masked_fill":
-        return [1]
-    return []
 
 def is_get_tensor_info_node(node: Node) -> bool:
     """ Returns True if this node is a node that takes a Tensor as input and output some
