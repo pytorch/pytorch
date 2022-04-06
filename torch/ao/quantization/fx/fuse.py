@@ -111,6 +111,7 @@ def _find_matches(
     # a map from node to the matched subpattern
     node_to_subpattern: Dict[Node, Any] = {}
 
+    # TODO: dedup with quantization matching function in match_utils.py
     def apply_match(pattern, node, match, matched_node_pattern, node_to_subpattern):
         if isinstance(pattern, tuple):
             s, *args = pattern
