@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/record_function.h>
+#include <torch/csrc/autograd/grad_hook_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -235,6 +236,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_add_metadata_json", addMetadataJson);  // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep);  // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
+  m.def("_enter_no_grad_hooks_mode", &torch::autograd::NoGradHooksMode::enter);
+  m.def("_exit_no_grad_hooks_mode", &torch::autograd::NoGradHooksMode::exit);
 
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these

@@ -184,6 +184,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
+    "torch/csrc/autograd/grad_hook_mode.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",

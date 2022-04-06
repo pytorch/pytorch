@@ -296,3 +296,11 @@ class inference_mode(_DecoratorContextManager):
 
     def clone(self):
         return self.__class__(self.mode)
+
+
+class no_grad_hook_mode(_DecoratorContextManager):
+    def __enter__(self):
+        torch._C._autograd._enter_no_grad_hooks_mode()
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._autograd._exit_no_grad_hooks_mode()
