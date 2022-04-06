@@ -2649,11 +2649,10 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
-# Emitted from `torch.nonzero(x, as_tuple=False)`
-
 
 @parse_args("v")
 def nonzero(g, input):
+    """Emitted from `torch.nonzero(x, as_tuple=False)`"""
     return t(g, g.op("NonZero", input))
 
 
