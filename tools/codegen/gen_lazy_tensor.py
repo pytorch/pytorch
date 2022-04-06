@@ -126,7 +126,7 @@ class default_args:
     shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
-    lazy_ir_cls: Type[LazyIR] = TSLazyIR
+    lazy_ir_cls: Type[LazyIR] = LazyIR
     backend_name: str = "TorchScript"
 
 def main() -> None:
@@ -167,16 +167,18 @@ def main() -> None:
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     torch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
     aten_path = str(torch_root / "aten" / "src" / "ATen")
+    ir_gen_class: Type[LazyIR] = default_args.lazy_ir_cls
+    if options.gen_ts_lowerings:
+        ir_gen_class = TSLazyIR
 
     run_gen_lazy_tensor(aten_path, options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
-                        options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
+                        options.node_base, options.node_base_hdr,
                         options.tensor_class, options.tensor_class_hdr, options.shape_inference_hdr,
-                        default_args.lazy_ir_cls, options.backend_name)
+                        ir_gen_class, options.backend_name)
 
 
 def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         dry_run: bool, impl_path: Optional[str],
-                        gen_ts_lowerings: bool,
                         node_base: str = default_args.node_base,
                         node_base_hdr: Optional[str] = default_args.node_base_hdr,
                         tensor_class: str = default_args.tensor_class,
