@@ -144,7 +144,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += (self->cdata->nbytes() / sizeof(scalar_t));
-    if (nindex < 0 || nindex >= (self->cdata->nbytes() / sizeof(scalar_t))) {
+    if (nindex < 0 || nindex >= static_cast<int64_t>(self->cdata->nbytes() / sizeof(scalar_t))) {
       PyErr_SetString(PyExc_IndexError, fmt::format(
             "index {} out of range for storage of size {}",
             nindex, self->cdata->nbytes() / sizeof(scalar_t)));
