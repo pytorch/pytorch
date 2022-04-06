@@ -289,7 +289,6 @@ void reflection_pad1d_out_template(
       });
     }
   } else {
-  auto pad_l = padding[0];
     if (input.is_quantized()) {
       AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
         reflection_pad1d_out_loop<scalar_t>(
