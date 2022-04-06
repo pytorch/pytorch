@@ -112,6 +112,8 @@ jobs:
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          export COMMIT_MESSAGES
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
@@ -144,11 +146,18 @@ jobs:
         uses: ./.github/actions/chown-workspace
         if: always()
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          file-suffix: bazel-${{ github.job }}
+          file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload test statistics
         if: always()

@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import List, Union
 from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
@@ -84,18 +84,16 @@ def aten_symbol(schema: LazyIrSchema) -> str:
 class LazyIR(ABC):
     backend_index: BackendIndex
     node_base: str
-    lowering_function_type: str = ""
-    lowering_context_type: str = ""
-    lowering_return_type: str = ""
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         return self.gen(f)
 
-    @abstractmethod
-    def lowering_body(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
-        pass
+    # there is no lowering functionality generated unless this IR base class is subclassed and
+    # implemented as a backend-specific node
+    def lowering_function(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+        return ""
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         # for now, we just want one IR class decl and soon after also the method defs
@@ -159,10 +157,7 @@ class {schema.node_name} : public {self.node_base} {{
     return ss.str();
   }}
 
-  {self.lowering_return_type} Lower({self.lowering_function_type} function,
-                   {self.lowering_context_type} loctx) const override {{
-    {self.lowering_body(f)}
-  }}
+  {self.lowering_function(f)}
 
   {scalar_decls}
   {has_optional_decls}
@@ -174,13 +169,12 @@ class {schema.node_name} : public {self.node_base} {{
 
 @dataclass(frozen=True)
 class TSLazyIR(LazyIR):
-    lowering_function_type: str = "std::shared_ptr<torch::jit::GraphFunction>"
-    lowering_context_type: str = "torch::lazy::TSLoweringContext*"
-    lowering_return_type: str = "torch::lazy::TSOpVector"
 
-    def lowering_body(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
-        return ts_lowering_body(f)
-
+    def lowering_function(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+        return f"""torch::lazy::TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+    torch::lazy::TSLoweringContext* loctx) const override {{
+    {ts_lowering_body(f)}
+  }}"""
 
 def lazy_tensor_decls(value_args: List[LazyArgument], tensor_class: str) -> str:
     lazy_tensor_decls: List[str] = []
@@ -210,6 +204,7 @@ class GenLazyNativeFuncDefinition:
     class_method_name: str
     backend_index: BackendIndex
     tensor_class: str
+    gen_forced_fallback_code: bool
 
     @method_with_native_function
     def __call__(self, func: NativeFunction) -> List[str]:
@@ -221,7 +216,9 @@ class GenLazyNativeFuncDefinition:
         value_args = schema.filtered_args(values=True, scalars=False)
         returns_length = len(schema.returns)
 
-        fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
+        fallback_str = ""
+        if self.gen_forced_fallback_code:
+            fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
 
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
         assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
