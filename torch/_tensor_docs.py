@@ -3375,7 +3375,7 @@ Example::
 """.format(**reproducibility_notes))
 
 add_docstr_all('scatter_reduce', r"""
-scatter_reduce(input, dim, index, src, reduce, *, include_self=True) -> Tensor
+scatter_reduce(input, dim, index, src, reduce) -> Tensor
 
 See :func:`torch.scatter_reduce`
 """)
