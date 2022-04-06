@@ -245,7 +245,6 @@ class TestComposability(TestCase):
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
-
         # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))

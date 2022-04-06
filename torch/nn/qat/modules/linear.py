@@ -59,9 +59,12 @@ class Linear(nn.Linear):
         if is_parametrized(mod):
             transfer_parametrizations_and_params(mod, qat_linear)
 
-        if not hasattr(qat_linear, "weight"):
+        # depending on if weight/bias or both are parametrized in mod, thesee could already
+        # be updated by transfer_parametrizations_and_params. need to check whether
+        # this occured and do the update manually if not.
+        if not is_parametrized(qat_linear, "weight"):
             qat_linear.weight = mod.weight
-        if not hasattr(qat_linear, "bias"):
+        if not is_parametrized(qat_linear, "bias"):
             qat_linear.bias = mod.bias
 
         return qat_linear

@@ -667,7 +667,8 @@ def transfer_parametrizations_and_params(from_module: Module, to_module: Module)
     if is_parametrized(from_module):
         assert isinstance(from_module.parametrizations, ModuleDict)
         for parameter_name in from_module.parametrizations:
+            setattr(to_module, parameter_name, from_module.parametrizations[parameter_name].original)
             for param_func in from_module.parametrizations[parameter_name]:
-                setattr(to_module, parameter_name, from_module.parametrizations[parameter_name].original)
                 register_parametrization(to_module, parameter_name, param_func)
+
     return to_module

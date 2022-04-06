@@ -3171,6 +3171,37 @@ class TestNN(NNTestCase):
             Y = model.weight
             self.assertEqual(id(X), id(Y))
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
+    def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
+        r"""Test that transfering parametrizations doesn't cause issues with caching"""
+        class Skew(nn.Module):
+            def forward(self, X):
+                X = X.tril(-1)
+                return X - X.T
+
+        class Orthogonal(nn.Module):
+            def forward(self, X):
+                Id = torch.eye(X.size(0), device=X.device)
+                return torch.linalg.solve(Id + X, Id - X)
+
+        model = nn.Linear(5,5)
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+
+        to_model = nn.Linear(5,5)
+        parametrize.transfer_parametrizations_and_params(model, to_model)
+
+        with parametrize.cached():
+            X = model.weight
+            Y = model.weight
+            self.assertEqual(id(X), id(Y))
+
+            A = to_model.weight
+            B = to_model.weight
+            self.assertEqual(id(X), id(Y))
+
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
         class Identity(nn.Module):
@@ -3185,6 +3216,43 @@ class TestNN(NNTestCase):
         parametrize.register_parametrization(module, "weight", Identity().eval())
         self.assertTrue(module.parametrizations.weight[0].training)
         self.assertTrue(module.parametrizations.weight[1].training)
+
+    def test_type_before_parametrizations(self):
+        r"""Test that type_before_parametrizations always retrieves original type"""
+        class Identity(nn.Module):
+            def forward(self, X):
+                return X
+
+        model = nn.Linear(5,5)
+        original_type = type(model)
+        self.assertTrue(parametrize.type_before_parametrizations(model) == original_type)
+        parametrize.register_parametrization(model, "weight", Identity())
+        self.assertTrue(parametrize.type_before_parametrizations(model) == original_type)
+
+    def test_transfer_parametrizations_and_params(self):
+        r"""Test that all parametrizations and their associated parameters are transfered."""
+        class AddOne(nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2.0 * x
+
+        class MinusOne(nn.Module):
+            def forward(self, x):
+                return x - 1.0
+
+        model = nn.Linear(5,5)
+        parametrize.register_parametrization(model, "weight", AddOne())
+        parametrize.register_parametrization(model, "weight", Double())
+        parametrize.register_parametrization(model, "weight", MinusOne())
+
+        to_model = nn.qat.Linear(5,5, qconfig = torch.ao.quantization.get_default_qconfig())
+        parametrize.transfer_parametrizations_and_params(model, to_model)
+
+        self.assertEqual(model.weight, to_model.weight)
+        self.assertEqual(model.parametrizations.weight.original, to_model.parametrizations.weight.original)
 
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
