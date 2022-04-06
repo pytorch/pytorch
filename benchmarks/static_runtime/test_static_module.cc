@@ -1098,8 +1098,7 @@ TEST(ManagedTensorRanges, NoAliases) {
   auto* z = vmap["z"];
 
   FastSet<const Value*> managed_tensors = {y, z};
-  AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
+  auto ranges = ManagedTensorRanges(*graph->block(), managed_tensors, graph);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1138,8 +1137,7 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
   auto* z2 = vmap["z2"];
 
   FastSet<const Value*> managed_tensors = {y, z1, z2};
-  AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
+  auto ranges = ManagedTensorRanges(*graph->block(), managed_tensors, graph);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1185,8 +1183,7 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
   auto* d = vmap["d"];
   auto* e = vmap["e"];
 
-  AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
+  auto ranges = ManagedTensorRanges(*graph->block(), {b, c, d, e}, graph);
   const std::vector<std::pair<Value*, Value*>> overlapping_values{
       {b, c}, {c, d}, {c, e}};
 
@@ -1220,8 +1217,7 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
   auto* c = vmap["c"];
   auto* d = vmap["d"];
 
-  AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
+  auto ranges = ManagedTensorRanges(*graph->block(), {b, c, d}, graph);
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
   EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
@@ -1241,10 +1237,47 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   auto* b = vmap["b"];
   auto* output = vmap["output"];
 
-  AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
+  auto ranges = ManagedTensorRanges(*graph->block(), {b, output}, graph);
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
+}
+
+TEST(ManagedTensorRanges, LastUseOfNodeInSubBlock) {
+  const std::string src = R"IR(
+    graph(%a.1 : Tensor, %cond1.1 : bool, %cond2.1 : bool):
+      %4 : bool = prim::Constant[value=0]()
+      %5 : NoneType = prim::Constant()
+      %20 : int[] = prim::Constant[value=[1, 1]]()
+      %b.1 : Tensor = aten::abs(%a.1)
+      %c.1 : Tensor = aten::argmin(%a.1, %5, %4)
+      %d : Tensor = prim::If(%cond1.1)
+        block0():
+          %d.31 : Tensor = prim::If(%cond2.1)
+            block0():
+              %d.1 : Tensor = aten::linear(%b.1, %b.1, %5)
+              -> (%d.1)
+            block1():
+              %d.3 : Tensor = aten::linear(%c.1, %c.1, %5)
+              %d.9 : Tensor = aten::mul(%d.3, %d.3)
+              -> (%d.9)
+          -> (%d.31)
+        block1():
+          %b.7 : Tensor = aten::view(%a.1, %20)
+          %d.19 : Tensor = aten::mul(%b.7, %c.1)
+          -> (%d.19)
+      %17 : Tensor = aten::clone(%c.1, %5)
+      %18 : Tensor = aten::clone(%d, %5)
+      %19 : (Tensor, Tensor) = prim::TupleConstruct(%17, %18)
+      return (%19)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b.1"];
+  auto* c = vmap["c.1"];
+
+  auto ranges = ManagedTensorRanges(*graph->block(), {b, c}, graph);
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
 }
 
 namespace {
@@ -1328,9 +1361,8 @@ void testAssignStorageToManagedTensors(
   }
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
-  AliasDb alias_db(graph);
   auto ranges =
-      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
+      ManagedTensorRanges(*graph->block(), managed_tensor_values, graph);
   auto groups = assignStorageToManagedTensors(
       graph->block()->nodes(), ranges, tensor_value_to_tensor);
 

@@ -113,10 +113,23 @@ class ValueGroup {
 class TORCH_API ManagedTensorRanges {
  public:
   ManagedTensorRanges() = default;
+
+  ManagedTensorRanges(
+      Block& block,
+      const FastSet<const Value*>& managed_tensor_values,
+      std::shared_ptr<Graph> graph);
+
+  // This constructor is here so we can construct many
+  // ManagedTensorRanges without re-constructing alias_db and
+  // values_from_outer_scope. Technically, both can be derived
+  // from a single parameter (graph), but we don't want to have
+  // to re-do that since we do this liveness analysis for every block.
   ManagedTensorRanges(
       Block& block,
       const AliasDb& alias_db,
-      const FastSet<const Value*>& managed_tensor_values);
+      const FastSet<const Value*>& managed_tensor_values,
+      const FastMap<const Node*, std::vector<const Value*>>&
+          values_from_outer_scope);
 
   // If true, then this node is the last use of at least one
   // managed tensor. availableTensorValuesAfterNode(node) will return a vector
@@ -129,6 +142,21 @@ class TORCH_API ManagedTensorRanges {
   // For testing. True if v1 and v2 are both mutable types and have lifetimes
   // that overlap.
   bool lifetimesOverlap(const Value* v1, const Value* v2) const;
+
+  // Each key `node` in the constructed map is a node with sub-blocks (e.g.
+  // prim::If). The vector `node` maps to is the set of values in any child
+  // block of `node` that originate from `node`'s scope.
+  // Example:
+  // a = some_op()
+  // if condition1:
+  //     b = some_op()
+  //     if condition2:
+  //         c = another_op(a)
+  //     else:
+  //         c = another_op(b)
+  // The outer prim::If node maps to {a}. The inner prim::If node maps to {b}.
+  static FastMap<const Node*, std::vector<const Value*>> valuesFromOuterScope(
+      std::shared_ptr<Graph> graph);
 
  private:
   struct Lifetime {
@@ -313,6 +341,8 @@ class BlockInfo {
 
   void prepare_for_memory_planner(
       const AliasDb& alias_db,
+      const FastMap<const Node*, std::vector<const Value*>>&
+          values_from_outer_scope,
       const StaticModuleOptions& opt);
 
   const auto& managed_output_tensor_values() const {
