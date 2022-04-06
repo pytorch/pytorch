@@ -207,7 +207,7 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
   Tensor dequantize(const Tensor& qtensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
-  cont bool equalTo(QuantizerPtr other) override {
+  const bool equalTo(QuantizerPtr other) override {
     if (!other.get() || other->qscheme() != kPerChannelAffineFloatQParams) {
       return false;
     }
