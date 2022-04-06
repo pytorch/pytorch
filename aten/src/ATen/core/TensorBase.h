@@ -418,7 +418,7 @@ class TORCH_API TensorBase {
     return impl_->is_sparse();
   }
 
-  /// Returns is a `Tensor` has a sparse CSR backend with is_transpose=is_block=False.
+  /// Returns is a `Tensor` has a sparse CSR backend.
   bool is_sparse_csr() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_sparse_csr();

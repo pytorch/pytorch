@@ -23,7 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types, empty_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off
@@ -950,7 +950,7 @@ class OpInfo(object):
         else:
             backward_dtypes = self.backward_dtypes
 
-        allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
+        allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32)
         return set(allowed_backward_dtypes).intersection(backward_dtypes)
 
     def supports_complex_autograd(self, device_type):
@@ -3003,7 +3003,7 @@ def clone_sample(sample, **kwargs):
 
     def clone_tensor(t):
         if isinstance(t, torch.Tensor):
-            return t.clone().requires_grad_(t.requires_grad)
+            return t.detach().clone().requires_grad_(t.requires_grad)
         else:
             return t
 
@@ -5468,21 +5468,30 @@ class ForeachFuncInfo(OpInfo):
 
 
 def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False, **kwargs):
-    # Generate Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
-    from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+    from torch.testing._internal.common_utils import random_well_conditioned_matrix
+
+    # Cholesky factorization is for positive-definite matrices
+    single_well_conditioned_matrix = random_well_conditioned_matrix(S, S, dtype=dtype, device=device)
+    batch_well_conditioned_matrices = random_well_conditioned_matrix(2, S, S, dtype=dtype, device=device)
+    single_pd = single_well_conditioned_matrix @ single_well_conditioned_matrix.mH
+    batch_pd = batch_well_conditioned_matrices @ batch_well_conditioned_matrices.mH
+
     inputs = (
         torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
         torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
-        random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
-        random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        single_pd,
+        batch_pd
     )
-    test_cases = (torch.linalg.cholesky(a) for a in inputs)
-    out = []
-    for a in test_cases:
-        a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-        out.append(SampleInput(a.clone().requires_grad_(requires_grad), kwargs=dict(upper=True)))
-    return out
+    test_cases = (torch.linalg.cholesky(a, upper=False) for a in inputs)
+    for l in test_cases:
+        # generated lower-triangular samples
+        l.requires_grad = requires_grad
+        yield SampleInput(l)  # upper=False by default
+        yield SampleInput(l.detach().clone().requires_grad_(requires_grad), kwargs=dict(upper=False))
+
+        # generate upper-triangular inputs
+        u = l.detach().clone().mT.contiguous().requires_grad_(requires_grad)
+        yield SampleInput(u, kwargs=dict(upper=True))
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
@@ -5762,16 +5771,15 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
 
 
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    out = sample_inputs_linalg_cholesky_inverse(
+    cholesky_inverse_samples = sample_inputs_linalg_cholesky_inverse(
         op_info, device, dtype, requires_grad=False
     )
 
-    for sample in out:
+    for sample in cholesky_inverse_samples:
         psd_matrix = sample.input
         sample.input = make_tensor(psd_matrix.shape, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
         sample.args = (psd_matrix.requires_grad_(requires_grad),)
-
-    return out
+        yield sample
 
 
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -6969,12 +6977,13 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
 
     reduce = op_info.variant_test_name
     sample_inputs = []
-    for args in test_cases:
+    for args, include_self in product(test_cases, [True, False]):
         inp_shape, dim, index, src_shape = args
         sample_inputs.append(
             SampleInput(
                 _tensor(inp_shape),
-                args=(dim, index, _tensor(src_shape), reduce)
+                args=(dim, index, _tensor(src_shape), reduce),
+                kwargs={'include_self': include_self}
             )
         )
 
@@ -8336,7 +8345,7 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
 
 
 def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
-    """Gradcheck wrpper for functions that take lower or upper triangular matrices as input.
+    """Gradcheck wrapper for functions that take lower or upper triangular matrices as input.
 
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input.
@@ -8344,6 +8353,23 @@ def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     """
     triangular_arg = args[idx].triu() if upper else args[idx].tril()
     return op(*args[:idx], triangular_arg, *args[idx + 1:], upper, **kwargs)
+
+
+def gradcheck_wrapper_triangular_input_real_positive_diagonal(op, *args, upper=False, idx=0, **kwargs):
+    """Gradcheck wrapper for functions that take lower/upper triangular matrices
+    with real and positive diagonals, for example, cholesky-like operations.
+    """
+    arg = args[idx]
+    arg_diag = arg.diagonal(0, -2, -1)
+    arg_diag_embed = torch.diag_embed(arg_diag)
+    id_diag_tensor = torch.ones_like(arg_diag)
+    id_tensor = torch.diag_embed(id_diag_tensor)
+    # new_arg = arg - diag(arg) + I
+    new_arg = arg - arg_diag_embed + id_tensor
+    return gradcheck_wrapper_triangular_input(
+        op, *args[:idx], new_arg, *args[idx + 1:],
+        upper=upper, idx=idx, **kwargs
+    )
 
 
 def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
@@ -8652,6 +8678,7 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71784
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.float16,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
            )),
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -8923,6 +8950,7 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ),
            supports_out=False),
     OpInfo('broadcast_to',
@@ -9037,17 +9065,14 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
-           backward_dtypes=floating_types(),
-           # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
-           # with complex dtype.
-           check_batched_gradgrad=False,
+           backward_dtypes=floating_and_complex_types(),
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           check_batched_gradgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
-           gradcheck_wrapper=gradcheck_wrapper_triangular_input,
+           gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               # TODO: FIXME: cholesky_inverse throws an error in forward when requires_grad=True
-               #   for complex tensors
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # cholesky_inverse does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),)),
     OpInfo('cholesky_solve',
@@ -9195,6 +9220,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                # RuntimeError: "eq_cpu" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
+               # RuntimeError: "eq_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.half,)),
            )),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types_and(torch.half),
@@ -9204,11 +9231,6 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        # File "test/test_binary_ufuncs.py", line 334, in test_batch_vs_slicing
-                        # actual = torch.stack(actual)
-                        # RuntimeError: "cat_cuda" not implemented for 'ComplexHalf'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_batch_vs_slicing',
-                                     device_type='cuda', dtypes=(torch.half,)),
                     )),
     BinaryUfuncInfo('copysign',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -9973,6 +9995,7 @@ op_db: List[OpInfo] = [
                # Arguments for call are not valid.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),  # noqa: B950
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient,
@@ -11189,6 +11212,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! RuntimeError: bias tensor has to be contiguous"), 'TestGradients',
                             'test_forward_mode_AD', device_type='cuda', active_if=TEST_WITH_ROCM),
            ),
@@ -11196,8 +11220,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv1d',
            aliases=('conv1d',),
            aten_name='conv1d',
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11206,6 +11231,14 @@ op_db: List[OpInfo] = [
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Ref: https://github.com/pytorch/pytorch/issues/75309
+               # AssertionError: None mismatch: torch.complex128 is not None
+               DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules',
+                            'test_custom_rules', dtypes=(torch.complex64, torch.complex128)),
+               # Ref: https://github.com/pytorch/pytorch/issues/75309
+               # RuntimeError: UNSUPPORTED DTYPE: complex
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
+                            'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -11346,6 +11379,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=False,
            supports_forward_ad=True,
@@ -11580,6 +11614,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bfloat16,)),
            ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
@@ -11667,7 +11702,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: elu_backward
+        supports_fwgrad_bwgrad=True,
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
@@ -11716,7 +11751,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: elu_backward
+        supports_fwgrad_bwgrad=True,
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
@@ -11777,7 +11812,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,  # depends on 'elu'
-        supports_fwgrad_bwgrad=False,  # Needs: elu_backward
+        supports_fwgrad_bwgrad=True,
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
@@ -11796,6 +11831,30 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
+        ref=lambda x, inplace=False:
+            x / (1 + np.exp(-x)),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        supports_fwgrad_bwgrad=True,
+        assert_autodiffed=False,
+        supports_out=False,
+        inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-3, rtol=1e-3),
+                    torch.bfloat16: tol(atol=1e-4, rtol=1e-4)
+                }),
+                'TestUnaryUfuncs', device_type='cuda',
+            ), ],
+    ),
+    # TODO: combine this with the nn.functional.silu OpInfo when
+    # complex autodiff for silu is supported.
+    UnaryUfuncInfo(
+        'nn.functional.silu',
+        variant_test_name='complex',
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -11821,6 +11880,7 @@ op_db: List[OpInfo] = [
         'nn.functional.hardsigmoid',
         ref=reference_hardsigmoid,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_autograd=True,
         assert_autodiffed=False,
@@ -11845,11 +11905,24 @@ op_db: List[OpInfo] = [
         aten_name="log_sigmoid",
         ref=reference_logsigmoid,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+        ],
     ),
     UnaryUfuncInfo(
         'nn.functional.mish',
@@ -12057,6 +12130,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.softshrink',
            aten_name="softshrink",
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            supports_forward_ad=True,
@@ -12069,6 +12143,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            assert_autodiffed=True,
@@ -12785,21 +12860,21 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_hsplit,
            error_inputs_func=error_inputs_hsplit,),
     OpInfo('vsplit',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_vsplit,
            error_inputs_func=error_inputs_vsplit,),
     OpInfo('dsplit',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13451,7 +13526,7 @@ op_db: List[OpInfo] = [
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            ),
     OpInfo('atleast_1d',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13465,7 +13540,7 @@ op_db: List[OpInfo] = [
            ),
            ),
     OpInfo('atleast_2d',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13479,7 +13554,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_atleast1d2d3d,
            ),
     OpInfo('atleast_3d',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13685,6 +13760,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('bfloat16',
            op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
@@ -13698,6 +13774,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('bool',
            op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
@@ -13916,6 +13993,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -14024,6 +14103,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
@@ -14213,7 +14294,7 @@ op_db: List[OpInfo] = [
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
            aliases=('concat',),
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
            sample_inputs_func=sample_inputs_cat_concat,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14318,7 +14399,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            skips=(
                # JIT has issue when op is passed as lambda
@@ -15097,7 +15179,7 @@ op_db: List[OpInfo] = [
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
-        dtypes=floating_types(),
+        dtypes=floating_types_and(torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
@@ -15120,6 +15202,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_softplus,
         supports_forward_ad=True,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
     ),
@@ -15568,6 +15651,46 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
+        '_masked.argmax',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmax): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmax
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.argmin',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmin): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmin
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
         '_masked.mean',
         ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         method_variant=None,
@@ -15976,7 +16099,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        decorators=(onlyCPU,),
     ),
     OpInfo(
         'scatter_reduce',
@@ -15984,9 +16106,9 @@ op_db: List[OpInfo] = [
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        decorators=(onlyCPU,),
     ),
     OpInfo(
         'scatter_reduce',
@@ -15994,25 +16116,25 @@ op_db: List[OpInfo] = [
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        decorators=(onlyCPU,),
     ),
     OpInfo(
         'scatter_reduce',
         variant_test_name='amin',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        decorators=(onlyCPU,),
     ),
     OpInfo(
         'scatter_reduce',
         variant_test_name='amax',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        decorators=(onlyCPU,),
     ),
 ]
 

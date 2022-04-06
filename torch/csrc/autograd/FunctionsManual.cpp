@@ -1192,17 +1192,33 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
   at::NoTF32Guard disable_tf32;
   Tensor grad_L;
   if (grad.defined()) {
-    Tensor common_term = grad + grad.mT();
+    Tensor common_term = grad + grad.mH();
     common_term = at::matmul(inverse, at::matmul(common_term, inverse));
     if (upper) {
       grad_L = -at::matmul(L, common_term);
     } else {
       grad_L = -at::matmul(common_term, L);
     }
-  } else {
-    grad_L = at::zeros({1}, L.options()).expand_as(L);
   }
+
   return grad_L;
+}
+
+// If X = (L L^H)^{-1} with L lower-triangular with a real positive diagonal,
+// then dX = K^H + K, where
+// K =  L^{-H} dL^{-1} [dL^{-1} = -L^{-1} dL L^{-1}]
+//   = -L^{-H} L^{-1} dL L^{-1} [L^{-H} L^{-1} = X]
+//   = -X dL L^{-1} [X = X^H = L^{-H} L^{-1} = L^{-1} L^{-H}]
+//   = -X dL X L^{H}.
+// If X = (U^H U)^{-1} with U upper-triangular with a real positive diagonal,
+// then K becomes
+// K = -X dU^H X U
+Tensor cholesky_inverse_jvp(const Tensor& F, const Tensor& dF, const Tensor& X, bool upper) {
+  at::NoTF32Guard disable_tf32;
+  const auto CF = upper ? F : F.mH();
+  const auto dCF = upper ? dF.mH() : dF;
+  const auto partial_dX = -X.matmul(dCF).matmul(X).matmul(CF);
+  return partial_dX + partial_dX.mH();
 }
 
 // The formula for forward AD is adapted from
@@ -5266,6 +5282,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result) {
   Tensor grad_self, grad_src;
 
@@ -5286,7 +5303,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (grad * result).gather(dim, index) / src;
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = ones_like(grad);
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
@@ -5298,6 +5315,10 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
   }
 
   return std::make_tuple(grad_self, grad_src);

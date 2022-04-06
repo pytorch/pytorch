@@ -731,6 +731,17 @@ constexpr auto autograd_privateuse3_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse3);
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 
+// This keyset has:
+// (1) the functionality bits corresponding to backends (dense, sparse,
+// quantized) (2) all of the backend bits set
+constexpr DispatchKeySet backend_functionality_keys =
+    DispatchKeySet({
+        DispatchKey::Dense,
+        DispatchKey::Quantized,
+        DispatchKey::Sparse,
+    }) |
+    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+
 struct OpTableOffsetAndMask {
   uint16_t offset;
   uint16_t backend_mask;
@@ -804,6 +815,13 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   }
 }
 
+// returns the "backend" DispatchKey of highest priority in the set.
+// This is basically like highestBackendKey(), except that we have some
+// "functionality" bits that correspond to backends (Sparse, Quantized)
+inline DispatchKey highestPriorityBackendTypeId(DispatchKeySet ks) {
+  return (ks & backend_functionality_keys).highestPriorityTypeId();
+}
+
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
@@ -821,7 +839,8 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
   // treatment;
   return (s - autograd_dispatch_keyset_with_ADInplaceOrView -
-          autocast_dispatch_keyset)
+          autocast_dispatch_keyset -
+          DispatchKeySet({DispatchKey::PythonTLSSnapshot, DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 
