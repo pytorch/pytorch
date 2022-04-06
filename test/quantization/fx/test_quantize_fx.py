@@ -4033,19 +4033,6 @@ class TestQuantizeFx(QuantizationTestCase):
     def _assertFixedQParamsFakeQuantizeEqual(self, fq1, fq2):
         self.assertEqual(fq1()._observer_ctr, fq2()._observer_ctr)
 
-    def test_fixed_qparams_patterns(self):
-        hard_sigmoid_keys = [torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
-        sigmoid_keys = [torch.nn.Sigmoid, torch.sigmoid, "sigmoid", "sigmoid_"]
-        tanh_keys = [torch.nn.Tanh, torch.tanh, "tanh", "tanh_"]
-        for k in hard_sigmoid_keys + sigmoid_keys:
-            self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP[k], default_affine_fixed_qparams_observer)
-            self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[k],
-                                                      default_affine_fixed_qparams_fake_quant)
-        for k in tanh_keys:
-            self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP[k], default_symmetric_fixed_qparams_observer)
-            self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[k],
-                                                      default_symmetric_fixed_qparams_fake_quant)
-
     def test_register_patterns(self):
         @register_fusion_pattern("dummy_fusion")
         class DummyFusion():
