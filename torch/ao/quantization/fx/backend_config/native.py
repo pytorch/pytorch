@@ -63,6 +63,18 @@ default_dynamic_int8_dtype_config = {
     "is_dynamic": True,
 }
 
+weight_only_quint8_dtype_config = {
+    "input_dtype": torch.float,
+    "weight_dtype": torch.quint8,
+    "output_dtype": torch.float,
+}
+
+weight_only_quint4x2_dtype_config = {
+    "input_dtype": torch.float,
+    "weight_dtype": torch.quint4x2,
+    "output_dtype": torch.float,
+}
+
 # ======================
 # |  OPERATOR CONFIGS  |
 # ======================
@@ -506,6 +518,26 @@ def _get_rnn_op_configs():
         })
     return rnn_op_configs
 
+def _get_embedding_op_configs():
+    embedding_op_configs = []
+    for embedding_op in [
+            torch.nn.Embedding,
+            torch.nn.EmbeddingBag,
+            nnqat.Embedding,
+            nnqat.EmbeddingBag,
+    ]:
+        embedding_op_configs.append({
+            "pattern": embedding_op,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [
+                weight_only_quint8_dtype_config,
+                weight_only_quint4x2_dtype_config
+            ],
+            # This is temporary, and will be removed soon
+            "_input_output_observed": False
+        })
+    return embedding_op_configs
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -521,5 +553,6 @@ def get_native_backend_config_dict():
             *_get_bn_configs(),
             *_get_share_qparams_op_configs(),
             *_get_rnn_op_configs(),
+            *_get_embedding_op_configs(),
         ],
     }
