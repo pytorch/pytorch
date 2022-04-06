@@ -75,6 +75,9 @@ default_dynamic_int8_dtype_config = {
     "input_dtype": torch.quint8,
     "weight_dtype": torch.qint8,
     "output_dtype": torch.quint8,
+    # currently the dtype check is not yet enabled, so we provided the dtype_configs but
+    # it is not really used yet,
+    # we will enable it a bit later after we moved everything to backend_config_dict
     "is_dynamic": True,
 }
 
