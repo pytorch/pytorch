@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <functional>
 #include <numeric>
+#include "lazy/ts_backend/ops/expand.h"
 
 namespace torch {
 namespace lazy {
@@ -37,6 +38,8 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
     case ViewInfo::Type::kNarrow:
       return MakeNode<Narrow>(
           ir_value, view_info.indices, view_info.shape.sizes());
+    case ViewInfo::Type::kExpand:
+      return MakeNode<ExpandView>(ir_value, view_info.shape.sizes());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:
@@ -91,6 +94,9 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
       case ViewInfo::Type::kNarrow:
         result = MakeNode<NarrowViewUpdate>(
             tmp_values[i - 1], result, view_info.indices);
+        break;
+      case ViewInfo::Type::kExpand:
+        result = MakeNode<ExpandViewUpdate>(tmp_values[i - 1], result);
         break;
       case ViewInfo::Type::kNoOp:
         break;

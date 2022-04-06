@@ -114,12 +114,21 @@ void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
   }
 }
 
-torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size) {
+/*
   auto input_shape = input->shape();
   return torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<torch::lazy::Expand>(
       input->GetIrValue(),
       GetExpandDimensions(input_shape.Get(), std::move(size)),
-      /*is_scalar_expand=*/false), input->GetDevice());
+      is_scalar_expand=false), input->GetDevice());
+*/
+
+torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size) {
+  auto input_shape = input->shape();
+  torch::lazy::ViewInfo::Type view_type = torch::lazy::ViewInfo::Type::kExpand;
+  auto tgt_shape_dims = GetExpandDimensions(input_shape.Get(), std::move(size));
+  auto tgt_shape = Shape(input_shape.Get().scalar_type(), tgt_shape_dims);
+  torch::lazy::ViewInfo view_info(view_type, tgt_shape, input_shape);
+  return input->CreateViewTensor(std::move(view_info));
 }
 
 void fill_(torch::lazy::LazyTensorPtr& input, const at::Scalar& value) {

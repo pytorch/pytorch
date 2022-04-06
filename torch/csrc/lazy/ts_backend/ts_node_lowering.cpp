@@ -24,6 +24,7 @@
 #include <torch/csrc/lazy/core/view_ops/view.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
+#include "ATen/core/symbol.h"
 
 namespace torch {
 namespace lazy {
@@ -106,6 +107,17 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerExpand(
           torch::lazy::NodeCast<torch::lazy::Expand>(
               node, torch::lazy::OpKind(at::aten::expand)));
+    }
+    if (node->op().op == c10::Symbol::prim("expand_view")) {
+      std::vector<torch::jit::NamedValue> arguments;
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+      arguments.emplace_back(node->shape().sizes());
+      auto expand_out = LowerBuiltin(at::aten::expand, arguments);
+      return {GenerateClone(expand_out.front())};
+    }
+    if (node->op().op == c10::Symbol::prim("expand_view_update")) {
+      return LowerExpandUpdate(torch::lazy::NodeCast<torch::lazy::ExpandViewUpdate>(
+              node, torch::lazy::OpKind(c10::Symbol::prim("expand_view_update"))));
     }
     if (node->op().op == at::aten::narrow) {
       return LowerNarrow(torch::lazy::NodeCast<torch::lazy::Narrow>(
@@ -331,6 +343,35 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     GenerateCopy(base, loctx()->GetOutputOp(source_argument));
     return {dest};
   }
+
+
+  TSOpVector LowerExpandUpdate(const torch::lazy::ExpandViewUpdate* node) {
+    torch::jit::Value* dest =
+        GenerateClone(loctx()->GetOutputOp(node->operand(0)));
+    auto orig_shape = node->shapes().at(0);
+    const torch::lazy::Output& source_argument = node->operand(1);
+    auto sliced_source_arg = loctx()->GetOutputOp(source_argument);
+    const torch::lazy::Shape& source_shape = source_argument.shape();
+    
+    auto orank =orig_shape.dim();
+    auto erank = source_shape.dim();
+    for (size_t i : c10::irange(erank)) {
+        if ((i >= orank) || (orig_shape.size(orank - i - 1) == 1 && source_shape.size(erank - i - 1) != 1)
+        ) {
+          sliced_source_arg = GenerateSlice(/*base=*/sliced_source_arg, /*dim=*/erank - i - 1, /*start=*/0,
+                              /*end=*/1,
+                              /*step=*/1);
+        }
+    }
+
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(sliced_source_arg);
+    arguments.emplace_back(orig_shape.sizes());
+    auto reshaped = LowerBuiltin(at::aten::reshape, arguments);
+    GenerateCopy(dest, reshaped[0]);
+    return {dest};
+  }
+
 
   TSOpVector LowerUnsqueeze(const Unsqueeze* node) {
     std::vector<torch::jit::NamedValue> arguments;
