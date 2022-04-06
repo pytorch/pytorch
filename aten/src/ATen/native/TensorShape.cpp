@@ -1341,6 +1341,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           # swap the loop order for better algorithmic complexity.
           new_dim_indices = []
           selected_dim_indices = []
+          # This is a brute-force algorithms to convey the main idea.
+          # The CPP code below is more efficient but more complicated.
           for i, i_idx in enumerate(indices[dim]):
               for j, j_idx in enumerate(index):
                   if i_idx == j_idx:
@@ -1374,7 +1376,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   // Equivalent to t.index_select(dim, idx), but vanilla index_select is not parallel,
   // so we use gather instead.
   // We use this method to select relevant indices/values
-  // in the intersection between indices[dim] and the index.
+  // from the intersection between indices[dim] and the index.
   const auto index_select = [](const Tensor& t, int64_t dim, const Tensor& idx) -> Tensor {
     const auto idx_len = idx.numel();
     auto out_shape = t.sizes().vec();
@@ -1415,6 +1417,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
     const auto dim_indices = indices[dim].contiguous();
 
+    // If nnz is smaller than size, then either indices[dim] or index gets sorted,
+    // then this follows by a binary search to find interesections.
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto search_in_dim_indices
         // if either dim_indices or index requires sorting, we compare
@@ -1466,44 +1470,55 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       const std::vector<int64_t> src_n_threads_shape = {
         n_threads_src, (src_len + n_threads_src - 1) / n_threads_src
       };
+
+      // src_int_idx and sorted_int_idx store "i" and "j" indices indicating
+      // intersections such that src_int_idx[i] == sorted_int_idx[j].
+      // These intersections are found with binary search and in parallel.
       auto src_int_idx = at::empty(src_n_threads_shape, src.options());
       auto sorted_int_idx = at::empty_like(src_int_idx);
+      // For each element "i" from src, int_counts define how many
+      // elements there are in sorted, i.e. "j" indices, corresponding
+      // to "i", i.e.:
+      // |{j : src_int_idx[i] == sorted_int_idx[j]}| for each i in src_int_idx.
       auto int_counts = at::zeros_like(src_int_idx);
 
-      const auto sorted_len = sorted.numel();
-      const auto* ptr_sorted = sorted.data_ptr<int64_t>();
-      const auto* ptr_sorted_start = ptr_sorted;
-      const auto* ptr_sorted_end = ptr_sorted + sorted_len;
+      // fill in src_int_idx, sorted_int_idx, int_counts
+      {
+        const auto sorted_len = sorted.numel();
+        const auto* ptr_sorted = sorted.data_ptr<int64_t>();
+        const auto* ptr_sorted_start = ptr_sorted;
+        const auto* ptr_sorted_end = ptr_sorted + sorted_len;
 
-      at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
-          const auto tid = at::get_thread_num();
-          auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-          auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-          auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-          const auto* ptr_src = src.data_ptr<int64_t>() + start;
+        at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
+            const auto tid = at::get_thread_num();
+            auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
+            auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+            auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_src = src.data_ptr<int64_t>() + start;
 
-          for (const auto i : c10::irange(start, end)) {
-            const auto src_val = *ptr_src++;
-            const auto src_val_lb = std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
-            // We cannot just use *src_val_lb != src_val because when
-            // src_val_lb == ptr_sorted_end, dereferencing past-the-end value
-            // is not well-defined.
-            if (src_val_lb == ptr_sorted_end || *src_val_lb != src_val) {
-              ++ptr_tid_src_int_idx;
-              ++ptr_tid_sorted_int_idx;
-              ++ptr_tid_int_counts;
-              continue;
+            for (const auto i : c10::irange(start, end)) {
+              const auto src_val = *ptr_src++;
+              const auto src_val_lb = std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+              // We cannot just use *src_val_lb != src_val because when
+              // src_val_lb == ptr_sorted_end, dereferencing past-the-end value
+              // is not well-defined.
+              if (src_val_lb == ptr_sorted_end || *src_val_lb != src_val) {
+                ++ptr_tid_src_int_idx;
+                ++ptr_tid_sorted_int_idx;
+                ++ptr_tid_int_counts;
+                continue;
+              }
+              const auto src_val_ub = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+
+              const int64_t count = src_val_ub - src_val_lb;
+              const int64_t j = src_val_lb - ptr_sorted_start;
+
+              *ptr_tid_src_int_idx++ = i;
+              *ptr_tid_sorted_int_idx++ = j;
+              *ptr_tid_int_counts++ = count;
             }
-            const auto src_val_ub = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
-
-            const int64_t count = src_val_ub - src_val_lb;
-            const int64_t j = src_val_lb - ptr_sorted_start;
-
-            *ptr_tid_src_int_idx++ = i;
-            *ptr_tid_sorted_int_idx++ = j;
-            *ptr_tid_int_counts++ = count;
-          }
-      });
+        });
+      }
 
       const auto compressed_int_counts = int_counts.sum(-1);
       const auto res_len = compressed_int_counts.sum().item<int64_t>();
@@ -1514,36 +1529,48 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return std::make_tuple(empty_idx, empty_idx);
       }
 
+      // Now that we know "i", "j" and the counts, we "unflatten"
+      // them into two arrays of intersection indices such that
+      // selected_src = repeat_interleave(src_int_idx, int_counts),
+      // and selected_sorted is obtained as follows:
+      // offsets = int_counts.cumsum(0).sub_(int_counts)
+      // for ii, (j, c) in enumerate(zip(sorted_int_idx, int_counts)):
+      //     out_slice = slice(offsets[ii], offsets[ii] + c)
+      //     src_slice = slice(j, j + c)
+      //     selected_sorted[out_slice] = sorted_int_idx[src_slice]
       auto selected_sorted = at::empty({res_len}, sorted.options());
       auto selected_src = at::empty({res_len}, src.options());
 
-      auto* ptr_selected_sorted = selected_sorted.data_ptr<int64_t>();
-      auto* ptr_selected_src = selected_src.data_ptr<int64_t>();
+      // fill in selected_sorted, selected_src
+      {
+        auto* ptr_selected_sorted = selected_sorted.data_ptr<int64_t>();
+        auto* ptr_selected_src = selected_src.data_ptr<int64_t>();
 
-      const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
-      const auto* ptr_sorted_idx = sorted_idx.data_ptr<int64_t>();
-      at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
-          const auto tid = at::get_thread_num();
-          const auto tid_offset = thread_offsets.data_ptr<int64_t>()[tid];
-          const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-          const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-          const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-          auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
-          auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
+        const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
+        const auto* ptr_sorted_idx = sorted_idx.data_ptr<int64_t>();
+        at::parallel_for(0, src_len, src_grain_size, [&](int64_t start, int64_t end) {
+            const auto tid = at::get_thread_num();
+            const auto tid_offset = thread_offsets.data_ptr<int64_t>()[tid];
+            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+            auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
+            auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
-          for (const auto ii : c10::irange(start, end)) {
-            const auto count = *ptr_tid_int_counts++;
-            const auto i = *ptr_tid_src_int_idx++;
-            const auto j = *ptr_tid_sorted_int_idx++;
-            if (!count) continue;
+            for (const auto ii : c10::irange(start, end)) {
+              const auto count = *ptr_tid_int_counts++;
+              const auto i = *ptr_tid_src_int_idx++;
+              const auto j = *ptr_tid_sorted_int_idx++;
+              if (!count) continue;
 
-            std::fill_n(ptr_tid_selected_src, count, i);
-            std::copy_n(ptr_sorted_idx + j, count, ptr_tid_selected_sorted);
+              std::fill_n(ptr_tid_selected_src, count, i);
+              std::copy_n(ptr_sorted_idx + j, count, ptr_tid_selected_sorted);
 
-            ptr_tid_selected_sorted += count;
-            ptr_tid_selected_src += count;
-          }
-      });
+              ptr_tid_selected_sorted += count;
+              ptr_tid_selected_src += count;
+            }
+        });
+      }
 
       return search_in_dim_indices
         ? std::make_tuple(selected_sorted, selected_src)
@@ -1581,6 +1608,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       return cidx;
     };
 
+    // If nnz is (much) larger than size, then both indices[dim] and index get sorted
+    // with a count sort (faster, and no huge nnz-sized chunk memory allocations).
+    // The element-wise product between the count tables gives us all the intersections.
     const auto get_selected_indices_large_nnz_small_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto get_counts = [&sorted_idx_to_cidx](
           // Writes into counts (must be preallocated and zero)
@@ -1756,7 +1786,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     // We choose `nnz < size`, which measures theoretical complexity
     // and does not rely on runtime performance.
     // TODO: perform this analysis and find better C(nnz, size).
-    if (nnz < size) {
+    if (nnz <= size) {
       std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_small_nnz_large_size();
     }
     else {
