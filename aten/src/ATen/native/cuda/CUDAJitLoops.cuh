@@ -115,9 +115,8 @@ static inline void launch_jitted_unrolled_kernel(
     // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
   }
-
-  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1},
-  {num_threads(), 1, 1});
+  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u},
+  {num_threads(), 1u, 1u});
 }
 
 template<
@@ -197,8 +196,7 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
       // since 3 slots are already filled in `args`
       args[i + 3] = extra_args_array[i];
     }
-
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1}, {num_threads(), 1, 1});
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
     auto ic = TrivialOffsetCalculator<arity>();
     auto oc = TrivialOffsetCalculator<1>();
@@ -220,8 +218,8 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
       // since 7 slots are already filled in `args`
       args[i + 7] = extra_args_array[i];
     }
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1}, {num_threads(), 1, 1});
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   }
 }
 
