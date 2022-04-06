@@ -13311,11 +13311,18 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
                     # this function is undefined if 'abs' values are <0
+                    supports_forward_ad=True,
                     lhs_make_tensor_kwargs=dict(low=0),
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # GradcheckError: Jacobian computed with forward mode mismatch for output 0 with respect to input 0
+                        # Numerical:
+                        #  tensor([[0.]], dtype=torch.float64)
+                        # Analytical:
+                        # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
+                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,

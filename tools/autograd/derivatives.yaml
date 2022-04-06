@@ -418,6 +418,7 @@
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
+  result: at::complex(abs_t*angle_p.cos() - angle_t*abs_p*angle_p.sin(), abs_t*angle_p.sin() + angle_t*abs_p*angle_p.cos())
 
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
