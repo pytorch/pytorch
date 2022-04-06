@@ -153,7 +153,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
 
   while (block_size < (max_block_size)) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
-  block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
+  block_size = std::max(block_size, static_cast<uint64_t>(at::cuda::warp_size()));
   return dim3(block_size);
 }
 
@@ -959,8 +959,7 @@ Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
           input.scalar_type(),
           "masked_softmax",
           [&] {
-            Tensor mask_not = mask.logical_not();
-            output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), -1);
+            output = at::softmax(input.masked_fill(mask, -std::numeric_limits<scalar_t>::infinity()), -1);
           });
         return output;
     }

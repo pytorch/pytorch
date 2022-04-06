@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <test/cpp/jit/test_utils.h>
+#include <torch/torch.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
@@ -189,6 +190,29 @@ TEST(LiteInterpreterTest, DivideTensor) {
   at::Tensor expected_2 = at::tensor({-4.}, c10::TensorOptions(c10::ScalarType::Float));
   AT_ASSERT(result_1.toList().get(0).toTensor().equal(expected_1));
   AT_ASSERT(result_1.toList().get(1).toTensor().equal(expected_2));
+}
+
+TEST(LiteInterpreterTest, MultipleOps) {
+  // Load check in model: multiple_ops.ptl
+  auto testModelFile = "multiple_ops.ptl";
+
+  // class Model(torch.nn.Module):
+  //           def __init__(self):
+  //               super(Model, self).__init__()
+  //               self.ops = torch.nn.Sequential(
+  //                   torch.nn.ReLU(),
+  //                   torch.nn.Flatten(),
+  //               )
+  //           def forward(self, x):
+  //               x[1] = -2
+  //               return self.ops(x)
+
+  Module bc = _load_for_mobile(testModelFile);
+  auto b = at::ones({2, 2, 2, 2});
+  const auto result = bc.forward({b});
+
+  at::Tensor expected = torch::tensor({{1, 1, 1, 1, 1, 1, 1, 1}, {0, 0, 0, 0, 0, 0, 0, 0}}, c10::TensorOptions(c10::ScalarType::Float));
+  AT_ASSERT(result.toTensor().equal(expected));
 }
 } // namespace mobile
 } // namespace jit

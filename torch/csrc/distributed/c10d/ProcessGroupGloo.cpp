@@ -763,6 +763,8 @@ ProcessGroupGloo::ProcessGroupGloo(
   for(const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
+
+  init();
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {

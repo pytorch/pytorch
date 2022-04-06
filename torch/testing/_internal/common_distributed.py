@@ -83,8 +83,8 @@ class DistTestCases:
 
 
 def skip_if_no_gpu(func):
-    """Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
-
+    """Skips if the world size exceeds the number of GPUs, ensuring that if the
+    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():

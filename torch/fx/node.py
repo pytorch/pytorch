@@ -26,7 +26,9 @@ Argument = Optional[Union[
 ]]
 
 _side_effectful_functions: Set[Callable] = {
-    torch._assert, torch.ops.profiler._record_function_enter,
+    torch._assert,
+    torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_enter_new,
     torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
@@ -461,20 +463,30 @@ class Node:
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
     @compatibility(is_backward_compatible=True)
-    def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
+    def replace_all_uses_with(self,
+                              replace_with : 'Node',
+                              delete_user_cb: Callable[['Node'], bool] = lambda user: True
+                              ) -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
 
         Args:
 
             replace_with (Node): The node to replace all uses of ``self`` with.
+            delete_user_cb (Callable): Callback that is called to determine
+              whether a given user of the self node should be removed.
 
         Returns:
 
             The list of Nodes on which this change was made.
         """
         to_process = list(self.users)
+        skipped = []
         for use_node in to_process:
+            if not delete_user_cb(use_node):
+                skipped.append(use_node)
+                continue
+
             def maybe_replace_node(n : Node) -> Node:
                 if n == self:
                     return replace_with
@@ -487,8 +499,8 @@ class Node:
             assert isinstance(new_kwargs, dict)
             use_node.__update_args_kwargs(new_args, new_kwargs)
 
-        assert len(self.users) == 0
-        return to_process
+        assert len(self.users) - len(skipped) == 0
+        return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
     def is_impure(self):

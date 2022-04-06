@@ -227,7 +227,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // expression and base type names.
   if (resolver_) {
     if (auto typePtr =
-            resolver_->resolveType(expr.range().text().str(), expr.range())) {
+            resolver_->resolveType(expr.range().text(), expr.range())) {
       return typePtr;
     }
   }

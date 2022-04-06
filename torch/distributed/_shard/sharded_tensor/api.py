@@ -149,7 +149,7 @@ class ShardedTensor(object):
         dims = _flatten_tensor_size(size)
 
         if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(self._sharding_spec)}')
+            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
 
         self._sharding_spec = sharding_spec
 
@@ -280,17 +280,19 @@ class ShardedTensor(object):
 
         world_size = dist.get_world_size(self._process_group)
 
-        gathered_shards = [None] * world_size
-        # will revise this part with CPU support and use dist.gather()
-        # once NCCL support for gather() is ready
-        # https://github.com/pytorch/pytorch/issues/66187
-        dist.all_gather_object(
+        gathered_shards: List[Optional[List[Shard]]] = [None] * world_size if rank == dst else []
+        # TODO: see how we could use dist.gather() instead of dist.gather_object
+        # as the latter one involves pickling on CPU, see more context
+        # https://github.com/pytorch/pytorch/issues/73935
+        dist.gather_object(
             obj=local_shards,
-            object_list=gathered_shards,
+            object_gather_list=gathered_shards,
+            dst=dst,
             group=self._process_group,
         )
-
         if rank == dst:
+            if out is None:
+                raise ValueError("`out` Tensor must be provided on dst rank!")
             dims = len(full_size)
             for shards in gathered_shards:
                 if shards is None:
@@ -681,9 +683,18 @@ class ShardedTensor(object):
             raise NotImplementedError("Only single local shard is supported.")
         return self.local_shards()[0].tensor
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
-            return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
+            # Find ShardedTensor instance to get process_group.
+            for arg in args:
+                if isinstance(arg, ShardedTensor):
+                    return _SHARDED_OPS[func](types, args, kwargs, arg._process_group)
+
+            for kwarg in kwargs.values():
+                if isinstance(kwarg, ShardedTensor):
+                    return _SHARDED_OPS[func](types, args, kwargs, kwarg._process_group)
+
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")

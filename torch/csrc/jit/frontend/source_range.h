@@ -4,172 +4,43 @@
 
 #include <algorithm>
 #include <iostream>
-#include <iterator>
 #include <memory>
-#include <numeric>
 #include <unordered_map>
-
 namespace torch {
 namespace jit {
 
 class SourceRangeUnpickler;
 struct SourceRange;
 
-// A stringlike class backed by a vector of string_view
-// the string represented are logically the concatenation of  the string_views
-// This has advantage of not needing continues memory.
-struct TORCH_API StringCordView {
-  StringCordView();
-  StringCordView(
-      std::vector<c10::string_view> inputs,
-      std::vector<std::shared_ptr<std::string>> ownerships);
-
-  size_t size() const {
-    return accumulated_sizes_.back();
-  }
-
-  size_t find(const std::string& tok, size_t start) const;
-  StringCordView substr(size_t start, size_t size) const;
-
-  char at(size_t index) const {
-    return *iter_for_pos(index);
-  }
-  char operator[](size_t index) const {
-    return at(index);
-  }
-
-  std::string str() const {
-    std::stringstream ss;
-    for (auto s : pieces_) {
-      ss << std::string(s);
-    }
-    return ss.str();
-  }
-
-  bool operator==(const std::string& rhs);
-
-  bool operator==(const StringCordView& rhs);
-
-  c10::string_view piece(size_t index) const {
-    return pieces_[index];
-  }
-
-  struct Iterator {
-    Iterator(
-        const StringCordView* str,
-        size_t start_line,
-        size_t start_pos,
-        size_t size)
-        : line_(start_line), pos_(start_pos), str_(str), size_(size) {}
-    explicit Iterator(const StringCordView* str)
-        : Iterator(str, 0, 0, str->size()) {}
-    Iterator(const Iterator&) = default;
-    Iterator(Iterator&&) = default;
-    Iterator& operator=(const Iterator&) = default;
-    Iterator& operator=(Iterator&&) = default;
-
-    Iterator operator++() {
-      if (size_ == 0) {
-        return *this;
-      }
-      if ((pos_ + 1) < str_->pieces_[line_].size()) {
-        pos_++;
-      } else {
-        line_++;
-        pos_ = 0;
-      }
-      return *this;
-    }
-
-    Iterator operator++(int) {
-      Iterator prev(*this);
-      ++(*this);
-      return prev;
-    }
-
-    bool operator==(const Iterator& rhs) const {
-      if (!has_next() && !rhs.has_next()) {
-        return true;
-      }
-      return (str_ == rhs.str_) && (line_ == rhs.line_) && (pos_ == rhs.pos_);
-    }
-    bool operator!=(const Iterator& rhs) {
-      return !((*this) == rhs);
-    }
-    bool has_next() const {
-      return size_ > 0 && (line_ < str_->pieces_.size());
-    }
-
-    char operator*() const {
-      TORCH_INTERNAL_ASSERT(line_ < str_->pieces_.size());
-      TORCH_INTERNAL_ASSERT(pos_ < str_->pieces_[line_].size());
-      return str_->pieces_[line_].at(pos_);
-    }
-
-   private:
-    size_t line_;
-    size_t pos_;
-    const StringCordView* str_;
-    size_t size_;
-    friend struct StringCordView;
-  };
-
-  Iterator begin() const {
-    return Iterator(this, 0, 0, size());
-  }
-  Iterator end() const {
-    return Iterator(this, pieces_.size(), 0, 0);
-  }
-
- private:
-  Iterator iter_for_pos(size_t pos) const;
-
-  std::vector<c10::string_view> pieces_;
-  std::vector<size_t> accumulated_sizes_;
-  std::vector<std::shared_ptr<std::string>> owned_strings_;
-};
-
-// Source represents a code segment. It keeps track of:
+// SourceView represents a code segment. It keeps track of:
 //  - text_view : the view into text of the code segment
 //  - filename (optional) : if present, represents the name of the file from
 //                          which the code segment originated.
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
-struct TORCH_API Source {
-  // Whether or not Source should copy the string passed in the constructor.
-  enum CopiesString { COPIES_STRING, DONT_COPY };
-
-  explicit Source(
+struct SourceView {
+  explicit SourceView(
       c10::string_view text_view,
-      c10::optional<std::string> filename = c10::nullopt,
-      size_t starting_line_no = 0,
-      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr,
-      CopiesString copies_str = COPIES_STRING)
-      : filename_(std::move(filename)),
-        starting_line_no_(starting_line_no),
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : text_view_(text_view),
+        filename_(c10::nullopt),
+        starting_line_no_(0),
         gen_ranges_(std::move(gen_ranges)) {
-    if (copies_str == COPIES_STRING) {
-      std::shared_ptr<std::string> allocated_str =
-          std::make_shared<std::string>(text_view.data(), text_view.size());
-      text_view_ = StringCordView({*allocated_str}, {allocated_str});
-    } else {
-      text_view_ = StringCordView({text_view}, {});
-    }
-
     calc_line_start_offsets();
   }
 
-  explicit Source(
-      StringCordView str,
-      c10::optional<std::string> filename = c10::nullopt,
-      size_t starting_line_no = 0,
+  SourceView(
+      c10::string_view text_view,
+      c10::optional<std::string> filename,
+      size_t starting_line_no,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
-      : text_view_(str),
+      : text_view_(text_view),
         filename_(std::move(filename)),
         starting_line_no_(starting_line_no),
         gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
+
   // Given a line number (within source_), return the byte offset of the
   // beginning of that line.
   size_t offset_for_line(size_t line) const {
@@ -183,9 +54,11 @@ struct TORCH_API Source {
 
   // Calculate the line (within the code segment) on which `offset` resides.
   size_t lineno_for_offset(size_t offset) const {
-    auto iter = std::upper_bound(
-        line_starting_offsets_.begin(), line_starting_offsets_.end(), offset);
-    return iter - line_starting_offsets_.begin() - 1;
+    return std::upper_bound(
+               line_starting_offsets_.begin(),
+               line_starting_offsets_.end(),
+               offset) -
+        line_starting_offsets_.begin() - 1;
   }
 
   // Calculate the line (within the original source file, if present) on which
@@ -198,27 +71,11 @@ struct TORCH_API Source {
     }
   }
 
-  StringCordView get_line(size_t lineno) const {
-    auto start = offset_for_line(lineno);
-    auto size = (lineno + 1) < num_lines() ? offset_for_line(lineno + 1) - start
-                                           : text_view_.size() - start;
-    return text_view_.substr(start, size);
-  }
-
-  // Note: this makes a copy
-  StringCordView text_str() const {
+  const c10::string_view text() const {
     return text_view_;
   }
 
-  char char_at(size_t index) const {
-    return text_view_.at(index);
-  }
-
-  size_t size() const {
-    return text_view_.size();
-  }
-
-  c10::optional<std::string>& filename() {
+  const c10::optional<std::string>& filename() const {
     return filename_;
   }
 
@@ -229,19 +86,17 @@ struct TORCH_API Source {
   c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range);
 
-  ~Source() = default;
+ protected:
+  c10::string_view text_view_;
 
  private:
   void calc_line_start_offsets() {
-    line_starting_offsets_.clear();
     line_starting_offsets_.push_back(0);
     size_t pos = 0;
-    while ((pos = text_view_.find("\n", pos)) != std::string::npos) {
+    while ((pos = text().find('\n', pos)) != std::string::npos) {
       line_starting_offsets_.push_back(++pos);
     }
   }
-
-  StringCordView text_view_;
 
   c10::optional<std::string> filename_;
   // If filename_ is not present, starting_line_no_ is don't care
@@ -253,15 +108,67 @@ struct TORCH_API Source {
   std::shared_ptr<SourceRangeUnpickler> gen_ranges_;
 };
 
+// Source represents a code segment like SourceView, but the former owns a copy
+// of source text while the latter doesn't.
+struct Source : public SourceView {
+  explicit Source(
+      std::string text,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text, gen_ranges), text_(std::move(text)) {
+    text_view_ = text_;
+  }
+
+  explicit Source(
+      c10::string_view text_view,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text_view, gen_ranges),
+        text_(text_view.begin(), text_view.end()) {
+    text_view_ = text_;
+  }
+
+  explicit Source(
+      std::string text,
+      c10::optional<std::string> filename,
+      size_t starting_line_no,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text, filename, starting_line_no, gen_ranges),
+        text_(std::move(text)) {
+    text_view_ = text_;
+  }
+
+  explicit Source(
+      c10::string_view text_view,
+      c10::optional<std::string> filename,
+      size_t starting_line_no,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : SourceView(text_view, filename, starting_line_no, gen_ranges),
+        text_(text_view.begin(), text_view.end()) {
+    text_view_ = text_;
+  }
+
+  // Constructor that deepcopies and owns source text referenced in
+  // `source_view`.
+  explicit Source(const SourceView& source_view) : SourceView(source_view) {
+    text_ = std::string(text_view_.begin(), text_view_.end());
+    text_view_ = text_;
+  }
+
+  std::string text_;
+};
+
 // A SourceRange is a reference to subset of a Source, specified by `start` and
 // `end` byte offsets into the source text.
 struct TORCH_API SourceRange {
-  SourceRange(std::shared_ptr<Source> source_view_, size_t start_, size_t end_)
+  SourceRange(
+      std::shared_ptr<SourceView> source_view_,
+      size_t start_,
+      size_t end_)
       : source_view_(std::move(source_view_)), start_(start_), end_(end_) {}
   SourceRange() : source_view_(nullptr), start_(0), end_(0) {}
 
-  const StringCordView text() const {
-    return source_view_->text_str().substr(start(), end() - start());
+  const std::string text() const {
+    auto text_view = source_view_->text().substr(start(), end() - start());
+    return std::string(text_view.begin(), text_view.end());
   }
   size_t size() const {
     return end() - start();
@@ -276,7 +183,7 @@ struct TORCH_API SourceRange {
       bool highlight,
       const std::string& funcname) const;
 
-  const std::shared_ptr<Source>& source() const {
+  const std::shared_ptr<SourceView>& source() const {
     return source_view_;
   }
   size_t start() const {
@@ -322,7 +229,7 @@ struct TORCH_API SourceRange {
   }
 
  protected:
-  std::shared_ptr<Source> source_view_;
+  std::shared_ptr<SourceView> source_view_;
 
  private:
   size_t start_;
@@ -330,16 +237,13 @@ struct TORCH_API SourceRange {
 };
 
 // OwnedSourceRange is just like a SourceRange except that it owns a `Source`
-// instead of `Source`. Thus OwnedSourceRange owns a copy of source text.
+// instead of `SourceView`. Thus OwnedSourceRange owns a copy of source text.
 struct OwnedSourceRange : public SourceRange {
-  explicit OwnedSourceRange(const SourceRange& source_range)
+  OwnedSourceRange(const SourceRange& source_range)
       : SourceRange(source_range) {
     const auto& source = source_range.source();
     if (source) {
-      source_view_ = std::make_shared<Source>(
-          source->text_str().str(),
-          source->filename(),
-          source->starting_line_no());
+      source_view_ = std::make_shared<Source>(*source);
     }
   }
 };
@@ -354,7 +258,7 @@ struct StackEntry {
   SourceRange range;
 };
 
-C10_EXPORT void format_stack_trace(
+TORCH_API void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries);
 
@@ -377,14 +281,3 @@ using SourceRangeTagMap =
 
 } // namespace jit
 } // namespace torch
-
-namespace std {
-template <>
-struct iterator_traits<torch::jit::StringCordView::Iterator> {
-  using value_type = char;
-  using difference_type = ptrdiff_t;
-  using pointer = char*;
-  using reference = char&;
-  using iterator_category = std::forward_iterator_tag;
-};
-} // namespace std

@@ -323,21 +323,30 @@ static void isin_sorting(
   }
 }
 
-Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
-              "Expected condition, x and y to be on the same device, but condition is on ",
-              condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
-              " respectively");
+Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
+  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
 
   if (condition.scalar_type() == ScalarType::Byte) {
   TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-} else {
+  } else {
   TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  }
+  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+  auto iter = at::TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(out)
+    .add_input(cond_bool)
+    .add_input(self)
+    .add_input(other)
+    .build();
+  where_kernel(iter.device_type(), iter);
+  return out;
 }
 
-  c10::MaybeOwned<Tensor> b_condition, b_self, b_other;
-  std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
-  return at::_s_where(*b_condition, *b_self, *b_other);
+Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  Tensor ret = at::empty({0}, self.options());
+  at::native::where_self_out(condition, self, other, ret);
+  return ret;
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
@@ -357,22 +366,6 @@ Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
 
 std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
-}
-
-Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-  Tensor ret = at::empty(self.sizes(), self.options());
-  //
-  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
-  auto iter = at::TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(ret)
-    .add_input(cond_bool)
-    .add_input(self)
-    .add_input(other)
-    .build();
-  where_kernel(iter.device_type(), iter);
-  return ret;
 }
 
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {

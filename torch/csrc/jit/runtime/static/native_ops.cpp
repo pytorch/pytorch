@@ -87,17 +87,21 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::DictConstruct,
     prim_DictConstruct,
     [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        // prepare inputs
-        auto stack = boxInputs(*p_node);
-        // run op
-        auto* node = p_node->node();
-        dictConstruct(
-            stack,
-            node->output()->type()->expectRef<DictType>(),
-            node->inputs().size());
-        // put output back
-        p_node->Output(0) = std::move(stack[0]);
+      auto dict_type = n->output()->type()->expect<DictType>();
+      const auto num_inputs = n->inputs().size();
+      DCHECK_EQ(num_inputs % 2, 0);
+      return [dict_type = std::move(dict_type),
+              num_inputs,
+              dict_size = num_inputs / 2](ProcessedNode* p_node) {
+        auto result = c10::impl::GenericDict(
+            dict_type->containedType(0), dict_type->containedType(1));
+        result.reserve(dict_size);
+        for (size_t i = 0; i < num_inputs; i += 2) {
+          const auto& key = p_node->Input(i);
+          const auto& value = p_node->Input(i + 1);
+          result.insert_or_assign(key, value);
+        }
+        p_node->Output(0) = result;
       };
     });
 
@@ -168,16 +172,17 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::ListUnpack,
     prim_ListUnpack,
     [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        // prepare inputs
-        auto stack = boxInputs(*p_node);
-        // run op
-        size_t num_outputs = p_node->outputs().size();
-        listUnpack(stack, num_outputs);
-        // put output back
-        DCHECK_EQ(stack.size(), num_outputs);
+      const auto num_outputs = n->outputs().size();
+      return [num_outputs](ProcessedNode* p_node) {
+        const auto list = p_node->Input(0).toListRef();
+        TORCH_CHECK(
+            list.size() == num_outputs,
+            "Expected ",
+            num_outputs,
+            " elements in list but got ",
+            list.size());
         for (const auto i : c10::irange(num_outputs)) {
-          p_node->Output(i) = std::move(stack[i]);
+          p_node->Output(i) = list[i];
         }
       };
     });
@@ -709,26 +714,100 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
     });
 
-REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node*) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    auto condition = p_node->Input(0).toBool();
-    auto* block_runners = p_node->block_runners();
-    DCHECK(block_runners);
-    DCHECK_EQ(block_runners->size(), 2);
-    auto& runner = (*block_runners)[!condition];
+namespace {
+bool outputsEmpty(const Block* block) {
+  return block->outputs().size() == 1 && block->outputs().at(0)->mustBeNone();
+}
 
-    auto output = runner({});
-    if (!output.isTuple()) {
-      p_node->Output(0) = std::move(output);
-      return;
-    }
-    auto& elems = output.toTupleRef().elements();
-    DCHECK_EQ(elems.size(), p_node->num_outputs());
-    for (const auto i : c10::irange(elems.size())) {
-      p_node->Output(i) = elems[i];
-    }
-  };
-});
+bool blockEmpty(const Block* block) {
+  return block->nodes().begin() == block->nodes().end();
+}
+
+enum class BlockRunPlan : int8_t {
+  kRunOnlyTrueBlock,
+  kRunOnlyFalseBlock,
+  kRunBothBlocks,
+  kRunNeitherBlock,
+};
+} // namespace
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::If,
+    prim_If,
+    [](Node* node) -> SROperator {
+      DCHECK_EQ(node->blocks().size(), 2);
+      const Block* true_block = node->blocks().at(0);
+      const Block* false_block = node->blocks().at(1);
+
+      const bool true_block_returns_empty = outputsEmpty(true_block);
+      const bool false_block_returns_empty = outputsEmpty(false_block);
+
+      BlockRunPlan block_run_plan = BlockRunPlan::kRunNeitherBlock;
+
+      if (true_block_returns_empty && false_block_returns_empty) {
+        const bool false_block_is_empty = blockEmpty(false_block);
+        const bool true_block_is_empty = blockEmpty(true_block);
+
+        if (false_block_is_empty && !true_block_is_empty) {
+          block_run_plan = BlockRunPlan::kRunOnlyTrueBlock;
+        } else if (!false_block_is_empty && true_block_is_empty) {
+          block_run_plan = BlockRunPlan::kRunOnlyFalseBlock;
+        } else if (false_block_is_empty && true_block_is_empty) {
+          block_run_plan = BlockRunPlan::kRunNeitherBlock;
+        } else {
+          block_run_plan = BlockRunPlan::kRunBothBlocks;
+        }
+      } else {
+        block_run_plan = BlockRunPlan::kRunBothBlocks;
+      }
+
+      switch (block_run_plan) {
+        case BlockRunPlan::kRunBothBlocks:
+          return [](ProcessedNode* p_node) {
+            auto condition = p_node->Input(0).toBool();
+            auto* block_runners = p_node->block_runners();
+            DCHECK(block_runners);
+            DCHECK_EQ(block_runners->size(), 2);
+            auto& runner = (*block_runners)[!condition];
+
+            auto output = runner({});
+            if (!output.isTuple()) {
+              p_node->Output(0) = std::move(output);
+              return;
+            }
+            auto& elems = output.toTupleRef().elements();
+            DCHECK_EQ(elems.size(), p_node->num_outputs());
+            for (const auto i : c10::irange(elems.size())) {
+              p_node->Output(i) = elems[i];
+            }
+          };
+        case BlockRunPlan::kRunOnlyTrueBlock:
+          return [](ProcessedNode* p_node) {
+            auto condition = p_node->Input(0).toBool();
+            auto* block_runners = p_node->block_runners();
+            DCHECK(block_runners);
+            DCHECK_EQ(block_runners->size(), 2);
+            if (condition) {
+              auto output = block_runners->front()({});
+              DCHECK(output.isNone());
+            }
+          };
+        case BlockRunPlan::kRunOnlyFalseBlock:
+          return [](ProcessedNode* p_node) {
+            auto condition = p_node->Input(0).toBool();
+            auto* block_runners = p_node->block_runners();
+            DCHECK(block_runners);
+            DCHECK_EQ(block_runners->size(), 2);
+            if (!condition) {
+              auto output = block_runners->back()({});
+              DCHECK(output.isNone());
+            }
+          };
+        case BlockRunPlan::kRunNeitherBlock:
+          return [](ProcessedNode*) {};
+      }
+      return [](ProcessedNode*) {};
+    });
 
 namespace {
 
@@ -955,6 +1034,111 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto condition = pnode->Input(0).toBool();
         pnode->Output(0) = condition ? createBorrowedIValue(pnode->Input(1))
                                      : createBorrowedIValue(pnode->Input(2));
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::len,
+    aten_len,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema("aten::len.t(t[] a) -> int")) ||
+          n->matches(torch::schema("aten::len.any(Any[] a) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto list = pnode->Input(0).toListRef();
+          const int64_t size = list.size();
+          pnode->Output(0) = size;
+        };
+      }
+      if (n->matches(torch::schema("aten::len.Tensor(Tensor t) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& t = pnode->Input(0).toTensor();
+          TORCH_CHECK(t.dim() > 0);
+          pnode->Output(0) = t.sizes()[0];
+        };
+      }
+      if (n->matches(torch::schema("aten::len.str(str s) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& string = pnode->Input(0).toStringRef();
+          pnode->Output(0) = static_cast<int64_t>(string.size());
+        };
+      }
+      if (n->matches(
+              torch::schema("aten::len.Dict_str(Dict(str, t) self) -> int")) ||
+          n->matches(
+              torch::schema("aten::len.Dict_int(Dict(int, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_bool(Dict(bool, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_float(Dict(float, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_complex(Dict(complex, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_Tensor(Dict(Tensor, t) self) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& dict = pnode->Input(0).toGenericDict();
+          pnode->Output(0) = static_cast<int64_t>(dict.size());
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::IntImplicit,
+    aten_IntImplicit,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::IntImplicit(Tensor a) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& tensor = pnode->Input(0).toTensor();
+        // JIT does a check for requires_grad, but we skip it here since SR is
+        // inference only
+        if (tensor.sizes().size() != 0) {
+          throw std::runtime_error(
+              "Cannot convert a tensor of dimension > 0 to scalar");
+        }
+        if (!isIntegralType(tensor.scalar_type())) {
+          std::stringstream ss;
+          ss << "Cannot input a tensor of type " << tensor.scalar_type()
+             << " as an integral argument";
+          throw std::runtime_error(ss.str());
+        }
+        pnode->Output(0) = at::native::item(tensor).toInt();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::select,
+    aten_select,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::select(Tensor(a) self, int dim, int index) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto dim = pnode->Input(1).toInt();
+        const auto index = pnode->Input(2).toInt();
+        pnode->Output(0) = at::native::select(self, dim, index);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::reshape_as,
+    aten_reshape_as,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto& other = pnode->Input(1).toTensor();
+        pnode->Output(0) = at::native::reshape(self, other.sizes());
       };
     });
 
