@@ -10,6 +10,12 @@ from torch.package import (
     PackageImporter,
     sys_importer,
 )
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -21,6 +27,11 @@ except ImportError:
 
 class TestImporter(PackageTestCase):
     """Tests for Importer and derived classes."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporter
+        self.PackageExporter = PackageExporter
 
     def test_sys_importer(self):
         import package_a
@@ -47,11 +58,11 @@ class TestImporter(PackageTestCase):
         import package_a
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.save_module(package_a.__name__)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
 
         # Construct an importer-only environment.
         ordered_importer = OrderedImporter(importer)
@@ -73,11 +84,11 @@ class TestImporter(PackageTestCase):
         import package_a
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.save_module(package_a.__name__)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
 
         ordered_importer_sys_first = OrderedImporter(sys_importer, importer)
         self.assertIs(ordered_importer_sys_first.import_module("package_a"), package_a)
@@ -137,24 +148,31 @@ class TestImporter(PackageTestCase):
 
         # Set up a PackageImporter which has a torch.float16 object pickled:
         buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
+        with self.PackageExporter(buffer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_dtype)
         buffer.seek(0)
 
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
         my_loaded_dtype = importer.load_pickle("foo", "foo.pkl")
 
         # Re-save a package with only our PackageImporter as the importer
         buffer2 = BytesIO()
-        with PackageExporter(buffer2, importer=importer) as exporter:
+        with self.PackageExporter(buffer2, importer=importer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_loaded_dtype)
 
         buffer2.seek(0)
 
-        importer2 = PackageImporter(buffer2)
+        importer2 = self.PackageImporter(buffer2)
         my_loaded_dtype2 = importer2.load_pickle("foo", "foo.pkl")
         self.assertIs(my_dtype, my_loaded_dtype)
         self.assertIs(my_dtype, my_loaded_dtype2)
+
+
+class TestImporterNoTorch(TestImporter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporterNoTorch
+        self.PackageExporter = PackageExporterNoTorch
 
 
 if __name__ == "__main__":
