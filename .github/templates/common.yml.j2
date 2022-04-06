@@ -131,6 +131,11 @@ on:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          echo ${{ pytorch_directory }}
+          Add-MpPreference -ExclusionPath ${{ pytorch_directory }}
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}
