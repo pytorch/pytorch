@@ -529,7 +529,6 @@ RegisterOperators reg_autocast_to_reduced_precision_optional({
             push(stack, IValue(ret));
           };
         },
-        // TODO: need to update alias info on Tensor?
         aliasAnalysisFromSchema()),
 });
 
@@ -551,7 +550,6 @@ RegisterOperators reg_autocast_to_full_precision_optional({
             push(stack, IValue(ret));
           };
         },
-        // TODO: need to update alias info on Tensor?
         aliasAnalysisFromSchema()),
 });
 
