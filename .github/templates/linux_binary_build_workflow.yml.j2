@@ -118,7 +118,7 @@ jobs:
     !{{ upload.binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
