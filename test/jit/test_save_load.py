@@ -16,8 +16,6 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import (JitTestCase,
                                                clear_class_registry)
 
-ENABLE_FLATBUFFER = os.environ.get('ENABLE_FLATBUFFER', '0') == '1'
-
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"
@@ -532,20 +530,6 @@ class TestSaveLoad(JitTestCase):
         self.assertTrue(m_loaded_buffers['buffer'].is_meta)
 
 
-def script_module_to_buffer(script_module):
-    module_buffer = io.BytesIO()
-    if ENABLE_FLATBUFFER:
-        module_buffer = io.BytesIO(
-            script_module._save_to_buffer_for_lite_interpreter(
-                _use_flatbuffer=True
-            )
-        )
-    else:
-        torch.jit.save_jit_module_to_flatbuffer(script_module, module_buffer)
-    module_buffer.seek(0)
-    return module_buffer
-
-
 class TestSaveLoadFlatbuffer(JitTestCase):
     def test_different_modules(self):
         """
@@ -564,7 +548,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return x
 
         first_script_module = torch.jit.script(Foo())
-        first_saved_module = script_module_to_buffer(first_script_module)
+        first_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(first_script_module, first_saved_module)
+        first_saved_module.seek(0)
 
         clear_class_registry()
 
@@ -578,7 +564,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return x
 
         second_script_module = torch.jit.script(Foo())
-        second_saved_module = script_module_to_buffer(second_script_module)
+        second_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(torch.jit.script(Foo()), second_saved_module)
+        second_saved_module.seek(0)
 
         clear_class_registry()
 
@@ -598,7 +586,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return x
 
         sm = torch.jit.script(ContainsBoth())
-        contains_both = script_module_to_buffer(sm)
+        contains_both = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(sm, contains_both)
+        contains_both.seek(0)
         sm = torch.jit.jit_module_from_flatbuffer(contains_both)
 
     def test_different_functions(self):
@@ -614,7 +604,10 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return lol(x)
 
         first_script_module = torch.jit.script(Foo())
-        first_saved_module = script_module_to_buffer(first_script_module)
+        first_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(first_script_module, first_saved_module)
+        first_saved_module.seek(0)
+
         clear_class_registry()
 
         def lol(x):  # noqa: F811
@@ -625,7 +618,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return lol(x)
 
         second_script_module = torch.jit.script(Foo())
-        second_saved_module = script_module_to_buffer(second_script_module)
+        second_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(torch.jit.script(Foo()), second_saved_module)
+        second_saved_module.seek(0)
 
         clear_class_registry()
 
@@ -645,7 +640,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return x
 
         sm = torch.jit.script(ContainsBoth())
-        contains_both = script_module_to_buffer(sm)
+        contains_both = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(sm, contains_both)
+        contains_both.seek(0)
         sm = torch.jit.jit_module_from_flatbuffer(contains_both)
 
     def test_different_interfaces(self):
@@ -677,7 +674,10 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return self.interface.bar(x)
 
         first_script_module = torch.jit.script(Foo())
-        first_saved_module = script_module_to_buffer(first_script_module)
+        first_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(first_script_module, first_saved_module)
+        first_saved_module.seek(0)
+
         clear_class_registry()
 
         @torch.jit.interface
@@ -704,7 +704,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return self.interface.not_bar(x)
 
         second_script_module = torch.jit.script(Foo())
-        second_saved_module = script_module_to_buffer(second_script_module)
+        second_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(torch.jit.script(Foo()), second_saved_module)
+        second_saved_module.seek(0)
 
         clear_class_registry()
 
@@ -724,7 +726,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return x
 
         sm = torch.jit.script(ContainsBoth())
-        contains_both = script_module_to_buffer(sm)
+        contains_both = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(sm, contains_both)
+        contains_both.seek(0)
         sm = torch.jit.jit_module_from_flatbuffer(contains_both)
 
     def test_many_collisions(self):
@@ -766,7 +770,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
 
         first_script_module = torch.jit.script(Foo())
-        first_saved_module = script_module_to_buffer(first_script_module)
+        first_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(first_script_module, first_saved_module)
+        first_saved_module.seek(0)
 
         clear_class_registry()
 
@@ -804,7 +810,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return x, MyCoolNamedTuple(a="hello")
 
         second_script_module = torch.jit.script(Foo())
-        second_saved_module = script_module_to_buffer(second_script_module)
+        second_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(second_script_module, second_saved_module)
+        second_saved_module.seek(0)
 
         clear_class_registry()
 
@@ -824,7 +832,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 return len(x + named_tuple_2.a) + named_tuple_1.a
 
         sm = torch.jit.script(ContainsBoth())
-        contains_both = script_module_to_buffer(sm)
+        contains_both = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(sm, contains_both)
+        contains_both.seek(0)
         sm = torch.jit.jit_module_from_flatbuffer(contains_both)
 
     def test_save_load_using_pathlib(self):

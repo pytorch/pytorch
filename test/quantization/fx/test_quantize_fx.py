@@ -2226,6 +2226,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
 
             # check converted/quantized model
+            print(quant_type)
             m = convert_fx(
                 m,
                 convert_custom_config_dict=convert_custom_config_dict)
@@ -3669,11 +3670,14 @@ class TestQuantizeFx(QuantizationTestCase):
             default_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic
         }
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            print("\nhi")
+            # print(qconfig)
             model = M().eval()
             qconfig_dict = {
                 "": qconfig
             }
             m = prepare_fx(model, qconfig_dict)
+            print(m)
             m = convert_fx(m)
             m(torch.rand(5, 5))
             node_list = [
@@ -3681,6 +3685,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(nniqd.LinearReLU),
                 ns.call_function(dynamic_quantized_ops[qconfig]),
             ]
+            # print(node_list)
+            # print(m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
     @skipIfNoFBGEMM

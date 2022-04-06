@@ -119,12 +119,16 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = None
-    is_dynamic = activation_post_process.is_dynamic
-    if hasattr(activation_post_process, "compute_dtype"):
-        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8]:
+    if activation_post_process.is_dynamic:
+        # dynamic quantization
+        node_type = "call_function"
+        quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        qparams = {"_dtype_": dtype, "_reduce_range_": reduce_range}
+    elif dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
@@ -140,15 +144,6 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
-    # elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
-    elif is_dynamic:
-        # dynamic quantization
-        node_type = "call_function"
-        quantize_op = torch.quantize_per_tensor_dynamic
-        # TODO: get reduce range from observer
-        # reduce_range = activation_post_process.reduce_range
-        reduce_range = torch.backends.quantized.engine == "fbgemm"
-        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None

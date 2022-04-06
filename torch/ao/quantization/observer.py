@@ -101,7 +101,7 @@ class ObserverBase(ABC, nn.Module):
     def __init__(self, dtype, is_dynamic=None):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
-        self.is_dynamic=is_dynamic
+        self.is_dynamic = is_dynamic
 
     @abstractmethod
     def forward(self, x):
@@ -1492,7 +1492,7 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.float, compute_dtype=torch.quint8, is_dynamic=True
+    dtype=torch.quint8, is_dynamic=True
 )
 """
 Default observer for dynamic quantization.
