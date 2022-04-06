@@ -7154,7 +7154,7 @@
 - func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   variants: method, function
 
-- func: qr_orthogonalization(Tensor self, Tensor out, float epsilon=1e-8) -> (Tensor Q)
+- func: qr_orthogonalization(Tensor self, Tensor out, float epsilon=1e-8) -> Tensor Q
   variants: method, function
   dispatch:
     CUDA: qr_orthogonalization_cuda

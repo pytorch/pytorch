@@ -95,21 +95,32 @@ __global__  void q_loop(scalar_t *Q, scalar_t *vs, const uint n, const uint m){
 }
 
 template <int BLOCK_THREADS, typename scalar_t> 
-void qr_main(const torch::Tensor& A, const torch::Tensor& Q, const uint m, const uint n, const float epsilon){
+void qr_main(const at::Tensor& A, at::Tensor& Q, const uint m, const uint n, const float epsilon){
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    auto options = torch::TensorOptions().dtype(torch::kInt32).device(A.device());
-    torch::Tensor barriers = torch::zeros({m}, options);
+    auto options = at::TensorOptions().dtype(torch::kInt32).device(A.device());
+    at::Tensor barriers = at::zeros({m}, options);
     
-    torch::Tensor vs = torch::zeros_like(A);
-    torch::Tensor R = A.clone();
+    at::Tensor vs = at::zeros_like(A);
+    at::Tensor R = A.clone();
     R.diagonal().add_((scalar_t) epsilon);
     
-    reflections<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(R.data<scalar_t>(), vs.data<scalar_t>(), m, n, barriers.data<int>());
+    reflections<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(
+        R.data_ptr<scalar_t>(), 
+        vs.data_ptr<scalar_t>(), 
+        m, 
+        n, 
+        barriers.data_ptr<int>()
+    );
 
     Q.fill_(0);
     Q.fill_diagonal_(1);
-    q_loop<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(Q.data<scalar_t>(), vs.data<scalar_t>(), n, m);
+    q_loop<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(
+        Q.data_ptr<scalar_t>(), 
+        vs.data_ptr<scalar_t>(), 
+        n, 
+        m
+    );
 }
 
 
