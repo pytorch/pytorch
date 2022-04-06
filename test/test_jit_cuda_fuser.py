@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
+import contextlib
 import unittest
 import os
 import random
@@ -44,7 +45,6 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 FUSION_GROUP = 'prim::CudaFusionGroup'
 FUSION_GUARD = 'prim::CudaFusionGuard'
 
-import contextlib
 
 @contextlib.contextmanager
 def nvfuser_singleton_fusion(flag):
@@ -499,7 +499,7 @@ class TestCudaFuser(JitTestCase):
 
     def _unary_test_helper(self, operation, dtype, random_data):
         gradient_check = (dtype == torch.float64) and random_data
-        shape = (8, 7)
+        shape = self.special_values.shape
         torch.cuda.manual_seed_all(211)
 
         # need additional def of t for boolean ops
@@ -657,8 +657,8 @@ class TestCudaFuser(JitTestCase):
 
         jitted = torch.jit.script(bit_not)
         x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(torch.long)
-        jit_o = bit_not(x)
-        jit_o = bit_not(x)
+        jit_o = jitted(x)
+        jit_o = jitted(x)
         o = bit_not(x)
         self.assertEqual(o, jit_o)
         jitted.graph_for(x)  # Shows up in second instance, not first
@@ -670,8 +670,8 @@ class TestCudaFuser(JitTestCase):
         jitted = torch.jit.script(bool_not)
         x = torch.rand(4, 8, 32, 32, dtype=torch.float, device="cuda").round().to(torch.bool)
         y = torch.rand(4, 8, 32, 32, dtype=torch.float, device="cuda").round().to(torch.bool)
-        jit_o = bool_not(x, y)
-        jit_o = bool_not(x, y)
+        jit_o = jitted(x, y)
+        jit_o = jitted(x, y)
         o = bool_not(x, y)
         self.assertEqual(o, jit_o)
         jitted.graph_for(x, y)  # Shows up in second instance, not first
@@ -1211,7 +1211,7 @@ class TestCudaFuser(JitTestCase):
     def _compare(self, desc, inp1, inp2, error):
         a = inp1.clone()
         b = inp2.clone()
-        close = torch.allclose(a, b, rtol=error, atol=error)
+        close = torch.allclose(a, b, rtol=error, atol=error, equal_nan=True)
         if not close:
             print(desc, close)
             z = a - b
@@ -2447,7 +2447,7 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=True)
         grads = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=False)
 
-        def t(x: torch.Tensor, mode : str):
+        def t(x: torch.Tensor, mode: str):
             o = torch.nn.functional.gelu(x, approximate=mode)
             o = o * 2.0
             return o
@@ -2579,7 +2579,7 @@ class TestCudaFuser(JitTestCase):
         for i in range(3):
             with torch.cuda.amp.autocast():
                 jit_o = t_jit(x, y)
-                if i == 2 :
+                if i == 2:
                     fwd_graph = t_jit.graph_for(x, y)
             jit_o.backward(grad)
 
@@ -2614,9 +2614,9 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
 
         for i in range(3):
-            with torch.cuda.amp.autocast() :
+            with torch.cuda.amp.autocast():
                 jit_o = t_jit(x)
-                if i == 2 :
+                if i == 2:
                     fwd_graph = t_jit.graph_for(x)
             jit_o.backward(grad)
 
@@ -2653,7 +2653,7 @@ class TestCudaFuser(JitTestCase):
         for i in range(3):
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 jit_o = t_jit(x, y)
-                if i == 2 :
+                if i == 2:
                     fwd_graph = t_jit.graph_for(x, y)
             jit_o.backward(grad)
 
@@ -2689,9 +2689,9 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
 
         for i in range(3):
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16) :
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 jit_o = t_jit(x)
-                if i == 2 :
+                if i == 2:
                     fwd_graph = t_jit.graph_for(x)
             jit_o.backward(grad)
 
@@ -3373,7 +3373,7 @@ class TestCudaFuser(JitTestCase):
             return torch.dropout(x, 0.5, flag)
 
         jit_t = torch.jit.script(t)
-        for idx in range(5) :
+        for idx in range(5):
             out = jit_t(x, True)
 
         graph = jit_t.graph_for(x, True)
@@ -3408,7 +3408,7 @@ class TestCudaFuser(JitTestCase):
                 with torch.no_grad():
                     self.bias.fill_(10)
 
-            def forward(self, inputs : torch.Tensor, view_shape : List[int]):
+            def forward(self, inputs: torch.Tensor, view_shape: List[int]):
                 o = inputs + self.bias
                 o = o.view(view_shape)
                 return torch.relu(o)
@@ -3447,7 +3447,7 @@ class TestCudaFuser(JitTestCase):
                 with torch.no_grad():
                     self.bias.fill_(10)
 
-            def forward(self, inputs : torch.Tensor, bias : torch.Tensor, view_shape : List[int]):
+            def forward(self, inputs: torch.Tensor, bias: torch.Tensor, view_shape: List[int]):
                 o = inputs.view(view_shape)
                 inputs.add_(bias)
                 return torch.relu(o)
@@ -3596,7 +3596,7 @@ class TestCudaFuser(JitTestCase):
                 self.weight = torch.nn.Parameter(torch.randn([1024, 1024], dtype=dtype, device=device), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.randn([1, 1024], dtype=dtype, device=device), requires_grad=False)
 
-            def forward(self, inputs : torch.Tensor):
+            def forward(self, inputs: torch.Tensor):
                 o = inputs.view([32768, 1024])
                 o = torch.mm(o, self.weight)
                 o = o.view([256, 128, 1024])
@@ -3628,7 +3628,7 @@ class TestCudaFuser(JitTestCase):
             def __init__(self):
                 super(BiasSqueezeRelu, self).__init__()
 
-            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+            def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = inputs + bias
                 o = torch.squeeze(o)
                 return torch.relu(o)
@@ -3654,7 +3654,7 @@ class TestCudaFuser(JitTestCase):
             def __init__(self):
                 super(BiasSqueezeRelu, self).__init__()
 
-            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+            def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = torch.squeeze(inputs)
                 inputs.add_(bias)
                 return torch.relu(o)
@@ -3711,7 +3711,7 @@ class TestCudaFuser(JitTestCase):
             def __init__(self):
                 super(BiasUnsqueezeRelu, self).__init__()
 
-            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+            def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = inputs + bias
                 o = torch.unsqueeze(o, 0)
                 return torch.relu(o)
@@ -3737,7 +3737,7 @@ class TestCudaFuser(JitTestCase):
             def __init__(self):
                 super(BiasUnsqueezeRelu, self).__init__()
 
-            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+            def forward(self, inputs: torch.Tensor, bias: torch.Tensor):
                 o = torch.unsqueeze(inputs, 0)
                 inputs.add_(bias)
                 return torch.relu(o)
@@ -3816,7 +3816,7 @@ class TestCudaFuser(JitTestCase):
         def f(t0, t1, t2, t3):
             masked_input = torch.where(t1, t2, t3)
             total = masked_input.sum([0, 1, 2, 3])
-            sizes : List[int] = []
+            sizes: List[int] = []
             t10 = torch.reshape(t0, sizes)
             t7 = total / t10
             t4 = t7.to(dtype=torch.float)
@@ -4016,7 +4016,7 @@ class TestCudaFuser(JitTestCase):
 
         with nvfuser_singleton_fusion(True):
             def t(x):
-                sizes : List[int] = []
+                sizes: List[int] = []
                 return x.sum(sizes)
 
             t_jit = torch.jit.script(t)
@@ -4056,7 +4056,7 @@ class TestCudaFuser(JitTestCase):
         y = [4, 6]
 
         with nvfuser_singleton_fusion(True):
-            def t(x, y : List[int]):
+            def t(x, y: List[int]):
                 t1 = x + 1.0
                 t2 = t1 * 1.0
                 out = t2.reshape(y)
