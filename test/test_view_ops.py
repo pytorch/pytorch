@@ -911,13 +911,13 @@ class TestViewOps(TestCase):
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_view_copy(self, device):
         a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone()
+        a_ref = a.clone().detach().requires_grad_()
         a_view = a_ref.view(2, 2)
         a_view_copy = a.view_copy(2, 2)
 
         # view_copy ops don't preserve view relationship
-        self.assertTrue(self.is_view_of(a_view, a_ref))
-        self.assertFalse(self.is_view_of(a_view_copy, a))
+        self.assertTrue(self.is_view_of(a_ref, a_view))
+        self.assertFalse(self.is_view_of(a, a_view_copy))
 
         a_view_copy.sum().backward()
         a_view.sum().backward()
