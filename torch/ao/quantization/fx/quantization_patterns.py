@@ -2,18 +2,9 @@ import torch
 from torch.fx.graph import (
     Node,
 )
-from ..observer import (
-    default_affine_fixed_qparams_observer,
-    default_symmetric_fixed_qparams_observer,
-)
-
-from ..utils import (
-    activation_dtype,
-)
 
 from .pattern_utils import (
     register_quant_pattern,
-    get_default_output_activation_post_process_map,
     Pattern,
 )
 from .utils import (
@@ -158,26 +149,9 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
     """
     pass
 
-@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
-@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_observer)
-@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_observer)
-@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_observer)
-@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_observer)
-@register_quant_pattern('sigmoid', default_affine_fixed_qparams_observer)
-@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_observer)
-@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_observer)
-@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_observer)
-@register_quant_pattern('tanh', default_symmetric_fixed_qparams_observer)
-@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_observer)
+# TODO: remove this class
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
-    # some qhandlers override the activations constructor
-    def get_activation_ctr(self, qconfig, pattern, is_training) -> Optional[Callable]:
-        act_dtype = activation_dtype(qconfig)
-        if act_dtype == torch.quint8:
-            return get_default_output_activation_post_process_map(is_training).get(
-                pattern, qconfig.activation)
-        else:
-            return qconfig.activation
+    pass
 
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
