@@ -21635,8 +21635,6 @@ TEST_F(NVFuserTest, FusionTrivialReductionForwarding4_CUDA) {
   auto tv5 = add(tv4, IrBuilder::create<Double>(1));
   fusion.addOutput(tv5);
 
-  fusion.printMath();
-
   tv3->merge(0, 1);
   tv3->split(0, 32);
 

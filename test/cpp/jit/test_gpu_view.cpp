@@ -961,8 +961,6 @@ TEST_F(NVFuserTest, FusionComputeAtRootDomainMapWithView_CUDA) {
   auto tv5 = add(tv3, tv4);
   fusion.addOutput(tv5);
 
-  fusion.printMath();
-
   ComputeAtRootDomainMap map;
   map.build();
 
