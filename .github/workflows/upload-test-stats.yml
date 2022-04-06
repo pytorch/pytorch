@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master@${{ github.sha }}
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - uses: actions/setup-python@v3
 

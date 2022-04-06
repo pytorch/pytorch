@@ -17,6 +17,7 @@ REQUEST_HEADERS = {
     "Authorization": "token " + GITHUB_TOKEN,
 }
 S3_RESOURCE = boto3.resource("s3")
+TEMP_DIR = Path(os.environ["RUNNER_TEMP"]) / "tmp-test-stats"
 
 
 def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
@@ -154,6 +155,11 @@ if __name__ == "__main__":
         help="id of the workflow to get artifacts from",
     )
     args = parser.parse_args()
+
+    print("mkdir: ", TEMP_DIR)
+    TEMP_DIR.mkdir()
+    print("cd to ", TEMP_DIR)
+    os.chdir(TEMP_DIR)
 
     # Download and extract all the reports (both GHA and S3)
     download_and_extract_s3_reports(args.workflow_run_id)
