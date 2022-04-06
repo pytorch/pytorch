@@ -6,6 +6,7 @@
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/core/tensor.h>
 
 namespace torch {
 namespace lazy {
@@ -48,6 +49,11 @@ class TORCH_API BackendImplInterface {
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const = 0;
+
+  // Unwraps a LazyTensor object hidden inside an at::Tensor, returning nullptr if invalid
+  virtual LazyTensorPtr UnwrapLazyTensor(const at::Tensor& tensor) const;
+  // Creates a backend-specific LazyTensor object wrapping tensor (or returns nullptr if tensor is undefined)
+  virtual LazyTensorPtr CreateLazyTensor(const at::Tensor& tensor, const BackendDevice& device) const;
 
   /**
    * Lowering, Compilation, Execution
