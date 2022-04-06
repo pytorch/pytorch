@@ -3532,12 +3532,11 @@ class TestONNXRuntime(unittest.TestCase):
     # Clip <= opset 11 does not support non-floats (e.g. ints)
     # We enable such non-float types to avoid generating wrong ONNX file
     # and enhance the compatibility of pytorch.onnx.
-    @skipIfUnsupportedMaxOpsetVersion(11)
     def test_clip_int(self):
         class MyClipInt(torch.nn.Module):
             def forward(self, x):
                 return torch.clamp(x, 0, 1)
-        self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int32))
+        self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int64))
 
     # ReLU <= opset 13 is float only; but use casting for compatibility
     def test_relu_int(self):
