@@ -278,15 +278,16 @@ auto handle_torch_function_no_python_arg_parser(
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     for (auto& arg : overloaded_args) {
+      // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
+      py::object torch_function =
+          PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
+
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg)) {
         TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
                    "will be an error in future, please define it as a classmethod.");
       }
 
-      // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-      py::object torch_function =
-          PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
       ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
           torch_function.ptr(),
           torch_api_function,
