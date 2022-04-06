@@ -1990,7 +1990,6 @@ void ONNXShapeTypeInference(
       //       The conversion here is incomplete for these ops.
       //       e.g: ListConstruct, ListUnpack, etc.
       std::shared_ptr<onnx::ModelProto> model_proto;
-      SymbolDimMap symbol_map;
       ConvertGraphToONNXProto(n_graph, model_proto, symbol_map, opset_version);
       GRAPH_DEBUG(
           "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
