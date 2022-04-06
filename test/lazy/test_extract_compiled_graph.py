@@ -84,11 +84,12 @@ class ModuleReturnDupTensor(nn.Module):
 
 @contextmanager
 def force_fallback_ctx_mgr(fallback_op):
+    oldconfig = config.get_force_fallback()
     config.set_force_fallback(fallback_op)
     try:
         yield None
     finally:
-        config.set_force_fallback("")
+        config.set_force_fallback(oldconfig)
 
 @contextmanager
 def nop_ctx_mgr():
