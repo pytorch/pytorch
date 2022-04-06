@@ -211,19 +211,17 @@ def main() -> None:
         assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
         assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
-        from tools.codegen.dest.lazy_ir import TSLazyIR
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
                             backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
                             impl_path=ts_native_functions,
+                            gen_ts_lowerings=True,
                             node_base="TsNode",
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
-                            lazy_ir_cls=TSLazyIR,
-                            per_operator_headers=options.per_operator_headers,
-                            gen_forced_fallback_code=True)
+                            per_operator_headers=options.per_operator_headers)
 
 
 def copy_resources_to_dir(autograd_dir: pathlib.Path) -> None:
