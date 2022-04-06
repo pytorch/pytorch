@@ -9975,10 +9975,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
             F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "expected 4D or 5D input"):
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
             F.grid_sample(input[0], grid, align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "grid with same number of dimensions"):
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
             F.grid_sample(input, torch.empty(1, 1, 1, 1, 3), align_corners=False)
 
         with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
@@ -9994,7 +9994,7 @@ class TestNN(NNTestCase):
             F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
 
         if TEST_CUDA:
-            with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
 
     def test_affine_grid_error_checking(self):
@@ -15720,9 +15720,7 @@ class TestNNDeviceType(NNTestCase):
         # for scale_factor in [0.5, 1, 1.5, 2]:
         for scale_factor in [2, ]:
             in_t = torch.ones(2, 3, 8, 8, device=device)
-            print("dtype: ", in_t.dtype)
             out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            print(out_t)
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             expected_out = torch.ones(2, 3, out_size, out_size, device=device)
             self.assertEqual(expected_out, out_t, atol=1e-5, rtol=0)
@@ -17207,15 +17205,15 @@ class TestNNDeviceType(NNTestCase):
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
 
-    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double)))
+    @skipMeta
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.half, torch.float, torch.double)))
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
         # Test empty input and per sample weight, and backward pass. There was a CUDA
         # invalid configuration bug (more context in #46572)
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
             es.weight.data.copy_(
-                torch.arange(1, 11, device=device, dtype=dtypes[2]).view_as(es.weight))
+                torch.arange(1, 11, device=device).view_as(es.weight).to(dtypes[2]))
             input = torch.tensor([], device=device, dtype=dtypes[0])
             offsets = torch.tensor([0, 0, 0, 0, 0], device=device, dtype=dtypes[1])
             per_sample_weights = torch.randn_like(input, dtype=dtypes[2]) \
@@ -17246,13 +17244,13 @@ class TestNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double)))
+    @skipMeta
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
             es.weight.data.copy_(
-                torch.arange(1, 11, device=device, dtype=dtypes[2]).view_as(es.weight))
+                torch.arange(1, 11, device=device).view_as(es.weight).to(dtypes[2]))
             input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=dtypes[0])
             offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=dtypes[1])
             per_sample_weights = torch.randn_like(input, dtype=dtypes[2]) \
@@ -17280,13 +17278,13 @@ class TestNNDeviceType(NNTestCase):
         for mode, trainable in itertools.product(modes, trainable_scale):
             test_per_sample_weights(mode, trainable)
 
-    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double)))
+    @skipMeta
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
         def test_per_sample_weights_new_offsets(mode, trainable_scale, include_last_offset, has_weight=True):
             es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtypes[2], device=device)
             es.weight.data.copy_(
-                torch.arange(1, 11, device=device, dtype=dtypes[2]).view_as(es.weight))
+                torch.arange(1, 11, device=device).view_as(es.weight).to(dtypes[2]))
             input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=dtypes[0])
             offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=dtypes[1])
 
@@ -17442,7 +17440,7 @@ class TestNNDeviceType(NNTestCase):
     ):
         # check a known test example
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, wdtype)
-        es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=wdtype).view_as(es.weight))
+        es.weight.data.copy_(torch.arange(1, 11, device=device).view_as(es.weight).to(wdtype))
         input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=dtype)
         offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=odtype)
 
@@ -17545,8 +17543,8 @@ class TestNNDeviceType(NNTestCase):
             offset[-1] = 100
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
 
-    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double)))
+    @skipMeta
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
         self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
         self._test_EmbeddingBag(device, 'mean', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
@@ -17559,7 +17557,7 @@ class TestNNDeviceType(NNTestCase):
         elif self.device_type == 'cpu':
             # TODO: figure out why precision on sparse embeddings isn't the
             # same as for dense.
-            test_backward = dtypes[2] is not torch.float
+            test_backward = dtypes[2] is not torch.float and dtypes[2] is not torch.float16
 
         self._test_EmbeddingBag(
             device,
@@ -17580,8 +17578,8 @@ class TestNNDeviceType(NNTestCase):
             test_backward=test_backward,
         )
 
-    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double)))
+    @skipMeta
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
         weight_tensor = torch.randn(3, 4, dtype=dtypes[2], device=device)
 
@@ -17610,6 +17608,11 @@ class TestNNDeviceType(NNTestCase):
     def test_embedding_bag_bfloat16(self, device, dtypes):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
+
+    @onlyNativeDeviceTypes  # currently fails on XLA
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
+    def test_embedding_bag_half(self, device, dtypes):
+        self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.float16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
@@ -18446,6 +18449,35 @@ class TestNNDeviceType(NNTestCase):
         self.assertRaises(RuntimeError,
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
                                                                   torch.zeros(3, device=device)))
+
+    @onlyCPU
+    def test_activations_bfloat16_cpu(self, device):
+        def test_bfloat16(fn, device, inp_dims, prec):
+            # bfloat16 compute
+            input = torch.randn(inp_dims, dtype=torch.bfloat16, device=device, requires_grad=True)
+            out = fn(input)
+            grad_input = torch.randn_like(out, dtype=torch.bfloat16, device=device)
+            out.backward(grad_input)
+
+            # fp32 compute
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out2 = fn(input2)
+            grad_input2 = grad_input.detach().clone().float()
+            out2.backward(grad_input2)
+
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(input.grad.dtype, torch.bfloat16)
+            self.assertEqual(out, out2, atol=prec, rtol=0, exact_dtype=False)
+            self.assertEqual(input.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
+
+        shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
+        for shape in shapes:
+            test_bfloat16(torch.nn.LogSigmoid(), device, shape, prec=2e-2)
+            test_bfloat16(torch.nn.Hardsigmoid(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Hardshrink(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
+            test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
 
     def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2, scale_factor=None):
         # fp32 compute
@@ -19378,6 +19410,32 @@ class TestNNDeviceType(NNTestCase):
         b_bf16.backward(torch.ones(3, device=device))
         expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=torch.bfloat16)
         self.assertEqual(a_bf16.grad, expected_bf16)
+
+    @onlyCPU
+    def test_softshrink(self, device):
+        x = torch.tensor([[1.21, 0.56, 0.5001, 0.4999, 1.2357, -0.4999, -0.5001, -1.154,
+                           0.254, -0.24, -0.225, 0.104, 0.002, -0.001, 0.0574, 1.2344,
+                           0.1748, -0.1797, -0.8125, 0.2051, -1.1328, 1.2344, -0.1562, 2.3554,
+                           -0.1953, 0.0304, -0.3613, -1.3047, 1.0312, 0.1436, -0.6953, 0.5664,
+                           -0.5820, -0.3301, 0.8203, 0.6133, 0.5938],
+                          [-0.8203, -1.2344, -0.5234, 2.5312, -0.4551, -0.6875, -1.5547, -0.2217,
+                           -0.3027, 2.6406, 1.3047, 0.2344, -1.6719, 0.2773, -1.3516, 3.4575,
+                           0.4414, 0.2656, 2.1094, -1.5156, 1.2344, -0.4336, 0.6797, -3.5486,
+                           0.9766, -0.4062, 1.4844, 0.7500, -1.7578, 0.7461, 1.6094, 8.5458,
+                           0.3730, -0.3477, -1.0625, 0.3848, 0.0557]], device=device)
+        expected = torch.tensor([[0.71, 0.06, 0.0001, 0., 0.7357, 0., -0.0001, -0.654,
+                                  0., 0., 0., 0., 0., 0., 0., 0.7344,
+                                  0., 0., -0.3125, 0., -0.6328, 0.7344, 0., 1.8554,
+                                  0., 0., 0., -0.8047, 0.5312, 0., -0.1953, 0.0664,
+                                  -0.0820, 0.0, 0.3203, 0.1133, 0.0938],
+                                 [-0.3203, -0.7344, -0.0234, 2.0312, 0.0, -0.1875, -1.0547, 0.,
+                                  0.0, 2.1406, 0.8047, 0., -1.1719, 0., -0.8516, 2.9575,
+                                  0., 0., 1.6094, -1.0156, 0.7344, 0., 0.1797, -3.0486,
+                                  0.4766, 0., 0.9844, 0.2500, -1.2578, 0.2461, 1.1094, 8.0458,
+                                  0., 0., -0.5625, 0., 0.]])
+        softshrink = torch.nn.Softshrink()
+        out = softshrink(x)
+        self.assertEqual(out, expected, atol=1e-2, rtol=0)
 
     def test_threshold_inplace_overlap(self, device):
         # Inplace threshold is okay, because it is idempotent
