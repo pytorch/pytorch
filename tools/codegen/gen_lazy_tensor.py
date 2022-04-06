@@ -190,7 +190,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
                         # it must match how ATen was built
                         per_operator_headers: bool = False,
-                        backend_name: str = default_args.backend_name) -> None:
+                        backend_name: str = default_args.backend_name,
+                        gen_forced_fallback_code: bool = False) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
 
@@ -319,8 +320,7 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
             "torch/csrc/lazy/core/shape.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/LazyIr.h",
-            "torch/csrc/lazy/ts_backend/ts_eager_fallback.h",
-        ]],
+        ] + (["torch/csrc/lazy/ts_backend/ts_eager_fallback.h"] if gen_forced_fallback_code else [])],
         'native_functions_include': '',
         'namespace_prologue': ns_helper.prologue,
         'namespace_epilogue': ns_helper.epilogue,
@@ -328,7 +328,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
         list(concat_map_codegen(
             dest.GenLazyNativeFuncDefinition(f'{backend_key}NativeFunctions',
                                              backend_indices[backend_key],
-                                             tensor_class),
+                                             tensor_class,
+                                             gen_forced_fallback_code),
             grouped_native_functions,
             codegenInplaceVariant=True
         )),
