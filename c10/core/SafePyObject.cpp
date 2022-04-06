@@ -3,7 +3,8 @@
 
 namespace c10 {
 
-bool SafePyObject::has_same_interpreter(const c10::impl::PyInterpreter* interpreter) const {
+bool SafePyObject::has_same_interpreter(
+    const c10::impl::PyInterpreter* interpreter) const {
   return interpreter == pyinterpreter_;
 }
 
