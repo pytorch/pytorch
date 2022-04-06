@@ -33,8 +33,15 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   Node* new_node;
   if (n->matches(
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
-    new_node =
-        graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
+    auto dtype = graph_->insert(prim::dtype, {inputs.at(0)});
+    new_node = graph_
+                   ->insert(
+                       aten::full_like,
+                       {inputs.at(0), inputs.at(1)},
+                       {NamedValue("dtype", dtype)})
+                   ->node();
+    new_node->copyMetadata(n);
+    new_node->output()->setType(n->output()->type());
   } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
     new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
   } else if (
@@ -68,11 +75,29 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
+bool removableSetItem(Node* n) {
+  if (n->kind() != aten::_set_item ||
+      n->input(1)->node()->kind() != prim::Constant) {
+    return false;
+  }
+  if (n->inputs().at(0)->node()->kind() != prim::ListConstruct) {
+    return false;
+  }
+  auto li_node = n->inputs().at(0)->node();
+  int64_t index = *constant_as<int64_t>(n->input(1));
+  if (index < 0) {
+    index += li_node->inputs().size();
+  }
+  auto li_len = static_cast<int64_t>(li_node->inputs().size());
+  return index < li_len && index >= 0;
+}
+
 bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
   return (
       (n->kind() == aten::append ||
        (n->kind() == aten::insert &&
-        n->inputs().at(1)->node()->kind() == prim::Constant)) &&
+        n->inputs().at(1)->node()->kind() == prim::Constant) ||
+       (removableSetItem(n))) &&
       n->inputs().at(0)->node()->kind() == prim::ListConstruct);
 }
 
@@ -169,6 +194,15 @@ bool MutationRemover::RemoveListMutation(Block* block) {
         // insert beyond current list length is the same as append
         pos = std::min(pos, size);
         list_construct->insertInput(pos, node->inputs().at(2));
+        break;
+      }
+      case aten::_set_item: {
+        int pos = toIValue(node->inputs().at(1))->toInt();
+        int size = list_construct->inputs().size();
+        if (pos < 0) {
+          pos = std::max(pos + size, 0);
+        }
+        list_construct->replaceInput(pos, node->input(2));
         break;
       }
       default:

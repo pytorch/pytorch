@@ -67,13 +67,13 @@ if(UNIX AND NOT APPLE)
     # site above though in case there was a reason we were testing
     # against clock_gettime. In principle, the choice of symbol you
     # test for shouldn't matter.
-    set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
+    set(CMAKE_REQUIRED_LIBRARIES caffe2::Threads)
     check_library_exists(rt shm_open "sys/mman.h" NEED_RT_AND_PTHREAD)
     unset(CMAKE_REQUIRED_LIBRARIES)
     if(NEED_RT_AND_PTHREAD)
       message(STATUS "Needs it, linking against pthread and rt")
-      target_link_libraries(shm rt Threads::Threads)
-      target_link_libraries(torch_shm_manager rt Threads::Threads)
+      target_link_libraries(shm rt caffe2::Threads)
+      target_link_libraries(torch_shm_manager rt caffe2::Threads)
     endif()
   endif()
 endif()

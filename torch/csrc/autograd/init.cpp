@@ -1,29 +1,31 @@
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/autograd/python_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
 
 #include <set>
-
-struct DisableTorchDispatch {
-  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
-  }
-  c10::impl::ExcludeDispatchKeyGuard guard_;
-};
+#include <unordered_set>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -73,7 +75,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool, bool, bool>());
+      .def(py::init<ProfilerState,
+          bool, /* record_input_shapes */
+          bool, /* profile_memory */
+          bool, /* with_stack */
+          bool, /* with_flops */
+          bool  /* with_modules */
+          >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
@@ -107,7 +115,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("IDEEP", c10::DeviceType::IDEEP)
       .value("HIP", c10::DeviceType::HIP)
       .value("FPGA", c10::DeviceType::FPGA)
-      .value("MSNPU", c10::DeviceType::MSNPU)
+      .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
       .value("Lazy", c10::DeviceType::Lazy)
       .value("MLC", c10::DeviceType::MLC)
@@ -217,26 +225,50 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif // USE_KINETO
     ;
 
-  m.def("_enable_profiler", enableProfiler);
+  m.def("_enable_profiler",
+        &enableProfiler,
+        py::arg("config"),
+        py::arg("activities"),
+        py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
+  m.def("_add_metadata_json", addMetadataJson);  // Only if `USE_KINETO` is set
+  m.def("_kineto_step", profilerStep);  // Only if `USE_KINETO` is set
+  m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
-  m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
-#ifdef USE_KINETO
-      addMetadataJson(key, value);
-#else
-      LOG(WARNING) << "Adding profiling metadata requires using "
-                   << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
+  // NOTICE: These record functions are not torch operators and may not show up
+  // in TorchScript tracing, FX transforms, or operator serialization. For these
+  // use cases, please use `torch.profiler.record_function`.
+  // Creates a new profiling scope using RecordFunction and invokes its starting
+  // callbacks.
+  m.def("_record_function_with_args_enter", [](const std::string& name, py::args args) {
+    using torch::autograd::profiler::PythonRecordFunction;
+    auto python_rec = c10::make_intrusive<PythonRecordFunction>(at::RecordScope::USER_SCOPE);
+    auto *rec = &python_rec->record;
+    if (rec->isActive()) {
+      if (rec->needsInputs()) {
+        auto iv_inputs = std::vector<c10::IValue>();
+        for (const auto& arg : args) {
+            iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
+        }
+        rec->before(name, iv_inputs);
+      } else {
+        rec->before(name);
+      }
+    }
+    return torch::jit::toPyObject(std::move(python_rec));
   });
 
-  m.def("kineto_available", []() {
-#ifdef USE_KINETO
-    return true;
-#else
-    return false;
-#endif
-  });
+  // Ends the profiling scope created with record_function_with_param_enter.
+  m.def("_record_function_with_args_exit",
+        [](const py::object &obj) {
+          using torch::autograd::profiler::PythonRecordFunction;
+          auto python_record = torch::jit::toCustomClass<PythonRecordFunction>(obj);
+
+          // We don't actually need to do anything with handle just need to persist the
+          // lifetime until now.
+          python_record->record.end();
+        });
 
   m.def("_supported_activities", []() {
     std::set<ActivityType> activities {ActivityType::CPU};
@@ -272,17 +304,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
-  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
-    torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
+  m.def("_push_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+    torch::autograd::PyDefaultSavedVariableHooks::push_hooks(pack_hook, unpack_hook);
   });
-  m.def("_reset_default_hooks", []() {
-    torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
+  m.def("_pop_saved_tensors_default_hooks", []() {
+    torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
+  });
+
+  _C_m.def("_register_py_class_for_device", [](const std::string& device, py::object python_type_class) {
+    auto cls = python_type_class.ptr();
+    registerPythonTensorClass(device, cls);
   });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
-  py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+  // TODO: line up this binding with DisableTorchFunction
+  py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
@@ -294,6 +332,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
 
+  torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
 }
 
@@ -339,6 +378,18 @@ static PyObject * is_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_autocast_gpu_dtype(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_gpu_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!THPDtype_Check(arg)) {
@@ -363,10 +414,21 @@ static const char* scalarTypeName(const at::ScalarType type) {
   }
 }
 
+static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
   END_HANDLE_TH_ERRORS
 }
 
@@ -386,6 +448,26 @@ static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
 static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(at::autocast::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_autocast_cache_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_autocast_cache_enabled(arg == Py_True);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -464,6 +546,20 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * enter_python_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  PythonMode::enter(arg);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  PythonMode::exit();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -476,12 +572,18 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
   {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
   {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
+  {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
+  {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
+  {"is_autocast_cache_enabled", is_autocast_cache_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
+  {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

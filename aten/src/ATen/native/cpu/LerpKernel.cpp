@@ -1,22 +1,15 @@
-#include <ATen/ATen.h>
-
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/Lerp.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at {
 namespace native {
 namespace {
 
-static void lerp_kernel_scalar(
-    Tensor& ret,
-    const Tensor& self,
-    const Tensor& end,
-    const Scalar& weight) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  auto iter = TensorIterator::borrowing_binary_op(ret, self, end);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(ret.scalar_type(), "lerp_kernel_scalar", [&] {
+void lerp_scalar_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_scalar", [&] {
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
     scalar_t weight_val = weight.to<scalar_t>();
     at::native::cpu_kernel(
@@ -29,20 +22,8 @@ static void lerp_kernel_scalar(
   });
 }
 
-static void lerp_kernel_tensor(
-    Tensor& ret,
-    const Tensor& self,
-    const Tensor& end,
-    const Tensor& weights) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
-  auto iter = TensorIteratorConfig()
-    .add_output(ret)
-    .add_input(self)
-    .add_input(end)
-    .add_input(weights)
-    .build();
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(ret.scalar_type(), "lerp_kernel_tensor", [&] {
+void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_tensor", [&] {
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
     at::native::cpu_kernel(
         iter,
@@ -56,8 +37,8 @@ static void lerp_kernel_tensor(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_kernel_scalar);
-REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_kernel_tensor);
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
 
 } // namespace native
 } // namespace at

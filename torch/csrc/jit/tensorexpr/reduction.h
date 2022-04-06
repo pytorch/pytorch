@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -26,30 +25,27 @@ class TORCH_API Reducer {
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
-      : init_(init.node()), interaction_(interaction) {}
-
   template <typename RI>
   Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
     interaction_ = interaction;
   }
   virtual ~Reducer() = default;
 
-  Expr* initializer() const {
+  ExprPtr initializer() const {
     return init_;
   }
 
-  ReduceOp* operator()(
-      Buf* result_buf,
+  ExprHandle operator()(
+      BufHandle result_buf,
       ExprHandle body,
-      const std::vector<Expr*>& output,
-      const std::vector<Var*>& inner) const;
+      const std::vector<ExprHandle>& output,
+      const std::vector<VarHandle>& inner) const;
 
-  ReduceOp* operator()(
-      Buf* result_buf,
-      Expr* body,
-      const std::vector<Expr*>& output,
-      const std::vector<Var*>& inner) const;
+  ReduceOpPtr operator()(
+      BufPtr result_buf,
+      ExprPtr body,
+      const std::vector<ExprPtr>& output,
+      const std::vector<VarPtr>& inner) const;
 
   // Polymorphic handling of Body functions with a variety of parameters.
   static ExprHandle getReduceBody(
@@ -103,20 +99,30 @@ class TORCH_API Reducer {
 
   // Completes the reduction operator by applying the interaction function to
   // the accumulation and the body expression.
-  static Expr* complete(
-      Buf* accumulator,
+  static ExprPtr complete(
+      BufPtr accumulator,
       ReduceInteraction interaction,
       ExprHandle body,
-      const std::vector<Expr*>& output_args,
-      const std::vector<Var*>& reduce_args) {
+      const std::vector<ExprPtr>& output_args,
+      const std::vector<VarPtr>& reduce_args) {
     ExprHandle accum =
-        ExprHandle(new Load(body.dtype(), accumulator, output_args));
+        ExprHandle(alloc<Load>(body.dtype(), accumulator, output_args));
     auto e = interaction(accum, body);
     return e.node();
   }
+  static ExprHandle complete(
+      BufHandle accumulator,
+      ReduceInteraction interaction,
+      ExprHandle body,
+      const std::vector<ExprHandle>& output_args,
+      const std::vector<VarHandle>& reduce_args) {
+    ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
+    auto e = interaction(accum, body);
+    return e;
+  }
 
  private:
-  Expr* init_;
+  ExprPtr init_;
   ReduceInteraction interaction_;
 };
 
@@ -128,14 +134,21 @@ class TORCH_API Reducer {
 class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ReduceOp(Expr* body, std::vector<Var*> reduce_args, const Reducer& reducer)
+  ReduceOp(
+      ExprPtr body,
+      std::vector<VarPtr> reduce_args,
+      const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
         reducer_(reducer) {}
+  static ExprHandle make(
+      ExprHandle body,
+      std::vector<VarHandle> reduce_args,
+      const Reducer& reducer);
 
   // return the body expression which obtains the value to be reduced.
-  Expr* body() const {
+  ExprPtr body() const {
     return body_;
   }
 
@@ -145,13 +158,13 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
   }
 
   // returns variables associated with the axes of reduction.
-  const std::vector<Var*>& reduce_args() const {
+  const std::vector<VarPtr>& reduce_args() const {
     return reduce_args_;
   }
 
  private:
-  Expr* body_;
-  std::vector<Var*> reduce_args_;
+  ExprPtr body_;
+  std::vector<VarPtr> reduce_args_;
   const Reducer reducer_;
 };
 
@@ -168,7 +181,7 @@ inline ExprHandle maximumVal(ScalarType type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
     return ExprHandle(std::numeric_limits<Type>::max());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -181,7 +194,7 @@ inline ExprHandle minimumVal(ScalarType type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
     return ExprHandle(std::numeric_limits<Type>::min());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -216,11 +229,11 @@ class Minimum : public Reducer {
 
 class ReductionExpander : public IRMutator {
  public:
-  Stmt* expand(Stmt* s) {
+  StmtPtr expand(StmtPtr s) {
     return s->accept_mutator(this);
   }
 
-  Expr* mutate(ReduceOp* v) override {
+  ExprPtr mutate(ReduceOpPtr v) override {
     return v->body();
   }
 };

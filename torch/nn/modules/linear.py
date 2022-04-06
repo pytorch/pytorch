@@ -16,6 +16,10 @@ class Identity(Module):
         args: any argument (unused)
         kwargs: any keyword argument (unused)
 
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
     Examples::
 
         >>> m = nn.Identity(54, unused_argument1=0.1, unused_argument2=False)
@@ -128,11 +132,11 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
-          :math:`*` means any number of additional dimensions. All but the last dimension
+        - Input1: :math:`(*, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
+          :math:`*` means any number of additional dimensions including none. All but the last dimension
           of the inputs should be the same.
-        - Input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
-        - Output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+        - Input2: :math:`(*, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
+        - Output: :math:`(*, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
 
     Attributes:

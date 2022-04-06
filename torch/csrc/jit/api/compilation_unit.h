@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
@@ -98,7 +98,8 @@ struct TORCH_API CompilationUnit {
       // if non-null, the first argument to each def, is bound to this value
       const Self* self,
       // see [name mangling]
-      bool shouldMangle = false);
+      bool shouldMangle = false,
+      c10::optional<size_t> operator_set_version = c10::nullopt);
 
   void define_hooks(
       const c10::optional<c10::QualifiedName>& prefix,
@@ -292,7 +293,8 @@ struct TORCH_API CompilationUnit {
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
       bool shouldMangle = false,
-      FunctionType type = FunctionType::Method) const;
+      FunctionType type = FunctionType::Method,
+      c10::optional<size_t> version = c10::nullopt) const;
 
   // Define a property on \p self.
   struct PropertyPair;

@@ -64,9 +64,9 @@ struct C10_API LocalDispatchKeySet {
 
 // thread_local variables cannot be C10_API on Windows.
 // Inlining this seems to break AutoDispatchBelowAutograd on Android.
-#if defined(_MSC_VER) || defined(C10_ANDROID)
+#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
-#else // defined(_MSC_VER) || defined(C10_ANDROID)
+#else // defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
@@ -74,7 +74,7 @@ inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
   // because they include this header.
   return raw_local_dispatch_key_set;
 }
-#endif // defined(_MSC_VER) || defined(C10_ANDROID)
+#endif // defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
@@ -115,6 +115,20 @@ class C10_API ExcludeDispatchKeyGuard {
   // on destruction
   PODLocalDispatchKeySet* tls_;
   DispatchKeySet exclude_;
+};
+
+struct C10_API ForceDispatchKeyGuard {
+ public:
+  ForceDispatchKeyGuard(c10::impl::LocalDispatchKeySet key_set)
+      : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+    c10::impl::_force_tls_local_dispatch_key_set(key_set);
+  }
+  ~ForceDispatchKeyGuard() {
+    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
+  }
+
+ private:
+  c10::impl::LocalDispatchKeySet saved_keyset_;
 };
 
 // Non-RAII API for manipulating the thread-local dispatch state.

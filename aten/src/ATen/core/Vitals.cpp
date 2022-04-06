@@ -1,5 +1,6 @@
 #include <ATen/core/Vitals.h>
 #include <cstdlib>
+#include <iostream>
 
 namespace at {
 namespace vitals {

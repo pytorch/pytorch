@@ -4,7 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <list>
@@ -184,18 +184,6 @@ struct ProfilingRecord {
   std::shared_ptr<Graph> profiled_graph_;
   mutable std::mutex mutex_;
   size_t profiling_count_;
-  // the key is a frame id
-  // the value is a mapping from a Value in a graph
-  // to a profiled TensorType
-  std::map<int64_t, std::map<Value*, TensorTypePtr>> profiled_types_per_frame_;
-
-  // A thin wrapper around `partitionSetByDimension` to ensure
-  // `new_sizes` and `sym_shapes` are of the same rank
-
-  c10::SymbolicShape mergeSymbolicShapes(
-      const c10::SymbolicShape& new_sizes,
-      const c10::SymbolicShape& sym_shapes,
-      SetPartitioningHelper& partition_helper);
 
   bool ready() const;
 
@@ -204,13 +192,14 @@ struct ProfilingRecord {
   }
 
   TORCH_API ProfileIValueOp* createProfileIValueNode(Value* in_val);
+  TORCH_API ProfileIValueOp* createProfileIValueNode(ArrayRef<Value*> inputs);
 
  private:
   ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
-  void insertShapeProfile(Node* n, size_t offset);
+  void insertShapeProfile(Node* n, size_t offset, const TypePtr& input_type);
   ProfilingRecord(std::shared_ptr<Graph> g);
 };
 

@@ -1,6 +1,7 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <unordered_map>
 
@@ -49,48 +50,17 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
-class JitLoggingConfig {
- public:
-  static JitLoggingConfig& getInstance() {
-    static JitLoggingConfig instance;
-    return instance;
-  }
-  JitLoggingConfig(JitLoggingConfig const&) = delete;
-  void operator=(JitLoggingConfig const&) = delete;
+TORCH_API std::string get_jit_logging_levels();
 
- private:
-  std::string logging_levels;
-  std::unordered_map<std::string, size_t> files_to_levels;
+TORCH_API void set_jit_logging_levels(std::string level);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  JitLoggingConfig() {
-    const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-    logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
-    parse();
-  }
-  void parse();
+TORCH_API void set_jit_logging_output_stream(std::ostream& out_stream);
 
- public:
-  std::string getLoggingLevels() {
-    return this->logging_levels;
-  }
-  void setLoggingLevels(std::string levels) {
-    this->logging_levels = levels;
-    parse();
-  }
+TORCH_API std::ostream& get_jit_logging_output_stream();
 
-  std::unordered_map<std::string, size_t> getFilesToLevels() {
-    return this->files_to_levels;
-  }
-};
+TORCH_API std::string getHeader(const Node* node);
 
-std::string TORCH_API get_jit_logging_levels();
-
-void TORCH_API set_jit_logging_levels(std::string level);
-
-std::string TORCH_API getHeader(const Node* node);
-
-std::string TORCH_API log_function(const std::shared_ptr<Graph>& graph);
+TORCH_API std::string log_function(const std::shared_ptr<Graph>& graph);
 
 TORCH_API ::torch::jit::JitLoggingLevels jit_log_level();
 
@@ -113,10 +83,11 @@ TORCH_API std::ostream& operator<<(
     std::ostream& out,
     ::torch::jit::JitLoggingLevels level);
 
-#define JIT_LOG(level, ...)                                  \
-  if (is_enabled(__FILE__, level)) {                         \
-    std::cerr << ::torch::jit::jit_log_prefix(               \
-        level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
+#define JIT_LOG(level, ...)                                         \
+  if (is_enabled(__FILE__, level)) {                                \
+    ::torch::jit::get_jit_logging_output_stream()                   \
+        << ::torch::jit::jit_log_prefix(                            \
+               level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
   }
 
 // tries to reconstruct original python source
@@ -138,6 +109,14 @@ TORCH_API std::ostream& operator<<(
 // pass
 #define GRAPH_DEBUG(...) \
   JIT_LOG(::torch::jit::JitLoggingLevels::GRAPH_DEBUG, __VA_ARGS__);
+// use GRAPH_EXPORT to export a graph so that the IR can be loaded by a script
+#define GRAPH_EXPORT(MSG, G)                       \
+  JIT_LOG(                                         \
+      ::torch::jit::JitLoggingLevels::GRAPH_DEBUG, \
+      MSG,                                         \
+      "\n<GRAPH_EXPORT>\n",                        \
+      (G)->toString(),                             \
+      "</GRAPH_EXPORT>");
 
 #define GRAPH_DUMP_ENABLED \
   (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DUMP))

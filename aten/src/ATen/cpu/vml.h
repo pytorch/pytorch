@@ -28,7 +28,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <type_traits>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
@@ -40,7 +39,7 @@
 
 namespace at {
 namespace vml {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 

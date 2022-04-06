@@ -3,7 +3,7 @@
 #include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
@@ -37,7 +37,7 @@ struct TORCH_API UpsampleOptions {
 
   /// if "True", the corner pixels of the input and output tensors are
   /// aligned, and thus preserving the values at those pixels. This only has
-  /// effect when :attr:`mode` is "linear", "bilinear", or
+  /// effect when :attr:`mode` is "linear", "bilinear", "bicubic", or
   /// "trilinear". Default: "False"
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 };
@@ -58,7 +58,8 @@ struct TORCH_API InterpolateFuncOptions {
       enumtype::kBilinear,
       enumtype::kBicubic,
       enumtype::kTrilinear,
-      enumtype::kArea> mode_t;
+      enumtype::kArea,
+      enumtype::kNearestExact> mode_t;
 
   /// output spatial sizes.
   TORCH_ARG(c10::optional<std::vector<int64_t>>, size) = c10::nullopt;
@@ -67,7 +68,7 @@ struct TORCH_API InterpolateFuncOptions {
   TORCH_ARG(c10::optional<std::vector<double>>, scale_factor) = c10::nullopt;
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
-  /// "bicubic", "trilinear", and "area". Default: "nearest"
+  /// "bicubic", "trilinear", "area", "nearest-exact". Default: "nearest"
   TORCH_ARG(mode_t, mode) = torch::kNearest;
 
   /// Geometrically, we consider the pixels of the input and output as squares
@@ -91,6 +92,11 @@ struct TORCH_API InterpolateFuncOptions {
   /// the recomputed scale_factor may differ from the one passed in due to rounding and precision
   /// issues.
   TORCH_ARG(c10::optional<bool>, recompute_scale_factor) = c10::nullopt;
+
+  /// flag to apply anti-aliasing. Using anti-alias
+  /// option together with :attr:`align_corners` equals "False", interpolation result would match Pillow
+  /// result for downsampling operation. Supported modes: "bilinear". Default: "False".
+  TORCH_ARG(bool, antialias) = false;
 };
 
 } // namespace functional

@@ -19,6 +19,11 @@ namespace {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
   TORCH_CHECK(qx.ndimension() > 0, "qnnpack_hardswish(): Got empty input tensor");
+  TORCH_CHECK(qx.scalar_type() == c10::kQUInt8,
+                "qnnpack_hardswish(): Expected input data type to be ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(qx.scalar_type()));
   initQNNPACK();
 
   size_t num_elems = qx.numel() / qx.size(0);

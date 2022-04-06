@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, List, Tuple, Match
+from typing import Optional, Sequence, Set, List, Tuple, Match
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding, NamedCType
@@ -43,6 +43,9 @@ class Derivative:
 
     # Saved outputs that are referenced by the formula.
     saved_outputs: Tuple[SavedAttribute, ...]
+
+    # Gradients that are referenced by name in the formula.
+    named_gradients: Set[str]
 
 # Represents a forward formula that calculates forward derivatives
 # for one tensor.
@@ -114,6 +117,14 @@ class DifferentiabilityInfo:
 
     # The union of 'saved_outputs' of all 'derivatives'.
     all_saved_outputs: Sequence[SavedAttribute]
+
+    # All named gradients that are available for use, in the same
+    # order as in the grads vector.
+    available_named_gradients: Sequence[str]
+
+    # The named gradients that are used in any of the derivatives.
+    # Invariant: all(name in available_named_gradients for name in used_named_gradients)
+    used_named_gradients: Set[str]
 
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the
@@ -324,9 +335,44 @@ def match_differentiability_info(
                     required_primals = required_primals + ("self",) if required_primals else ("self",)
 
                 if not is_exact_match:
-                    # Make sure that the forward grad is modified inplace when the original formula
-                    # is out of place
-                    formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
+                    # NOTE [In-place forward AD formula Optimization]
+                    #
+                    # This optimization transforms the formula to directly do inplace, i.e.
+                    # instead of self_t.copy_(self_t.op()) we do self_t.op_() when the following are met:
+                    #
+                    # 1) the formula satisfies the pattern: "self_t.op(*args)"
+                    # 2) "op" in (1) needs to be the same as the op the derivative is for
+                    #
+                    # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
+                    # If there is a need, we can relax (2) to allow any op that has an in-place variant
+                    is_single_method_on_self_t = False
+                    match = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
+                    if match:
+                        op_name, between_parens = match.group(1), match.group(2)
+
+                        # We want to...
+                        #   Match: self_t.op1(other_p.op2(arg))
+                        #   Avoid: self_t.op1(args) + self_t.op2(args)
+                        #   Avoid: self_t.op1(other_p.op2(arg)) + self_t.op2(args)
+                        def check_parens_nest_level_gt_zero(s: str) -> bool:
+                            level = 1
+                            for ch in s:
+                                if ch == ")":
+                                    level -= 1
+                                    if level == 0:
+                                        return False
+                                if ch == "(":
+                                    level += 1
+                            return True
+                        is_single_method_on_self_t = check_parens_nest_level_gt_zero(between_parens)
+                    directly_do_inplace = is_single_method_on_self_t and op_name == info.name
+
+                    if directly_do_inplace:
+                        formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
+                    else:
+                        # Make sure that the forward grad is modified inplace when the original formula
+                        # is out of place
+                        formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
                 required_original_self_value = bool(re.search(IDENT_REGEX.format("original_self_p"), formula))
 
@@ -360,6 +406,9 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:
+        if len(output_differentiability) != len(outputs):
+            raise RuntimeError(f"The length of output_differentiability ({len(output_differentiability)}), "
+                               f"does not match the number of outputs ({len(outputs)}).")
         differentiable_outputs: List[DifferentiableOutput] = []
         if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
             raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")

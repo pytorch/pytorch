@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/optim/schedulers/lr_scheduler.h>
 
 namespace torch {
@@ -21,14 +22,18 @@ void LRScheduler::set_optimizer_lrs(const std::vector<double>& learning_rates) {
               "Number of learning rates given: ", learning_rates.size(),
               "\nNumber of param groups: ", optimizer_.param_groups().size());
 
-  for(std::size_t i = 0; i < optimizer_.param_groups().size(); i++)
+  for (const auto i : c10::irange(optimizer_.param_groups().size())) {
     optimizer_.param_groups()[i].options().set_lr(learning_rates[i]);
+  }
 }
 
 std::vector<double> LRScheduler::get_current_lrs() const {
   std::vector<double> learnings_rates(optimizer_.param_groups().size());
-  for(std::size_t i = 0; i < optimizer_.param_groups().size(); i++)
+  if(learnings_rates.size() > 0) {
+    for (const auto i : c10::irange(optimizer_.param_groups().size())) {
       learnings_rates[i] = optimizer_.param_groups()[i].options().get_lr();
+    }
+  }
   return learnings_rates;
 }
 

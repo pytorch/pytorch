@@ -32,15 +32,18 @@ if is_available():
         Logger,
         BuiltinCommHookType,
         GradBucket,
+        Work as _Work,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _register_comm_hook,
         _register_builtin_comm_hook,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
-        _verify_model_across_ranks,
+        _verify_params_across_processes,
         _test_python_store,
-        _DistributedDebugLevel,
-        _get_debug_mode,
+        DebugLevel,
+        get_debug_level,
+        set_debug_level,
+        set_debug_level_from_env,
     )
 
     if sys.platform != "win32":
@@ -62,3 +65,11 @@ if is_available():
         _create_process_group_wrapper,
         _rank_not_in_group,
     )
+
+    from .rendezvous import (
+        _create_store_from_options,
+    )
+
+    from .remote_device import _remote_device
+
+    set_debug_level_from_env()

@@ -34,8 +34,8 @@ class LlvmCoverageSegment(NamedTuple):
 
 def parse_segments(raw_segments: List[List[int]]) -> List[LlvmCoverageSegment]:
     """
-        Creates LlvmCoverageSegment from a list of lists in llvm export json.
-        each segment is represented by 5-element array.
+    Creates LlvmCoverageSegment from a list of lists in llvm export json.
+    each segment is represented by 5-element array.
     """
     ret: List[LlvmCoverageSegment] = []
     for raw_segment in raw_segments:
