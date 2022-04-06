@@ -2094,11 +2094,11 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
-                state for ``model`` 's original unflattened parameters and
-                including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict` if on
-                rank 0, and an empty :class:`dict` otherwise.
+            Dict[str, Any]: A :class:`dict` containing the optimizer state for
+                ``model`` 's original unflattened parameters and including keys
+                "state" and "param_groups" following the convention of
+                :meth:`torch.optim.Optimizer.state_dict` if on rank 0, and an
+                empty :class:`dict` otherwise.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2224,10 +2224,9 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            sharded_optim_state_dict (Dict[str, Any]): The full optimizer
-                state dict remapped to flattened parameters instead of
-                unflattened parameters and restricted to only include this
-                rank's part of the optimizer state.
+            Dict[str, Any]: The full optimizer state dict remapped to flattened
+                parameters instead of unflattened parameters and restricted to
+                only include this rank's part of the optimizer state.
         """
         full_osd = full_optim_state_dict  # alias
         if "state" not in full_osd or "param_groups" not in full_osd:
@@ -2326,8 +2325,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> wrapped_optim.load_state_dict(sharded_osd)
 
         Returns:
-            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
-                using the parameter keys specified by ``optim_state_key_type``.
+            Dict[str, Any]: The optimizer state dict re-keyed using the
+                parameter keys specified by ``optim_state_key_type``.
         """
         assert optim_state_key_type in \
             (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)
