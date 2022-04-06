@@ -650,8 +650,11 @@ class TestIndexing(TestCase):
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
     # one mask tensor (2d)
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that `dim_ptr` is incremented correctly for the 2-dim bool
+    # index case.
     @dtypes(torch.float)
-    def test_advancedindex_dim_1m_2d(self, device, dtype):
+    def test_advancedindex_dim_1m_2d_bool(self, device, dtype):
         t = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
 
         values = (
@@ -702,8 +705,12 @@ class TestIndexing(TestCase):
             self.assertEqual(nt[nm, 0], nt[:, :, 0][nm])
 
     # one mask tensor (2d), mask is not the very first index
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that `dim_ptr` is incremented correctly for the 2-dim bool
+    # index case regardless of the index tensor placement in the index argument
+    # list.
     @dtypes(torch.float)
-    def test_advancedindex_dim_1m_2d_2(self, device, dtype):
+    def test_advancedindex_dim_1m_2d_2_bool(self, device, dtype):
         t0 = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
         t1 = torch.arange(24, 48, device=device, dtype=dtype).view(4, 3, 2)
         t = torch.stack((t0, t1))
@@ -756,8 +763,11 @@ class TestIndexing(TestCase):
             self.assertEqual(nt[1, nm, 0], nt[1, :, :, 0][nm])
 
     # one mask tensor (3d)
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that `dim_ptr` is incremented correctly for the 3-dim bool
+    # index case.
     @dtypes(torch.float)
-    def test_advancedindex_dim_1m_3d(self, device, dtype):
+    def test_advancedindex_dim_1m_3d_bool(self, device, dtype):
         t0 = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
         t1 = torch.arange(24, 48, device=device, dtype=dtype).view(4, 3, 2)
         t = torch.stack((t0, t1))
@@ -810,8 +820,12 @@ class TestIndexing(TestCase):
             self.assertEqual(nt[nm, 0], nt[:, :, :, 0][nm])
 
     # two mask tensors (1d)
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that `dim_ptr` is incremented correctly for the 1-dim bool
+    # index case and that the code works correctly with multiple index tensor
+    # arguments.
     @dtypes(torch.float)
-    def test_advancedindex_dim_2m_1d(self, device, dtype):
+    def test_advancedindex_dim_2m_1d_bool(self, device, dtype):
         t0 = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
         t1 = torch.arange(24, 48, device=device, dtype=dtype).view(4, 3, 2)
         t = torch.stack((t0, t1))
@@ -850,7 +864,52 @@ class TestIndexing(TestCase):
             # check 4: numpy compositionality
             self.assertEqual(nt[nm, 0, nn, 1], nt[:, 0, :, 1][nm, nn])
 
+    # long tensor (2d)
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that long tensors always increment `dim_ptr` by 1 regardless
+    # of the index tensor dimensions.
+    @dtypes(torch.float)
+    def test_advancedindex_dim_1m_2d_long(self, device, dtype):
+        t = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
+        r = torch.tensor([6, 7], device=device, dtype=dtype)
+        r = torch.stack((r, r, r))
+        r = torch.stack((r, r, r, r))
+
+        values = (
+            # tensor, mask, result
+            (t,
+             torch.ones(4, 3, device=device, dtype=torch.long),
+             r),
+        )
+
+        for tv, mv, rv in values:
+            t = tv
+            m = mv
+            r = rv
+
+            nt = np.array(tv.cpu())
+            nm = np.array(mv.cpu())
+            nr = np.array(rv.cpu())
+
+            # https://github.com/pytorch/pytorch/issues/71673
+            # check 0: compositionality
+            self.assertEqual(t[m, 0], t[:, 0][m])
+            # check 1: expected result
+            self.assertEqual(t[m, 0], r)
+
+            # check 2: numpy works as expected
+            self.assertEqual(nt[nm, 0], nr)
+            # check 3: expected result against numpy
+            self.assertEqual(
+                t[m, 0],
+                torch.tensor(nr, device=device, dtype=dtype))
+            # check 4: numpy compositionality
+            self.assertEqual(nt[nm, 0], nt[:, 0][nm])
+
     # one mask tensor (0d), invalid
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that 0d/scalar tensors are not allowed in advanced indexing
+    # and that the code doesn't fall apart when processing 0d input.
     @dtypes(torch.float)
     def test_advancedindex_dim_1m_0d_invalid(self, device, dtype):
         tv = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)

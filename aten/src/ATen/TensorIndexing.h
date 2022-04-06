@@ -269,8 +269,34 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   // TODO: check scalarType
   outIndices.resize(*dim_ptr + 1);
   outIndices[*dim_ptr] = tensor;
-  // This makes sure multi-dim tensor indices work properly, see:
+  // NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+  //
+  // Make sure the dimension pointer (`dim_ptr`) is incremented correctly when
+  // tensor indexes are used during advanced indexing.  As of writing this, the
+  // allowed tensor index dtypes are: long, byte, and bool.  For long index
+  // tensors, the dimension pointer is always incremented by 1 (regardless of
+  // the index tensor dimensions).  For byte and bool index tensors, it is
+  // incremented by the index tensor dimensions.  This is also reflected in the
+  // equivalent slicing operations.  The behavior must be the same as in NumPy.
+  //
+  // For example:
+  // t[m, i] == t[:, i][m]        # 1-dim bool index tensor
+  // t[m, i] == t[:, :, i][m]     # 2-dim bool index tensor
+  // t[m, i] == t[:, :, :, i][m]  # 3-dim bool index tensor
+  // ... and so on (for any n > 0)
+  // where m is an n-dim bool index tensor and i is an integer.
+  //
+  // t[m, i] == t[:, i][m]  # n-dim long index tensor
+  // where m is an n-dim long index tensor (for any n > 0) and i is an integer.
+  //
+  // 0-dim index tensors (scalars) are not allowed in advanced indexing.
+  //
+  // See:
   // https://github.com/pytorch/pytorch/issues/71673
+  // https://dev-discuss.pytorch.org/t/558
+  // https://numpy.org/doc/stable/user/quickstart.html#indexing-with-arrays-of-indices
+  // https://numpy.org/doc/stable/user/quickstart.html#indexing-with-boolean-arrays
+  //
   // Similar to count_specified_dimensions:
   if (tensor.scalar_type() == kByte || tensor.scalar_type() == kBool) {
     *dim_ptr += tensor.dim();
