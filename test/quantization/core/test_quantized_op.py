@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_onednn,
 )
+
 from torch.ao.quantization import PerChannelMinMaxObserver
 from torch.testing._internal.common_cuda import TEST_CUDNN
 import torch.backends.xnnpack
