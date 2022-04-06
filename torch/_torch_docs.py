@@ -11699,6 +11699,7 @@ Example::
         quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
 """)
 
+
 add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
