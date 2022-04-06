@@ -19,7 +19,7 @@ void where_kernel_impl(TensorIterator &iter) {
 #if AT_USE_JITERATOR()
   static const auto where_string = jiterator_stringify(
       template <typename T>
-      T where_kernel(T cond_val, T self_val, T other_val) {
+      T where_kernel(bool cond_val, T self_val, T other_val) {
         return cond_val ? self_val : other_val;
       }
   ); // where_string
