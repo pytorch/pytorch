@@ -134,17 +134,23 @@ VarWithType IRParser::parseVarWithType(bool allow_optional) {
 
 std::string IRParser::parseVar() {
   L.expect('%');
-  if (L.cur().kind == TK_IDENT) {
-    auto name = L.expect(TK_IDENT).text();
-    if (L.cur().kind == TK_NUMBER) {
-      auto suffix = L.expect(TK_NUMBER).text();
-      AT_ASSERT(suffix[0] == '.');
-      name += suffix;
+  std::string name;
+  bool continue_parsing;
+  do {
+    if (L.cur().kind == TK_IDENT) {
+      name += L.expect(TK_IDENT).text();
+    } else {
+      name += L.expect(TK_NUMBER).text();
     }
-    return name;
-  } else {
-    return L.expect(TK_NUMBER).text();
-  }
+    continue_parsing = false;
+    if (L.nextIf('.')) {
+      continue_parsing = true;
+      name += '.';
+    } else if (L.cur().kind == TK_NUMBER && L.cur().text()[0] == '.') {
+      continue_parsing = true;
+    }
+  } while (continue_parsing);
+  return name;
 }
 
 void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
