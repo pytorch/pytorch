@@ -14,7 +14,11 @@ if(NOT BUILD_PYTHON)
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_INCLUDE_DIR})
+  include_directories(${TBB_INCLUDE_DIR})
+endif()
+
+if(BUILD_ONEDNN_GRAPH)
+  string(APPEND CMAKE_CXX_FLAGS " -DBUILD_ONEDNN_GRAPH")
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
