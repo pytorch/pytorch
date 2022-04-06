@@ -3588,6 +3588,78 @@ class TestCudaFuser(JitTestCase):
             self._view_test_generator(ndims, self._bias_view_relu_helper)
         self._alias_bias_view_relu_helper([2, 3, 4, 5], [1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
 
+    def _bias_flatten_relu_helper(self, shape, start_dim, end_dim, dtype, device, error):
+        class BiasFlattenRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasFlattenRelu, self).__init__()
+                self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
+                with torch.no_grad():
+                    self.bias.fill_(10)
+
+            def forward(self, inputs : torch.Tensor, start_dim : int, end_dim : int):
+                o = inputs + self.bias
+                o = o.flatten(start_dim, end_dim)
+                return torch.relu(o)
+
+        t = BiasFlattenRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        self._run_helper(t_jit, t, x, start_dim, end_dim)
+        self.assertGraphContains(t_jit.graph_for(x, start_dim, end_dim), 'prim::flatten_copy', True)
+
+    def _alias_bias_flatten_relu_helper(self, shape, start_dim, end_dim, dtype, device, error):
+        class BiasFlattenRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasFlattenRelu, self).__init__()
+                self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
+                with torch.no_grad():
+                    self.bias.fill_(10)
+
+            def forward(self, inputs : torch.Tensor, bias : torch.Tensor, start_dim : int, end_dim : int):
+                o = inputs.flatten(start_dim, end_dim)
+                inputs.add_(bias)
+                return torch.relu(o)
+
+        t = BiasFlattenRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        # profiling
+        jit_o = t_jit(x.clone(), bias, start_dim, end_dim)
+        # optimization
+        jit_o = t_jit(x.clone(), bias, start_dim, end_dim)
+        # final
+        jit_o = t_jit(x.clone(), bias, start_dim, end_dim)
+        # eager - baseline
+        o = t(x.clone(), bias, start_dim, end_dim)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x, bias, start_dim, end_dim)
+
+        self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
+        self.assertGraphContainsExactly(graph, 'prim::flatten_copy', 0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_flatten(self):
+        torch._C._jit_set_nvfuser_guard_mode(True)
+        self._bias_flatten_relu_helper([2, 3, 4, 5], 0, -1, torch.float, 'cuda', 1e-6)
+        self._bias_flatten_relu_helper([2, 3, 4, 5], 1, -1, torch.float, 'cuda', 1e-6)
+        self._bias_flatten_relu_helper([2, 3, 4, 5], 2, -1, torch.float, 'cuda', 1e-6)
+        self._bias_flatten_relu_helper([2, 3, 4, 5], 0, 3, torch.float, 'cuda', 1e-6)
+        self._bias_flatten_relu_helper([2, 3, 4, 5], 1, 2, torch.float, 'cuda', 1e-6)
+        self._bias_flatten_relu_helper([2, 3, 4, 5], 2, 2, torch.float, 'cuda', 1e-6)
+        self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 0, -1, torch.float, 'cuda', 1e-6)
+        self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 1, -1, torch.float, 'cuda', 1e-6)
+        self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 2, -1, torch.float, 'cuda', 1e-6)
+        self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 0, 3, torch.float, 'cuda', 1e-6)
+        self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 1, 2, torch.float, 'cuda', 1e-6)
+        self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 2, 2, torch.float, 'cuda', 1e-6)
+
     def _ltc_helper(self, shape, dtype, device, error, approximate=True):
         # modeled after LTC linear layer
         class LTC(torch.nn.Module):

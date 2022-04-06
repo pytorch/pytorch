@@ -253,6 +253,22 @@ TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
+TEST_F(NVFuserTest, FusionFlattenFailWrongDim_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 3, 4, 5};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(flatten(x_add_bias, 1, 5));
+  ASSERT_ANY_THROW(flatten(x_add_bias, -5, 0));
+}
+
 TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

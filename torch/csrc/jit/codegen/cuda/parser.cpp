@@ -2668,6 +2668,46 @@ class IrParser {
     }
 
     {
+      auto flatten_op = getOperatorForLiteral(
+          "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor");
+      REGISTER_PARSE_RULE(
+          flatten_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(),
+                value_map[node->inputs()[0]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto start_dim_value = constant_as<int>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                start_dim_value.has_value(), "start_dim is not valid");
+            auto end_dim_value = constant_as<int>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                end_dim_value.has_value(), "end_dim is not valid");
+
+            TensorView* output =
+                flatten(self, start_dim_value.value(), end_dim_value.value());
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            // we don't support dynamic start_dim;
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we don't support dynamic end_dim yet;
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
+    {
       auto ptr_op =
           getOperatorForLiteral("prim::squeeze_copy(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
@@ -3340,6 +3380,28 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // argument 1: new tensor size;
       case 1:
         profileViewSize(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto flatten_schema1 =
+      getOperatorForLiteral(
+          "aten::flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor")
+          ->schema();
+  static auto flatten_schema2 =
+      getOperatorForLiteral(
+          "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor")
+          ->schema();
+  if (node->matches(flatten_schema1) || node->matches(flatten_schema2)) {
+    switch (offset) {
+      // argument 1: start_dim;
+      // argument 2: end_dim;
+      case 1:
+      case 2:
+        profileInt(pr, node, offset);
         break;
       default:
         return false;

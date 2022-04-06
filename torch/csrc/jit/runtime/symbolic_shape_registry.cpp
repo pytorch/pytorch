@@ -108,6 +108,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
       {"aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)", "view"},
       {"prim::view_copy(Tensor self, int[] size) -> Tensor", "view"},
+      {"prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor", "flatten"},
       {"prim::reshape_copy(Tensor self, int[] shape) -> Tensor", "view"},
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
@@ -302,7 +303,6 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
 void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g) {
-
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.size() == 0) {
     loadFunctions();

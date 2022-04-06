@@ -2075,7 +2075,8 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
       {{aten::view, prim::view_copy},
        {aten::reshape, prim::reshape_copy},
        {aten::squeeze, prim::squeeze_copy},
-       {aten::unsqueeze, prim::unsqueeze_copy}});
+       {aten::unsqueeze, prim::unsqueeze_copy},
+       {aten::flatten, prim::flatten_copy}});
 
   std::vector<Node*> maybe_safe_alias_nodes;
   for (Node* n : block->nodes()) {
@@ -2121,6 +2122,7 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
       {{prim::view_copy, aten::view},
+       {prim::flatten_copy, aten::flatten},
        {prim::reshape_copy, aten::reshape},
        {prim::squeeze_copy, aten::squeeze},
        {prim::unsqueeze_copy, aten::unsqueeze}});
