@@ -6,6 +6,12 @@ from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, sys_importer
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
 
 try:
@@ -22,16 +28,21 @@ packaging_directory = Path(__file__).parent
 class TestSaveLoad(PackageTestCase):
     """Core save_* and loading API tests."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporter
+        self.PackageExporter = PackageExporter
+
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,
         "Tests that use temporary files are disabled in fbcode",
     )
     def test_saving_source(self):
         filename = self.temp()
-        with PackageExporter(filename) as he:
+        with self.PackageExporter(filename) as he:
             he.save_source_file("foo", str(packaging_directory / "module_a.py"))
             he.save_source_file("foodir", str(packaging_directory / "package_a"))
-        hi = PackageImporter(filename)
+        hi = self.PackageImporter(filename)
         foo = hi.import_module("foo")
         s = hi.import_module("foodir.subpackage")
         self.assertEqual(foo.result, "module_a")
@@ -43,7 +54,7 @@ class TestSaveLoad(PackageTestCase):
     )
     def test_saving_string(self):
         filename = self.temp()
-        with PackageExporter(filename) as he:
+        with self.PackageExporter(filename) as he:
             src = dedent(
                 """\
                 import math
@@ -51,7 +62,7 @@ class TestSaveLoad(PackageTestCase):
                 """
             )
             he.save_source_string("my_mod", src)
-        hi = PackageImporter(filename)
+        hi = self.PackageImporter(filename)
         m = hi.import_module("math")
         import math
 
@@ -65,13 +76,13 @@ class TestSaveLoad(PackageTestCase):
     )
     def test_save_module(self):
         filename = self.temp()
-        with PackageExporter(filename) as he:
+        with self.PackageExporter(filename) as he:
             import module_a
             import package_a
 
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
-        hi = PackageImporter(filename)
+        hi = self.PackageImporter(filename)
         module_a_i = hi.import_module("module_a")
         self.assertEqual(module_a_i.result, "module_a")
         self.assertIsNot(module_a, module_a_i)
@@ -81,7 +92,7 @@ class TestSaveLoad(PackageTestCase):
 
     def test_dunder_imports(self):
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with self.PackageExporter(buffer) as he:
             import package_b
 
             obj = package_b.PackageBObject
@@ -89,7 +100,7 @@ class TestSaveLoad(PackageTestCase):
             he.save_pickle("res", "obj.pkl", obj)
 
         buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = self.PackageImporter(buffer)
         loaded_obj = hi.load_pickle("res", "obj.pkl")
 
         package_b = hi.import_module("package_b")
@@ -113,21 +124,21 @@ class TestSaveLoad(PackageTestCase):
     def test_bad_dunder_imports(self):
         """Test to ensure bad __imports__ don't cause PackageExporter to fail."""
         buffer = BytesIO()
-        with PackageExporter(buffer) as e:
+        with self.PackageExporter(buffer) as e:
             e.save_source_string(
                 "m", '__import__(these, unresolvable, "things", wont, crash, me)'
             )
 
     def test_save_module_binary(self):
         f = BytesIO()
-        with PackageExporter(f) as he:
+        with self.PackageExporter(f) as he:
             import module_a
             import package_a
 
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
         f.seek(0)
-        hi = PackageImporter(f)
+        hi = self.PackageImporter(f)
         module_a_i = hi.import_module("module_a")
         self.assertEqual(module_a_i.result, "module_a")
         self.assertIsNot(module_a, module_a_i)
@@ -146,10 +157,10 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         filename = self.temp()
-        with PackageExporter(filename) as he:
+        with self.PackageExporter(filename) as he:
             he.intern("**")
             he.save_pickle("obj", "obj.pkl", obj2)
-        hi = PackageImporter(filename)
+        hi = self.PackageImporter(filename)
 
         # check we got dependencies
         sp = hi.import_module("package_a.subpackage")
@@ -179,19 +190,19 @@ class TestSaveLoad(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
-        with PackageExporter(f1) as pe:
+        with self.PackageExporter(f1) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
 
-        importer1 = PackageImporter(f1)
+        importer1 = self.PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
-        importer2 = PackageImporter(f1)
+        importer2 = self.PackageImporter(f1)
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 
         f2 = self.temp()
 
         def make_exporter():
-            pe = PackageExporter(f2, importer=[importer1, sys_importer])
+            pe = self.PackageExporter(f2, importer=[importer1, sys_importer])
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
             return pe
 
@@ -220,19 +231,21 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
+        with self.PackageExporter(buffer) as exporter:
             exporter.intern("**")
             exporter.save_pickle("model", "model.pkl", obj2)
 
         buffer.seek(0)
 
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
         imported_obj2 = importer.load_pickle("model", "model.pkl")
         imported_obj2_module = imported_obj2.__class__.__module__
 
         # Should export without error.
         buffer2 = BytesIO()
-        with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+        with self.PackageExporter(
+            buffer2, importer=(importer, sys_importer)
+        ) as exporter:
             exporter.intern("**")
             exporter.save_module(imported_obj2_module)
 
@@ -241,19 +254,28 @@ class TestSaveLoad(PackageTestCase):
         import package_a.use_torch_package_importer  # noqa: F401
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
+        with self.PackageExporter(buffer) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
 
         buffer.seek(0)
 
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
 
         # Should export without error.
         buffer2 = BytesIO()
-        with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+        with self.PackageExporter(
+            buffer2, importer=(importer, sys_importer)
+        ) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
+
+
+class TestSaveLoadNoTorch(TestSaveLoad):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporterNoTorch
+        self.PackageExporter = PackageExporterNoTorch
 
 
 if __name__ == "__main__":
