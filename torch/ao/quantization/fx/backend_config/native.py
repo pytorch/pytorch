@@ -1,5 +1,5 @@
 from collections import namedtuple
-
+import operator
 import torch
 from .observation_type import ObservationType
 import torch.nn.functional as F
@@ -288,6 +288,21 @@ def _get_conv_configs():
         })
     return conv_configs
 
+_ADD_CONFIG = {
+    "pattern": operator.add,
+    "num_tensor_args_to_observation_type": {
+        # TODO: this is not used right now since we have extra check in prepare
+        # will need to change this to NO_OBSERVER later after we implemented
+        # Tensor dtype inference properly
+        0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+        2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+    },
+    "dtype_configs": [
+        weighted_op_int8_dtype_config,
+    ],
+}
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -297,5 +312,6 @@ def get_native_backend_config_dict():
             *_DEFAULT_OP_INT8_CONFIGS,
             *_get_linear_configs(),
             *_get_conv_configs(),
+            _ADD_CONFIG,
         ],
     }
