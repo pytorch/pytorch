@@ -527,5 +527,79 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
+def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
+    """
+    This is the simplified or low overhead version of aot_module. For frontends
+    like TorchDynamo, the input functions/modules to AOT are static and have
+    unpacked inputs/outputs. This gives us an opportunity to remove the
+        (1) pytree overhead to parse inputs/outputs,
+        (2) AOT Autograd cache,
+        (3) Reading of params/buffers in every forward call
+
+    :func:`aot_module_simplified` removes these overheads.
+    """
+    #########################################################
+
+    params = {
+        **dict(_named_parameters(mod, remove_duplicate=False)),
+        **dict(_named_buffers(mod, remove_duplicate=False)),
+    }
+    params_flat, params_spec = pytree.tree_flatten(params)
+    params_flat = tuple(params_flat)
+    params_len = len(params_flat)
+
+    def functional_call(*args, **kwargs):
+        with _stateless.reparametrize_module(
+            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+        ):
+            out = mod(*args[params_len:], **kwargs)
+        if not isinstance(out, (tuple, list)):
+            raise RuntimeError(
+                "Graph output must be a tuple(). This is so that we can avoid "
+                "pytree processing of the ouputs. Please change the module to "
+                "have tuple outputs or use aot_module instead."
+            )
+        return out
+
+    def aot_function_simplified(
+        fn: Callable,
+        fw_compiler: Callable,
+        bw_compiler: Optional[Callable] = None,
+        partition_fn: Callable = default_partition,
+        decompositions: Dict = {},
+        hasher_type: str = "StaticShapeHasher",
+        static_argnums: Optional[Tuple[int]] = None,
+    ) -> Callable:
+        assert static_argnums is None
+        if bw_compiler is None:
+            bw_compiler = fw_compiler
+        compiled_fn = create_aot_autograd_function(
+            fn,
+            fw_compiler,
+            bw_compiler,
+            partition_fn,
+            decompositions,
+            grad_state=torch.is_grad_enabled(),
+        ).apply
+
+        return compiled_fn
+
+    compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
+
+    class AOTModule(nn.Module):
+        def __init__(self):
+            super(AOTModule, self).__init__()
+            self.orig_module = mod
+
+        def forward(self, *args, **kwargs):
+            return compiled_f(
+                *params_flat,
+                *args,
+                **kwargs,
+            )
+
+    return AOTModule()
+
+
 compiled_function = aot_function
 compiled_module = aot_module
