@@ -5000,7 +5000,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 6,
+            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 5,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -5016,14 +5016,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = torch.mul(x, 1.0)
                 x = self.conv1(x)
                 x = torch.mul(x, 1.0)
-                # TODO: add support for add + torch.relu?
                 x = torch.relu(x)
                 x = self.conv2(x)
                 return x
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 6,
+            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 5,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
