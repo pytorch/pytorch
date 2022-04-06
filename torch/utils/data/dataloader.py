@@ -229,7 +229,7 @@ class DataLoader(Generic[T_co]):
             # this, and support custom samplers that specify the assignments to
             # specific workers.
             if isinstance(dataset, IterDataPipe):
-                torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+                dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
             elif shuffle is not False:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
