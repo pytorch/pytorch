@@ -6,6 +6,7 @@ from functools import partial
 from itertools import product
 
 import torch
+import torch.cuda.nccl as nccl
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import (
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+from torch.testing._internal.common_cuda import CUDA11OrLater
 
 
 if not dist.is_available():
@@ -41,17 +43,24 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # Various mixed precision configs to test under.
 default_mp = MixedPrecision()
-mp_diff_reduce = MixedPrecision(reduce_dtype=torch.bfloat16)
-mp_diff_buffer = MixedPrecision(buffer_dtype=torch.bfloat16)
-mp_diff_buffer_and_reduce = MixedPrecision(
-    buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32
+
+nccl_supports_bf16 = (
+    CUDA11OrLater and dist.is_nccl_available() and nccl.version() >= (2, 10)
 )
+
+mp_configs = [default_mp]
+
+if nccl_supports_bf16:
+    mp_diff_reduce = MixedPrecision(reduce_dtype=torch.bfloat16)
+    mp_diff_buffer = MixedPrecision(buffer_dtype=torch.bfloat16)
+    mp_diff_buffer_and_reduce = MixedPrecision(buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+    mp_configs.extend([
+        mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce,
+    ])
+
 # Buffer original dtype, which can differ from model params.
 buffer_orig_dtype = torch.float64
 
-mp_configs = [
-    default_mp, mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce
-]
 params = "mp_config,cpu_offload,backward_prefetch,full_precision_param_dtype"
 cpu_offload_config = [
     CPUOffload(offload_params=True), CPUOffload(offload_params=False)
@@ -73,12 +82,16 @@ test_name_mapping = {
     str(BackwardPrefetch.BACKWARD_PRE): "prefetch_pre",
     str(BackwardPrefetch.BACKWARD_POST): "prefetch_post",
     str(default_mp): "mp_fp16",
-    str(mp_diff_reduce): "mp_diff_reduce",
-    str(mp_diff_buffer): "mp_diff_buffer",
-    str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
 }
+
+if nccl_supports_bf16:
+    test_name_mapping.update({
+        str(mp_diff_reduce): "mp_diff_reduce",
+        str(mp_diff_buffer): "mp_diff_buffer",
+        str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
+    })
 
 subtest_name = partial(subtest_name, test_name_mapping)
 
@@ -329,8 +342,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
+        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
         self._run_test_mixed_precision_e2e(
-            mp_config=mp_diff_buffer_and_reduce,
+            mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
             full_precision_param_dtype=torch.float64,
@@ -386,8 +400,9 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
+        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
         self._run_test_mixed_precision_e2e(
-            mp_config=mp_diff_buffer_and_reduce,
+            mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
             full_precision_param_dtype=torch.float64,
@@ -396,8 +411,9 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_e2e_full_shard(self):
+        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
         self._run_test_mixed_precision_e2e(
-            mp_config=mp_diff_buffer_and_reduce,
+            mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
             full_precision_param_dtype=torch.float64,
