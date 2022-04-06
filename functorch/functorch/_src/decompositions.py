@@ -580,11 +580,15 @@ def detach_decomposition(x):
     return x
 
 
-# @register_decomposition(aten.cudnn_batch_norm)
-# def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
-#     a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
-#     return (a,b, c, aten.new_empty(input, (1,)))
+@register_decomposition(aten.cudnn_batch_norm)
+def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
+    a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
+    # Cudnn return running mean and variance when training is True
+    if training:
+        return (a, b, c, input.new_zeros((1,)))
+    return (a, input.new_zeros((1,)), input.new_zeros((1,)), input.new_zeros((1,)))
 
-# @register_decomposition(aten.cudnn_batch_norm_backward)
-# def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
-#     return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
+
+@register_decomposition(aten.cudnn_batch_norm_backward)
+def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
+    return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
