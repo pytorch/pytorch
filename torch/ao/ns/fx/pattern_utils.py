@@ -74,7 +74,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
         # that it works with the ns matcher function, maybe we should use `is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns
         if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
-           isinstance(quant_pattern[1], tuple) and  len(quant_pattern[1]) == 2:
+           isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
             # flatten the pattern with form (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d))
             quant_pattern = (quant_pattern[0], quant_pattern[1][0], quant_pattern[1][1])
 
