@@ -12,7 +12,7 @@ Permute::Permute(const Value& input, std::vector<int64_t> dims)
           /*num_outputs=*/1,
           MHash(dims)),
       dims_(std::move(dims)) {
-  addShapeFromFunction([&]() {
+  addComputedShape([&]() {
     return MakePermuteShape(operand(0).shape(), dims_);
   });
 }
