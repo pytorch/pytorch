@@ -20,7 +20,9 @@ sparse_defaults = {
     "zeros_per_block": 4,
 }
 
-
+# This series of tests are to check the composability goals for sparsity and quantization. Namely
+# that performing quantization and sparsity model manipulations in various orderings
+# does not cause problems
 class TestComposability(TestCase):
     def _get_model_and_sparsifier_and_sparse_config(self, qconfig=None):
         model = nn.Sequential(
@@ -62,6 +64,9 @@ class TestComposability(TestCase):
     def _calculate_sparsity(self, tensor):
         return ((tensor == 0).sum() / tensor.numel()).item()
 
+    # This test checks whether performing quantization prepare before sparse prepare
+    # causes any issues and verifies that the correct observers are inserted and that
+    # the quantized model works as expected
     def test_q_prep_before_s_prep(self):
         (
             mod,
@@ -71,15 +76,26 @@ class TestComposability(TestCase):
 
         tq.prepare(mod, inplace=True)
         sparsifier.prepare(mod, config=sparse_config)
+
+        # check that correct modules had parametrizations added
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5], "parametrizations"))
+        # check that correct observers were inserted
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
+
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
+    # This test checks whether performing sparsity prepare before quantization prepare
+    # causes any issues. In particular, previous quantization flow was unable to match
+    # the post sparse prepare module names (adding parametrizations changes the module class names)
+    # which would result in those parametrized modules not being quantized. This test verifies that
+    # the fix for this was successful.
     def test_s_prep_before_q_prep(self):
         (
             mod,
@@ -89,15 +105,28 @@ class TestComposability(TestCase):
 
         sparsifier.prepare(mod, config=sparse_config)
         tq.prepare(mod, inplace=True)
+
+        # check that correct modules had parametrizations added and
+        # that none were lost during prepare
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5], "parametrizations"))
+
+        # check that correct observers were inserted and that matching
+        # occured succesfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
+
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
+    # if the sparsified modules have not undergone the final squash mask operation, its possible
+    # that the problem outlined in test_s_prep_before_q_prep would occur. This test verifies
+    # both that the fix to the convert flow avoids this issue and that the resulting quantized
+    # module uses the sparse version of the weight value.
     def test_convert_without_squash_mask(self):
         (
             mod,
@@ -107,16 +136,25 @@ class TestComposability(TestCase):
 
         sparsifier.prepare(mod, config=sparse_config)
         tq.prepare(mod, inplace=True)
+
+        # check that correct modules had parametrizations added and
+        # that none were lost during prepare
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5], "parametrizations"))
+
+        # check that correct observers were inserted and that matching
+        # occured succesfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         sparsifier.step()
         sparsity_level = self._calculate_sparsity(mod[5].weight)
         mod(torch.randn(1, 4, 4, 4))
         tq.convert(mod, inplace=True)
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
+        # check that module was actually sparsified
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparsity_level)
         self.assertGreaterAlmostEqual(
@@ -134,12 +172,20 @@ class TestComposability(TestCase):
         tq.fuse_modules(mod, [["5", "6"]], inplace=True)
         mod[5].qconfig = tq.get_default_qconfig("fbgemm")
         tq.prepare(mod, inplace=True)
+
+        # check that correct modules had parametrizations added and
+        # that none were lost during prepare or fusion
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5][0], "parametrizations"))
+
+        # check that correct observers were inserted and that matching
+        # occured succesfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.intrinsic.quantized.LinearReLU))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
@@ -153,16 +199,25 @@ class TestComposability(TestCase):
         sparsifier.prepare(mod, config=sparse_config)
         mod[5].qconfig = tq.get_default_qconfig("fbgemm")
         tq.prepare(mod, inplace=True)
+
+        # check that correct modules had parametrizations added and
+        # that none were lost during prepare
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5][0], "parametrizations"))
+
+        # check that correct observers were inserted and that matching
+        # occured succesfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         sparsifier.step()
         sparsity_level = self._calculate_sparsity(mod[5][0].weight)
         mod(torch.randn(1, 4, 4, 4))
         tq.convert(mod, inplace=True)
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.intrinsic.quantized.LinearReLU))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
+        # check that module was actually sparsified
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparsity_level)
         self.assertGreaterAlmostEqual(
@@ -182,13 +237,20 @@ class TestComposability(TestCase):
         tq.prepare_qat(mod, inplace=True)
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5], "parametrizations"))
+
+        # check that correct observers were inserted and that matching
+        # occured succesfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self.assertTrue(isinstance(mod[5], torch.nn.qat.Linear))
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
+
+        # check that module was actually sparsified
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
@@ -209,14 +271,25 @@ class TestComposability(TestCase):
             mod[0],
         ]
         sparsifier.prepare(mod, config=sparse_config)
+
+        # check that correct modules had parametrizations added and
+        # that none were lost during qat prepare
         self.assertTrue(hasattr(mod[0], "parametrizations"))
         self.assertTrue(hasattr(mod[5], "parametrizations"))
+
+        # check that correct observers were inserted and that matching
+        # occured succesfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self.assertTrue(isinstance(mod[5], torch.nn.qat.Linear))
+
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
+
+        # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
+
+        # check that module was actually sparsified
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
