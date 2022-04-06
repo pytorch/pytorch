@@ -77,8 +77,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -181,8 +180,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -407,8 +405,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -512,8 +509,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -739,8 +735,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -844,8 +839,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1070,8 +1064,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1174,8 +1167,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1400,8 +1392,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1505,8 +1496,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1732,8 +1722,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1837,8 +1826,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2063,8 +2051,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2167,8 +2154,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2393,8 +2379,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2498,8 +2483,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2725,8 +2709,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2830,8 +2813,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3056,8 +3038,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3160,8 +3141,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3386,8 +3366,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3491,8 +3470,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3718,8 +3696,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3823,8 +3800,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          $pytorch_root=[string](Get-Location)
-          Add-MpPreference -ExclusionPath $pytorch_root
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.

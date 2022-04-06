@@ -34,8 +34,7 @@ runs:
     - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
       shell: powershell
       run: |
-        $pytorch_root=[string](Get-Location)
-        Add-MpPreference -ExclusionPath $pytorch_root
+        Set-MpPreference -ExclusionPath $(Get-Location).tostring()
 
     - name: Install Visual Studio 2019 toolchain
       shell: powershell
