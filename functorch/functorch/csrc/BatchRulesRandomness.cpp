@@ -207,6 +207,39 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
   return std::make_tuple(output, mask);
 }
 
+Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const c10::optional<Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  const auto cur_level = maybe_layer->layerId();
+
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  self_value = moveBatchDimToFront(self_value, self_bdim);
+
+  RandomnessType randomness = maybe_layer->randomness();
+  check_randomness(randomness, self_bdim.has_value());
+
+  if (randomness == RandomnessType::Different && !self_bdim) {
+    auto shape = self_value.sizes();
+    VmapDimVector shapeVec(1, maybe_layer->batchSize());
+    shapeVec.reserve(shape.size() + 1);
+    shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
+    self_value = self_value.expand(shapeVec);
+  }
+  if (self_value.dim() == 3 && (self_bdim || randomness == RandomnessType::Different)) {
+    self_value = reshape_dim_into(1, 0, self_value);
+  }
+  auto out = multinomial(self_value, num_samples, replacement, generator);
+  if (randomness == RandomnessType::Same && !self_bdim) {
+    return out;
+  }
+  if(self_value.dim() == 3 && self_bdim) {
+    out = out.reshape(self.sizes());
+  }
+  return makeBatched(out, 0, cur_level);
+}
+
 template <typename A, A a, typename C>
 struct RandomBatchRuleHelper;
 
@@ -420,7 +453,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 
   UNARY_POINTWISE_RANDOM(_standard_gamma);
   UNARY_POINTWISE_RANDOM(_sample_dirichlet);
-  UNARY_POINTWISE_RANDOM(multinomial);
+  m.impl("multinomial", multinomial_batching_rule);
   UNARY_POINTWISE_RANDOM(poisson);
   UNARY_POINTWISE_RANDOM(bernoulli);
 
