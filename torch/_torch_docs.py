@@ -8545,7 +8545,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
 add_docstr(torch.scatter_reduce, r"""
-scatter_reduce(input, dim, index, src, reduce) -> Tensor
+scatter_reduce(input, dim, index, src, reduce, *, include_self=True) -> Tensor
 
 Reduces all values from the :attr:`input` tensor to the indices specified in
 the :attr:`index` tensor. For each value in :attr:`input`, its output index is

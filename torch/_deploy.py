@@ -3,6 +3,7 @@ import torch
 from torch.package._package_pickler import create_pickler
 from torch.package._package_unpickler import PackageUnpickler
 from torch.package import sys_importer, OrderedImporter, PackageImporter, Importer
+from torch.package._zip_file_torchscript import TorchScriptPackageZipFileReader
 from torch.serialization import _maybe_decode_ascii
 
 def _save_storages(importer, obj):
@@ -48,7 +49,10 @@ def _save_storages(importer, obj):
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
     data_value = data_buf.getvalue()
-    return data_value, serialized_storages, serialized_dtypes, importer.zip_reader if importer else None
+
+    assert (not importer or isinstance(importer.zip_reader, TorchScriptPackageZipFileReader)), \
+        f'importer {importer}\'s zip reader is of type {type(importer.zip_reader)} not TorchScriptPackageZipFileReader'
+    return data_value, serialized_storages, serialized_dtypes, importer.zip_reader.zip_reader if importer else None
 
 def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dtypes):
 
