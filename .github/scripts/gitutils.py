@@ -193,8 +193,15 @@ class GitRepo:
                 while len(from_values) > 0 and len(to_values) > 0:
                     frc = self.get_commit(from_values.pop())
                     toc = self.get_commit(to_values.pop())
-                    if frc.title != toc.title or frc.author_date != toc.author_date:
-                        raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
+                    # FRC branch might have PR number added to the title
+                    if not frc.title != toc.title or frc.author_date != toc.author_date:
+                        # HACK: Same commit were merged, reverted and landed again
+                        # which creates a tracking problem
+                        if (
+                            "pytorch/pytorch" not in self.remote_url() or
+                            frc.commit_hash != "0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf"
+                        ):
+                            raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
                     from_commits.remove(frc.commit_hash)
                     to_commits.remove(toc.commit_hash)
                 continue

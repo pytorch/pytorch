@@ -699,7 +699,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # operator is in the related op set directly
                 if not _op_in_base_sets_of_related_ops(base_op):
                     raise AssertionError(
-                        f"handing for {qhandler_cls} for op {base_op} not implemented")
+                        f"handling for {qhandler_cls} for op {base_op} not implemented")
 
     @skipIfNoFBGEMM
     def test_user_defined_function(self):
@@ -1615,7 +1615,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
                 else:
                     self.assertTrue(
-                        (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
+                        (base_op in FUNS_IO_TYPE_FP32) or
+                        (base_op in MODS_IO_TYPE_FP32) or
+                        (base_op in MODS_IO_TYPE_FP32_OR_INT8),
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
 
     @skipIfNoFBGEMM
