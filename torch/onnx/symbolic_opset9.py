@@ -731,7 +731,7 @@ def mish(g, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
-def op_with_optional_float_cast(g, op_name, *args, **kwargs) -> torch._C.Value:
+def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     """Some PyTorch operators (e.g., Clip/Min/ReLU/Pad) are super set of ONNX in terms of data types.
     This function maximizes the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
     operator data type. For example, `Cast<int>(Clip<float>(Cast<float>(INPUT)))` can be used to mimic
@@ -746,7 +746,7 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs) -> torch._C.Value:
             (optional, "Float" by default) indicating the data type of internal operator.
 
     Returns:
-        torch._C.Value: the output of the operator.
+        Optional[torch._C.Value, Tuple[torch._C.Value, ...]]: output(s) of the operator.
     """
     opset_before = kwargs.pop("opset_before", None)
     target_float_t = kwargs.pop("target_float_t", "Float")
