@@ -398,7 +398,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
         self.is_legacy: bool = is_legacy
-        self.flops: Optional[float] = flops
+        self.flops: Optional[int] = flops
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
@@ -541,7 +541,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_parent: Optional[FunctionEvent] = None
         self.device_type: DeviceType = DeviceType.CPU
         self.is_legacy: bool = False
-        self.flops: float = 0.0
+        self.flops: int = 0
 
     def add(self, other):
         if self.key is None:
@@ -642,6 +642,7 @@ def _filter_name(name):
     filtered_out_names = [
         MEMORY_EVENT_NAME,  # used only for the top-level memory events
         "profiler::_record_function_enter",
+        "profiler::_record_function_enter_new",
         "profiler::_record_function_exit",
         "aten::is_leaf",
         "aten::output_nr",
@@ -752,27 +753,17 @@ def _build_table(
 
     def auto_scale_flops(flops):
         flop_headers = [
-            'FLOPS',
-            'KFLOPS',
-            'MFLOPS',
-            'GFLOPS',
-            'TFLOPS',
-            'PFLOPS',
+            'FLOPs',
+            'KFLOPs',
+            'MFLOPs',
+            'GFLOPs',
+            'TFLOPs',
+            'PFLOPs',
         ]
         assert flops > 0
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
         assert log_flops >= 0 and log_flops < len(flop_headers)
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
-
-    def flops_rate(evt):
-        US_IN_SECOND = 1000.0 * 1000.0
-        if evt.flops > 0:
-            if evt.cuda_time_total != 0:
-                return float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
-            else:
-                return float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
-        else:
-            return -1
 
     add_column(name_column_width)
     for _ in headers[1:]:
@@ -790,12 +781,11 @@ def _build_table(
         # Auto-scaling of flops header
         raw_flops = []
         for evt in events:
-            rate = flops_rate(evt)
-            if rate > 0:
-                raw_flops.append(rate)
+            if evt.flops > 0:
+                raw_flops.append(evt.flops)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
-            headers.append(flops_header)
+            headers.append('Total {}'.format(flops_header))
             add_column(flops_column_width)
         else:
             with_flops = False  # can't find any valid flops
@@ -895,11 +885,10 @@ def _build_table(
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
         if with_flops:
-            rate = flops_rate(evt)
-            if rate <= 0.0:
+            if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append('{0:8.3f}'.format(rate * flops_scale))
+                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:

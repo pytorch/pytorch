@@ -479,6 +479,24 @@ const std::vector<std::string> functions = {
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
 
+        def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None
+
+            return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
+
+        def _autocast_to_reduced_precision(self,
+                                          cuda_enabled : bool,
+                                          cpu_enabled : bool,
+                                          cuda_dtype : int,
+                                          cpu_dtype : int):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None, None, None
+
+            return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):
@@ -612,7 +630,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
@@ -895,16 +913,10 @@ const std::vector<std::string> functions = {
                 return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
             return result, backward
 
-        def gelu(self):
-            result = torch.gelu(self)
+        def gelu(self : Tensor, *, approximate : str):
+            result = torch.gelu(self, approximate=approximate)
             def backward(grad_output):
-                m_2_sqrtpi = 1.12837916709551257390
-                m_sqrt1_2 = 0.707106781186547524401
-                alpha = m_sqrt1_2
-                beta = m_2_sqrtpi * m_sqrt1_2 * 0.5
-                cdf = (torch.erf(self * m_sqrt1_2) + 1.0) * 0.5
-                pdf = beta * torch.exp(self * self * -0.5)
-                return grad_output * (cdf + self * pdf)
+                return torch.gelu_backward(grad_output, self, approximate=approximate), None
             return result, backward
 
         def hardswish(self):
@@ -1117,7 +1129,7 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
-        def batch_norm_disabled(input : Tensor,
+        def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        running_mean : Optional[Tensor],
@@ -1141,100 +1153,31 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
-        def layer_norm_disabled(input : Tensor,
+        def layer_norm(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        eps : float,
                        cudnn_enable : bool):
 
-            input_ndim = input.dim()
-            normalized_ndim = len(normalized_shape)
-            n = 1
-            for i in range(input_ndim - normalized_ndim):
-                n *= input.size(i)
-
-            input_reshape = input.contiguous().view(1, n, -1)
-
-            bn_out, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
-                input_reshape, None, None, None, None, True,
-                0.0, eps, cudnn_enable)
-
-            bn_out = bn_out.view(input.size())
-            if weight is not None and bias is not None:
-                output = bias.addcmul(bn_out, weight, value=1)
-            elif weight is not None:
-                output = bn_out.mul(weight)
-            elif bias is not None:
-                output = bn_out.add(bias)
-            else:
-                output = bn_out
+            output, mean, rstd = torch.native_layer_norm(input, normalized_shape, weight, bias, eps)
 
             def backward(grad_output):
-                if weight is not None and bias is not None:
-                    grad_bn_out = grad_output * weight
-                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                elif weight is not None:
-                    grad_bn_out = grad_output * weight
-                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
-                    grad_bias = None
-                elif bias is not None:
-                    grad_bn_out = grad_output
-                    grad_weight= None
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                else:
-                    grad_bn_out = grad_output
-                    grad_weight= None
-                    grad_bias = None
-
-
-                grad_bn_out = grad_bn_out.contiguous().view(1, n, -1)
-
-                grad_input, _, _ = torch._batch_norm_impl_index_backward(
-                    impl_idx, input_reshape, grad_bn_out, None, None, None,
-                    save1, save2, True, eps, [True, False, False], reserve)
-
-                grad_input = grad_input.view(input.size())
+                output_mask = [True, weight is not None, bias is not None]
+                grad_input, grad_weight, grad_bias = torch.native_layer_norm_backward(grad_output, input, normalized_shape, mean, rstd, weight, bias, output_mask)
                 return grad_input, None, grad_weight, grad_bias, None, None
-
             return output, backward
-
-        def AD_fused_dropout_backward(grad,
-                                      mask,
-                                      p1m: float):
-            p1r = 1. / p1m
-            grad_input = grad * (mask.type_as(grad) * p1r)
-            return grad_input
 
         def dropout(input,
                     p: float,
                     train: bool):
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
-            p1m = 1. - p
-            if train:
-                if use_cuda:
-                    mask = torch.rand_like(input, memory_format=1) < p1m
-                    res = mask.type_as(input) * input * (1./p1m)
-                else:
-                    mask = torch.empty_like(input, memory_format=1)
-                    mask.bernoulli_(p1m)
-                    res = mask * input / p1m
-            else:
-                p1m = 1.
-                res = input
-                mask = torch.empty_like(input, memory_format=1)
+            # if `train == false` we need to set `p1m` to 0 so `scale == 1`
+            p1m = (1. - p) * float(train)
+            scale = 1. / (float(p1m == 0.) + p1m)
+            res,mask = torch.native_dropout(input, p, train)
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
-                else:
-                    grad_input = grad_output * mask / p1m
+                grad_input = torch.native_dropout_backward(grad_output, mask, scale)
                 return grad_input, None, None
             return res, backward
 
@@ -1253,7 +1196,7 @@ const std::vector<std::string> functions = {
         def log_softmax(self, dim: int, dtype: Optional[int]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1267,7 +1210,7 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1412,6 +1355,15 @@ const std::vector<std::string> functions = {
                 mask = (self >= threshold).type_as(self)
                 return grad_output * mask, None, None
             return torch.threshold(self, threshold, value), backward
+
+        def softplus(self,
+                      beta: number,
+                      threshold: number):
+            result = torch.softplus(self, beta, threshold)
+            def backward(grad_output):
+                z = torch.exp(result * beta)
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+            return result, backward
 
         def fmod(self,
                  other: number):
@@ -1582,7 +1534,7 @@ void loadModule(const CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();

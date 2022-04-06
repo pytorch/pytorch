@@ -5,14 +5,14 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic push
 #endif
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif // __GNUC__
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
 #include <cublas_v2.h>
 #include <curand.h>
@@ -30,10 +30,11 @@
 // CAFFE2_CUDA_API gets translated to CAFFE2_HIP_API in hipify script, which
 // causes a marco redefinition issue with the later definition of
 // CAFFE2_HIP_API, so we exclude this definition when HIP is specified
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #define CAFFE2_CUDA_API TORCH_CUDA_CPP_API
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
+//TODO: [ROCm] Need to remove this after CUDA->HIP mapping is updated.
 #define CAFFE2_HIP_EXPORT C10_EXPORT
 #define CAFFE2_HIP_API TORCH_HIP_API
 
@@ -52,20 +53,20 @@
 #endif
 
 // cuda major revision number below which fp16 compute is not supoorted
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 constexpr int kFp16CUDADevicePropMajor = 6;
 #else
 constexpr int kFp16CUDADevicePropMajor = 3;
 #endif
 
 // Re-enable strict aliasing diagnostic if it was disabled.
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic pop
 #endif
 #endif // __GNUC__
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
@@ -78,14 +79,14 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 
 namespace caffe2 {
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 /**
  * Empty class to identify TensorCore-based math
  */
 class TensorCoreEngine {};
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
-#if CUDA_VERSION >= 10000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 10000
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
 #else
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE memoryType
@@ -95,7 +96,11 @@ class TensorCoreEngine {};
  * A runtime function to report the cuda version that Caffe2 is built with.
  */
 inline int CudaVersion() {
+#if defined(USE_ROCM)
+  return ROCM_VERSION;
+#else
   return CUDA_VERSION;
+#endif
 }
 
 /**

@@ -32,22 +32,7 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
-// Distributed c10d debug levels
-enum DistributedDebugLevel {
-  OFF = 0,
-  DETAIL = 1,
-  INFO = 2,
-};
-
-// String debug log levels
-extern const char* kDistDebugEnvVar;
-extern const char* kDistDebugDetailLogLevel;
-extern const char* kDistDebugInfoLogLevel;
-extern const char* kDistDebugOffLogLevel;
-
 TORCH_API std::string parse_env(const char* env_var_name);
-
-TORCH_API DistributedDebugLevel parseDistDebugLevel();
 
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
@@ -347,7 +332,7 @@ inline at::Tensor newLikeFlat(
   }
   auto& t = tensors[deviceIdx][0];
   auto device = t.device();
-  for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
+  for (const auto i : c10::irange(1, tensors[deviceIdx].size())) {
     if (tensors[deviceIdx][i].device() != device) {
       TORCH_CHECK(false, "Expecting all tensors on the same device");
     }
@@ -422,7 +407,7 @@ inline void checkSplitSizes(
         "Tensor's dim 0 does not divide equally across group size");
   } else {
     TORCH_CHECK(
-        split_sizes.size() == group_size,
+        split_sizes.size() == static_cast<size_t>(group_size),
         "Number of tensor splits not equal to group size");
     const auto sum = c10::sum_integers(split_sizes);
     TORCH_CHECK(
@@ -482,7 +467,6 @@ size_t computeLengthsAndOffsets(
 }
 
 using RankType = uint32_t;
-using PortType = uint16_t;
 using SizeType = uint64_t;
 
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
@@ -536,31 +520,7 @@ using SizeType = uint64_t;
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
-// Helper resource guard class
-class ResourceGuard {
- public:
-  ResourceGuard(std::function<void()> destructor)
-      : destructor_(std::move(destructor)), released_(false) {}
-
-  ~ResourceGuard() {
-    if (!released_) {
-      destructor_();
-    }
-  }
-
-  void release() {
-    released_ = true;
-  }
-
- private:
-  std::function<void()> destructor_;
-  bool released_;
-};
-
 namespace tcputil {
-
-constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
-const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 // Send and receive
 template <typename T>
@@ -676,21 +636,6 @@ inline std::string recvString(int socket) {
   recvBytes<char>(socket, value.data(), value.size());
   return std::string(value.data(), value.size());
 }
-
-// Other helpers
-std::string sockaddrToString(struct sockaddr* addr);
-
-std::pair<int, PortType> listen(PortType port);
-
-int connect(
-    const std::string& address,
-    PortType port,
-    bool wait = true,
-    const std::chrono::milliseconds& timeout = kNoTimeout);
-
-std::tuple<int, std::string> accept(
-    int listenSocket,
-    const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
 } // namespace c10d

@@ -61,6 +61,8 @@ class DeadCodeEliminator {
         continue;
       }
       Graph& g = *node->g(attr::Subgraph);
+      // WARNING: Do not use a ranged loop. The loop bounds are changed by the
+      // loop body.
       for (size_t i = 0; i < g.inputs().size(); ++i) {
         if (!g.inputs().at(i)->hasUses()) {
           GRAPH_UPDATE(
@@ -296,6 +298,12 @@ class DeadCodeEliminator {
     if (!useAliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
+
+      if (node->kind() == prim::SetAttr) {
+        // SetAttr is a special case: it doesn't have a schema, but does
+        // have untracked mutations
+        return true;
+      }
 
       // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when

@@ -3,11 +3,16 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 
 #include <iostream>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
+#if AT_MKL_ENABLED()
+#include <mkl.h>
+#include <thread>
+#endif
 
 struct NumThreadsGuard {
   int old_num_threads_;
@@ -48,6 +53,18 @@ TEST(TestParallel, NestedParallel) {
     }
   });
 }
+
+#ifdef TH_BLAS_MKL
+TEST(TestParallel, LocalMKLThreadNumber) {
+  auto master_thread_num = mkl_get_max_threads();
+  auto f = [](int nthreads){
+    set_num_threads(nthreads);
+  };
+  std::thread t(f, 1);
+  t.join();
+  ASSERT_EQ(master_thread_num, mkl_get_max_threads());
+}
+#endif
 
 TEST(TestParallel, NestedParallelThreadId) {
   // check that thread id within a nested parallel block is accurate

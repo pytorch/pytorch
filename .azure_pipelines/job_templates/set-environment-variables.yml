@@ -120,9 +120,7 @@ steps:
         Write-Host "##vso[task.setvariable variable=CMAKE_LIBRARY_PATH;]$(Build.SourcesDirectory)\mkl\lib;$env:CMAKE_LIBRARY_PATH"
         Write-Host "##vso[task.setvariable variable=ADDITIONAL_PATH;]$(Build.SourcesDirectory)\tmp_bin"
         Write-Host "##vso[task.setvariable variable=SCCACHE_IDLE_TIMEOUT;]1500"
-        Write-Host "##vso[task.setvariable variable=RANDOMTEMP_EXECUTABLE;]$(Build.SourcesDirectory)\tmp_bin\nvcc.exe"
-        Write-Host "##vso[task.setvariable variable=CUDA_NVCC_EXECUTABLE;]$(Build.SourcesDirectory)\tmp_bin\randomtemp.exe"
-        Write-Host "##vso[task.setvariable variable=RANDOMTEMP_BASEDIR;]$(Build.SourcesDirectory)\tmp_bin"
+        Write-Host "##vso[task.setvariable variable=CMAKE_CUDA_COMPILER_LAUNCHER;]$(Build.SourcesDirectory)/tmp_bin/randomtemp.exe;$(Build.SourcesDirectory)/tmp_bin/sccache.exe"
       displayName: Set MKL, sccache and randomtemp environment variables
 
     # View current environment variables

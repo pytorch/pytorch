@@ -4,33 +4,23 @@
 
 PyObject *THPStorageClass = nullptr;
 
-PyObject * THPStorage_(New)(THWStorage *ptr)
+PyObject * THPStorage_(New)(c10::intrusive_ptr<c10::StorageImpl> ptr)
 {
   AT_ASSERT(ptr);
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {
-    ((THPStorage *)obj)->cdata = ptr;
-  } else {
-    THWStorage_(free)(LIBRARY_STATE ptr);
+    ((THPStorage *)obj)->cdata = ptr.release();
   }
   return obj;
 }
 
 static void THPStorage_(dealloc)(THPStorage* self)
 {
-  THWStorage_(free)(LIBRARY_STATE self->cdata);
+  if (self->cdata) {
+    c10::raw::intrusive_ptr::decref(self->cdata);
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
-static THWStorage* THPStorage_(newWithAllocator)(int64_t size, at::Allocator* allocator)
-{
-#if defined(THC_GENERIC_FILE)
-  THPUtils_setError(THPStorageStr " does not support custom allocators");
-  return nullptr;
-#else
-  return THWStorage_(newWithAllocator)(LIBRARY_STATE size, allocator);
-#endif
 }
 
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -55,22 +45,28 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     if (num_args == 0) {
       PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
       if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
-        THWStorage *ptr = (THWStorage*)PyLong_AsVoidPtr(cdata_ptr);
+        c10::StorageImpl *ptr = (c10::StorageImpl*)PyLong_AsVoidPtr(cdata_ptr);
         self->cdata = ptr;
         return (PyObject*)self.release();
       }
     }
     THPUtils_assert(num_kwargs == 0, THPStorageStr "(): invalid keyword arguments");
   }
+  if (allocator == nullptr) {
+#if defined(THC_GENERIC_FILE)
+      allocator = c10::cuda::CUDACachingAllocator::get();
+#else
+      allocator = c10::GetDefaultCPUAllocator();
+#endif
+  }
 
   // torch.Storage()
   if (num_args == 0) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (allocator) {
-      self->cdata = THPStorage_(newWithAllocator)(0, allocator);
-    } else {
-      self->cdata = THWStorage_(new)(LIBRARY_STATE_NOARGS);
-    }
+    self->cdata = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      0,
+      allocator,
+      /*resizable=*/true).release();
     return (PyObject*)self.release();
   }
 
@@ -79,19 +75,12 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.Storage(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
     int64_t size = THPUtils_unpackLong(first_arg);
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (allocator) {
-      self->cdata = THPStorage_(newWithAllocator)(size, allocator);
-    } else {
-      self->cdata = THWStorage_(newWithSize)(LIBRARY_STATE size);
-    }
+    self->cdata = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size,
+      allocator,
+      /*resizable=*/true).release();
     return (PyObject*)self.release();
-  }
-
-  // torch.Storage(view_source, [offset, [size]])
-  if (num_args < 4 && THPStorage_(Check)(first_arg)) {
-    THPUtils_setError("storage views not supported");
-    return nullptr;
   }
 
   // torch.Storage(sequence)
@@ -99,7 +88,12 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
-    self->cdata = THWStorage_(newWithSize)(LIBRARY_STATE length);
+    self->cdata = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      length,
+      allocator,
+      /*resizable=*/true)
+      .release();
     THPObjectPtr item;
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
@@ -110,7 +104,10 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         self->cdata->unsafe_data<scalar_t>()[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
-        THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
+        storage_set(
+          at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+          i,
+          value);
 #endif
       }
     } catch (const std::exception &e) {
@@ -127,10 +124,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
-          "(Sequence data)",
-          "(" THPStorageStr " view_source)",
-          "(" THPStorageStr " view_source, int offset)",
-          "(" THPStorageStr " view_source, int offset, int size)");
+          "(Sequence data)");
   return nullptr;
   END_HANDLE_TH_ERRORS
 }
@@ -150,13 +144,13 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += (self->cdata->nbytes() / sizeof(scalar_t));
-    if (nindex < 0 || nindex >= (self->cdata->nbytes() / sizeof(scalar_t))) {
+    if (nindex < 0 || nindex >= static_cast<int64_t>(self->cdata->nbytes() / sizeof(scalar_t))) {
       PyErr_SetString(PyExc_IndexError, fmt::format(
             "index {} out of range for storage of size {}",
             nindex, self->cdata->nbytes() / sizeof(scalar_t)));
       return nullptr;
     }
-    scalar_t value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
+    scalar_t value = storage_get(at::unsafeStorageFromTH(self->cdata, /*retain=*/true), nindex);
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
@@ -171,11 +165,11 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
       return nullptr;
     }
 
-    scalar_t *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
+    scalar_t *data = self->cdata->data<scalar_t>();
 
     at::StorageImpl* old_storage = self->cdata;
     c10::raw::intrusive_ptr::incref(old_storage);
-    at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
+    auto new_storage = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
         slicelength * sizeof(quantized_t),
@@ -190,9 +184,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
             },
             old_storage->device()),
         old_storage->allocator(),
-        /* resizable */ false));
+        /* resizable */ false);
 
-    PyObject *_ret = THPStorage_(New)(new_storage.unsafeReleaseStorageImpl());
+    PyObject *_ret = THPStorage_(New)(std::move(new_storage));
     return _ret;
   }
   PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",
@@ -214,7 +208,10 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   scalar_t rvalue = THPUtils_(unpackReal)(value);
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
-    THWStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
+    storage_set(
+      at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+      nindex,
+      rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -230,7 +227,10 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     // TODO: check the bounds only once
     // TODO: fill?
     for (;start < stop; start++)
-      THWStorage_(set)(LIBRARY_STATE self->cdata, start, rvalue);
+      storage_set(
+        at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+        start,
+        rvalue);
     return 0;
   }
   THPUtils_setError("can't index a " THPStorageStr " with %s",
@@ -318,85 +318,8 @@ typedef PyObject *(*getter)(PyObject *, void *);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_(properties)[] = {
   {"device", (getter)THPStorage_(device), nullptr, nullptr, nullptr},
-  {"dtype",  (getter)THPStorage_(dtype), nullptr, nullptr, nullptr},
   {nullptr}
 };
-
-extern THPCopyList THWStorage_(copy_functions);
-THPCopyList THWStorage_(copy_functions);
-
-void THPStorage_(initCopyMethods)()
-{
-  auto& h = THWStorage_(copy_functions);
-  // copy from CPU types
-  // TODO: Add cross-dtype storage copy for complex storage
-#if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE) && \
-    !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPCharStorageType, h, &THWStorage_(copyChar));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPShortStorageType, h, &THWStorage_(copyShort));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPIntStorageType, h, &THWStorage_(copyInt));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPLongStorageType, h, &THWStorage_(copyLong));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPHalfStorageType, h, &THWStorage_(copyHalf));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPFloatStorageType, h, &THWStorage_(copyFloat));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBFloat16StorageType, h, &THWStorage_(copyBFloat16));
-#ifdef THQUINT8
-      THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQUInt8StorageType, h, &THWStorage_(copyQUInt8));
-#endif
-#ifdef THQINT8
-      THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt8StorageType, h, &THWStorage_(copyQInt8));
-#endif
-#ifdef THQINT32
-      THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt32StorageType, h, &THWStorage_(copyQInt32));
-#endif
-#else
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPComplexFloatStorageType, h, &THWStorage_(copyComplexFloat));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPComplexDoubleStorageType, h, &THWStorage_(copyComplexDouble));
-#endif
-
-#ifdef THC_GENERIC_FILE
-  // copy from GPU types
-  #if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE) && !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPCharStorageType, h, &THWStorage_(copyCudaChar));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPShortStorageType, h, &THWStorage_(copyCudaShort));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPIntStorageType, h, &THWStorage_(copyCudaInt));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPLongStorageType, h, &THWStorage_(copyCudaLong));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, h, &THWStorage_(copyCudaFloat));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, h, &THWStorage_(copyCudaDouble));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, h, &THWStorage_(copyCudaHalf));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, h, &THWStorage_(copyCudaBool));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, h, &THWStorage_(copyCudaBFloat16));
-  #else
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexFloatStorageType, h, &THWStorage_(copyCudaComplexFloat));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexDoubleStorageType, h, &THWStorage_(copyCudaComplexDouble));
-  #endif
-  // add CPU <- GPU copies to base type
-  /// #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
-  #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
-  extern THPCopyList THCpuStorage_(copy_functions);
-  auto& b = THCpuStorage_(copy_functions);
-  #if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE) && !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, b, &THCpuStorage_(copyCudaByte));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPCharStorageType, b, &THCpuStorage_(copyCudaChar));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPShortStorageType, b, &THCpuStorage_(copyCudaShort));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPIntStorageType, b, &THCpuStorage_(copyCudaInt));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPLongStorageType, b, &THCpuStorage_(copyCudaLong));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, b, &THCpuStorage_(copyCudaFloat));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, b, &THCpuStorage_(copyCudaDouble));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, b, &THCpuStorage_(copyCudaHalf));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, b, &THCpuStorage_(copyCudaBool));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, b, &THCpuStorage_(copyCudaBFloat16));
-  #else
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexFloatStorageType, b, &THCpuStorage_(copyCudaComplexFloat));
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexDoubleStorageType, b, &THCpuStorage_(copyCudaComplexDouble));
-  #endif
-  #undef THCpuStorage
-  #undef THCpuStorage_
-#endif
-}
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/StorageMethods.cpp>
@@ -416,13 +339,12 @@ bool THPStorage_(init)(PyObject *module)
     return false;
   Py_INCREF(&THPStorageType);
   PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
-  THPStorage_(initCopyMethods)();
   return true;
 }
 
 void THPStorage_(postInit)(PyObject *module)
 {
-  THPStorageClass = PyObject_GetAttrString(module,(char*)TH_CONCAT_STRING_2(Real,Storage));
+  THPStorageClass = PyObject_GetAttrString(module, "_UntypedStorage");
   if (!THPStorageClass) throw python_error();
 
   at::Backend backend = at::Backend::CPU;

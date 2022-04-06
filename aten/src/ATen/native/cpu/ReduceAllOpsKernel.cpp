@@ -1,16 +1,18 @@
-#include<ATen/native/ReduceOps.h>
-#include<ATen/native/ReduceAllOps.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ReduceOps.h>
+#include <ATen/native/ReduceAllOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/SharedReduceOps.h>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 namespace {
@@ -29,7 +31,7 @@ inline void reduce_all_impl_vec(
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
-    [&](int64_t start, int64_t end, const scalar_t ident) -> scalar_t {
+    [&](int64_t start, int64_t end, const scalar_t /*ident*/) -> scalar_t {
       scalar_t partial_out = vec::reduce_all<scalar_t>(
         [=](Vec x, Vec y) { return vop(x, y); },
         input_data + start,
@@ -51,7 +53,7 @@ inline void reduce_all_impl(
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t ident) -> scalar_t {
       scalar_t partial_out = ident;
-      for (int64_t i = start; i < end; i++) {
+      for (const auto i : c10::irange(start, end)) {
          partial_out = op(partial_out, input_data[i]);
       }
       return partial_out;
@@ -124,7 +126,7 @@ inline void reduce_all_impl_two_outputs(
   scalar_t_pair result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t_pair& ident) -> scalar_t_pair {
       scalar_t_pair partial_out(ident);
-      for (int64_t i = start; i < end; i++) {
+      for (const auto i : c10::irange(start, end)) {
          partial_out = reduce_chunk_func(partial_out, input_data[i]);
       }
       return partial_out;

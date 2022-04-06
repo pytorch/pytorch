@@ -193,50 +193,45 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/stats/test_history.py --mode=multiline --ref=594a66 --sha-length=8 --test=test_set_dir \
-      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
-    2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
-    2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
-    2021-02-10 10:13:25Z 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
-    2021-02-10 10:13:25Z 9c0caf03 pytorch_linux_xenial_py3_6_gcc7_test 0.449s
-    2021-02-10 10:09:14Z 602434bc pytorch_linux_xenial_py3_6_gcc5_4_test 0.361s
-    2021-02-10 10:09:14Z 602434bc pytorch_linux_xenial_py3_6_gcc7_test 0.454s
-    2021-02-10 10:09:10Z 2e35fe95 (no reports in S3)
-    2021-02-10 10:09:07Z ff73be7e (no reports in S3)
-    2021-02-10 10:05:39Z 74082f0d (no reports in S3)
-    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.414s
-    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.476s
-    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.377s
-    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.326s
+    $ tools/stats/test_history.py --mode=multiline --ref=86a961af879 --sha-length=8 \
+      --test=test_composite_compliance_dot_cpu_float32 \
+      --job linux-xenial-py3.7-gcc5.4-test-default1 --job linux-xenial-py3.7-gcc7-test-default1
+    2022-02-18 15:47:37Z 86a961af linux-xenial-py3.7-gcc5.4-test-default1 0.001s
+    2022-02-18 15:47:37Z 86a961af linux-xenial-py3.7-gcc7-test-default1 0.001s
+    2022-02-18 15:12:34Z f5e201e4 linux-xenial-py3.7-gcc5.4-test-default1 0.001s
+    2022-02-18 15:12:34Z f5e201e4 linux-xenial-py3.7-gcc7-test-default1 0.001s
+    2022-02-18 13:14:56Z 1c0df265 linux-xenial-py3.7-gcc5.4-test-default1 0.001s
+    2022-02-18 13:14:56Z 1c0df265 linux-xenial-py3.7-gcc7-test-default1 0.001s
+    2022-02-18 13:14:56Z e73eaffd (no reports in S3)
+    2022-02-18 06:29:12Z 710f12f5 linux-xenial-py3.7-gcc5.4-test-default1 0.001s
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/stats/test_history.py --mode=multiline --all --ref=321b9 --delta=12 --sha-length=8 \
-      --test=test_qr_square_many_batched_complex_cuda
-    2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
-    2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
-    2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 402.572s
-    2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.164s
-    2021-01-06 20:58:28Z fcb69d2e pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 436.732s
-    2021-01-06 20:58:28Z fcb69d2e pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
-    2021-01-06 20:58:28Z fcb69d2e pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 407.616s
-    2021-01-06 20:58:28Z fcb69d2e pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.044s
+    $ tools/stats/test_history.py --mode=multiline --all --ref=86a961af879 --delta=12 --sha-length=8 \
+      --test=test_composite_compliance_dot_cuda_float32
+    2022-02-18 03:49:46Z 69389fb5 linux-bionic-cuda10.2-py3.9-gcc7-test-default1 0.001s skipped
+    2022-02-18 03:49:46Z 69389fb5 linux-bionic-cuda10.2-py3.9-gcc7-test-slow1 0.001s skipped
+    2022-02-18 03:49:46Z 69389fb5 linux-xenial-cuda11.3-py3.7-gcc7-test-default1 0.001s skipped
+    2022-02-18 03:49:46Z 69389fb5 periodic-linux-bionic-cuda11.5-py3.7-gcc7-test-default1 0.001s skipped
+    2022-02-18 03:49:46Z 69389fb5 periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-test-default1 0.001s skipped
+    2022-02-18 03:49:46Z 69389fb5 periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test-default1 0.001s skipped
 
 In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/stats/test_history.py --mode=columns --ref=3cf783 --sha-length=8 --test=test_set_dir \
-      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
-    2021-02-10 12:18:50Z 3cf78395    0.644s    0.312s
-    2021-02-10 11:13:34Z 594a66d7    0.360s  errored
-    2021-02-10 10:13:25Z 9c0caf03    0.819s    0.449s
-    2021-02-10 10:09:14Z 602434bc    0.361s    0.454s
-    2021-02-10 10:09:10Z 2e35fe95
-    2021-02-10 10:09:07Z ff73be7e
-    2021-02-10 10:05:39Z 74082f0d
-    2021-02-10 07:42:29Z 0620c96f    0.414s    0.377s (2 job re-runs omitted)
-    2021-02-10 07:27:53Z 33afb5f1    0.381s    0.294s
+    $ tools/stats/test_history.py --mode=columns --ref=86a961af879 --sha-length=8 \
+      --test=test_composite_compliance_dot_cpu_float32 \
+      --job linux-xenial-py3.7-gcc5.4-test-default1 --job linux-xenial-py3.7-gcc7-test-default1
+    2022-02-18 15:47:37Z 86a961af    0.001s    0.001s
+    2022-02-18 15:12:34Z f5e201e4    0.001s    0.001s
+    2022-02-18 13:14:56Z 1c0df265    0.001s    0.001s
+    2022-02-18 13:14:56Z e73eaffd
+    2022-02-18 06:29:12Z 710f12f5    0.001s    0.001s
+    2022-02-18 05:20:30Z 51b04f27    0.001s    0.001s
+    2022-02-18 03:49:46Z 69389fb5    0.001s    0.001s
+    2022-02-18 00:19:12Z 056b6260    0.001s    0.001s
+    2022-02-17 23:58:32Z 39fb7714    0.001s    0.001s
 
 Minor note: in columns mode, a blank cell means that no report was found
 in S3, while the word "absent" means that a report was found but the

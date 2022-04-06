@@ -21,7 +21,7 @@ PyObject* THPFInfo_New(const at::ScalarType& type) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
-  self_->type = c10::toValueType(type);
+  self_->type = c10::toRealValueType(type);
   return self.release();
 }
 
@@ -142,7 +142,7 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
     });
   }
   // Quantized Type
-  return AT_DISPATCH_QINT_TYPES(self->type, "max", [] {
+  return AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self->type, "max", [] {
       return THPUtils_packInt64(std::numeric_limits<underlying_t>::max());
   });
 }
@@ -154,7 +154,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
     });
   }
   // Quantized Type
-  return AT_DISPATCH_QINT_TYPES(self->type, "min", [] {
+  return AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self->type, "min", [] {
       return THPUtils_packInt64(std::numeric_limits<underlying_t>::lowest());
   });
 }
