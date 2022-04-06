@@ -1,6 +1,4 @@
-$pytorch_root=[string](Get-Location)
-echo $pytorch_root
-Add-MpPreference -ExclusionPath $pytorch_root
+Set-MpPreference -ExclusionPath $(Get-Location).tostring()
 $preference = Get-MpPreference
 echo "show ExclusionPath"
-echo $preference.ExclusionPath
+echo "path is "$preference.ExclusionPath
