@@ -267,6 +267,7 @@ class Module:
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
         self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
         self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
@@ -1164,6 +1165,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_load_state_dict_post_hooks' not in self.__dict__:
+            self._load_state_dict_post_hooks = OrderedDict()
         if '_non_persistent_buffers_set' not in self.__dict__:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
@@ -1407,6 +1410,27 @@ class Module:
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
+    def _register_load_state_dict_post_hook(self, hook, with_module=False):
+        r"""These hooks will be called with no arguments after loading
+        `state_dict` into `self`.
+
+        If ``with_module`` is ``True``, then the first argument to the hook is
+        an instance of the module. In this case the hook should take in a
+        ``nn.Module`` as the first argument.
+
+        Arguments:
+            hook (Callable): Callable hook that will be invoked after
+                loading the state dict.
+            with_module (bool, optional): Whether or not to pass the module
+                instance to the hook as the first parameter.
+        """
+        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        if with_module:
+            hook = functools.partial(hook, self)
+        self._load_state_dict_post_hooks[handle.id] = hook
+        return handle
+
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
@@ -1501,6 +1525,7 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
+
     def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
                         strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
@@ -1537,12 +1562,18 @@ class Module:
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
         def load(module, prefix=''):
-            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
-            module._load_from_state_dict(
-                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
-            for name, child in module._modules.items():
-                if child is not None:
-                    load(child, prefix + name + '.')
+            try:
+                local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+                module._load_from_state_dict(
+                    state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+                for name, child in module._modules.items():
+                    if child is not None:
+                        load(child, prefix + name + '.')
+            finally:
+                # Note that post hooks for a module are called after self _and_ all
+                # all child modules are loaded.
+                for hook in module._load_state_dict_post_hooks.values():
+                    hook()
 
         load(self)
         del load
