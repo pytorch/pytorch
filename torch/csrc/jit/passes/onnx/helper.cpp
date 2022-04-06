@@ -193,7 +193,7 @@ Node* transformToONNXConcatNode(
     // and 1-D tensors, For inputs that are already 1-D tensors, we skip the
     // step of creating a corresponding unsqueeze node.
     if (auto type = new_input->type()->cast<TensorType>()) {
-      if (type->dim() && type->dim() == 1) {
+      if (type->dim() && type->dim() == 1U) {
         unsqueezed.emplace_back(new_input);
         continue;
       }
