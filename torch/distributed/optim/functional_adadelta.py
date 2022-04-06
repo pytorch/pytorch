@@ -23,6 +23,7 @@ class _FunctionalAdadelta(object):
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         foreach: bool = False,
+        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -30,6 +31,7 @@ class _FunctionalAdadelta(object):
             "rho": rho,
             "eps": eps,
             "weight_decay": weight_decay,
+            "maximize": maximize
         }
         self.foreach = foreach
 
@@ -52,6 +54,7 @@ class _FunctionalAdadelta(object):
         rho = self.defaults['rho']
         eps = self.defaults['eps']
         weight_decay = self.defaults['weight_decay']
+        maximize = self.defaults['maximize']
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -85,4 +88,5 @@ class _FunctionalAdadelta(object):
                        rho=rho,
                        eps=eps,
                        weight_decay=weight_decay,
-                       foreach=self.foreach)
+                       foreach=self.foreach,
+                       maximize=maximize)
