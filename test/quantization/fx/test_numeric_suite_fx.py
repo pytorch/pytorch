@@ -1626,7 +1626,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                         (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
                         (base_op in FUNS_IO_TYPE_FP32) or
                         (base_op in MODS_IO_TYPE_FP32) or
-                        (base_op in MODS_IO_TYPE_FP32_OR_INT8),
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
 
     @skipIfNoFBGEMM
