@@ -686,6 +686,8 @@ class Operator:
         exemptions = {
             # we have support (see OpInfo), testing artifact
             'torch.nn.functional.dropout2d',
+            # exception: we dont even support double backward for this
+            'torch.nn.functional.hardswish',
         }
         if self.name in exemptions:
             return Support.YES
