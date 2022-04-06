@@ -24,13 +24,19 @@ from ...fuser_method_mappings import (
     fuse_convtranspose_bn,
 )
 
-_ConvMetadata = namedtuple("_ConvMetadata", ["root", "transpose", "bn", "reference", "qat", "relu", "relu_qat", "bn_qat", "bn_relu_qat", "func"])
-_Conv1dMetadata = _ConvMetadata(nn.Conv1d, nn.ConvTranspose1d, nn.BatchNorm1d, nnqr.Conv1d, nnqat.Conv1d, nni.ConvReLU1d,
-                                nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d, F.conv1d)
-_Conv2dMetadata = _ConvMetadata(nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d, nnqr.Conv2d, nnqat.Conv2d, nni.ConvReLU2d,
-                                nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d, F.conv2d)
-_Conv3dMetadata = _ConvMetadata(nn.Conv3d, nn.ConvTranspose3d, nn.BatchNorm3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
-                                nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
+_ConvMetadata = namedtuple(
+    "_ConvMetadata",
+    ["root", "transpose", "bn", "reference", "qat", "relu", "relu_qat", "bn_qat",
+     "bn_relu_qat", "func"])
+_Conv1dMetadata = _ConvMetadata(
+    nn.Conv1d, nn.ConvTranspose1d, nn.BatchNorm1d, nnqr.Conv1d, nnqat.Conv1d, nni.ConvReLU1d,
+    nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d, F.conv1d)
+_Conv2dMetadata = _ConvMetadata(
+    nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d, nnqr.Conv2d, nnqat.Conv2d, nni.ConvReLU2d,
+    nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d, F.conv2d)
+_Conv3dMetadata = _ConvMetadata(
+    nn.Conv3d, nn.ConvTranspose3d, nn.BatchNorm3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
+    nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
 
 # ===================
 # |  DTYPE CONFIGS  |
