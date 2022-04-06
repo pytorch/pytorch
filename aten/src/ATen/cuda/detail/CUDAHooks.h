@@ -8,8 +8,10 @@
 
 namespace at { namespace cuda { namespace detail {
 
-// Callback to initialize THC Magma, which is implemented in torch_cuda_cu
-TORCH_CUDA_CPP_API extern std::function<void()> THCMagma_init;
+// Set the callback to initialize Magma, which is set by
+// torch_cuda_cu. This indirection is required so magma_init is called
+// in the same library where Magma will be used.
+TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
 
 TORCH_CUDA_CPP_API bool hasPrimaryContext(int64_t device_index);
 TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
@@ -17,13 +19,14 @@ TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
-  std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
+  void initCUDA() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(void* data) const override;
   const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
+  bool hasCuSOLVER() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
   bool hasPrimaryContext(int64_t device_index) const override;

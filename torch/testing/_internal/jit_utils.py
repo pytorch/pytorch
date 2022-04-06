@@ -16,7 +16,8 @@ import functools
 # Testing utils
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, \
-    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS, \
+    is_iterable_of_tensors
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
@@ -36,7 +37,7 @@ import sys
 import tempfile
 import textwrap
 from importlib.abc import Loader
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Union
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -289,8 +290,25 @@ class JitTestCase(JitCommonTestCase):
         result.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         return result
 
-    def assertGraphContains(self, graph, kind):
-        self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
+    def assertGraphContains(self, graph, kind, consider_subgraphs=False):
+
+        if consider_subgraphs:
+            strgraph = str(graph)
+            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
+            self.assertTrue(count > 0)
+            return
+
+        def nodes(block):
+            out = []
+            for node in block.nodes():
+                if node.kind() == kind:
+                    out.append(node)
+                for block in node.blocks():
+                    out += nodes(block)
+            return out
+
+        out_nodes = nodes(graph)
+        self.assertTrue(len(out_nodes) > 0)
 
     def assertGraphContainsExactly(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
         def perform_assert(graph, kind, actual, expected, consider_subgraphs):
@@ -375,35 +393,46 @@ class JitTestCase(JitCommonTestCase):
         return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
+                               name=None, outputs=None, capture_output=False,
+                               frames_up=1, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
-        when executed with normal python, the string frontend, and the AST frontend
+        when executed with normal python, the string frontend, and the
+        AST frontend. Logic taken from `checkScript` (see comments there
+        for details)
         """
-
         with enable_profiling_mode_for_profiling_tests():
-            # normal python
+            # Normal Python
             with self.assertRaisesRegex(exception, regex):
-                script(*inputs)
-            # string frontend
-            with self.assertRaisesRegex(exception, regex):
-                source = textwrap.dedent(inspect.getsource(script))
-                cu = torch.jit.CompilationUnit(source)
-                ge = getattr(cu, script.__name__)
-                # profiling run
-                with self.assertRaisesRegex(exception, regex):
-                    ge(*inputs)
-                # optimized run
-                ge(*inputs)
-            # python AST frontend
-            with self.assertRaisesRegex(exception, regex):
-                ge = torch.jit.script(script)
-                # profiling run
-                with self.assertRaisesRegex(exception, regex):
-                    ge(*inputs)
-                # optimized run
-                ge(*inputs)
+                if isinstance(script, str):
+                    frame = self.get_frame_vars(frames_up)
+                    the_locals: Dict[str, Any] = {}
+                    execWrapper(script, glob=frame, loc=the_locals)
+                    frame.update(the_locals)
 
+                    python_fn = frame[name]
+                else:
+                    python_fn = script
+
+                python_fn(*inputs)
+
+            # String frontend
+            with self.assertRaisesRegex(exception, regex):
+                if isinstance(script, str):
+                    cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
+                    string_frontend = getattr(cu, name)
+                else:
+                    source = textwrap.dedent(inspect.getsource(script))
+                    cu = torch.jit.CompilationUnit(source, _frames_up=frames_up)
+                    string_frontend = getattr(cu, script.__name__)
+
+                string_frontend(*inputs)
+
+            # Python AST frontend
+            if not isinstance(script, str):
+                with self.assertRaisesRegex(exception, regex):
+                    ge = torch.jit.script(python_fn)
+                    ge(*inputs)
 
     def checkBailouts(self, model, inputs, expected):
         state = model.get_debug_state()
@@ -594,7 +623,7 @@ class JitTestCase(JitCommonTestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
-                self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
+                self.assertEqual(g2, g2_ge, atol=8e-4, rtol=8e-4)
 
         return ge
 
@@ -668,11 +697,13 @@ def _trace(*args, **kwargs):
 
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
+        torch._C._jit_override_can_fuse_on_cpu_legacy(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
+            torch._C._jit_override_can_fuse_on_cpu_legacy(False)
             torch._C._jit_override_can_fuse_on_cpu(False)
             torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
@@ -732,3 +763,126 @@ def _get_py3_code(code, fn_name):
         loader.exec_module(module)
         fn = getattr(module, fn_name)
         return fn
+
+class TensorExprTestOptions():
+    def __init__(self):
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
+
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        torch._C._jit_set_texpr_fuser_enabled(True)
+        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
+    def restore(self):
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._get_graph_executor_optimize(self.old_profiling_mode)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+
+def clone_inputs(args):
+    inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
+
+    return inputs
+
+def get_traced_sample_variant_pairs(device, dtype, op):
+    # tuples of (variant, sample)
+    outputs: List[Tuple[Any, Any]] = []
+
+    samples = op.sample_inputs(device, dtype)
+
+    # Acquires variants to test
+    func = op.get_op()
+    method = op.get_method()
+    variants = {
+        # TODO: inplace tests currently fail, fix and add inplace variant
+        'function': func, 'method': method,
+    }
+
+    # TODO: find better way to standardize on op registration itself..
+    has_fake_function = op.name in ["resize_", 'resize_as_']
+
+    if has_fake_function:
+        variants = {'method': getattr(torch.Tensor, op.name)}
+
+    # In eager mode, these ops can take (Tensor, bool) args; but in
+    # JIT they can only take (Tensor, Scalar), and bool is not a
+    # scalar in the JIT type system. So to test these in JIT, the bool
+    # is converted to an int for the test.
+    ops_with_unsupported_bool_args = [
+        {
+            "name": "div_floor_rounding",
+            "arg_idx": [0],
+        },
+        {
+            "name": "div_no_rounding_mode",
+            "arg_idx": [0],
+        },
+        {
+            "name": "div_trunc_rounding",
+            "arg_idx": [0],
+        },
+        {
+            "name": "index_fill",
+            "arg_idx": [2],
+        },
+        {
+            "name": "full_like",
+            "arg_idx": [0],
+        },
+        {
+            "name": "mul",
+            "arg_idx": [0],
+        },
+        {
+            "name": "new_full",
+            "arg_idx": [1],
+        },
+    ]
+
+    # doesn't support tracing
+    if has_fake_function:
+        return outputs
+
+    for sample in samples:
+        for func_type, variant in variants.items():
+            if variant is None:
+                continue
+
+            if is_lambda(variant):
+                continue
+
+            matching_ops = filter(lambda x: op.formatted_name == x["name"], ops_with_unsupported_bool_args)
+            for op_data in matching_ops:
+                for idx in op_data["arg_idx"]:
+                    args = list(sample.args)
+                    if len(sample.args) > idx and isinstance(sample.args[idx], bool):
+                        args[idx] = int(args[idx])
+                    sample.args = tuple(args)
+
+            outputs.append((variant, sample))
+
+    return outputs
+
+# types.LambdaType gave false positives
+def is_lambda(lamb):
+    LAMBDA = lambda: 0  # noqa: E731
+    return isinstance(lamb, type(LAMBDA)) and lamb.__name__ == LAMBDA.__name__

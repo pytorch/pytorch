@@ -12,6 +12,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/irange.h>
 
 #include <cufft.h>
 #include <cufftXt.h>
@@ -28,7 +29,7 @@ using namespace at::native::detail;
 static void exec_cufft_plan(
     const CuFFTConfig &config, void* in_data, void* out_data, bool forward) {
   auto& plan = config.plan();
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   auto value_type = config.data_type();
   if (value_type == kFloat) {
     switch (config.transform_type()) {
@@ -117,61 +118,6 @@ static void exec_cufft_plan(
 // tensors being contiguous, and that the strides at the innermost signal
 // dimension being unit (1) w.r.t. the corresponding data type.
 
-#pragma push
-#pragma diag_suppress 177   // Function was declared but never referenced
-static inline Tensor _run_cufft(
-    const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
-    bool complex_input, bool complex_output, bool inverse,
-    IntArrayRef checked_signal_sizes, fft_norm_mode norm, bool onesided,
-    IntArrayRef output_sizes, bool input_was_cloned
-) {
-  if (config.should_clone_input() && !input_was_cloned) {
-    input = input.clone(at::MemoryFormat::Contiguous);
-  }
-
-  auto& plan = config.plan();
-
-  // set output
-  auto output = at::empty(output_sizes, input.options());
-
-  // set to current stream
-  CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
-
-  auto ws = at::empty({ config.workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
-  CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
-
-  // run
-  exec_cufft_plan(config, input.data_ptr(), output.data_ptr(), !inverse);
-
-  // rescale if requested
-  auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
-  if (norm != fft_norm_mode::none) {
-    auto signal_numel = c10::multiply_integers(checked_signal_sizes);
-    double scale_denom;
-    if (norm == fft_norm_mode::by_root_n) {
-      scale_denom = std::sqrt(static_cast<double>(signal_numel));
-    } else {
-      scale_denom = static_cast<double>(signal_numel);
-    }
-    if (!complex_input && complex_output && !onesided) {
-      auto end_data_slice = infer_ft_real_to_complex_onesided_size(size_last_signal_dim);
-      output.narrow(signal_ndim, 0, end_data_slice).div_(scale_denom);
-    } else {
-      output.div_(scale_denom);
-    }
-  }
-
-  // if needed, fill out the other half using conjugate symmetry
-  if (!complex_input && complex_output && !onesided) {
-    DimVector signal_dims(signal_ndim);
-    std::iota(signal_dims.begin(), signal_dims.end(), 1);
-    auto out_as_complex = at::view_as_complex(output);
-    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
-  }
-  return output;
-}
-#pragma pop
-
 // The cuFFT plan cache
 // unique_ptr for nullability and to avoid reference invalidation on vector resize
 static std::vector<std::unique_ptr<CuFFTParamsLRUCache>> plan_caches;
@@ -234,6 +180,23 @@ void cufft_clear_plan_cache_impl(int64_t device_index) {
 namespace {
 constexpr int64_t cufft_max_ndim = 3;
 
+// "Large" here means a prime factor not special-cased by cuFFT
+// Ref: https://docs.nvidia.com/cuda/cufft/index.html#accuracy-and-performance
+bool has_large_prime_factor(int64_t n) {
+  constexpr int64_t first_large_prime = 11;
+  const std::array<int64_t, 4> prime_radices{{2, 3, 5, 7}};
+  for (auto prime : prime_radices) {
+    if (n < first_large_prime) {
+        return false;
+    }
+
+    while (n % prime == 0) {
+      n /= prime;
+    }
+  }
+  return n != 1;
+}
+
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
@@ -267,7 +230,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   const auto batch_size = input.sizes()[0];
   DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-  for (int64_t i = 0; i < signal_ndim; ++i) {
+  for (const auto i : c10::irange(signal_ndim)) {
     auto in_size = input.sizes()[i + 1];
     auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
@@ -279,13 +242,13 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
 
   batched_sizes[0] = batch_size;
   DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
-  for (size_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
   // Create the transform plan (either from cache or locally)
-  const auto value_type = c10::toValueType(input.scalar_type());
+  const auto value_type = c10::toRealValueType(input.scalar_type());
   auto fft_type = GetCuFFTTransformType(input.is_complex(), out.is_complex());
   CuFFTParams Params(input.strides(), out.strides(), signal_size, fft_type, value_type);
   CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(input.device().index());
@@ -293,7 +256,22 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   c10::optional<CuFFTConfig> uncached_plan;
   const CuFFTConfig * config = nullptr;
 
-  if (plan_cache.max_size() > 0) {
+  // Workaround for gh-63152, gh-58724
+  // Bluestein plans in CUDA 11.1 (cufft 10.3) cannot be re-used
+  // Bluestein's algorithm is only used when a size has large prime factors,
+  // sizes with only small prime factors can still be cached
+  bool use_caching = true;
+#ifdef CUFFT_VERSION
+  if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
+    // Only cache plans for transforms with small prime factors
+    use_caching = std::none_of(
+        signal_size.begin() + 1, signal_size.end(), [](int64_t dim_size) {
+      return has_large_prime_factor(dim_size);
+    });
+  }
+#endif
+
+  if (use_caching && plan_cache.max_size() > 0) {
     guard.lock();
     if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
       config = &plan_cache.lookup(Params);
@@ -326,7 +304,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
     out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
     batch_numel *= out_sizes[dim_permute[i]];
   }
-  for (int64_t i = batch_dims; i < ndim; ++i) {
+  for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
   return out.as_strided_(out_sizes, out_strides, out.storage_offset());
@@ -467,7 +445,7 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
 
-  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
 
   if (use_optimized_cufft_path(dim)) {
     Tensor temp;

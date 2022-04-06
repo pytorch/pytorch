@@ -46,9 +46,12 @@ def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
     qx = np.clip(qx, qmin, qmax).astype(qtype)
     return qx
 
-def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
+def _calculate_dynamic_qparams(X, dtype, reduce_range=False, qscheme=torch.per_tensor_affine):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
+    assert qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric)
+    if qscheme == torch.per_tensor_symmetric:
+        assert dtype == torch.qint8
     if isinstance(X, torch.Tensor):
         X = X.numpy()
     if dtype == torch.qint8:
@@ -63,17 +66,25 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
             qmin, qmax = 0, 255
     min_val = X.min()
     max_val = X.max()
+    is_symmetric = (qscheme == torch.per_tensor_symmetric)
     if min_val == max_val:
         scale = 1.0
         zero_point = 0
     else:
-        max_val = max(max_val, 0.0)
-        min_val = min(min_val, 0.0)
-        scale = (max_val - min_val) / (qmax - qmin)
-        scale = max(scale, np.finfo(np.float32).eps)
-        zero_point = qmin - round(min_val / scale)
-        zero_point = max(qmin, zero_point)
-        zero_point = min(qmax, zero_point)
+        if is_symmetric:
+            max_val = max(max_val, -min_val)
+            min_val = -max_val
+            scale = (max_val - min_val) / (qmax - qmin)
+            scale = max(scale, np.finfo(np.float32).eps)
+            zero_point = 0
+        else:
+            max_val = max(max_val, 0.0)
+            min_val = min(min_val, 0.0)
+            scale = (max_val - min_val) / (qmax - qmin)
+            scale = max(scale, np.finfo(np.float32).eps)
+            zero_point = qmin - round(min_val / scale)
+            zero_point = max(qmin, zero_point)
+            zero_point = min(qmax, zero_point)
     return [float(scale), int(zero_point)]
 
 def _calculate_dynamic_per_channel_qparams(X, dtype):
@@ -165,6 +176,8 @@ def qengine_is_fbgemm():
     return torch.backends.quantized.engine == 'fbgemm'
 def qengine_is_qnnpack():
     return torch.backends.quantized.engine == 'qnnpack'
+def qengine_is_onednn():
+    return torch.backends.quantized.engine == 'onednn'
 
 # Helper function used to simulate per-channel fake-quant against any axis
 def _permute_to_axis_zero(X, axis):
@@ -203,4 +216,8 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     return res.to(dtype)
 
 def to_tensor(X, device):
-    return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
+    if not isinstance(X, torch.Tensor):
+        X = torch.tensor(X)
+    else:
+        X = X.clone().detach()
+    return X.to(device=torch.device(device), dtype=torch.float32)
