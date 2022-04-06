@@ -997,32 +997,6 @@ class TestAutograd(TestCase):
         self.assertRaisesRegex(RuntimeError, 'cannot be empty',
                                lambda: torch.autograd.backward(fn(), gradient, inputs=[]))
 
-    def test_no_grad_hooks(self):
-        l = torch.nn.Linear(5, 5)
-
-        hook_called = False
-
-        def hook(g):
-            nonlocal hook_called
-            hook_called = True
-            return g
-
-        l.weight.register_hook(hook)
-
-        x = torch.randn(5, 5)
-
-        with torch.autograd.no_grad_hook_mode():
-            out = l(x)
-            loss = torch.sum(out)
-            loss.backward()
-
-            self.assertFalse(hook_called)
-
-        out = l(x)
-        loss = torch.sum(out)
-        loss.backward()
-        self.assertTrue(hook_called)
-
     def test_backward_with_nonleaf_inputs(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         x_nonleaf = x * 1

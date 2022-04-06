@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/grad_hook_mode.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
@@ -637,8 +638,10 @@ static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
 }
 
 static variable_list call_post_hooks(Node& fn, variable_list outputs, const variable_list& inputs) {
-  for (const auto& hook : fn.post_hooks()) {
-    outputs = (*hook)(outputs, inputs);
+  if (!no_grad_hooks_mode()) {
+    for (const auto& hook : fn.post_hooks()) {
+      outputs = (*hook)(outputs, inputs);
+    }
   }
   return outputs;
 }
