@@ -265,6 +265,8 @@ default_decompositions = set(
         aten.hardswish_backward,
         aten.tanh_backward,
         aten.silu_backward,
+        aten.cudnn_batch_norm,
+        aten.cudnn_batch_norm_backward,
     ]
 )
 default_decompositions = get_decompositions(default_decompositions)
