@@ -77,7 +77,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   /**
    * Compare against `other` for equality.
    */
-  virtual const bool equalTo(QuantizerPtr other) = 0;
+  virtual bool equalTo(QuantizerPtr other) const = 0;
 };
 
 } // namespace at
