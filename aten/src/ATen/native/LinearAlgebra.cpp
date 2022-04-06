@@ -1596,13 +1596,14 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-bool should_fold_into_mm(const Tensor& tensor1, const Tensor& tensor2) {
-  auto dim_tensor1 = tensor1.dim();
-  auto dim_tensor2 = tensor2.dim();
+bool should_fold(const Tensor& tensor1, const int64_t dim_tensor2) {
+  const auto dim_tensor1 = tensor1.dim();
   if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+    const auto t1_sizes_ptr = tensor1.sizes().cbegin();
+    const auto t1_strides = tensor1.strides();
     if (dim_tensor1 == 3 && dim_tensor2 == 2 &&
-        tensor1.strides().back() != 1 &&
-        tensor1.strides().front() == tensor1.sizes().cbegin()[1] * tensor1.sizes().cbegin()[2]) {
+        t1_strides.back() != 1 &&
+        t1_strides.front() == t1_sizes_ptr[1] * t1_sizes_ptr[2]) {
       // First dim is slowest moving, and then the following two dims are
       // transposed. This can happen for example by permute(0, 2, 1).
       // First 2 dims could be folded to use mm but would require permutation
@@ -1624,21 +1625,14 @@ bool should_fold_into_mm(const Tensor& tensor1, const Tensor& tensor2) {
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
-- If both Tensors are 1-dimensional, the dot product (scalar) is returned.
-- If both arguments are 2-dimensional, the matrix-matrix product is returned.
-- If the first argument is 1-dimensional and the second argument is 2-dimensional,
-  a 1 is prepended to its dimension for the purpose of the matrix multiply.
-  After the matrix multiply, the prepended dimension is removed.
-- If the first argument is 2-dimensional and the second argument is 1-dimensional,
-  the matrix-vector product is returned.
-- If both arguments are at least 1-dimensional and at least one argument is
-  N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
-  argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
-  batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
-  1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
-  The non-matrix (i.e. batch) dimensions are broadcasted (and thus
-  must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
-  and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
+- If both Tensors are 1-dimensional, (1d) the dot product (scalar) is returned.
+- If the arguments are 2D - 1D or 1D - 2D, the matrix-vector product is returned.
+- If both arguments are 2D, the matrix-matrix product is returned.
+- If one of the arguments is ND with N >= 3 and the other is 1D or 2D, and some
+  conditions on the strides apply (see should_fold) we fold the first N-2 dimensions
+  of the ND argument into a matrix and return mm or mv
+- Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
+  there's more than one
 */
 Tensor _matmul_impl(
     Tensor& out,
@@ -1666,34 +1660,35 @@ Tensor _matmul_impl(
     return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold_into_mm(tensor1, tensor2) ||
-             should_fold_into_mm(tensor2, tensor1)) {
+  } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and some condition on the strides is fulfilled
     const auto transpose = dim_tensor2 > dim_tensor1;
-    const auto t1 = transpose ? MaybeOwned<Tensor>::owned(tensor2.transpose(-2, -1))
+    const auto t1 = transpose ? MaybeOwned<Tensor>::owned(tensor2.mT())
                               : MaybeOwned<Tensor>::borrowed(tensor1);
-    const auto t2 = transpose && dim_tensor1 == 2
-                      ? MaybeOwned<Tensor>::owned(tensor1.t())
-                      : MaybeOwned<Tensor>::borrowed(transpose ? tensor1 : tensor2);
+    const auto t2 = !transpose ? MaybeOwned<Tensor>::borrowed(tensor2)
+                               : dim_tensor1 == 2
+                                   ? MaybeOwned<Tensor>::owned(tensor1.t())
+                                   : MaybeOwned<Tensor>::borrowed(tensor1);
     // Invariant: t1->dim() >= 3 && (t2->dim() == 1 || t2->dim() == 2)
+    //            and *t1 and *t2 are matmul-compatible
 
     // Why not t1->view(-1, sizes_1.back())?
     // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
     // This can happen in e.g. [3, 5, 0] @ [0, 0].
     const auto sizes_1 = t1->sizes();
     auto output_shape = DimVector(sizes_1.begin(), sizes_1.end() - 1);
-    const auto batch_product = c10::multiply_integers(output_shape);
+    const auto folded_dim1 = c10::multiply_integers(output_shape);
 
     // Readjust output_shape if we are multiplying by a matrix
     const auto t2_is_matrix = t2->dim() == 2;
     if (t2_is_matrix) {
       output_shape.push_back(t2->sizes()[1]);
     }
-    const auto t1_folded = t1->reshape({batch_product, sizes_1.back()});
+    const auto t1_folded = t1->reshape({folded_dim1, sizes_1.back()});
     if (!has_out) {
       if (t2_is_matrix) {
         // FIXME This path always does an unnecessary copy when transpose == true as the returned
@@ -1710,33 +1705,30 @@ Tensor _matmul_impl(
         // Swap last two elements of output_shape
         std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
         at::native::resize_output(out, output_shape);
-        out.transpose_(-2, -1);
         std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
       } else {
         at::native::resize_output(out, output_shape);
       }
+      const auto out_ = transpose_out ? c10::MaybeOwned<Tensor>::owned(out.mT())
+                                      : c10::MaybeOwned<Tensor>::borrowed(out);
 
       // We then reshape the output to the expected shape and call mm/mv
       // and transpose back if necessary
-      auto reshaped_out = t2_is_matrix ? out.reshape({batch_product, t2->sizes().back()})
-                                       : out.reshape({batch_product});
+      auto reshaped_out = t2_is_matrix ? out_->reshape({folded_dim1, t2->sizes().back()})
+                                       : out_->reshape({folded_dim1});
       if (t2_is_matrix) {
         at::mm_out(reshaped_out, t1_folded, *t2);
       } else {
         at::mv_out(reshaped_out, t1_folded, *t2);
       }
       if (!reshaped_out.is_alias_of(out)) {
-        out.copy_(reshaped_out.view_as(out));
-      }
-      if (transpose_out) {
-        out.transpose_(-2, -1);
+        out_->copy_(reshaped_out.view_as(*out_));
       }
       return out;
     }
   } else {
     // dim_tensor1 >= 3 || dim_tensor2 >= 3
-    // We are multiplying b1 x n x m1 by b2 x m2 x p (where b1 and b2 can be lists);
-    // we track m1 vs m2 separately even though they must match for nicer error messages
+    // We track m1 vs m2 separately even though they must match for nicer error messages
     const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
     const int64_t m1 = tensor1.sizes().back();
     const IntArrayRef batch_tensor1(tensor1.sizes().data(),
