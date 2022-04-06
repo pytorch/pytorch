@@ -121,10 +121,8 @@ class QuantizeHandler(ABC):
 class BinaryOpQuantizeHandler(QuantizeHandler):
     pass
 
-@register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
-    def is_general_tensor_value_op(self) -> bool:
-        return True
+    pass
 
 # TODO: remove this class
 class ConvReluQuantizeHandler(QuantizeHandler):
