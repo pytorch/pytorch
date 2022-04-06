@@ -421,6 +421,7 @@ Tensor& addmm_out_sparse_csr_cpu(
     const Scalar& alpha,
     Tensor& result) {
   switch (mat1.layout()) {
+  case kStrided:
   case kSparseCsr:
     break;
   case kSparseCsc:
