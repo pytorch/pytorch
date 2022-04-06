@@ -33,6 +33,7 @@ from torch._utils import _get_device_index
 from ..modules import Module
 from ._functions import _get_stream
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
+import torch.nn.utils.parametrize as P
 
 
 logger = logging.getLogger(__name__)
@@ -606,6 +607,14 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.parameters_to_ignore = []
 
+        # Track original parameters for parametrization.
+        self._original_parameters = []
+        for module_name, module in self.module.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if P.is_parametrized(module, param_name):
+                    raise RuntimeError(f'Parameter: {module_name}.{param_name} is already parametrized!')
+                self._original_parameters.append((module, module_name, param_name))
+
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -664,6 +673,18 @@ class DistributedDataParallel(Module, Joinable):
             self._distributed_broadcast_coalesced(
                 module_states, self.broadcast_bucket_size, authoritative_rank
             )
+
+    def _mark_params_as_replicated(self):
+        from torch.distributed._shard.replicated_tensor import ReplicatedTensorParametrization
+        for module, module_name, param_name in self._original_parameters:
+            if (getattr(module, param_name).requires_grad and f'{module_name}.{param_name}' not in self.parameters_to_ignore):
+                P.register_parametrization(module, param_name, ReplicatedTensorParametrization(self.process_group))
+
+    def _mark_params_as_not_replicated(self):
+        for module, module_name, param_name in self._original_parameters:
+            if (getattr(module, param_name).requires_grad and f'{module_name}.{param_name}'
+                    not in self.parameters_to_ignore and P.is_parametrized(module, param_name)):
+                P.remove_parametrizations(module, param_name, leave_parametrized=False)
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -982,11 +1003,18 @@ class DistributedDataParallel(Module, Joinable):
                 # Notify joined ranks whether they should sync in backwards pass or not.
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-            if self.device_ids:
-                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
-            else:
-                output = self.module(*inputs, **kwargs)
+            # Mark parameters as replicated.
+            try:
+                self._mark_params_as_replicated()
+
+                if self.device_ids:
+                    inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+                    output = self.module(*inputs[0], **kwargs[0])
+                else:
+                    output = self.module(*inputs, **kwargs)
+            finally:
+                # Convert back to regular tensors after forward pass is done.
+                self._mark_params_as_not_replicated()
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.

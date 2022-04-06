@@ -13,10 +13,10 @@ from torch.distributed._shard import (
     shard_parameter,
     sharded_tensor,
     _shard_tensor,
+    load_with_process_group,
 )
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
-    load_with_process_group,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
