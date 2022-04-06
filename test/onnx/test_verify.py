@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter

@@ -17,138 +17,134 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(IRVerifier, BitwiseOps) {
-  KernelScope kernel_scope;
-  Var* X = new Var("x", kInt);
-  Var* Y = new Var("y", kFloat);
+  VarPtr X = alloc<Var>("x", kInt);
+  VarPtr Y = alloc<Var>("y", kFloat);
   {
-    auto a = new And(X, Y);
+    auto a = alloc<And>(X, Y);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
-    auto a = new Or(X, Y);
+    auto a = alloc<Or>(X, Y);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
-    auto a = new Xor(X, Y);
+    auto a = alloc<Xor>(X, Y);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
-    auto a = new Lshift(X, Y);
+    auto a = alloc<Lshift>(X, Y);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
-    auto a = new Rshift(X, Y);
+    auto a = alloc<Rshift>(X, Y);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
 }
 
 TEST(IRVerifier, CompareSelect) {
-  KernelScope kernel_scope;
-  Expr* X = new IntImm(1);
-  Expr* Y = new FloatImm(3.14f);
+  ExprPtr X = alloc<IntImm>(1);
+  ExprPtr Y = alloc<FloatImm>(3.14f);
   {
-    auto a = new CompareSelect(X, X, X, Y, kEQ);
+    auto a = alloc<CompareSelect>(X, X, X, Y, kEQ);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
-    auto a = new CompareSelect(X, Y, X, X, kEQ);
+    auto a = alloc<CompareSelect>(X, Y, X, X, kEQ);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
 }
 
 TEST(IRVerifier, Ramp) {
-  KernelScope kernel_scope;
-  Var* I = new Var("i", kInt);
-  Var* J = new Var("j", kFloat);
+  VarPtr I = alloc<Var>("i", kInt);
+  VarPtr J = alloc<Var>("j", kFloat);
   {
-    auto a = new Ramp(I, J, 4);
+    auto a = alloc<Ramp>(I, J, 4);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
 }
 
 TEST(IRVerifier, Load) {
-  KernelScope kernel_scope;
-  Var* I = new Var("i", kInt);
-  Var* J = new Var("j", kLong);
-  Var* K = new Var("k", kFloat);
-  Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
+  VarPtr I = alloc<Var>("i", kInt);
+  VarPtr J = alloc<Var>("j", kLong);
+  VarPtr K = alloc<Var>("k", kFloat);
+  BufPtr B = alloc<Buf>(
+      "b",
+      std::vector<ExprPtr>({alloc<IntImm>(10), alloc<IntImm>(20)}),
+      kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
-    auto a = new Load(B, {I, J});
+    auto a = alloc<Load>(B, std::vector<ExprPtr>({I, J}));
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_NO_THROW(verify(a));
   }
   {
     // Float index
-    auto a = new Load(B, {K, K});
+    auto a = alloc<Load>(B, std::vector<ExprPtr>({K, K}));
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Multilanes are only allowed in flattened indices
-    auto multilane_index = new Ramp(I, new IntImm(1), 4);
-    auto a = new Load(B, {I, multilane_index});
+    auto multilane_index = alloc<Ramp>(I, alloc<IntImm>(1), 4);
+    auto a = alloc<Load>(B, std::vector<ExprPtr>({I, multilane_index}));
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
 }
 
 TEST(IRVerifier, IfThenElse) {
-  KernelScope kernel_scope;
-  Var* I = new Var("i", kInt);
-  Var* J = new Var("j", kLong);
-  Var* K = new Var("k", kFloat);
+  VarPtr I = alloc<Var>("i", kInt);
+  VarPtr J = alloc<Var>("j", kLong);
+  VarPtr K = alloc<Var>("k", kFloat);
   {
     // Condition must be integral
-    auto a = new IfThenElse(K, I, I);
+    auto a = alloc<IfThenElse>(K, I, I);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Dtypes of true and false exprs must match
-    auto a = new IfThenElse(I, I, J);
+    auto a = alloc<IfThenElse>(I, I, J);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Can't have multiple lanes in condition expr
-    auto a = new IfThenElse(new Broadcast(I, 4), I, I);
+    auto a = alloc<IfThenElse>(alloc<Broadcast>(I, 4), I, I);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
 }
 
 TEST(IRVerifier, For) {
-  KernelScope kernel_scope;
-  Var* I = new Var("i", kInt);
-  Var* J = new Var("j", kInt);
-  Stmt* body = new Block({});
+  VarPtr I = alloc<Var>("i", kInt);
+  VarPtr J = alloc<Var>("j", kInt);
+  StmtPtr body = alloc<Block>(std::vector<StmtPtr>({}));
   {
     // Can't have nullptr as a Var
-    auto a = new For(nullptr, I, J, body);
+    auto a = alloc<For>(nullptr, I, J, body);
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     EXPECT_ANY_THROW(verify(a));
   }
 }
 
 TEST(IRVerifier, Block) {
-  KernelScope kernel_scope;
-  Var* I = new Var("i", kInt);
-  Buf* B = new Buf("B", {new IntImm(10)}, kInt);
+  VarPtr I = alloc<Var>("i", kInt);
+  BufPtr B = alloc<Buf>("B", std::vector<ExprPtr>({alloc<IntImm>(10)}), kInt);
   {
-    Stmt* store = new Store(B, {I}, I);
+    StmtPtr store = alloc<Store>(B, std::vector<ExprPtr>({I}), I);
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    Stmt* block1 = new Block({store});
+    StmtPtr block1 = alloc<Block>(std::vector<StmtPtr>({store}));
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    Stmt* block2 = new Block({store});
+    StmtPtr block2 = alloc<Block>(std::vector<StmtPtr>({store}));
     // Stmt can't have multiple parrents, thus inserting it into several blocks
     // is illegal
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -157,33 +153,35 @@ TEST(IRVerifier, Block) {
 }
 
 TEST(IRVerifier, Store) {
-  KernelScope kernel_scope;
-  Var* I = new Var("i", kInt);
-  Var* J = new Var("j", kLong);
-  Var* K = new Var("k", kFloat);
-  Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
+  VarPtr I = alloc<Var>("i", kInt);
+  VarPtr J = alloc<Var>("j", kLong);
+  VarPtr K = alloc<Var>("k", kFloat);
+  BufPtr B = alloc<Buf>(
+      "b",
+      std::vector<ExprPtr>({alloc<IntImm>(10), alloc<IntImm>(20)}),
+      kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
-    auto a = new Store(B, {I, J}, K);
+    auto a = alloc<Store>(B, std::vector<ExprPtr>({I, J}), K);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_NO_THROW(verify(a));
   }
   {
     // Float index
-    auto a = new Store(B, {K, K}, K);
+    auto a = alloc<Store>(B, std::vector<ExprPtr>({K, K}), K);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Multilanes are only allowed in flattened indices
-    auto multilane_index = new Ramp(I, new IntImm(1), 4);
-    auto a = new Store(B, {I, multilane_index}, K);
+    auto multilane_index = alloc<Ramp>(I, alloc<IntImm>(1), 4);
+    auto a = alloc<Store>(B, std::vector<ExprPtr>({I, multilane_index}), K);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Value and buf dtypes mismatch
-    auto a = new Store(B, {I}, I);
+    auto a = alloc<Store>(B, std::vector<ExprPtr>({I}), I);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(a));
   }

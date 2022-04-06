@@ -1,33 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-
-/*
- * Predicate compute takes a TensorView and set of indices. The number of
- * indices and the root of the TensorView are required to have the same number
- * of dimensions. Predicate compute should be run after index compute, and the
- * result of index compute should be used for the indices entry.
- *
- * A vector of Int values are returned which are the output of the operation
- * index[i] < get_root(TV)->domain()->axis(i)->size()
- *
- * It is assumed that no predicate is required if index[i] is an index directly
- * from a for loop. This will not catch all cases if we actually have static
- * size information for example:
- *
- * TV[I].split(4)
- * would produce the code:
- * for(i : I/4)
- *   for(j : 4)
- *     if( i * 4 + j < TV.size(0))
- *       TV[i * 4 + j]...
- *
- * However if we had TV.size[0] = 16 at "compile time" then we wouldn't need the
- * predicate. However we will still generate: for(i : 4) for(j : 4) if( i * 4 +
- * j < TV.size(0)) TV[i * 4 + j]...
- *
- */
+#include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 namespace torch {
 namespace jit {
@@ -36,42 +13,180 @@ namespace cuda {
 
 class PredicateCompute {
  public:
-  // Return the series of predicates, if an axis doesn't have a predicate
-  // reutrns 1
-  static std::vector<kir::Bool*> computePredicates(
-      const TensorView* tv,
-      const std::vector<Val*>& indices,
-      bool use_rfactor);
-
-  static kir::Bool* getInlinePredicate(
-      Expr* expr,
+  // ignore_internal_syncthread_ops will prevent creation of predicates on
+  // block/grid broadcast/reduce as these have syncthread calls within them
+  // so all threads need to execute the function.
+  static Bool* getInlinePredicate(
+      const Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      kir::Bool* thread_pred,
-      bool ignore_block_grid_reductions = true);
+      Bool* thread_pred,
+      PredicateType pred_type);
 };
 
-class TORCH_CUDA_CU_API UnrollPredicate {
+//! Parallelized domains may need to be predicated with threading
+//! indices and IterDomain extents. For example, if a domain is
+//! parallelized by TIDx, when TIDx is not exact, i.e., it can be
+//! larger than the extents of domains parallelized by TIDx,
+//! threadIdx.x may be larger than the IterDomain extent. This can be
+//! harmless for Local tensors, however, for it would
+//! result in out-of-bounds access for Shared tensors as they are
+//! allocated based on tensor shapes rather than threading
+//! dimensions.
+class ParallelizedDomainPredicate {
  public:
-  static kir::Bool* get(
-      const std::vector<kir::ForLoop*>& outer_loops,
-      kir::ForLoop* unrolled_loop,
-      const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map);
+  //! Predicate information for parallelized domains
+  class PredicateInfo {
+   public:
+    explicit PredicateInfo(ParallelType pt) : pt_(pt) {}
+
+    //! Adds a domain that is parallized by the same paralell type
+    bool addDomain(IterDomain* id);
+
+    const std::vector<IterDomain*>& ids() const {
+      return ids_;
+    }
+
+    //! Generates a predicate Val from predicate information
+    Bool* getPredicate() const;
+
+   private:
+    ParallelType pt_;
+    //! Domains parallelized by the same parallel type
+    std::vector<IterDomain*> ids_;
+  };
+
+  //! Returns a predicate Val for parallelied domains of an expression.
+  static Bool* getPredicate(
+      const Expr* expr,
+      const std::vector<kir::ForLoop*>& loops);
+
+  //! Returns predicate information for parallelied domains of an
+  //! expression.
+  static std::unordered_map<ParallelType, PredicateInfo, TypeHash>
+  getPredicateMap(
+      const Expr* expr,
+      const std::vector<kir::ForLoop*>& loops,
+      kir::ForLoop* unswitched_loop = nullptr);
+};
+
+//! Keys to identify unique unswitch predicates. Just consists of a
+//! predicated concrete domain if not parallelized. If parallelized,
+//! pick one for each different parallelization. When the same
+//! parallel type is used for different concrete domains, they are
+//! considered different predicates and are included in the unswitch
+//! condition lists.
+class UnswitchPredicateKey {
+ public:
+  UnswitchPredicateKey();
+
+  UnswitchPredicateKey(
+      IterDomain* predicated_consumer_id,
+      TensorView* consumer_tv,
+      IterDomain* predicated_concrete_id);
+
+  bool operator==(const UnswitchPredicateKey& other) const {
+    return predicated_concrete_id_ == other.predicated_concrete_id_ &&
+        parallel_concrete_ids_ == other.parallel_concrete_ids_;
+  }
+
+  const auto& predicatedId() const {
+    return predicated_concrete_id_;
+  }
+
+  const auto& parallelConcreteIds() const {
+    return parallel_concrete_ids_;
+  }
+
+  IterDomain* parallelId(ParallelType pt) const {
+    auto it = parallelConcreteIds().find(pt);
+    if (it == parallelConcreteIds().end()) {
+      return nullptr;
+    } else {
+      return it->second;
+    }
+  }
+
+  std::string toString() const;
 
  private:
-  UnrollPredicate(
+  //! Predicated concrete domain
+  IterDomain* predicated_concrete_id_ = nullptr;
+  //! Store parallelized concrete domains
+  std::unordered_map<ParallelType, IterDomain*, TypeHash>
+      parallel_concrete_ids_;
+};
+
+struct UnswitchPredicateKeyHash {
+  std::size_t operator()(const UnswitchPredicateKey& key) const;
+};
+
+class TORCH_CUDA_CU_API UnswitchPredicate {
+ public:
+  static Bool* get(
+      const std::vector<kir::ForLoop*>& outer_loops,
+      kir::ForLoop* unrolled_loop);
+
+ private:
+  //! Predicate information for each UnswitchPredicateKey.
+  struct MergedPredicates {
+    //! Predicate information for the start and stop predicates.
+    struct Info {
+      //! Most restrictive static predicate. Nullptr if no static
+      //! predicate found.
+      Bool* static_pred = nullptr;
+      //! The offset value of static_pred
+      int64_t static_offset = 0;
+      //! List of dynamic predicates.
+      std::vector<Bool*> dynamic_preds;
+    };
+    UnswitchPredicateKey predicate_key;
+    Info start;
+    Info stop;
+  };
+
+  UnswitchPredicate(
       std::vector<kir::ForLoop*> outer_loops,
-      kir::ForLoop* unrolled_loop,
-      const std::unordered_map<IterDomain*, IterDomain*>& _p2c_root_map);
+      kir::ForLoop* unrolled_loop);
 
   void predicateOn(Expr*);
 
   void openLoop(kir::ForLoop*);
 
+  void openIte(kir::IfThenElse*);
+
+  //! Generates the final predicates from the predicated_keys map
+  void finalize();
+
+  //! Merge predicates as much as possible. If a predicate offset is
+  //! static, only pick the most restrictive one, e.g., the one with the
+  //! minimum offset for the start predication.
+  void mergeUnswitchPredicateOffsets(
+      Bool* predicate,
+      Val* offset,
+      MergedPredicates::Info& merged_predicate_info,
+      bool is_start);
+
  private:
-  std::unordered_map<IterDomain*, kir::Bool*> predicates_;
+  //! Track which iter domains have been predicated
+  std::unordered_set<UnswitchPredicateKey, UnswitchPredicateKeyHash>
+      predicated_keys_;
+
+  //! The predicates that have been recorded but not yet finalized
+  std::vector<MergedPredicates> pending_predicates_;
+
+  //! Track which parallelized domains have been predicated
+  std::unordered_map<
+      ParallelType,
+      ParallelizedDomainPredicate::PredicateInfo,
+      TypeHash>
+      parallelized_dom_predicates_;
+
+  //! The predicates that have been generated.
+  std::vector<Bool*> predicates_;
+
   std::vector<kir::ForLoop*> for_loops_;
 
-  const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map_;
+  kir::ForLoop* unrolled_loop_;
 };
 
 } // namespace cuda

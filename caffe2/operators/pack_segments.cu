@@ -1,6 +1,7 @@
 #include <cub/cub.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/pack_segments.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 

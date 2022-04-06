@@ -10,16 +10,23 @@
 
 #include <nccl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
-const inline char* getNcclErrorDetailStr(ncclResult_t error) {
+const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
+  // Prioritize failure reason provided by PG NCCL first, as it can abort
+  // communicators when it encounters collective timeouts, etc.
+  if (processGroupFailureReason != c10::nullopt) {
+    return (*processGroupFailureReason).c_str();
+  }
   switch (error) {
     case ncclUnhandledCudaError:
       return "ncclUnhandledCudaError: Call to CUDA function failed.";
     case ncclSystemError:
-      return "ncclSystemError: System call (socket, malloc, munmap, etc) failed.";
+      return "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
+        "It can be also caused by unexpected exit of a remote peer, you can check NCCL warnings for failure reason and see if there is connection closure by a peer.";
     case ncclInternalError:
       return "ncclInternalError: Internal check failed. This is either a bug in NCCL or due to memory corruption";
     case ncclInvalidArgument:
@@ -51,14 +58,14 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error) {
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
-#define C10D_NCCL_CHECK(cmd)                                                  \
+#define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     if (result != ncclSuccess) {                                              \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
-          "\n" + getNcclErrorDetailStr(result);                               \
-      TORCH_CHECK(false, err);                                          \
+          "\n" + getNcclErrorDetailStr(result, failureReason);                \
+      TORCH_CHECK(false, err);                                                \
     }                                                                         \
   } while (0)
 
@@ -87,7 +94,10 @@ std::string ncclGetErrorWithVersion(ncclResult_t error);
 class NCCLComm {
  public:
   explicit NCCLComm(ncclComm_t ncclComm)
-      : ncclComm_(ncclComm), aborted_(false), ncclAsyncErr_(ncclSuccess) {}
+      : ncclComm_(ncclComm),
+        aborted_(false),
+        ncclAsyncErr_(ncclSuccess),
+        commFailureReason_(c10::nullopt) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -113,7 +123,7 @@ class NCCLComm {
       ncclUniqueId commId) {
     auto comm = std::make_shared<NCCLComm>();
     C10D_NCCL_CHECK(
-        ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank));
+        ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank), c10::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     return comm;
@@ -140,17 +150,15 @@ class NCCLComm {
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
   }
 
-  ncclComm_t getNcclComm() {
+  ncclComm_t getNcclComm();
+
+  c10::optional<std::string> getNcclCommFailureReason() const {
     std::unique_lock<std::mutex> lock(mutex_);
-    if (aborted_) {
-      TORCH_CHECK(false,
-          "NCCL communicator was aborted on rank " + std::to_string(rank_) +
-          ".");
-    }
-    return ncclComm_;
+    return commFailureReason_;
   }
 
-  void ncclCommAbort() {
+  void ncclCommAbort(
+      c10::optional<std::string> commFailureReason = c10::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
@@ -158,7 +166,11 @@ class NCCLComm {
       return;
     }
 
-    C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_));
+    // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
+    // timeout)
+    commFailureReason_ = commFailureReason;
+
+    C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
     aborted_ = true;
     ncclComm_ = nullptr;
 
@@ -183,7 +195,7 @@ class NCCLComm {
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
     }
-    C10D_NCCL_CHECK(ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_));
+    C10D_NCCL_CHECK(ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_), commFailureReason_);
     return ncclAsyncErr_;
 #else
     // Always return success, if error checks are disabled.
@@ -200,6 +212,9 @@ class NCCLComm {
   mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
   int rank_;
+  // Optional reason for communicator failure, provided by ProcessGroupNCCL for
+  // better error messaging.
+  c10::optional<std::string> commFailureReason_;
 };
 
 } // namespace c10d

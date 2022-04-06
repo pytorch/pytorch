@@ -19,7 +19,7 @@ class EmbeddingPackedParams(torch.nn.Module):
                                                            axis=0, dtype=self.dtype)
             self.set_weight(wq)
         else:
-            raise NotImplementedError('Unsupported dtype on quantized embedding! Supports quint8 and quint4x2.')
+            raise NotImplementedError(f'Unsupported dtype on quantized embedding! Supports quint8 and quint4x2. Got dtype: {dtype}')
 
     @torch.jit.export
     def set_weight(self, weight: torch.Tensor) -> None:
@@ -93,6 +93,7 @@ class Embedding(torch.nn.Module):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        self.dtype = dtype
 
         if _weight is None:
             scales = torch.ones(num_embeddings, dtype=torch.float)
@@ -109,7 +110,10 @@ class Embedding(torch.nn.Module):
         self._packed_params.set_weight(qweight)
 
     def forward(self, indices: Tensor) -> Tensor:
-        return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
+        if self.dtype == torch.quint4x2:
+            return torch.ops.quantized.embedding_4bit(self._packed_params._packed_weight, indices)
+        else:
+            return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
 
     def _get_name(self):
         return 'QuantizedEmbedding'
@@ -135,21 +139,31 @@ class Embedding(torch.nn.Module):
         r"""Create a quantized embedding module from a float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by user
         """
-        assert type(mod) == nn.Embedding, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
-            nn.Embedding.__name__
-        assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
-        from torch.quantization import float_qparams_weight_only_qconfig
-        if mod.qconfig is not None and mod.qconfig.weight is not None:
-            weight_observer = mod.qconfig.weight()
+        if hasattr(mod, 'weight_fake_quant'):
+            assert type(mod) == nn.qat.Embedding, 'nnq.' + cls.__name__ + '.from_float ' + \
+                'with fake quant only works for ' + nn.qat.Embedding.__name__
+            weight_observer = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
         else:
-            weight_observer = float_qparams_weight_only_qconfig.weight()
+            assert type(mod) == nn.Embedding, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
+                nn.Embedding.__name__
+            assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
+            from torch.ao.quantization import float_qparams_weight_only_qconfig
+            if mod.qconfig is not None and mod.qconfig.weight is not None:  # type: ignore[union-attr]
+                weight_observer = mod.qconfig.weight()  # type: ignore[union-attr, operator]
+            else:
+                weight_observer = float_qparams_weight_only_qconfig.weight()
 
         dtype = weight_observer.dtype
+        is_float_qparams_qconfig = weight_observer.qscheme == torch.per_channel_affine_float_qparams
+        assert is_float_qparams_qconfig, \
+            'Embedding quantization is only supported with float_qparams_weight_only_qconfig.'
 
-        assert dtype == torch.quint8, 'The only supported dtype for nnq.Embedding is torch.quint8'
+        assert dtype == torch.quint8 or dtype == torch.quint4x2, \
+            f'The only supported dtype for nnq.Embedding is torch.quint8 and torch.quint4x2, got {dtype}'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
@@ -160,6 +174,20 @@ class Embedding(torch.nn.Module):
         qembedding.set_weight(qweight)
         return qembedding
 
+    @classmethod
+    def from_reference(cls, ref_embedding):
+        qembedding = cls(
+            ref_embedding.num_embeddings,
+            ref_embedding.embedding_dim,
+            ref_embedding.padding_idx,
+            ref_embedding.max_norm,
+            ref_embedding.norm_type,
+            ref_embedding.scale_grad_by_freq,
+            ref_embedding.sparse,
+            ref_embedding.get_quantized_weight(),
+            ref_embedding.weight_dtype,
+        )
+        return qembedding
 
 class EmbeddingBag(Embedding):
     r"""
@@ -215,22 +243,28 @@ class EmbeddingBag(Embedding):
         r"""Create a quantized embedding_bag module from a float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by user
         """
-        assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
-            nn.EmbeddingBag.__name__
-        assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
-        from torch.quantization.qconfig import float_qparams_weight_only_qconfig
-        if mod.qconfig is not None and mod.qconfig.weight is not None:
-            weight_observer = mod.qconfig.weight()
+        if hasattr(mod, 'weight_fake_quant'):
+            weight_observer = mod.weight_fake_quant
         else:
-            weight_observer = float_qparams_weight_only_qconfig.weight()
+            assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
+                nn.EmbeddingBag.__name__
+            assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
+            from torch.ao.quantization.qconfig import float_qparams_weight_only_qconfig
+            if mod.qconfig is not None and mod.qconfig.weight is not None:  # type: ignore[union-attr]
+                weight_observer = mod.qconfig.weight()  # type: ignore[union-attr, operator]
+            else:
+                weight_observer = float_qparams_weight_only_qconfig.weight()
 
         dtype = weight_observer.dtype
+        is_float_qparams_qconfig = weight_observer.qscheme == torch.per_channel_affine_float_qparams
+        assert is_float_qparams_qconfig, \
+            'EmbeddingBag quantization is only supported with float_qparams_weight_only_qconfig.'
 
         assert dtype == torch.quint8 or dtype == torch.quint4x2, \
-            'The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2'
+            f'The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2, got {dtype}'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
@@ -239,4 +273,20 @@ class EmbeddingBag(Embedding):
         # Create quantized EmbeddingBag module and pass in the quantized weight
         qembedding_bag = EmbeddingBag(mod.num_embeddings, mod.embedding_dim, dtype=dtype)
         qembedding_bag.set_weight(qweight)
+        return qembedding_bag
+
+    @classmethod
+    def from_reference(cls, ref_embedding_bag):
+        qembedding_bag = cls(
+            ref_embedding_bag.num_embeddings,
+            ref_embedding_bag.embedding_dim,
+            ref_embedding_bag.max_norm,
+            ref_embedding_bag.norm_type,
+            ref_embedding_bag.scale_grad_by_freq,
+            ref_embedding_bag.mode,
+            ref_embedding_bag.sparse,
+            ref_embedding_bag.get_quantized_weight(),
+            ref_embedding_bag.include_last_offset,
+            ref_embedding_bag.weight_dtype,
+        )
         return qembedding_bag

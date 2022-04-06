@@ -2,6 +2,7 @@
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/MaybeOwned.h>
 
@@ -11,6 +12,7 @@
 namespace {
 
 using at::Tensor;
+using c10::IValue;
 
 struct MyString : public c10::intrusive_ptr_target, public std::string {
   using std::string::string;
@@ -136,6 +138,54 @@ void assertOwn(
   EXPECT_EQ(original.use_count(), useCount);
 }
 
+//////////////////// Helper implementations for IValue. ////////////////////
+
+template<>
+IValue getSampleValue() {
+  return IValue(getSampleValue<Tensor>());
+}
+
+template<>
+IValue getSampleValue2() {
+  return IValue("hello");
+}
+
+template<>
+bool equal(const IValue& lhs, const IValue& rhs) {
+  if (lhs.isTensor() != rhs.isTensor()) {
+    return false;
+  }
+  if (lhs.isTensor() && rhs.isTensor()) {
+    return lhs.toTensor().equal(rhs.toTensor());
+  }
+  return lhs == rhs;
+}
+
+template <>
+void assertBorrow(
+    const c10::MaybeOwned<IValue>& mo,
+    const IValue& borrowedFrom) {
+  if (!borrowedFrom.isPtrType()) {
+    EXPECT_EQ(*mo, borrowedFrom);
+  } else {
+    EXPECT_EQ(mo->internalToPointer(), borrowedFrom.internalToPointer());
+    EXPECT_EQ(borrowedFrom.use_count(), 1);
+  }
+}
+
+template <>
+void assertOwn(
+    const c10::MaybeOwned<IValue>& mo,
+    const IValue& original,
+    size_t useCount) {
+  if (!original.isPtrType()) {
+    EXPECT_EQ(*mo, original);
+  } else {
+    EXPECT_EQ(mo->internalToPointer(), original.internalToPointer());
+    EXPECT_EQ(original.use_count(), useCount);
+  }
+}
+
 template <typename T>
 void MaybeOwnedTest<T>::SetUp() {
   borrowFrom = getSampleValue<T>();
@@ -148,7 +198,8 @@ void MaybeOwnedTest<T>::SetUp() {
 
 using MaybeOwnedTypes = ::testing::Types<
   c10::intrusive_ptr<MyString>,
-  at::Tensor
+  at::Tensor,
+  c10::IValue
   >;
 
 TYPED_TEST_CASE(MaybeOwnedTest, MaybeOwnedTypes);

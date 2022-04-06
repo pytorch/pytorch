@@ -15,10 +15,6 @@ Modern infrastructure:
     to import arbitrary Python files in a script, without having to add
     them to the PYTHONPATH first.
 
-Legacy infrastructure (we should kill this):
-* [cwrap](cwrap) - Implementation of legacy code generation for THNN/THCUNN.
-  This is used by nnwrap.
-
 Build system pieces:
 
 * [setup_helpers](setup_helpers) - Helper code for searching for

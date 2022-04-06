@@ -32,7 +32,7 @@ struct Resolver {
   // the graph to create a value.
   virtual std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) {
     return nullptr;
   }
@@ -47,7 +47,7 @@ struct Resolver {
 struct NativeResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/Export.h>
 
 namespace c10d {
 
@@ -18,12 +19,14 @@ class TORCH_API GradBucket {
  public:
   explicit GradBucket(
       size_t index,
+      size_t bucket_count,
       const at::Tensor& tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
       const std::vector<at::Tensor>& parameters)
       : index_(index),
+        bucket_count_(bucket_count),
         buffer_(tensor),
         offsets_(offsets),
         lengths_(lengths),
@@ -63,11 +66,12 @@ class TORCH_API GradBucket {
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
   bool isLast() const {
-    return index_ == 0;
+    return index_ == bucket_count_ - 1;
   }
 
  private:
   size_t index_;
+  size_t bucket_count_;
   at::Tensor buffer_;
 
   // Per-variable info in buffer_.
@@ -82,7 +86,7 @@ class TORCH_API GradBucket {
 // Requires implementing 1) `runHook` method that communicates gradients
 // asynchronously, and 2) `parseHookResult` method that converts the hook
 // result into a tensor.
-class TORCH_PYTHON_API CommHookInterface {
+class TORCH_API CommHookInterface {
  public:
   virtual ~CommHookInterface() = default;
 
@@ -118,9 +122,8 @@ inline at::Tensor parseCppCommHookResult(
 
 // This CppCommHook interface only requires implementing runHook method that
 // potentially uses a state.
-// Still need TORCH_PYTHON_API instead of TORCH_API to support Windows platform.
 template <typename T>
-class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
+class CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 

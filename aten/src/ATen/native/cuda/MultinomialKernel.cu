@@ -1,19 +1,15 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/CUDAFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-
-#include <THC/THCReduceApplyUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCNumerics.cuh>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -22,6 +18,16 @@
 namespace at { namespace native {
 
 namespace {
+
+template <typename T>
+inline __device__ bool _isinf(T x) { return ::isinf(x); }
+
+inline __device__ bool _isinf(c10::Half x) {
+  return ::isinf(static_cast<float>(x));
+}
+inline __device__ bool _isinf(c10::BFloat16 x) {
+  return ::isinf(static_cast<float>(x));
+}
 
 #define MAX_NUM_BLOCKS 200
 
@@ -37,13 +43,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!(val < zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
+    sum = cuda_utils::BlockReduceSum(sum, smem);
     if (threadIdx.x == 0) {
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!(val < zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -65,14 +71,15 @@ void renormRows(Tensor& t) {
   auto props = at::cuda::getCurrentDeviceProperties();
   CUDA_KERNEL_ASSERT(props != NULL);
   int numSM = props->multiProcessorCount;
-  int maxThreads = props->maxThreadsPerBlock;
+  const int64_t maxThreads = std::min(
+      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
 
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(cols < maxThreads ? cols : maxThreads);
+  dim3 block(std::min(maxThreads, C10_WARP_SIZE * ceil_div(cols, int64_t{C10_WARP_SIZE})));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
-        <<<grid, block, block.x * sizeof(scalar_t),
+        <<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
             rows, cols);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -191,9 +198,9 @@ __global__ void sampleMultinomialOnce(
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isnan(val));
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isinf(val));
-      CUDA_KERNEL_ASSERT(val >= zero);
+      CUDA_KERNEL_ASSERT(!at::_isnan(val));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
+      CUDA_KERNEL_ASSERT(!(val < zero));
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -203,7 +210,7 @@ __global__ void sampleMultinomialOnce(
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      CUDA_KERNEL_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
       foundPos = 0;
@@ -328,7 +335,7 @@ void multinomial_with_replacement_kernel_impl(
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
 
-    int requiredWarps = at::cuda::ATenCeilDiv(numCategories, C10_WARP_SIZE);
+    int requiredWarps = at::ceil_div(numCategories, C10_WARP_SIZE);
     int requiredThreads = std::min(maxThreads, requiredWarps * C10_WARP_SIZE);
     int requiredShared = requiredThreads * sizeof(accscalar_t);
 
@@ -337,9 +344,7 @@ void multinomial_with_replacement_kernel_impl(
       // To exploit greater parallelism for the sampling, generate the
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
-      Tensor sampled = native::empty_cuda({numDist, n_sample}, optTypeMetaToScalarType(self_v.options().dtype_opt()),
-                                          self_v.options().layout_opt(), self_v.options().device_opt(),
-                                          self_v.options().pinned_memory_opt());
+      Tensor sampled = at::detail::empty_cuda({numDist, n_sample}, self_v.options());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
       dim3 block(requiredThreads);

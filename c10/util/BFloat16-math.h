@@ -3,6 +3,11 @@
 #include <c10/util/BFloat16-inl.h>
 #include <c10/util/math_compat.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+
 namespace std {
 
 /// Used by vec256<c10::BFloat16>::map
@@ -56,6 +61,12 @@ inline c10::BFloat16 sin(c10::BFloat16 a) {
 }
 inline c10::BFloat16 tan(c10::BFloat16 a) {
   return std::tan(float(a));
+}
+inline c10::BFloat16 sinh(c10::BFloat16 a) {
+  return std::sinh(float(a));
+}
+inline c10::BFloat16 cosh(c10::BFloat16 a) {
+  return std::cosh(float(a));
 }
 inline c10::BFloat16 tanh(c10::BFloat16 a) {
   return std::tanh(float(a));
@@ -169,3 +180,5 @@ C10_HOST_DEVICE inline c10::BFloat16 nextafter(
 }
 
 } // namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

@@ -1,18 +1,24 @@
-import functools
-import os
-import warnings
-
 from collections import defaultdict
 
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar, DefaultDict
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
+from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('sharding_filter')
 class ShardingFilterIterDataPipe(IterDataPipe):
-    def __init__(self, source_datapipe):
+    r"""
+    Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``). After ``apply_sharding`` is
+    called, each instance of the DataPipe (on different workers) will have every `n`-th element of the
+    original DataPipe, where `n` equals to the number of instances.
+
+    Args:
+        source_datapipe: Iterable DataPipe that will be sharded
+    """
+    def __init__(self, source_datapipe: IterDataPipe):
         self.source_datapipe = source_datapipe
         self.num_of_instances = 1
         self.instance_id = 0
@@ -29,46 +35,55 @@ class ShardingFilterIterDataPipe(IterDataPipe):
             if i % self.num_of_instances == self.instance_id:
                 yield item
 
+    def __len__(self):
+        if isinstance(self.source_datapipe, Sized):
+            return len(self.source_datapipe) // self.num_of_instances +\
+                (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+
 
 @functional_datapipe('batch')
-class BatchIterDataPipe(IterDataPipe[DataChunk[T_co]]):
-    r""" :class:`BatchIterDataPipe`.
+class BatcherIterDataPipe(IterDataPipe[DataChunk]):
+    r"""
+    Creates mini-batches of data (functional name: ``batch``). An outer dimension will be added as
+    ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
+    last batch if ``drop_last`` is set to ``False``.
 
-    Iterable DataPipe to create mini-batches of data. An outer dimension will be added as
-    `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
-    last batch if `drop_last` is set to `False`.
-    args:
+    Args:
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
-        unbatch_level: Specifies if it necessary to unbatch source data before
-            applying new batching rule
+        wrapper_class: wrapper to apply onto each batch (type ``List``) before yielding,
+            defaults to ``DataChunk``
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp = IterableWrapper(range(10))
+        >>> dp = dp.batch(batch_size=3, drop_last=True)
+        >>> list(dp)
+        [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
-    datapipe: IterDataPipe[T_co]
+    datapipe: IterDataPipe
     batch_size: int
     drop_last: bool
     length: Optional[int]
 
     def __init__(self,
-                 datapipe: IterDataPipe[T_co],
+                 datapipe: IterDataPipe,
                  batch_size: int,
                  drop_last: bool = False,
-                 unbatch_level: int = 0,
+                 wrapper_class=DataChunk,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
-        self.unbatch_level = unbatch_level
+        self.datapipe = datapipe
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
-        self.wrapper_class = DataChunk
+        self.wrapper_class = wrapper_class
 
-    def __iter__(self) -> Iterator[DataChunk[T_co]]:
-        batch: List[T_co] = []
+    def __iter__(self) -> Iterator[DataChunk]:
+        batch: List = []
         for x in self.datapipe:
             batch.append(x)
             if len(batch) == self.batch_size:
@@ -77,12 +92,11 @@ class BatchIterDataPipe(IterDataPipe[DataChunk[T_co]]):
         if len(batch) > 0:
             if not self.drop_last:
                 yield self.wrapper_class(batch)
-            batch = []
 
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized) and self.unbatch_level == 0:
+        if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
@@ -92,18 +106,30 @@ class BatchIterDataPipe(IterDataPipe[DataChunk[T_co]]):
 
 
 @functional_datapipe('unbatch')
-class UnBatchIterDataPipe(IterDataPipe):
-    r""" :class:`UnBatchIterDataPipe`.
-
-    Iterable DataPipe to undo batching of data. In other words, it flattens the data up to the specified level
+class UnBatcherIterDataPipe(IterDataPipe):
+    r"""
+    Undoes batching of data (functional name: ``unbatch``). In other words, it flattens the data up to the specified level
     within a batched DataPipe.
-    args:
+
+    Args:
         datapipe: Iterable DataPipe being un-batched
-        unbatch_level: Defaults to `1` (only flattening the top level). If set to `2`, it will flatten the top 2 levels,
-        and `-1` will flatten the entire DataPipe.
+        unbatch_level: Defaults to ``1`` (only flattening the top level). If set to ``2``,
+            it will flatten the top two levels, and ``-1`` will flatten the entire DataPipe.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> source_dp = IterableWrapper([[[0, 1], [2]], [[3, 4], [5]], [[6]]])
+        >>> dp1 = source_dp.unbatch()
+        >>> list(dp1)
+        [[0, 1], [2], [3, 4], [5], [6]]
+        >>> dp2 = source_dp.unbatch(unbatch_level=2)
+        >>> list(dp2)
+        [0, 1, 2, 3, 4, 5, 6]
     """
 
-    def __init__(self, datapipe, unbatch_level: int = 1):
+    def __init__(self,
+                 datapipe: IterDataPipe,
+                 unbatch_level: int = 1):
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
 
@@ -133,133 +159,67 @@ class UnBatchIterDataPipe(IterDataPipe):
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 
 
-@functional_datapipe('bucket_batch')
-class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
-    r""" :class:`BucketBatchIterDataPipe`.
-
-    Iterable DataPipe to create mini-batches of data from sorted bucket. An outer
-    dimension will be added as `batch_size` if `drop_last` is set to `True`,
-    or `length % batch_size` for the last batch if `drop_last` is set to `False`.
-        args:
-        datapipe: Iterable DataPipe being batched
-        batch_size: The size of each batch
-        drop_last: Option to drop the last batch if it's not full
-        bucket_size_mul: The multiplier to specify the size of bucket
-        sort_key: Callable to specify the comparison key for sorting within bucket
-    """
-    datapipe: IterDataPipe[T_co]
-    batch_size: int
-    drop_last: bool
-    bucket_size_mul: int
-    sort_key: Optional[Callable]
-    length: Optional[int]
-
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 batch_size: int,
-                 drop_last: bool = False,
-                 bucket_size_mul: int = 100,
-                 sort_key: Optional[Callable] = None,
-                 ) -> None:
-        assert batch_size > 0, "Batch size is required to be larger than 0!"
-        super().__init__()
-        self.datapipe = datapipe
-        self.batch_size = batch_size
-        self.drop_last = drop_last
-        self.bucket_size = batch_size * bucket_size_mul
-        self.sort_key = sort_key
-        if sort_key is not None and sort_key.__name__ == '<lambda>':
-            warnings.warn("Lambda function is not supported for pickle, "
-                          "please use regular python function instead.")
-        self.bucket_ds = BatchIterDataPipe(datapipe, batch_size=self.bucket_size, drop_last=False)
-        self.length = None
-
-    def __iter__(self) -> Iterator[List[T_co]]:
-        # Bucket without sorting remains same order, directly returns BatchDataset
-        if self.sort_key is None:
-            for element in BatchIterDataPipe(self.datapipe, batch_size=self.batch_size, drop_last=self.drop_last):
-                if isinstance(element, DataChunk):
-                    yield list(element.raw_iterator())
-                else:
-                    yield element
-        else:
-            bucket: List[T_co]
-            batch: List[T_co] = []
-            for bucket_or_chunk in self.bucket_ds:
-                bucket = list(bucket_or_chunk)
-                # In-place sort within bucket
-                bucket.sort(key=self.sort_key)
-                for start in range(0, len(bucket), self.batch_size):
-                    batch = bucket[start: start + self.batch_size]
-                    if len(batch) == self.batch_size or not self.drop_last:
-                        yield batch
-
-    def __len__(self) -> int:
-        if self.length is not None:
-            return self.length
-        if isinstance(self.datapipe, Sized):
-            if self.drop_last:
-                self.length = len(self.datapipe) // self.batch_size
-            else:
-                self.length = (len(self.datapipe) + self.batch_size - 1) // self.batch_size
-            return self.length
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-
-
-# defaut group key is the file pathname without the extension.
-# Assuming the passed in data is a tuple and 1st item is file's pathname.
-def default_group_key_fn(dataitem: Tuple[str, Any]):
-    return os.path.splitext(dataitem[0])[0]
-
-
-def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
-    txt_ext = ['.json', '.jsn', '.txt', '.text']
-
-    def cmp_fn(a: Tuple[str, Any], b: Tuple[str, Any]):
-        a_is_txt = os.path.splitext(a[0])[1] in txt_ext
-        b_is_txt = os.path.splitext(b[0])[1] in txt_ext
-
-        # if a is txt but b is not, b go front
-        if a_is_txt and not b_is_txt:
-            return 1
-        # if a is not txt but b is txt, a go front
-        if not a_is_txt and b_is_txt:
-            return -1
-        # if a and b both are or are not txt, sort in alphabetic order
-        if a[0] < b[0]:
-            return -1
-        elif a[0] > b[0]:
-            return 1
-        return 0
-
-    return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
-
-
 @functional_datapipe('groupby')
-class GroupByIterDataPipe(IterDataPipe):
-    # TODO(VtalyFedyunin): Add inline docs and tests (they are partially available in notebooks)
+class GrouperIterDataPipe(IterDataPipe[DataChunk]):
+    r"""
+    Groups data from input IterDataPipe by keys which are generated from ``group_key_fn``,
+    and yields a ``DataChunk`` with batch size up to ``group_size`` if defined (functional name: ``groupby``).
+
+    The samples are read sequentially from the source ``datapipe``, and a batch of samples belonging to the same group
+    will be yielded as soon as the size of the batch reaches ``group_size``. When the buffer is full,
+    the DataPipe will yield the largest batch with the same key, provided that its size is larger
+    than ``guaranteed_group_size``. If its size is smaller, it will be dropped if ``drop_remaining=True``.
+
+    After iterating through the entirety of source ``datapipe``, everything not dropped due to the buffer capacity
+    will be yielded from the buffer, even if the group sizes are smaller than ``guaranteed_group_size``.
+
+    Args:
+        datapipe: Iterable datapipe to be grouped
+        group_key_fn: Function used to generate group key from the data of the source datapipe
+        buffer_size: The size of buffer for ungrouped data
+        group_size: The max size of each group, a batch is yielded as soon as it reaches this size
+        guaranteed_group_size: The guaranteed minimum group size to be yielded in case the buffer is full
+        drop_remaining: Specifies if the group smaller than ``guaranteed_group_size`` will be dropped from buffer
+            when the buffer is full
+
+    Example:
+        >>> import os
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def group_fn(file):
+        ...    return os.path.basename(file).split(".")[0]
+        >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
+        >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
+        >>> list(dp0)
+        [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
+        >>> # A group is yielded as soon as its size equals to `group_size`
+        >>> dp1 = source_dp.groupby(group_key_fn=group_fn, group_size=2)
+        >>> list(dp1)
+        [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
+        >>> # Scenario where `buffer` is full, and group 'a' needs to be yielded since its size > `guaranteed_group_size`
+        >>> dp2 = source_dp.groupby(group_key_fn=group_fn, buffer_size=3, group_size=3, guaranteed_group_size=2)
+        >>> list(dp2)
+        [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
+    """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  group_key_fn: Callable,
                  *,
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
-                 unbatch_level: int = 0,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        check_lambda_fn(group_key_fn)
+        self.datapipe = datapipe
         self.group_key_fn = group_key_fn
+
         self.buffer_size = buffer_size
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
-            assert group_size > 0 and group_size <= buffer_size
+            assert 0 < group_size <= buffer_size
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
+            assert group_size is not None and 0 < guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
@@ -282,13 +242,16 @@ class GroupByIterDataPipe(IterDataPipe):
         new_buffer_size = buffer_size - biggest_size
         del buffer_elements[biggest_key]
 
-        return (result_to_yield, new_buffer_size)
+        return result_to_yield, new_buffer_size
 
     def __iter__(self):
         buffer_elements: DefaultDict[Any, List] = defaultdict(list)
         buffer_size = 0
         for x in self.datapipe:
             key = self.group_key_fn(x)
+
+            buffer_elements[key].append(x)
+            buffer_size += 1
 
             if self.group_size is not None and self.group_size == len(buffer_elements[key]):
                 yield self.wrapper_class(buffer_elements[key])
@@ -300,92 +263,7 @@ class GroupByIterDataPipe(IterDataPipe):
                 if result_to_yield is not None:
                     yield self.wrapper_class(result_to_yield)
 
-            buffer_elements[key].append(x)
-            buffer_size += 1
-
-        while buffer_size:
-            (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
-            if result_to_yield is not None:
-                yield self.wrapper_class(result_to_yield)
-
-
-@functional_datapipe('group_by_key')
-class GroupByKeyIterDataPipe(IterDataPipe[list]):
-    r""" :class:`GroupByKeyIterDataPipe`.
-
-    Iterable datapipe to group data from input iterable by keys which are generated from `group_key_fn`,
-    yields a list with `group_size` items in it, each item in the list is a tuple of key and data
-
-    args:
-        datapipe: Iterable datapipe that provides data. (typically str key (eg. pathname) and data stream in tuples)
-        group_size: the size of group
-        max_buffer_size: the max size of stream buffer which is used to store not yet grouped but iterated data
-        group_key_fn: a function which is used to generate group key from the data in the input datapipe
-        sort_data_fn: a function which is used to sort the grouped data before yielding back
-        length: a nominal length of the datapipe
-    """
-    datapipe: IterDataPipe[Tuple[str, Any]]
-    group_size: int
-    max_buffer_size: int
-    group_key_fn: Callable
-    sort_data_fn: Callable
-    curr_buffer_size: int
-    stream_buffer: Dict[str, List[Tuple[str, Any]]]
-    length: int
-
-    def __init__(
-            self,
-            datapipe: IterDataPipe[Tuple[str, Any]],
-            *,
-            group_size: int,
-            max_buffer_size: Optional[int] = None,
-            group_key_fn: Callable = default_group_key_fn,
-            sort_data_fn: Callable = default_sort_data_fn,
-            length: int = -1):
-        super().__init__()
-
-        assert group_size > 0
-        self.datapipe = datapipe
-        self.group_size = group_size
-
-        # default max buffer size is group_size * 10
-        self.max_buffer_size = max_buffer_size if max_buffer_size is not None else group_size * 10
-        assert self.max_buffer_size >= self.group_size
-
-        self.group_key_fn = group_key_fn  # type: ignore[assignment]
-        self.sort_data_fn = sort_data_fn  # type: ignore[assignment]
-        self.curr_buffer_size = 0
-        self.stream_buffer = {}
-        self.length = length
-
-    def __iter__(self) -> Iterator[list]:
-        if self.group_size == 1:
-            for data in self.datapipe:
-                yield [data]
-        else:
-            for data in self.datapipe:
-                key = self.group_key_fn(data)
-                if key not in self.stream_buffer:
-                    self.stream_buffer[key] = []
-                res = self.stream_buffer[key]
-                res.append(data)
-                if len(res) == self.group_size:
-                    yield self.sort_data_fn(res)
-                    del self.stream_buffer[key]
-                    self.curr_buffer_size = self.curr_buffer_size - self.group_size + 1
-                else:
-                    if self.curr_buffer_size == self.max_buffer_size:
-                        raise OverflowError(
-                            "stream_buffer is overflow, please adjust the order of data "
-                            "in the input datapipe or increase the buffer size!")
-                    self.curr_buffer_size = self.curr_buffer_size + 1
-
-            if self.curr_buffer_size > 0:
-                msg = "Not able to group [{}] with group size {}.".format(
-                    ','.join([v[0] for _, vs in self.stream_buffer.items() for v in vs]), str(self.group_size))
-                raise RuntimeError(msg)
-
-    def __len__(self) -> int:
-        if self.length == -1:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-        return self.length
+        for key in tuple(buffer_elements.keys()):
+            res = buffer_elements.pop(key)
+            buffer_size -= len(res)
+            yield self.wrapper_class(res)
