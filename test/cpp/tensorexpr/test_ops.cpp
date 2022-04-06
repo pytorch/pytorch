@@ -24,7 +24,7 @@ TEST(Ops, Sum) {
   constexpr int N = 16;
   std::vector<IntList> testDims = {{0}, {1}, {0, 1}};
   std::vector<std::vector<ExprHandle>> outputShapes = {{N}, {M}, {}};
-  for (int idx = 0; idx < testDims.size(); idx++) {
+  for (unsigned idx = 0; idx < testDims.size(); idx++) {
     const auto& dims = testDims[idx];
     const auto& outShape = outputShapes[idx];
 
