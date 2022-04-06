@@ -56,6 +56,9 @@ public:
     values = _mm512_setr_epi64(val1, val2, val3, val4,
                                 val5, val6, val7, val8);
   }
+  Vectorized<int64_t> isnan() const {
+    return Vectorized<int64_t>(0);
+  }
   template <int64_t mask>
   static Vectorized<int64_t> blend(Vectorized<int64_t> a, Vectorized<int64_t> b) {
     return _mm512_mask_blend_epi64(mask, a.values, b.values);
@@ -189,6 +192,9 @@ public:
             int32_t val13, int32_t val14, int32_t val15, int32_t val16) {
     values = _mm512_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8,
                                val9, val10, val11, val12, val13, val14, val15, val16);
+  }
+  Vectorized<int32_t> isnan() const {
+    return Vectorized<int32_t>(0);
   }
   template <int64_t mask>
   static Vectorized<int32_t> blend(Vectorized<int32_t> a, Vectorized<int32_t> b) {
@@ -384,6 +390,9 @@ public:
                               val24, val23, val22, val21, val20, val19, val18, val17,
                               val16, val15, val14, val13, val12, val11, val10, val9,
                               val8, val7, val6, val5, val4, val3, val2, val1);
+  }
+  Vectorized<int16_t> isnan() const {
+    return Vectorized<int16_t>(0);
   }
   template <int64_t mask>
   static Vectorized<int16_t> blend(Vectorized<int16_t> a, Vectorized<int16_t> b) {
@@ -589,6 +598,9 @@ public:
                               val24, val23, val22, val21, val20, val19, val18, val17,
                               val16, val15, val14, val13, val12, val11, val10, val9,
                               val8, val7, val6, val5, val4, val3, val2, val1);
+  }
+  Vectorized<int8_t> isnan() const {
+    return Vectorized<int8_t>(0);
   }
   template <int64_t mask>
   static Vectorized<int8_t> blend(Vectorized<int8_t> a, Vectorized<int8_t> b) {

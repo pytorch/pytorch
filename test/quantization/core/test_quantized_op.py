@@ -1262,10 +1262,22 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.max_pool2d,
             "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
         }
+        ops_under_test_with_indices = {
+            "nn.functional with indices": torch.nn.functional.max_pool2d_with_indices,
+        }
 
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             msg="{} results are off".format(name))
+        for name, op in ops_under_test_with_indices.items():
+            # we ignore the second value of returned tuple (indices);
+            # we cannot directly compare indices as multiple floating point values
+            # can map to the same integer, meaning that the indices we obtain aren't necessarily
+            # the same as operating on the fp tensor
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation, ceil_mode=ceil_mode)[0]
             self.assertEqual(a_ref, a_hat.dequantize(),
                              msg="{} results are off".format(name))
         # Test the ops.quantized separately, because None is not treated.

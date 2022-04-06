@@ -11,6 +11,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <c10/core/ScalarType.h>
 
 #include <algorithm>
 #include <vector>
@@ -401,6 +402,33 @@ Tensor quantized_max_pool2d(
   return qy;
 }
 
+// TODO: when TORCH_IMPL_FUNC becomes available for quantized kernels, we can change this impl
+// to use it
+std::tuple<at::Tensor &,at::Tensor &> max_pool2d_with_indices_out_quantized_cpu(
+                       const at::Tensor & self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
+                       at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode,
+                       at::Tensor & out, at::Tensor & indices) {
+  NoNamesGuard guard;
+
+  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+
+  const int padH = safe_downcast<int, int64_t>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+
+  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
+  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+
+  max_pool2d_kernel(kCPU, out, indices, self, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+  set_quantizer_(out, make_per_tensor_affine_quantizer(self.q_scale(), self.q_zero_point(), out.scalar_type()));
+  return std::tuple<at::Tensor &, at::Tensor &>(out, indices);
+}
+
+
 // Quantized max_pool1d is a special case of the max_pool2d, with one of the
 // dimensions and kernels removed.
 Tensor quantized_max_pool1d(
@@ -417,7 +445,7 @@ Tensor quantized_max_pool1d(
   if (stride.empty()) {
     stride = kernel_size;
   }
-  auto qy = at::quantized_max_pool2d(
+  auto qy = at::native::quantized_max_pool2d(
     qx.unsqueeze(kSqueezeDim),
     {1, kernel_size[0]},
     {1, stride[0]},
@@ -444,7 +472,7 @@ class QMaxPool_arr_args final {
       return at::quantized_max_pool1d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     } else if (kSpatialDim == 2) {
-      return at::quantized_max_pool2d(qx, kernel_size, stride, padding,
+      return at::native::quantized_max_pool2d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     }
     TORCH_CHECK(false, "MaxPool", kSpatialDim, "D is not supported.");

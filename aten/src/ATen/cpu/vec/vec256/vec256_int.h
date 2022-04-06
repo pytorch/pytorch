@@ -55,6 +55,9 @@ public:
   Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4) {
     values = _mm256_setr_epi64x(val1, val2, val3, val4);
   }
+  Vectorized<int64_t> isnan() const {
+    return Vectorized<int64_t>(0);
+  }
   template <int64_t mask>
   static Vectorized<int64_t> blend(Vectorized<int64_t> a, Vectorized<int64_t> b) {
     __at_align__ int64_t tmp_values[size()];
@@ -177,6 +180,9 @@ public:
   Vectorized(int32_t val1, int32_t val2, int32_t val3, int32_t val4,
          int32_t val5, int32_t val6, int32_t val7, int32_t val8) {
     values = _mm256_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8);
+  }
+  Vectorized<int32_t> isnan() const {
+    return Vectorized<int32_t>(0);
   }
   template <int64_t mask>
   static Vectorized<int32_t> blend(Vectorized<int32_t> a, Vectorized<int32_t> b) {
@@ -339,6 +345,9 @@ public:
          int16_t val13, int16_t val14, int16_t val15, int16_t val16) {
     values = _mm256_setr_epi16(val1, val2, val3, val4, val5, val6, val7, val8,
                                val9, val10, val11, val12, val13, val14, val15, val16);
+  }
+  Vectorized<int16_t> isnan() const {
+    return Vectorized<int16_t>(0);
   }
   template <int64_t mask>
   static Vectorized<int16_t> blend(Vectorized<int16_t> a, Vectorized<int16_t> b) {
@@ -520,6 +529,9 @@ public:
                               val9, val10, val11, val12, val13, val14, val15, val16,
                               val17, val18, val19, val20, val21, val22, val23, val24,
                               val25, val26, val27, val28, val29, val30, val31, val32);
+  }
+  Vectorized<int8_t> isnan() const {
+    return Vectorized<int8_t>(0);
   }
   template <int64_t mask>
   static Vectorized<int8_t> blend(Vectorized<int8_t> a, Vectorized<int8_t> b) {
