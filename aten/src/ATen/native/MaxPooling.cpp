@@ -97,10 +97,6 @@ Tensor max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  if (self.is_quantized()) {
-    return at::quantized_max_pool1d(
-        self, kernel_size, stride, padding, dilation, ceil_mode);
-  }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
       !self.device().is_cpu()) {

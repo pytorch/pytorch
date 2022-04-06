@@ -359,7 +359,6 @@ Pointwise Ops
     positive
     pow
     quantized_batch_norm
-    quantized_max_pool1d
     rad2deg
     real
     reciprocal

@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/MaxPooling.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -32,25 +33,46 @@ void max_pool1d_impl(
     Tensor& output,
     const Tensor& input,
     const PoolingParams1D& p) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
-    const Tensor in = input.contiguous();
-    scalar_t* const OP = output.data_ptr<scalar_t>();
-    const scalar_t* const IP = in.data_ptr<scalar_t>();
+  if (input.is_quantized()) {
+    AT_DISPATCH_QINT_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
+      set_quantizer_(output, make_per_tensor_affine_quantizer(input.q_scale(), input.q_zero_point(), output.scalar_type()));
+      const Tensor in = input.contiguous();
+      const auto OP = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
+      const auto IP = reinterpret_cast<scalar_t::underlying*>(in.data_ptr());
 
-    // Value used for padding
-    constexpr scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
-        ? -std::numeric_limits<scalar_t>::infinity()
-        : std::numeric_limits<scalar_t>::lowest();
+      // Value used for padding
+      constexpr auto FILL = std::numeric_limits<scalar_t::underlying>::lowest();
 
-    at::parallel_for(0, p.NB * p.NC, 0, [&](int64_t begin, int64_t end) {
-      for (const auto it : c10::irange(begin, end)) {
-        scalar_t* op = OP + it * p.OW;
-        const scalar_t* ip = IP + it * p.IW;
-        std::fill_n(op, p.OW, FILL);
-        max_pool1d_kernel(op, ip, p);
-      }
+      at::parallel_for(0, p.NB * p.NC, 0, [&](int64_t begin, int64_t end) {
+        for (const auto it : c10::irange(begin, end)) {
+          scalar_t::underlying* op = OP + it * p.OW;
+          const scalar_t::underlying* ip = IP + it * p.IW;
+          std::fill_n(op, p.OW, FILL);
+          max_pool1d_kernel(op, ip, p);
+        }
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
+      const Tensor in = input.contiguous();
+      scalar_t* const OP = output.data_ptr<scalar_t>();
+      const scalar_t* const IP = in.data_ptr<scalar_t>();
+
+      // Value used for padding
+      constexpr scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
+          ? -std::numeric_limits<scalar_t>::infinity()
+          : std::numeric_limits<scalar_t>::lowest();
+
+      at::parallel_for(0, p.NB * p.NC, 0, [&](int64_t begin, int64_t end) {
+        for (const auto it : c10::irange(begin, end)) {
+          scalar_t* op = OP + it * p.OW;
+          const scalar_t* ip = IP + it * p.IW;
+          std::fill_n(op, p.OW, FILL);
+          max_pool1d_kernel(op, ip, p);
+        }
+      });
+    });
+  }
 }
 
 } // namespace
