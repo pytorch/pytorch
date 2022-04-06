@@ -4,6 +4,7 @@
 #include <mutex>
 #include <utility>
 
+#include <ATen/Context.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/variant.h>
@@ -95,6 +96,45 @@ struct KinetoObserverContext : public at::ObserverContext {
   FallbackPair* fallback_ {nullptr};
 };
 
+constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
+
+// InputOutputEncoder
+// Stores each op_events' shapes and dtypes into a contiguous AppendOnlyList
+// so that we no longer create vectors for shapes and dtypes on every op.
+// Those vectors can be created during post-processing.
+class InputOutputEncoder final {
+ public:
+  void push(const std::vector<c10::IValue>& values);
+
+  // Used during post-processing to create vectors for shapes and dtype.
+  auto getNextShapesAndDtypes();
+
+  void clear();
+
+ private:
+  enum class Tag {
+    Tensor = 0,
+    UndefinedTensor,
+    TensorListBegin, // TODO: generalize to other lists.
+    Scalar,
+    Other,
+    TERMINATOR
+  };
+
+  struct TensorMetadata {
+    void* ptr_;
+    c10::ScalarType dtype_;
+    uint32_t dim_;
+  };
+
+  void push(const at::Tensor& t);
+
+  AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
+  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_metadata_;
+  AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
+};
+
+
 class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
@@ -125,7 +165,7 @@ class TORCH_API ThreadLocalSubqueue {
   AppendOnlyList<OpEvent, BlockSize> op_events_;
 
   // report_input_shapes
-  AppendOnlyList<Inputs, BlockSize> inputs_;
+  InputOutputEncoder inputs_outputs_;
 
   // with_stack
   AppendOnlyList<std::vector<std::string>, BlockSize> jit_stack_;

@@ -4034,7 +4034,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(fq1()._observer_ctr, fq2()._observer_ctr)
 
     def test_fixed_qparams_patterns(self):
-        hard_sigmoid_keys = [torch.nn.Hardsigmoid, torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
+        hard_sigmoid_keys = [torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
         sigmoid_keys = [torch.nn.Sigmoid, torch.sigmoid, "sigmoid", "sigmoid_"]
         tanh_keys = [torch.nn.Tanh, torch.tanh, "tanh", "tanh_"]
         for k in hard_sigmoid_keys + sigmoid_keys:
@@ -4168,22 +4168,63 @@ class TestQuantizeFx(QuantizationTestCase):
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
 
-    def test_stack_trace_preserved_subgraph_rewriter(self):
-        # a functional relu is taking the subgraph rewriter code path
-        class M(nn.Module):
+    def test_qat_skip_untraced(self):
+        class UnTraceableModuleClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 2)
+
             def forward(self, x):
-                x = F.relu(x)
+                return self.linear(x)
+
+        class UnTraceableModuleName(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.untraceable_module_class = UnTraceableModuleClass()
+                self.untraceable_module_name = UnTraceableModuleClass()
+
+            def forward(self, x):
+                x = self.untraceable_module_class(x)
+                x = self.untraceable_module_name(x)
                 return x
 
-        m = M().eval()
-        mp = prepare_fx(m, get_default_qconfig_dict())
-        mq = convert_fx(copy.deepcopy(mp), is_reference=False)
-        found_stack_trace = False
-        for n in mq.graph.nodes:
-            if n.op == 'call_function' and n.target == F.relu:
-                found_stack_trace = n.stack_trace is not None
-                break
-        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
+        mod = M()
+
+        qconfig_dict = {"": torch.quantization.get_default_qat_qconfig()}
+        prepare_custom_config_dict = {
+            "non_traceable_module_class": [UnTraceableModuleClass],
+            "non_traceable_module_name": ["untraceable_module_name"],
+        }
+        mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
+            mod.train(), qconfig_dict, prepare_custom_config_dict
+        )
+        mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
+            mod.train(), qconfig_dict, prepare_custom_config_dict
+        )
+        self.assertTrue(
+            isinstance(mod_prep.untraceable_module_class.linear, torch.nn.Linear)
+        )
+        self.assertTrue(
+            isinstance(mod_prep.untraceable_module_name.linear, torch.nn.Linear)
+        )
+        self.assertTrue(
+            type(mod_prep.untraceable_module_class.linear)
+            is not torch.nn.qat.modules.linear.Linear,
+            "prepare_qat_fx shold not convert anything inside untraced module classes",
+        )
+        self.assertTrue(
+            type(mod_prep.untraceable_module_name.linear)
+            is not torch.nn.qat.modules.linear.Linear,
+            "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
+        )
 
     def test_qconfig_dict_setup(self):
         class M(torch.nn.Module):
@@ -4828,6 +4869,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.mul, operator.imul, torch.ops.quantized.mul)
         self._test_binary_op_float16_impl(operator.mul, operator.imul)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_sum(self):
         class Sum(torch.nn.Module):
             def forward(self, x):
@@ -4851,6 +4893,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=node_occurrence,
             custom_qconfig_dict=custom_qconfig_dict)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
             def __init__(self):
@@ -5400,6 +5443,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_gelu_reference(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -5424,6 +5468,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_softmax_reference(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -5447,6 +5492,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_silu_reference(self):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
@@ -5478,6 +5524,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_mish_reference(self):
         module = torch.nn.Mish
         functional = torch.nn.functional.mish
