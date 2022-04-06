@@ -7382,7 +7382,7 @@ class _TestONNXRuntime:
 
         x = torch.randn(5, 3, 3)
         y = torch.randn(5, 2, 3)
-        self.run_test(Cdist(), input=(x, y))        
+        self.run_test(Cdist(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):

@@ -3633,6 +3633,8 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # In order to respect numpy style broadcasting as demonstrated in
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
     # we unsqueeze both input tensors
+    # Currently we ignore the 'compute_mode' variable as we use default to
+    # using matrix multiplication to calculate the euclidean distance
     rank = sym_help._get_tensor_rank(x1)
     broadcasted_x1 = sym_help._unsqueeze_helper(g, x1, [rank - 1])
     broadcasted_x2 = sym_help._unsqueeze_helper(g, x2, [rank - 2])
