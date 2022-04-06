@@ -76,7 +76,7 @@ c10::IValue SourceRangeSerializer::serialize_source(
 
 SourceRangePickler::SourceRangePickler() : srs(new SourceRangeSerializer()) {}
 
-std::vector<char> SourceRangePickler::pickle(
+c10::IValue SourceRangePickler::getSourceDebug(
     const SourceRangeRecords& ranges,
     const SourceRangeTagMap& source_range_tags) {
   std::vector<c10::IValue> ivalues;
@@ -91,8 +91,16 @@ std::vector<char> SourceRangePickler::pickle(
          srs->serialize(range.range),
          static_cast<int64_t>(source_range_tag)}));
   }
-  std::vector<at::Tensor> table;
   auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
+
+  return ivalue;
+}
+
+std::vector<char> SourceRangePickler::pickle(
+    const SourceRangeRecords& ranges,
+    const SourceRangeTagMap& source_range_tags) {
+  auto ivalue = getSourceDebug(ranges, source_range_tags);
+  std::vector<at::Tensor> table;
   auto result = jit::pickle(ivalue, &table);
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;

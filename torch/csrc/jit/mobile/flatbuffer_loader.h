@@ -131,6 +131,15 @@ class TORCH_API FlatbufferLoader {
   TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;
   bool module_parsed_ = false;
+
+  c10::IValue parseInlinedCallStack(
+      const mobile::serialization::InlinedCallStack* inlinedCallStack,
+      const std::shared_ptr<CompilationUnit>& cu);
+  c10::IValue parseMobileDebugInfo(
+      const flatbuffers::Vector<flatbuffers::Offset<
+          torch::jit::mobile::serialization::MobileDebugInfo>>*
+          mobile_debug_infos,
+      const std::shared_ptr<CompilationUnit>& cu);
 };
 
 } // namespace jit

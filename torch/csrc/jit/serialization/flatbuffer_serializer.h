@@ -21,13 +21,15 @@ TORCH_API void save_mobile_module(
     const std::string& filename,
     const ExtraFilesMap& extra_files = ExtraFilesMap(),
     const ExtraFilesMap& jit_sources = ExtraFilesMap(),
-    const std::vector<IValue>& jit_constants = {});
+    const std::vector<IValue>& jit_constants = {},
+    c10::IValue debug_info = c10::nullopt);
 
 TORCH_API flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
     const mobile::Module& module,
     const ExtraFilesMap& extra_files = ExtraFilesMap(),
     const ExtraFilesMap& jit_sources = ExtraFilesMap(),
-    const std::vector<IValue>& jit_constants = {});
+    const std::vector<IValue>& jit_constants = {},
+    c10::IValue debug_info = c10::nullopt);
 
 TORCH_API void save_jit_module(
     const Module& module,

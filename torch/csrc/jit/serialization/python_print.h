@@ -51,7 +51,8 @@ struct TORCH_API PythonPrint {
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
 
-TORCH_API void jitModuleToPythonCodeAndConstants(
+TORCH_API std::unordered_map<std::string, PythonPrint>
+jitModuleToPythonCodeAndConstants(
     const Module& module,
     ExtraFilesMap* jit_sources, // output
     std::vector<IValue>* constants // output

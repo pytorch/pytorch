@@ -180,6 +180,23 @@ table IValue {
   val:IValueUnion;
 }
 
+union InlinedCallStackUnion {InlinedCallStack}
+
+table InlinedCallStack {
+    module_type_name: string;
+    module_instance_name: string;
+    sr_tag: int64;
+    calle: InlinedCallStackUnion;
+    fn_name: string;
+}
+
+table MobileDebugInfo {
+    sr_start: int64;
+    sr_end: int64;
+    node_name: string;
+    inlined_call_stack: InlinedCallStack;
+}
+
 table ExtraFile {
   name:string;
   content:string;
@@ -211,6 +228,7 @@ table Module {
   // To read more:
   // https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md
   operator_version:uint;
+  mobile_debug_infos: [MobileDebugInfo];
 }
 
 root_type Module;

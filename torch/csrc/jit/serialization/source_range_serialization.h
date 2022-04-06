@@ -29,6 +29,10 @@ class SourceRangePickler {
       const SourceRangeRecords& ranges,
       const SourceRangeTagMap& source_range_tags);
 
+  c10::IValue getSourceDebug(
+      const SourceRangeRecords& ranges,
+      const SourceRangeTagMap& source_range_tags);
+
  private:
   std::shared_ptr<SourceRangeSerializer> srs;
 };
