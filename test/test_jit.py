@@ -8284,6 +8284,22 @@ dedent """
         with self.assertRaises(RuntimeError):
             parse_ir(g, parse_tensor_constants=False)
 
+    def test_parse_nested_names(self):
+        g_str = """
+    graph(%x.1 : Tensor):
+        %3 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        %hi.submod.value.5 : Tensor = aten::add(%x.1, %2, %3)
+        return (%hi.submod.value.5)
+        """
+        g = parse_ir(g_str)
+        round_trip_g = parse_ir(str(g))
+        self.assertEqual(canonical(g), canonical(round_trip_g))
+
+        func1 = torch._C._create_function_from_graph("forward", g)
+        func2 = torch._C._create_function_from_graph("forward", round_trip_g)
+        self.assertEqual(func1(torch.ones([2])), func2(torch.ones([2])))
+
     def test_is_after_use(self):
         def sorted_input_use(g):
             uses = list(next(g.inputs()).uses())
