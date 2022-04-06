@@ -19,8 +19,6 @@
 #include <android/log.h>
 #endif
 
-using namespace torch::autograd::profiler;
-
 namespace pytorch_jni {
 
 namespace {
@@ -121,7 +119,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     deviceType_ = deviceJniCodeToDeviceType(device);
     module_ = torch::jit::load(
-        std::move(modelPath->toStdString()), deviceType_, extra_files);
+        std::move(modelPath->toStdString()), c10::nullopt, extra_files);
     if (has_extra) {
       static auto putMethod =
           facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>::

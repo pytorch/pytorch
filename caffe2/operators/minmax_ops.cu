@@ -16,7 +16,7 @@ __global__ void SelectGradientCUDAKernel(
     T* dX) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dX[i] = __ldg(X + i) == __ldg(Y + i) ? __ldg(dY + i) : T(0);
 #else
     dX[i] = X[i] == Y[i] ? dY[i] : T(0);

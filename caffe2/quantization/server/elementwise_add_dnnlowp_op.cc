@@ -13,7 +13,7 @@ using namespace std;
 using namespace dnnlowp;
 
 using AddFp32Op =
-    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>;
+    BinaryElementwiseOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>;
 
 template <typename T>
 class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {

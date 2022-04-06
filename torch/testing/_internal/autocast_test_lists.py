@@ -85,7 +85,6 @@ class AutocastTestLists(object):
             # the current  _convolution
             ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
                                                               (0, 0), 1, False, True, True, True)),
-            ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
             ("conv3d", conv_args_fp32[2]),
@@ -94,14 +93,6 @@ class AutocastTestLists(object):
             ("conv_transpose2d", conv_args_fp32[1]),
             ("conv_transpose3d", conv_args_fp32[2]),
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
-            # deprecated cudnn_convolutions with bias
-            ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1),
-                                                                             (1, 1), 1, False, True), TEST_WITH_ROCM),
-            # deprecated cudnn_convolutions with no allow_tf32 flag
-            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            # the current cudnn_convolutions
             ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True, True), TEST_WITH_ROCM),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1),
                                                                  (1, 1), 1, False, True, True), TEST_WITH_ROCM),
@@ -110,6 +101,7 @@ class AutocastTestLists(object):
             ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
             ("addr", mat0_fp32 + pointwise0_fp32 + pointwise1_fp32),
             ("matmul", mat0_fp32 + mat1_fp32),
+            ("einsum", "bkhd,bqhd->bqkh", mat0_fp32 + mat1_fp32),
             ("mm", mat0_fp32 + mat1_fp32),
             ("mv", mat0_fp32 + pointwise0_fp32),
             ("chain_matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
@@ -307,7 +299,6 @@ class AutocastCPUTestLists(object):
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
             ("conv3d", conv_args_fp32[2]),
-            ("log_softmax", pointwise0_fp32 + (0,)),
             ("bmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                      torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("mm", mat0_fp32 + mat1_fp32),
@@ -319,27 +310,26 @@ class AutocastCPUTestLists(object):
                                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
         ]
         self.torch_fp32 = [
+            ("conv_transpose1d", conv_args_bf16[0]),
+            ("conv_transpose2d", conv_args_bf16[1]),
             ("conv_transpose3d", conv_args_bf16[2]),
             ("batch_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
                                            "running_var": torch.rand((n), dtype=torch.float32), "training": False,
                                            "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
-            ("max_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("dropout", dummy_bf16[2], {"p": 0.1, "train": False}),
             ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
-            ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_bf16),
-            ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
-            ("instance_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
-                                              "running_var": torch.rand((n), dtype=torch.float32), "use_input_stats": False,
+            ("instance_norm", dummy_bf16[1], {"weight": None, "bias": None, "running_mean": None,
+                                              "running_var": None, "use_input_stats": True,
                                               "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
         ]
         self.nn_bf16 = [
             ("linear", mat0_fp32 + mat1_fp32),
         ]
         self.nn_fp32 = [
-            ("adaptive_avg_pool2d", dummy_bf16[2], {"output_size": (3, 2)}),
             ("avg_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
-            ("gelu", dummy_bf16[3]),
+            ("gelu", dummy_bf16[3], {"approximate": 'none'}),
+            ("gelu", dummy_bf16[3], {"approximate": 'tanh'}),
             ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
             ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
             ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),
@@ -348,9 +338,8 @@ class AutocastCPUTestLists(object):
             ("upsample_trilinear3d", dummy_bf16[4], {"output_size": (n, n, n), "align_corners": False}),
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
                                      (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
-            ("smooth_l1_loss", mat0_bf16 + mat1_bf16),
             ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),
-            ("std", dummy_bf16[2]),
+            ("smooth_l1_loss", mat0_bf16 + mat1_bf16),
         ]
         self.torch_need_autocast_promote = [
             ("cat", (pointwise0_bf16 + pointwise1_fp32,)),

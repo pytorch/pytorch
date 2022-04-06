@@ -50,6 +50,9 @@
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
+#   USE_STATIC_MKL
+#     Prefer to link with MKL statically - Unix only
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -116,12 +119,16 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   PYTORCH_ROCM_ARCH
+#     specify which AMD GPU targets to build for.
+#     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
+#
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
 #
 #   BLAS
-#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
+#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, FlexiBLAS, or OpenBLAS. If set
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
 #
@@ -202,7 +209,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 2)
+python_min_version = (3, 7, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -348,7 +355,7 @@ def check_submodules():
             print('Please run:\n\tgit submodule update --init --recursive --jobs 0')
             sys.exit(1)
     for folder in folders:
-        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.txt"])
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.md", "LICENSE.txt"])
     check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
                                  'asmjit'), ['CMakeLists.txt'])
     check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
@@ -404,7 +411,6 @@ def build_deps():
 # the list of runtime dependencies required by this built package
 install_requires = [
     'typing_extensions',
-    'dataclasses; python_version < "3.7"'
 ]
 
 missing_pydep = '''
@@ -503,6 +509,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
+        if cmake_cache_vars['STATIC_DISPATCH_BACKEND']:
+            report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
+        if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
+            report('-- Using lightweight dispatch')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -814,7 +824,16 @@ def configure_extension_build():
                   include_dirs=[],
                   library_dirs=library_dirs,
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
+    C_flatbuffer = Extension("torch._C_flatbuffer",
+                             libraries=main_libraries,
+                             sources=["torch/csrc/stub_with_flatbuffer.c"],
+                             language='c',
+                             extra_compile_args=main_compile_args + extra_compile_args,
+                             include_dirs=[],
+                             library_dirs=library_dirs,
+                             extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
+    extensions.append(C_flatbuffer)
 
     if not IS_WINDOWS:
         DL = Extension("torch._dl",
@@ -824,23 +843,24 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    extensions.append(
-        Extension(
-            name=str('caffe2.python.caffe2_pybind11_state'),
-            sources=[]),
-    )
-    if cmake_cache_vars['USE_CUDA']:
+    if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                name=str('caffe2.python.caffe2_pybind11_state'),
                 sources=[]),
         )
-    if cmake_cache_vars['USE_ROCM']:
-        extensions.append(
-            Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_hip'),
-                sources=[]),
-        )
+        if cmake_cache_vars['USE_CUDA']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                    sources=[]),
+            )
+        if cmake_cache_vars['USE_ROCM']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                    sources=[]),
+            )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,
@@ -854,6 +874,7 @@ def configure_extension_build():
         'console_scripts': [
             'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
             'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+            'torchrun = torch.distributed.run:main',
         ]
     }
 
@@ -920,6 +941,7 @@ if __name__ == '__main__':
                 'bin/*',
                 'test/*',
                 '_C/*.pyi',
+                '_C_flatbuffer/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
@@ -927,6 +949,7 @@ if __name__ == '__main__':
                 'nn/*.pyi',
                 'nn/modules/*.pyi',
                 'nn/parallel/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
@@ -945,6 +968,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/ops/*.h',
                 'include/ATen/hip/*.cuh',
                 'include/ATen/hip/*.h',
                 'include/ATen/hip/detail/*.cuh',
@@ -975,6 +999,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.h',
                 'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
@@ -1003,6 +1028,10 @@ if __name__ == '__main__':
                 'include/torch/csrc/autograd/generated/*.h',
                 'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
+                'include/torch/csrc/deploy/*.h',
+                'include/torch/csrc/deploy/interpreter/*.h',
+                'include/torch/csrc/deploy/interpreter/*.hpp',
+                'include/torch/csrc/distributed/c10d/exception.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
@@ -1019,8 +1048,11 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
                 'include/torch/csrc/onnx/*.h',
+                'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
+                'include/torch/csrc/lazy/backend/*.h',
+                'include/torch/csrc/lazy/core/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
@@ -1028,8 +1060,6 @@ if __name__ == '__main__':
                 'include/THC/*.cuh',
                 'include/THC/*.h*',
                 'include/THC/generic/*.h',
-                'include/THCUNN/*.cuh',
-                'include/THCUNN/generic/*.h',
                 'include/THH/*.cuh',
                 'include/THH/*.h*',
                 'include/THH/generic/*.h',

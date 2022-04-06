@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace sparse {
 
@@ -29,7 +30,7 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
     }
   } else {
     std::vector<int64_t> indices_mult_cpu_vec;
-    indices_mult_cpu_vec.reserve(sparse_dim);
+    indices_mult_cpu_vec.resize(sparse_dim);
     int64_t mult = 1;
     for (int64_t i = sparse_dim - 1; i >= 0; i--) {
       indices_mult_cpu_vec[i] = mult;
@@ -98,7 +99,7 @@ Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
     at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t h, hp0, hp1;
-      for (auto i = start; i < end; i++) {
+      for (const auto i : c10::irange(start, end)) {
         hp0 = indices[i];
         hp1 = (i+1 == nnz) ?  dim : indices[i+1];
         if (hp0 != hp1) {

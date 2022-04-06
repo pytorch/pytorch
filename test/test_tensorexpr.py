@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -6,40 +8,18 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
-        # TODO: CPU fuser currently is disabled when multithreading.
-        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
-        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
-
+        super(BaseTestClass, self).setUp()
+        self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
+        self.tensorexpr_options.restore()
+        super(BaseTestClass, self).tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1112,6 +1092,22 @@ class TestTensorExprFuser(BaseTestClass):
             ref = foo(*values)
             np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
+    def test_cat_with_constant_dim(self):
+        for device in self.devices:
+            def foo(*args):
+                v1 = torch.cat(args, dim=1)
+                v2 = torch.cat([v1], dim=1)
+                return v2 * v2
+
+            empty = torch.tensor([], device=device, dtype=torch.float32)
+            inputs = [empty] + [torch.randn(1, 64, device=device), torch.randn(1, 64, device=device)]
+            traced = torch.jit.trace(foo, inputs)
+
+            x = warmup_and_run_forward(traced, *inputs)
+            self.assertLastGraphAllFused()
+            ref = foo(*inputs)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
     def test_scalar(self):
         @torch.jit.script
         def test_float(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: float, b: float) -> torch.Tensor:
@@ -1210,7 +1206,6 @@ class TestTensorExprFuser(BaseTestClass):
     def test_softmax_cuda(self):
         self._test_softmax('cuda')
 
-    @unittest.skip("float16 is not supported yet.")
     def test_half_gelu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 
@@ -1226,7 +1221,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
 
-    @unittest.skip("float16 is not supported yet.")
     def test_half_bn_relu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 
@@ -1468,7 +1462,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s = getModule(True)
         ref = am(x, x, x)
         test = am_s(x, x, x)
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
         # Now do the aliasing
         am.a = am.b
@@ -1477,7 +1471,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.a = am_s.b
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_inputs(self):
         class AliasModule(nn.Module):
@@ -1510,7 +1504,7 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.randn(128, 128)
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_input_and_module(self):
         class AliasModule(nn.Module):
@@ -1545,7 +1539,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.b = x
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_multiple_outputs(self):
         for device in self.devices:

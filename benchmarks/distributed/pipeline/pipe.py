@@ -35,7 +35,7 @@ class EmbeddingLayer(nn.Embedding):
     def __init__(self, ntoken, ninp, initrange):
         super().__init__(ntoken, ninp)
         self.ninp = ninp
-        self.weight.data.uniform_(-initrange, initrange)
+        nn.init.uniform_(self.weight, -initrange, initrange)
 
     def forward(self, src):
         return super().forward(src) * math.sqrt(self.ninp)
@@ -82,8 +82,8 @@ class TransformerDecoderLayer(nn.TransformerEncoderLayer):
 class LinearLayer(nn.Linear):
     def __init__(self, ninp, ntoken, initrange):
         super().__init__(ninp, ntoken)
-        self.bias.data.zero_()
-        self.weight.data.uniform_(-initrange, initrange)
+        nn.init.zeros_(self.bias)
+        nn.init.uniform_(self.weight, -initrange, initrange)
 
 
 class TransformerLMSequential(nn.Sequential):

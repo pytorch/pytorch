@@ -20,7 +20,7 @@ TORCH_META_FUNC2(pow, Tensor_Scalar) (const Tensor& base, const Scalar& exp) {
               "Integers to negative integer powers are not allowed.");
 
   auto common_dtype = at::result_type(base, exp);
-  build_unary_op(maybe_get_output(), base.to(common_dtype));
+  build_output_borrowing_argument_owning_unary_op(maybe_get_output(), base.to(common_dtype));
 }
 
 TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {

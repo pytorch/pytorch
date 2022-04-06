@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/stack.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/TypeList.h>
 
 namespace c10 {
@@ -262,7 +263,7 @@ private:
 
   OperatorKernel* getFunctor_() const;
 
-  std::shared_ptr<OperatorKernel> functor_;
+  c10::intrusive_ptr<OperatorKernel> functor_;
 
   InternalBoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;

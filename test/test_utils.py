@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import sys
 import os
 import contextlib
@@ -16,11 +18,9 @@ from torch.utils.data import DataLoader
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
-import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, has_breakpad
-from urllib.error import URLError
+from torch.testing._internal.common_utils import has_breakpad, load_tests, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -410,12 +410,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-class TestFFI(TestCase):
-    def test_deprecated(self):
-        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
-
-
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
@@ -583,128 +577,6 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-def sum_of_state_dict(state_dict):
-    s = 0
-    for _, v in state_dict.items():
-        s += v.sum()
-    return s
-
-SUM_OF_HUB_EXAMPLE = 431080
-TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
-
-@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
-class TestHub(TestCase):
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_from_github(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            source='github',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload(
-            'ailzhang/torchhub_example', force_reload=False)
-        hub_model = hub.load(
-            local_dir,
-            'mnist',
-            source='local',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_from_branch(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example:ci/test_slash',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_set_dir(self):
-        temp_dir = tempfile.gettempdir()
-        hub.set_dir(temp_dir)
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
-        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_list_entrypoints(self):
-        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
-        self.assertObjectIn('mnist', entry_lists)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_download_url_to_file(self):
-        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
-        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
-        loaded_state = torch.load(temp_file)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_state_dict_from_url(self):
-        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_zip_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    # Test the default zipfile serialization format produced by >=1.6 release.
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_zip_1_6_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-
-    def test_hub_dir(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            self.assertEqual(torch.hub.get_dir(), dirname)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_state_dict_from_url_with_name(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            file_name = 'test_file'
-            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
-            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
-            self.assertEqual(sum_of_state_dict(loaded_state),
-                             SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3, skip_after_retries=True)
-    def test_load_commit_from_forked_repo(self):
-        with self.assertRaisesRegex(
-                ValueError,
-                'If it\'s a commit from a forked repo'):
-            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
-
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
@@ -739,7 +611,8 @@ class TestAssert(TestCase):
 
 
 class TestCrashHandler(TestCase):
-    @unittest.skipIf(not has_breakpad(), "Crash handler lib was not linked in")
+    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
     def test_python_exception_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             torch.utils._crash_handler.enable_minidumps(temp_dir)
@@ -842,6 +715,14 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
+
+
+class TestCppExtensionUtils(TestCase):
+    def test_cpp_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
+
+    def test_cc_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
 
 
 if __name__ == '__main__':

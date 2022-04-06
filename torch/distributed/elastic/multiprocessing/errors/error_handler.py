@@ -18,24 +18,6 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-def _write_error(e: BaseException, error_file: Optional[str]):
-    data = {
-        "message": {
-            "message": f"{type(e).__name__}: {e}",
-            "extraInfo": {
-                "py_callstack": traceback.format_exc(),
-                "timestamp": str(int(time.time())),
-            },
-        }
-    }
-
-    if error_file:
-        with open(error_file, "w") as fp:
-            json.dump(data, fp)
-    else:
-        log.error(json.dumps(data, indent=2))
-
-
 class ErrorHandler:
     """
     Writes the provided exception object along with some other metadata about
@@ -83,7 +65,20 @@ class ErrorHandler:
         JSON format. If the error file cannot be determined, then logs the content
         that would have been written to the error file.
         """
-        _write_error(e, self._get_error_file_path())
+
+        file = self._get_error_file_path()
+        if file:
+            data = {
+                "message": {
+                    "message": f"{type(e).__name__}: {e}",
+                    "extraInfo": {
+                        "py_callstack": traceback.format_exc(),
+                        "timestamp": str(int(time.time())),
+                    },
+                }
+            }
+            with open(file, "w") as fp:
+                json.dump(data, fp)
 
     def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
         """
@@ -107,7 +102,7 @@ class ErrorHandler:
                 else:
                     rootcause_error["message"]["errorCode"] = error_code
 
-            log.info(
+            log.debug(
                 f"child error file ({rootcause_error_file}) contents:\n"
                 f"{json.dumps(rootcause_error, indent=2)}"
             )

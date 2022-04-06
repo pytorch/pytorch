@@ -21,13 +21,21 @@ from .clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
 # If you edit this, please edit the allowlist in clang_format_ci.sh as well.
 CLANG_FORMAT_ALLOWLIST = [
     "c10/",
+    "ios/",
     "torch/csrc/jit/",
+    "torch/csrc/deploy/",
     "test/cpp/jit/",
     "test/cpp/tensorexpr/"
 ]
 
+CLANG_FORMAT_BLOCK_LIST = {
+    "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
+}
+
+
 # Only files with names matching this regex will be formatted.
-CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
+CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp|m|mm)$")
+
 
 
 def get_allowlisted_files() -> Set[str]:
@@ -39,6 +47,9 @@ def get_allowlisted_files() -> Set[str]:
     for dir in CLANG_FORMAT_ALLOWLIST:
         for root, dirnames, filenames in os.walk(dir):
             for filename in filenames:
+                fullpath = os.path.join(root, filename)
+                if fullpath in CLANG_FORMAT_BLOCK_LIST:
+                    continue
                 if CPP_FILE_REGEX.match(filename):
                     matches.append(os.path.join(root, filename))
     return set(matches)

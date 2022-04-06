@@ -15,11 +15,6 @@ Object::Object(
           c10::StrongTypePtr(std::move(cu), type),
           type->numAttributes())) {}
 
-ObjectPtr Object::_ivalue() const {
-  TORCH_INTERNAL_ASSERT(_ivalue_);
-  return _ivalue_;
-}
-
 c10::optional<Method> Object::find_method(const std::string& basename) const {
   for (Function* fn : type()->methods()) {
     if (fn->name() == basename) {
