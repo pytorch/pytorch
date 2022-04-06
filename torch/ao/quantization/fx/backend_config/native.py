@@ -7,7 +7,8 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-
+from ...observer import default_affine_fixed_qparams_observer
+from ...fake_quantize import FixedQParamsFakeQuantize
 from ...fuser_method_mappings import reverse_sequential_wrapper2
 
 _ConvMetadata = namedtuple("_ConvMetadata", ["root", "reference", "qat", "relu", "relu_qat", "bn_qat", "bn_relu_qat", "func"])
@@ -303,6 +304,22 @@ _ADD_CONFIG = {
     ],
 }
 
+_HARDSIGMOID_MODULE_CONFIG = {
+    "pattern": torch.nn.Hardsigmoid,
+    "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+    # TODO: The following two keys are temporary, since we don't want to put observer in the configs
+    # we expect that it's provided by user
+    # What we want to put here is the requirement on observers, in this case dtype,
+    # quant_min, quant_max etc., but we need to first move all configs to
+    # backend_config_dict to do that, we'll remove these keys after we fully migrated
+    # everything to use backend_config_dict
+    "_overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer),
+    "_overwrite_output_observer": default_affine_fixed_qparams_observer,
+    "dtype_configs": [
+        weighted_op_int8_dtype_config,
+    ],
+}
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -313,5 +330,6 @@ def get_native_backend_config_dict():
             *_get_linear_configs(),
             *_get_conv_configs(),
             _ADD_CONFIG,
+            _HARDSIGMOID_MODULE_CONFIG,
         ],
     }
