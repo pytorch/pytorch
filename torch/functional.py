@@ -101,7 +101,7 @@ def broadcast_shapes(*shapes):
         RuntimeError: If shapes are incompatible.
     """
     # This wrapper exists to support variadic args.
-    # TODO Movie this to C++ once the jit has better support for torch.Size.
+    # TODO Move this to C++ once the jit has better support for torch.Size.
     if not torch.jit.is_tracing():
         max_len = 0
         for shape in shapes:
@@ -715,8 +715,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
             window=window, center=center, pad_mode=pad_mode, normalized=normalized,
             onesided=onesided, return_complex=return_complex)
-    # TODO: after having proper ways to map Python strings to ATen Enum, move
-    #       this and F.pad to ATen.
+    # NOTE: Do not edit. This code will be removed once the forward-compatibility
+    #       period is over for PR #73432
     if center:
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())

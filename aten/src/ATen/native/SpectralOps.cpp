@@ -759,14 +759,11 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
  *
  * This is modeled after librosa but with support for complex time-domain
  * signals and complex windows.
- *
- * NOTE: librosa's center and pad_mode arguments are currently only implemented
- * in python because it uses torch.nn.functional.pad which is python-only.
  */
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
-            const bool normalized, const optional<bool> onesidedOpt,
-            const optional<bool> return_complexOpt) {
+            const bool center, c10::string_view mode, const bool normalized,
+            const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -824,6 +821,19 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   if (self.dim() == 1) {
     input = input.unsqueeze(0);
   }
+
+  if (center) {
+    const auto input_shape = input.sizes();
+    const auto input_dim = input_shape.size();
+    const auto extra_dims = std::max(size_t{3}, input_dim) - input_dim;
+    const auto pad_amount = n_fft / 2;
+
+    DimVector extended_shape(extra_dims, 1);
+    extended_shape.append(input_shape.begin(), input_shape.end());
+    input = at::pad(input.view(extended_shape), {pad_amount, pad_amount}, mode);
+    input = input.view(IntArrayRef(input.sizes()).slice(extra_dims));
+  }
+
   int64_t batch = input.size(0);
   int64_t len = input.size(1);
   if (n_fft <= 0 || n_fft > len) {
@@ -895,6 +905,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   } else {
     return at::view_as_real(out);
   }
+}
+
+Tensor stft(
+    const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+    const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
+    const bool normalized,
+    const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
+  return at::stft(
+      self, n_fft, hop_lengthOpt, win_lengthOpt, window_opt,
+      /*center=*/false, /*mode=*/"constant", normalized, onesidedOpt,
+      return_complexOpt);
 }
 
 // Create complex tensor from the old style of real tensor with size=(..., 2)
@@ -1088,14 +1109,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   return y;
 
   #undef REPR
-}
-
-Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-            const optional<int64_t> win_lengthOpt, const Tensor& window,
-            const bool normalized, const optional<bool> onesidedOpt) {
-  return at::native::stft(
-      self, n_fft, hop_lengthOpt, win_lengthOpt, window, normalized, onesidedOpt,
-      /*return_complex=*/c10::nullopt);
 }
 
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
