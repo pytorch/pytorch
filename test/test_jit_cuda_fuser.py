@@ -3650,6 +3650,9 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x)
+        # TODO: revert disabled aten::view
+        # self.assertGraphContains(graph, FUSION_GUARD)
+        # self.assertGraphContains(graph, 'prim::view_copy', True)
         self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
         self.assertGraphContainsExactly(graph, 'prim::view_copy', 0, True)
 
