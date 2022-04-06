@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <mutex>
 #include <unordered_map>
+#include <onnx/shape_inference/implementation.h>
+#include <torch/csrc/jit/serialization/export.h>
 
 namespace torch {
 namespace jit {
@@ -10,6 +12,11 @@ namespace jit {
 class ConstantValueMap {
  public:
   static ConstantValueMap& getInstance();
+  static std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> GetGeneratedShape();
+  static void SetGeneratedShape(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape);
+
+  static SymbolDimMap& GetSymbolMap();
+  static void SetSymbolMap(SymbolDimMap symbol_map);
 
   static void SetRank(const std::string& tensorName, size_t rankValue);
   static bool HasRank(const std::string& tensorName);
@@ -81,6 +88,8 @@ class ConstantValueMap {
   // from a node. shapeValueMap stores the value of the tensor from a node when
   // this tensor represents a shape.
   std::unordered_map<std::string, c10::SymbolicShape> shapeValueMap;
+  std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generatedShapeDataByName;
+  SymbolDimMap symbolMap;
 };
 
 } // namespace jit

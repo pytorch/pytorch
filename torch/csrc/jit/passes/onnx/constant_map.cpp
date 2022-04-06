@@ -205,6 +205,22 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
+std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> ConstantValueMap::GetGeneratedShape() {
+  return ConstantValueMap::getInstance().generatedShapeDataByName;
+}
+
+void ConstantValueMap::SetGeneratedShape(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape) {
+  ConstantValueMap::getInstance().generatedShapeDataByName = generated_shape;
+}
+
+SymbolDimMap& ConstantValueMap::GetSymbolMap() {
+  return ConstantValueMap::getInstance().symbolMap;
+}
+
+void ConstantValueMap::SetSymbolMap(SymbolDimMap symbol_map) {
+  ConstantValueMap::getInstance().symbolMap = symbol_map;
+}
+
 template <typename Map>
 void UpdateStrKey(
     Map& map,
@@ -236,6 +252,8 @@ void ConstantValueMap::UpdateValueName(
       ConstantValueMap::getInstance().useInferredTypeMap, old_name, new_name);
   UpdateStrKey<decltype(shapeValueMap)>(
       ConstantValueMap::getInstance().shapeValueMap, old_name, new_name);
+  UpdateStrKey<decltype(generatedShapeDataByName)>(
+      ConstantValueMap::getInstance().generatedShapeDataByName, old_name, new_name);
 }
 
 void ConstantValueMap::ClearMaps() {
@@ -245,6 +263,8 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().typeReliableMap.clear();
   ConstantValueMap::getInstance().useInferredTypeMap.clear();
   ConstantValueMap::getInstance().shapeValueMap.clear();
+  ConstantValueMap::getInstance().generatedShapeDataByName.clear();
+  ConstantValueMap::getInstance().symbolMap.clear();
 }
 
 // For debug only.

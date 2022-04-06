@@ -100,6 +100,36 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
+c10::ShapeSymbol ONNXDimToShapeSymbol(onnx::TensorShapeProto_Dimension dim, SymbolDimMap& symbol_map){
+  if (dim.has_dim_value()) {
+    return c10::ShapeSymbol::fromStaticSize(dim.dim_value());
+  }
+  c10::optional<c10::ShapeSymbol> sym = c10::nullopt;
+  if (dim.has_dim_param()) {
+    // A specific dim param is produced.
+    // Search if this is already known,
+    // and assign the same Symbol.
+    GRAPH_UPDATE("Got dim_param:", dim.dim_param());
+    for (const auto& pair : symbol_map) {
+      if (pair.second == dim.dim_param()) {
+        sym = pair.first;
+        break;
+      }
+    }
+    if (!sym) {
+      sym = c10::ShapeSymbol::newSymbol();
+      symbol_map[sym.value()] = dim.dim_param();
+    }
+  } else {
+    // A None dim param is produced.
+    // Assign a new Symbol, no need to keep track
+    // of it because there won't be duplicates.
+    sym = c10::ShapeSymbol::newSymbol();
+    symbol_map[sym.value()] = "";
+  }
+  return sym.value();
+}
+
 TensorTypePtr TorchTensorTypeFromONNX(
     const onnx::TypeProto_Tensor& onnx_tensor_type,
     SymbolDimMap& symbol_map) {
@@ -119,35 +149,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
     const auto& onnx_shape = onnx_tensor_type.shape();
 
     for (const auto i : c10::irange(onnx_shape.dim_size())) {
-      auto& dim = onnx_shape.dim(i);
-      if (dim.has_dim_value()) {
-        sizes.emplace_back(c10::ShapeSymbol::fromStaticSize(dim.dim_value()));
-      } else {
-        c10::optional<c10::ShapeSymbol> sym = c10::nullopt;
-        if (dim.has_dim_param()) {
-          // A specific dim param is produced.
-          // Search if this is already known,
-          // and assign the same Symbol.
-          GRAPH_UPDATE("Got dim_param:", dim.dim_param());
-          for (const auto& pair : symbol_map) {
-            if (pair.second == dim.dim_param()) {
-              sym = pair.first;
-              break;
-            }
-          }
-          if (!sym) {
-            sym = c10::ShapeSymbol::newSymbol();
-            symbol_map[sym.value()] = dim.dim_param();
-          }
-        } else {
-          // A None dim param is produced.
-          // Assign a new Symbol, no need to keep track
-          // of it because there won't be duplicates.
-          sym = c10::ShapeSymbol::newSymbol();
-          symbol_map[sym.value()] = "";
-        }
-        sizes.emplace_back(sym.value());
-      }
+      sizes.emplace_back(ONNXDimToShapeSymbol(onnx_shape.dim(i), symbol_map));
     }
     v_type = TensorType::create(scalar_type, at::kCPU, sizes.size(), {});
     v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
@@ -363,11 +365,12 @@ void ConvertGraphToONNXProto(
     int opset_version) {
   RawDataExportMap export_map;
   bool val_use_external_data_format;
+  SymbolDimMap new_symbol_map;
   NodeNameMap node_names;
   std::tie(
       model_proto,
       export_map,
-      symbol_map,
+      new_symbol_map,
       val_use_external_data_format,
       node_names) =
       export_onnx(
@@ -383,6 +386,7 @@ void ConvertGraphToONNXProto(
           true,
           false,
           std::string());
+  symbol_map.insert(new_symbol_map.begin(), new_symbol_map.end());
   for (int i = 0; i < model_proto->graph().output_size(); ++i) {
     model_proto->mutable_graph()->mutable_output(i)->clear_type();
   }
@@ -1269,10 +1273,6 @@ void ComputeConstant(Node* n, int opset_version) {
             1, c10::ShapeSymbol::fromStaticSize(shape_value_size));
         ::c10::SymbolicShape final_shape(final_shape_vector);
         UpdateShape(n->output(), final_shape);
-      } else if (ConstantValueMap::HasShape(n->input()->debugName())) {
-        ConstantValueMap::SetShapeValue(
-            n->output()->debugName(),
-            ConstantValueMap::GetShape(n->input()->debugName()).value());
       }
       break;
     }
@@ -1281,25 +1281,6 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Gather: {
-      if (ConstantValueMap::HasShapeValue(n->input(0)->debugName()) &&
-          ConstantValueMap::HasValue(n->input(1)->debugName())) {
-        // Special case for pattern Shape -> Gather, to propagate shape value.
-        // Gather input 0 is 1d tensor, Gather input 1 is scalar.
-        // Gather output will be scalar.
-        auto shape_value =
-            ConstantValueMap::GetShapeValue(n->input(0)->debugName()).value();
-        auto idx_value =
-            ConstantValueMap::GetValue(n->input(1)->debugName()).value();
-        // Consider the case when Gather index is a scalar.
-        if (idx_value.dim() == 0) {
-          auto idx_value_0 = idx_value.item<int64_t>();
-          if (idx_value_0 >= 0) {
-            std::vector<c10::ShapeSymbol> dims = {shape_value.at(idx_value_0)};
-            c10::SymbolicShape symShape(dims);
-            ConstantValueMap::SetShapeValue(n->output()->debugName(), symShape);
-          }
-        }
-      }
       break;
     }
     case ::c10::onnx::Transpose: {
@@ -1965,6 +1946,9 @@ void ONNXShapeTypeInference(
     Node* n,
     const ParamMap& params_dict,
     int opset_version) {
+  std::unordered_map<std::string, std::string> outputs_map;
+  auto symbol_map = ConstantValueMap::GetSymbolMap();
+  auto generated_shape = ConstantValueMap::GetGeneratedShape();
   SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
@@ -1973,13 +1957,27 @@ void ONNXShapeTypeInference(
     // This graph is later converted to ONNX to run shape inference.
     auto n_graph = std::make_shared<Graph>();
     auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
+    for (size_t i = 0; i < clone_node->outputs().size(); ++i) {
+      outputs_map[n->output(i)->debugName()] = clone_node->output(i)->debugName();
+    }
     n_graph->insertNode(clone_node);
 
     // Register all node outputs as graph outputs.
     for (auto output : clone_node->outputs()) {
       n_graph->registerOutput(output);
     }
-
+    std::vector<string> original_keys;
+    for (auto gs: generated_shape) {
+      if (outputs_map.count(gs.first) > 0) {
+        generated_shape[outputs_map[gs.first]] = gs.second;
+        if (gs.first != outputs_map[gs.first]) {
+          original_keys.push_back(gs.first);
+        }
+      }
+    }
+    for (auto k: original_keys) {
+      generated_shape.erase(k);
+    }
     // Use scalar_type_analysis without low precision cast
     ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
 
@@ -1999,7 +1997,7 @@ void ONNXShapeTypeInference(
 
       // infer shape
       try {
-        onnx::shape_inference::InferShapes(*model_proto);
+        onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, generated_shape);
         UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
       } catch (std::runtime_error& ex) {
         // TODO: include this as warning once we have a more consolidated
@@ -2026,6 +2024,23 @@ void ONNXShapeTypeInference(
   }
 
   SpecialPostProcess(n);
+
+  for (auto output: n->outputs()) {
+    if (generated_shape.count(outputs_map[output->debugName()]) > 0) {
+      auto shape_data = generated_shape.find(outputs_map[output->debugName()])->second;
+      std::vector<::c10::ShapeSymbol> final_shape;
+      int rank = shape_data.dim_size();
+      final_shape.reserve(rank);
+      for (int i = 0; i < rank; ++i) {
+        final_shape.emplace_back(ONNXDimToShapeSymbol(shape_data.dim(i), symbol_map));
+      }
+      c10::SymbolicShape shape_value(final_shape);
+      ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
+      generated_shape[output->debugName()] = shape_data;
+      generated_shape.erase(outputs_map[output->debugName()]);
+    }
+  }
+  ConstantValueMap::SetGeneratedShape(generated_shape);
   if (IsValidONNXNode(n)) {
     ProcessConstantValueMap(n, opset_version);
     if (n->kind() != prim::ListConstruct) {
@@ -2060,6 +2075,7 @@ void ONNXShapeTypeInference(
 
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
+  ConstantValueMap::SetSymbolMap(symbol_map);
 }
 
 void ONNXSetDynamicInputShape(
