@@ -263,7 +263,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               // GELU is not supported (and does not compile!) prior
               // to CUDA 11.4.  Have observed accuracy issues with
               // GELU epilogue in 11.4; disabling the GELU epilogue
-              // path until we confirm which version it's wo
+              // path until we confirm which version it's working in.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
               : cuda::blas::GEMMAndBiasActivationEpilogue::None
