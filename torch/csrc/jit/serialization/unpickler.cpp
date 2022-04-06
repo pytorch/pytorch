@@ -738,7 +738,7 @@ void Unpickler::rebuildSparseTensor() {
       case static_cast<int>(c10::Layout::SparseCsc):
       case static_cast<int>(c10::Layout::SparseBsr):
       case static_cast<int>(c10::Layout::SparseBsc): {
-        Layout layout_ = static_cast<c10::Layout>(layout);
+        c10::Layout layout_ = static_cast<c10::Layout>(layout);
         std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
         bool requires_grad = elements.at(idx++).toBool();
         auto& crow_indices = elements.at(idx++).toTensor();
