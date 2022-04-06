@@ -111,6 +111,7 @@ def _find_matches(
     # a map from node to the matched subpattern
     node_to_subpattern: Dict[Node, Any] = {}
 
+    # TODO: dedup with quantization matching function in match_utils.py
     def apply_match(pattern, node, match, matched_node_pattern, node_to_subpattern):
         if isinstance(pattern, tuple):
             s, *args = pattern
@@ -122,10 +123,13 @@ def _find_matches(
         else:
             # the first pattern matches will take precedence
             if node.name not in match_map:
-                node_to_subpattern[node] = pattern
                 matched_node_pattern.append(node)
-                root_node, pattern, handler = match
-                match_map[node.name] = (root_node, pattern, matched_node_pattern, handler, node_to_subpattern)
+                # MatchAllNode here is actually MatchAllInputNode which should not
+                # be added to match_map
+                if pattern is not MatchAllNode:
+                    node_to_subpattern[node] = pattern
+                    root_node, pattern, handler = match
+                    match_map[node.name] = (root_node, pattern, matched_node_pattern, handler, node_to_subpattern)
 
     for node in reversed(graph.nodes):
         if node.name not in match_map:
@@ -133,5 +137,6 @@ def _find_matches(
                 matched_node_pattern: List[Node] = []
                 if is_match(modules, node, pattern):
                     apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
+                    break
 
     return match_map

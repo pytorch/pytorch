@@ -4,6 +4,8 @@
 #include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch {
 namespace lazy {
@@ -22,9 +24,11 @@ class CacheNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
-
+  const Shape& shape(size_t i) const override { return shape_; }
+  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
  private:
   std::string str_;
+  Shape shape_;
 };
 
 TEST(CacheTest, BasicTest) {
@@ -57,6 +61,41 @@ TEST(CacheTest, BasicTest) {
   EXPECT_EQ(cache.Get(a->node_hash()), nullptr);
   EXPECT_EQ(cache.Get(b->node_hash()), nullptr);
   EXPECT_EQ(cache.Get(c->node_hash()), nullptr);
+}
+
+class CacheNodeWithShape : public TsNode {
+ public:
+  explicit CacheNodeWithShape(const Shape& shape)
+      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0),
+        shape_(shape) {}
+
+  const Shape& getShape() const {
+    return shape_;
+  }
+
+ private:
+  Shape shape_;
+};
+
+TEST(CacheTest, ShapeCacheTestForDynamicShape) {
+  // enable dynamic shape
+  FLAGS_ltc_enable_dynamic_shapes = true;
+
+  CacheNodeWithShape nodes[] = {
+    CacheNodeWithShape(Shape(c10::kFloat, {2, 4})),
+    CacheNodeWithShape(Shape(c10::kFloat, {4, 2})) };
+
+  /*
+   * Make sure the cached shape for node (2, 4) is not used for node (4, 2)
+   */
+  for (auto& node : nodes) {
+    EXPECT_EQ(node.getShape(), node.GetOpShape([&]() {
+      return node.getShape();
+    }));
+  }
+
+  // reset the flag
+  FLAGS_ltc_enable_dynamic_shapes = false;
 }
 
 } // namespace lazy

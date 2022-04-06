@@ -65,7 +65,7 @@ def get_ops_in_version(version):
     domain_opname_ops = []
     for obj in members:
         if isinstance(obj[1], type) and hasattr(obj[1], "domain"):
-            ops = getmembers(obj[1])
+            ops = getmembers(obj[1], predicate=isfunction)
             for op in ops:
                 domain_opname_ops.append((obj[1].domain, op[0], op[1]))  # type: ignore[attr-defined]
 
