@@ -4,9 +4,6 @@ from torch.fx import (
     map_arg
 )
 from torch.fx.graph import Graph
-from ..utils import (
-    get_combined_dict
-)
 from .graph_module import (
     FusedGraphModule
 )
