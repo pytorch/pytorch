@@ -28,7 +28,7 @@ void where_kernel_impl(TensorIterator &iter) {
         /*name=*/ where_name,
         /*return_dtype=*/ scalar_t,
         /*common_dtype=*/ scalar_t,
-        /*arity=*/ 2>(iter, where_string);
+        /*arity=*/ 3>(iter, where_string);
   });
 #else
   AT_DISPATCH_COMPLEX_TYPES(dtype, "where_cuda", [&] {
