@@ -733,7 +733,7 @@ def mish(g, input):
 
 def op_with_optional_float_cast(g, op_name, *args, **kwargs) -> torch._C.Value:
     """Some PyTorch operators (e.g., Clip/Min/ReLU/Pad) are super set of ONNX in terms of data types.
-    This function maximize the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
+    This function maximizes the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
     operator data type. For example, `Cast<int>(Clip<float>(Cast<float>(INPUT)))` can be used to mimic
     `Clip<int>(INPUT)` (opset version < 12).
 
