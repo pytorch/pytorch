@@ -1415,9 +1415,18 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto search_in_dim_indices
-        = index_len * std::log2(nnz) < std::log2(index_len) * nnz
-        ? true
-        : false;
+        // if either dim_indices or index requires sorting, we compare
+        // the cost of sort + binary search, which is comparing
+        // (len(dim_indices) + len(index)) * log(len(index)) to
+        // (len(dim_indices) + len(index)) * log(len(dim_indices)).
+        // That simplifies to comparing len(dim_indices) to len(index).
+        = (nnz <= index_len)
+        // if self is coalesced and dim is 0, then we compare
+        // index_len * log(len(dim_indices)), which is binary search into dim_indices,
+        // to (len(index_len) + len(dim_indices)) * log(index_len)
+          || (self.is_coalesced() && dim == 0
+              && index_len * std::log2(nnz) <= (nnz + index_len) * std::log2(index_len))
+        ? true : false;
 
       Tensor sorted, sorted_idx, src;
       std::tie(sorted, sorted_idx, src) = [
