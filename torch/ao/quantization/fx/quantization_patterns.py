@@ -2,18 +2,9 @@ import torch
 from torch.fx.graph import (
     Node,
 )
-from ..observer import (
-    default_affine_fixed_qparams_observer,
-    default_symmetric_fixed_qparams_observer,
-)
-
-from ..utils import (
-    activation_dtype,
-)
 
 from .pattern_utils import (
     register_quant_pattern,
-    get_default_output_activation_post_process_map,
     Pattern,
 )
 from .utils import (
@@ -116,49 +107,13 @@ class QuantizeHandler(ABC):
     def is_standalone_module(self):
         return self.is_standalone_module_
 
-@register_quant_pattern(operator.sub)
-@register_quant_pattern(operator.mul)
-@register_quant_pattern(operator.truediv)
-@register_quant_pattern(torch.add)
-@register_quant_pattern(torch.sub)
-@register_quant_pattern(torch.mul)
-@register_quant_pattern(torch.div)
-@register_quant_pattern(torch.bmm)
-@register_quant_pattern((torch.nn.ReLU, operator.add))
-@register_quant_pattern((torch.nn.ReLU, operator.mul))
-@register_quant_pattern((torch.nn.ReLU, torch.add))
-@register_quant_pattern((torch.nn.ReLU, torch.mul))
-@register_quant_pattern((torch.nn.functional.relu, operator.add))
-@register_quant_pattern((torch.nn.functional.relu, operator.mul))
-@register_quant_pattern((torch.nn.functional.relu, torch.add))
-@register_quant_pattern((torch.nn.functional.relu, torch.mul))
-@register_quant_pattern((torch.relu, operator.add))
-@register_quant_pattern((torch.relu, operator.mul))
-@register_quant_pattern(torch.matmul)
+# TODO: remove this class, this is still exposed in torch.quantization
+# but we should be able to break bc
 class BinaryOpQuantizeHandler(QuantizeHandler):
-    def __init__(
-            self,
-            node_pattern: NodePattern,
-            modules: Dict[str, torch.nn.Module],
-            root_node_getter: Callable = None):
-        super().__init__(node_pattern, modules, root_node_getter)
+    pass
 
-        # determine how many of the first two args are Tensors (versus scalars)
-        # this distinguishes things like "x + y" from "x + 2" or "2 + x"
-        self.num_tensor_args = 0
-        cache_for_no_tensor_check: Dict[Node, bool] = dict()
-        for arg_idx in range(len(self.root_node.args)):
-            arg = self.root_node.args[arg_idx]
-            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg, modules, cache_for_no_tensor_check)):
-                self.num_tensor_args += 1
-
-    def is_general_tensor_value_op(self) -> bool:
-        return self.num_tensor_args == 1
-
-@register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
-    def is_general_tensor_value_op(self) -> bool:
-        return True
+    pass
 
 # TODO: remove this class
 class ConvReluQuantizeHandler(QuantizeHandler):
@@ -168,10 +123,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
 class LinearReLUQuantizeHandler(QuantizeHandler):
     pass
 
-@register_quant_pattern(torch.nn.BatchNorm2d)
-@register_quant_pattern(torch.nn.BatchNorm3d)
-@register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
-@register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
+# TODO: remove this class
 class BatchNormQuantizeHandler(QuantizeHandler):
     pass
 
@@ -191,39 +143,15 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     pass
 
-# we currently only support reference patterns for these ops so they have been removed
-# until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
-# @register_quant_pattern(torch.nn.GELU)
-# @register_quant_pattern(torch.nn.Softmax)
-# we currently only support reference patterns for these ops so they have been removed
-# until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
-# @register_quant_pattern(torch.nn.functional.gelu)
-# @register_quant_pattern(torch.nn.functional.softmax)
+# TODO: remove this class
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     """ Common quantized op, first input and first output will be quantized
     """
     pass
 
-@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
-@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_observer)
-@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_observer)
-@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_observer)
-@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_observer)
-@register_quant_pattern('sigmoid', default_affine_fixed_qparams_observer)
-@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_observer)
-@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_observer)
-@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_observer)
-@register_quant_pattern('tanh', default_symmetric_fixed_qparams_observer)
-@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_observer)
+# TODO: remove this class
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
-    # some qhandlers override the activations constructor
-    def get_activation_ctr(self, qconfig, pattern, is_training) -> Optional[Callable]:
-        act_dtype = activation_dtype(qconfig)
-        if act_dtype == torch.quint8:
-            return get_default_output_activation_post_process_map(is_training).get(
-                pattern, qconfig.activation)
-        else:
-            return qconfig.activation
+    pass
 
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
