@@ -1676,9 +1676,10 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     #     so rather than stamping all of the entries out in derivatives.yaml,
     #     we codegen them in.
     #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.
-    cpu_fm.write('CompositeViewCopyKernels.h', lambda: {
+    cpu_fm.write('CompositeViewCopyKernels.cpp', lambda: {
         'ops_headers': [
-            f'#include <ATen/ops/{g.view.root_name}_ops.h>'
+            '\n'.join(f'#include <ATen/ops/{f.root_name}_ops.h>' for f in
+                      ([g.view] if g.view_copy is None else [g.view, g.view_copy]))
             for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)
         ],
         'CompositeViewCopyKernel_Definitions': list(mapMaybe(

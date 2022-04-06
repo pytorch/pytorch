@@ -50,6 +50,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeViewCopyKernels.cpp",
     "aten/src/ATen/FunctionalInverses.h",
     "aten/src/ATen/Functions.h",
     "aten/src/ATen/Functions.cpp",
