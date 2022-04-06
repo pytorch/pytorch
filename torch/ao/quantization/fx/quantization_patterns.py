@@ -25,7 +25,6 @@ from abc import ABC
 import operator
 from typing import Any, Callable, Dict, Optional
 
-# this is temporary, will be removed soon
 def _default_root_node_getter(node_pattern):
     if node_pattern is None:
         return node_pattern
@@ -47,7 +46,9 @@ class QuantizeHandler(ABC):
             self,
             node_pattern: NodePattern,
             modules: Dict[str, torch.nn.Module],
-            root_node_getter: Callable = None):
+            root_node_getter: Callable = None,
+            is_custom_module=False,
+            is_standalone_module=False):
         """ Records pattern information in __init__, which will be used
         in convert
         """
@@ -56,6 +57,8 @@ class QuantizeHandler(ABC):
         if root_node_getter is None:
             root_node_getter = _default_root_node_getter
         self.root_node = root_node_getter(node_pattern)
+        self.is_custom_module_ = is_custom_module
+        self.is_standalone_module_ = is_standalone_module
         self.num_tensor_args = 0
         # determine how many of the first two args are Tensors (versus scalars)
         # this distinguishes things like "x + y" from "x + 2" or "2 + x"
@@ -106,6 +109,12 @@ class QuantizeHandler(ABC):
         this to a different value than what is specified in the qconfig.
         """
         return qconfig.activation
+
+    def is_custom_module(self):
+        return self.is_custom_module_
+
+    def is_standalone_module(self):
+        return self.is_standalone_module_
 
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
@@ -261,9 +270,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return True
 
-class CustomModuleQuantizeHandler(QuantizeHandler):
-    pass
-
 @register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
@@ -298,8 +304,10 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return True
 
+# TODO: not used, can be removed after torch.quantization namespace is deprecated
+class CustomModuleQuantizeHandler(QuantizeHandler):
+    pass
+
+# TODO: not used, can be removed after torch.quantization namespace is deprecated
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
-    """ Converts an observed standalone module to quantized standalone module
-    by calling convert_fx on the observed standalone module.
-    """
     pass
