@@ -126,7 +126,7 @@ class default_args:
     shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
-    lazy_ir_cls: Type[LazyIR] = TSLazyIR
+    lazy_ir_cls: Type[LazyIR] = LazyIR
     backend_name: str = "TorchScript"
 
 def main() -> None:
@@ -167,16 +167,18 @@ def main() -> None:
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     torch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
     aten_path = str(torch_root / "aten" / "src" / "ATen")
+    ir_gen_class: Type[LazyIR] = default_args.lazy_ir_cls
+    if options.gen_ts_lowerings:
+        ir_gen_class = TSLazyIR
 
     run_gen_lazy_tensor(aten_path, options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
-                        options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
+                        options.node_base, options.node_base_hdr,
                         options.tensor_class, options.tensor_class_hdr, options.shape_inference_hdr,
-                        default_args.lazy_ir_cls, options.backend_name)
+                        ir_gen_class, options.backend_name)
 
 
 def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         dry_run: bool, impl_path: Optional[str],
-                        gen_ts_lowerings: bool,
                         node_base: str = default_args.node_base,
                         node_base_hdr: Optional[str] = default_args.node_base_hdr,
                         tensor_class: str = default_args.tensor_class,
@@ -188,7 +190,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
                         # it must match how ATen was built
                         per_operator_headers: bool = False,
-                        backend_name: str = default_args.backend_name) -> None:
+                        backend_name: str = default_args.backend_name,
+                        gen_forced_fallback_code: bool = False) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
 
@@ -317,8 +320,7 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
             "torch/csrc/lazy/core/shape.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/LazyIr.h",
-            "torch/csrc/lazy/ts_backend/ts_eager_fallback.h",
-        ]],
+        ] + (["torch/csrc/lazy/ts_backend/ts_eager_fallback.h"] if gen_forced_fallback_code else [])],
         'native_functions_include': '',
         'namespace_prologue': ns_helper.prologue,
         'namespace_epilogue': ns_helper.epilogue,
@@ -326,7 +328,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
         list(concat_map_codegen(
             dest.GenLazyNativeFuncDefinition(f'{backend_key}NativeFunctions',
                                              backend_indices[backend_key],
-                                             tensor_class),
+                                             tensor_class,
+                                             gen_forced_fallback_code),
             grouped_native_functions,
             codegenInplaceVariant=True
         )),
