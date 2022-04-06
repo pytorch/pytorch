@@ -31,9 +31,9 @@ class _FunctionalAdadelta(object):
             "rho": rho,
             "eps": eps,
             "weight_decay": weight_decay,
-            "maximize": maximize
         }
         self.foreach = foreach
+        self.maximize = maximize
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -54,7 +54,6 @@ class _FunctionalAdadelta(object):
         rho = self.defaults['rho']
         eps = self.defaults['eps']
         weight_decay = self.defaults['weight_decay']
-        maximize = self.defaults['maximize']
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -89,4 +88,4 @@ class _FunctionalAdadelta(object):
                        eps=eps,
                        weight_decay=weight_decay,
                        foreach=self.foreach,
-                       maximize=maximize)
+                       maximize=self.maximize)
