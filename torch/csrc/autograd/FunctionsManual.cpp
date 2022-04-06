@@ -244,7 +244,7 @@ Tensor norm_backward(
 }
 
 // See norm_backward above for a note on ignoring the sanitizer
-__ubsan_ignore_function__ Tensor norm_jvp(
+Tensor norm_jvp(
   const Tensor& self_p, const Tensor& self_t,
   const optional<Scalar> & p_,
   Tensor norm,
