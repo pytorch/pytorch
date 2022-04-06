@@ -714,26 +714,100 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
     });
 
-REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node*) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    auto condition = p_node->Input(0).toBool();
-    auto* block_runners = p_node->block_runners();
-    DCHECK(block_runners);
-    DCHECK_EQ(block_runners->size(), 2);
-    auto& runner = (*block_runners)[!condition];
+namespace {
+bool outputsEmpty(const Block* block) {
+  return block->outputs().size() == 1 && block->outputs().at(0)->mustBeNone();
+}
 
-    auto output = runner({});
-    if (!output.isTuple()) {
-      p_node->Output(0) = std::move(output);
-      return;
-    }
-    auto& elems = output.toTupleRef().elements();
-    DCHECK_EQ(elems.size(), p_node->num_outputs());
-    for (const auto i : c10::irange(elems.size())) {
-      p_node->Output(i) = elems[i];
-    }
-  };
-});
+bool blockEmpty(const Block* block) {
+  return block->nodes().begin() == block->nodes().end();
+}
+
+enum class BlockRunPlan : int8_t {
+  kRunOnlyTrueBlock,
+  kRunOnlyFalseBlock,
+  kRunBothBlocks,
+  kRunNeitherBlock,
+};
+} // namespace
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::If,
+    prim_If,
+    [](Node* node) -> SROperator {
+      DCHECK_EQ(node->blocks().size(), 2);
+      const Block* true_block = node->blocks().at(0);
+      const Block* false_block = node->blocks().at(1);
+
+      const bool true_block_returns_empty = outputsEmpty(true_block);
+      const bool false_block_returns_empty = outputsEmpty(false_block);
+
+      BlockRunPlan block_run_plan = BlockRunPlan::kRunNeitherBlock;
+
+      if (true_block_returns_empty && false_block_returns_empty) {
+        const bool false_block_is_empty = blockEmpty(false_block);
+        const bool true_block_is_empty = blockEmpty(true_block);
+
+        if (false_block_is_empty && !true_block_is_empty) {
+          block_run_plan = BlockRunPlan::kRunOnlyTrueBlock;
+        } else if (!false_block_is_empty && true_block_is_empty) {
+          block_run_plan = BlockRunPlan::kRunOnlyFalseBlock;
+        } else if (false_block_is_empty && true_block_is_empty) {
+          block_run_plan = BlockRunPlan::kRunNeitherBlock;
+        } else {
+          block_run_plan = BlockRunPlan::kRunBothBlocks;
+        }
+      } else {
+        block_run_plan = BlockRunPlan::kRunBothBlocks;
+      }
+
+      switch (block_run_plan) {
+        case BlockRunPlan::kRunBothBlocks:
+          return [](ProcessedNode* p_node) {
+            auto condition = p_node->Input(0).toBool();
+            auto* block_runners = p_node->block_runners();
+            DCHECK(block_runners);
+            DCHECK_EQ(block_runners->size(), 2);
+            auto& runner = (*block_runners)[!condition];
+
+            auto output = runner({});
+            if (!output.isTuple()) {
+              p_node->Output(0) = std::move(output);
+              return;
+            }
+            auto& elems = output.toTupleRef().elements();
+            DCHECK_EQ(elems.size(), p_node->num_outputs());
+            for (const auto i : c10::irange(elems.size())) {
+              p_node->Output(i) = elems[i];
+            }
+          };
+        case BlockRunPlan::kRunOnlyTrueBlock:
+          return [](ProcessedNode* p_node) {
+            auto condition = p_node->Input(0).toBool();
+            auto* block_runners = p_node->block_runners();
+            DCHECK(block_runners);
+            DCHECK_EQ(block_runners->size(), 2);
+            if (condition) {
+              auto output = block_runners->front()({});
+              DCHECK(output.isNone());
+            }
+          };
+        case BlockRunPlan::kRunOnlyFalseBlock:
+          return [](ProcessedNode* p_node) {
+            auto condition = p_node->Input(0).toBool();
+            auto* block_runners = p_node->block_runners();
+            DCHECK(block_runners);
+            DCHECK_EQ(block_runners->size(), 2);
+            if (!condition) {
+              auto output = block_runners->back()({});
+              DCHECK(output.isNone());
+            }
+          };
+        case BlockRunPlan::kRunNeitherBlock:
+          return [](ProcessedNode*) {};
+      }
+      return [](ProcessedNode*) {};
+    });
 
 namespace {
 

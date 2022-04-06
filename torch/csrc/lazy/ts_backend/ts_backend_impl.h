@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/lazy/backend/backend_interface.h>
 
 namespace torch {
