@@ -17,6 +17,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
+from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
@@ -538,6 +539,37 @@ class TestContiguous(TestCase):
         inp = torch.randn(6, requires_grad=True)
         out = aot_function(f, nop)(inp)
         torch.autograd.grad(out, inp, torch.randn(3, 2))
+
+
+class TestAOTModuleSimplified(TestCase):
+    def test_aot_module_simplified(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        mod = MockModule()
+        mod.zero_grad()
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+        inputs = [x, y]
+        cloned_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+
+        ref = mod(*inputs)
+        ref[0].sum().backward()
+
+        aot_mod = aot_module_simplified(mod, nop)
+        aot_mod.zero_grad()
+        res = aot_mod(*cloned_inputs)
+        res[0].sum().backward()
+
+        assert torch.allclose(ref[0], res[0])
+        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
+        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
 
 only_for = ("cpu")

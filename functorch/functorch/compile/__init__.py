@@ -8,6 +8,7 @@ from .._src.aot_autograd import (
     compiled_module,
     num_of_recompilations,
     clear_compile_cache,
+    aot_module_simplified,
 )
 from .._src.compilers import (
     ts_compile,
