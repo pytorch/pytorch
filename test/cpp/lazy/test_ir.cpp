@@ -7,6 +7,9 @@
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <memory>
+#include <c10/core/ScalarType.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
@@ -97,8 +100,28 @@ TEST(IrTest, TsNodeTest) {
   EXPECT_TRUE(leafptr != nullptr);
 }
 
-// TODO(@ansley): Wait for backend to be landed 
-// TEST(IrTest, DynamicShapeTest) {}
+TEST(IrTest, DimensionNodeTest) {
+
+  const size_t DIM0 = 5;
+  const size_t DIM1 = 8;
+  NodePtr node1 = MakeNode<TsNode>(
+      OpKind(at::aten::view),
+      Shape(c10::kFloat, {DIM0, DIM1}),
+      /*num_outputs*/ 1,
+      /*hash_seed*/ kHashSeed);
+
+  auto size0 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(node1, 0));
+  auto size1 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(node1, 1));
+
+  ASSERT_EQ(DIM0, size0->getStaticValue());
+  ASSERT_EQ(DIM1, size0->getStaticValue());
+
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(MakeNode<SizeAdd>(size0, size1));
+  ASSERT_EQ(DIM0 + DIM1, add_dim);
+
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(MakeNode<SizeMul>(size0, size1));
+  ASSERT_EQ(DIM0 * DIM1, mul_dim);
+}
 
 } // namespace lazy
 } // namespace torch
