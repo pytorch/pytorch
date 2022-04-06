@@ -3,7 +3,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -97,7 +97,7 @@ REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp<int32_t>);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd64, AtomicFetchAddOp<int64_t>);
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     CreateMutex,
     IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
