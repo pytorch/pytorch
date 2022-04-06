@@ -73,6 +73,15 @@ import io
 import unittest
 import numpy as np
 
+class TestQuantizeEagerPTQStaticCUDA(QuantizationTestCase):
+    def test_resnet18(self):
+        from torchvision import models
+        from torchvision.models import quantization as quantized_models
+        eager_quantizable_model = quantized_models.__dict__["resnet18"](pretrained=False, quantize=False).to(device="cuda").eval().float()
+        # model = models.__dict__[name](pretrained=False).eval().float()
+        # self._test_model_impl(
+        #     'ddp', 'resnet18', model, eager_quantizable_model)
+
 class TestQuantizeEagerOps(QuantizationTestCase):
     @override_qengines
     def _test_reference_module_impl(self,
