@@ -11,16 +11,13 @@ from torch.distributed._shard.sharded_tensor import (
     ShardMetadata,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-)
-from torch.testing._internal.common_utils import (
-    TestCase,
-)
 from torch.distributed.fsdp.shard_utils import (
     _offsets_to_split_sizes,
     reshard_flatten_tensor,
 )
+from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 class TestShardUtils(TestCase):
     def test_offsets_to_split_sizes(self):
@@ -144,6 +141,7 @@ class TestShardUtilsDistributed(FSDPTest):
         torch.manual_seed(0)
         return torch.rand(1001).cuda()
 
+    @skip_if_lt_x_gpu(2)
     def test_reshard_flatten_tensor(self):
         def get_offsets(tensor, shard):
             if self.rank == 0:
