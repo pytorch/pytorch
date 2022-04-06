@@ -191,7 +191,7 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
 // Tensor-like __torch_function__ object and turn it into a mode;
 // but in general modes don't have to be Tensor-like (and we will
 // improperly accept mode objects as arguments when they shouldn't
-// be passed aroudn in this way).
+// be passed around in this way).
 const char* torch_function_mode_name = "__torch_function__";
 
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* kwargs, PyObject* torch_api, const std::string& module_name) -> PyObject* {
@@ -290,8 +290,8 @@ auto handle_torch_function_no_python_arg_parser(
           NULL));
       if (ret.ptr() != Py_NotImplemented) {
         // Return the reference to the result. This also covers the case where
-        // ret is NULL and __torch_function__ raised an exception, which we
-        // throw below
+        // ret is NULL and __torch_function__/__torch_dispatch raised an
+        // exception, which we throw below
         break;
       }
     }

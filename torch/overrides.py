@@ -1735,22 +1735,27 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
     infinite loops, so use with care!)
 
     Args:
-        mode (:class:`TorchFunctionMode`): the mode to set as current mode
-        replace (:class:`TorchFunctionMode`): the mode to replace.  You can
-            use this argument to change the mode in a situation where you
-            know what the current mode is (and you are intentionally
-            overwriting it.)  If you don't know what the current mode is,
-            use ``ignore_preexisting`` instead.
+        mode (:class:`TorchFunctionMode`, Tensor-like class or None): the
+            mode to set as current mode.  If you pass a Tensor-like class,
+            it will be treated as a non-compositional mode with no state,
+            which is convenient if you have an existing tensor subclass
+            that you'd like to apply globally in a quick and dirty way.
+            Passing None will disable the current mode.
+        replace (:class:`TorchFunctionMode` or Tensor-like class): the
+            mode to replace.  You can use this argument to change the mode in
+            a situation where you know what the current mode is (and you are
+            intentionally overwriting it.)  If you don't know what the current
+            mode is, use ``ignore_preexisting`` instead.
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
     if not (
         mode is None or
         isinstance(mode, TorchFunctionMode) or
-        (isinstance(mode, type) and issubclass(mode, torch.Tensor))
+        (isinstance(mode, type) and not issubclass(mode, TorchFunctionMode))
     ):
         raise TypeError(
-            "expected to get None, TorchFunctionMode or Tensor subclass as argument, got "
+            "expected to get TorchFunctionMode, Tensor-like class or None as argument, got "
             f"{type(mode)} instead"
         )
     old = _get_torch_function_mode()
@@ -1768,7 +1773,8 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
             help_text = (
                 'If you intended to completely override the preexisting mode, '
                 'pass ignore_preexisting=True.  This can result in unexpected '
-                'behavior; please consider making your mode compositional!'
+                'behavior; please consider rewriting your mode to be a subclass '
+                'of TorchFunctionMode to make it compositional!'
             )
         raise ValueError(
             'Attempted to enable_torch_function_mode, but there is already an '
@@ -1801,14 +1807,14 @@ def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
             a :class:`TorchFunctionMode`.  If your :class:`TorchFunctionMode`
             has no ``__init__`` implementation, you can simply pass the class
             itself (e.g., ``push_torch_function_mode(MyMode)``); otherwise,
-            use ``partial`` to partially apply the constructor with all
+            use ``functools.partial`` to partially apply the constructor with all
             non-inner arguments (e.g.,
             ``push_torch_function_mode(partial(MyMode, arg))``)
     """
     if isinstance(ctor, TorchFunctionMode):
         raise ValueError(
-            'Expected a TorchFunctionMode constructor function, but got a '
-            f'concrete TorchFunctionMode {ctor}.  Consider using '
+            'Expected a TorchFunctionMode constructor function, but got an '
+            f'instance of TorchFunctionMode {ctor}.  Consider using '
             'enable_torch_function_mode instead.'
         )
     old = _get_torch_function_mode()

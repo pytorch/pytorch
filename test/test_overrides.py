@@ -1105,15 +1105,18 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(bar(x), -40)
 
     def test_modes_return_notimplemented(self):
-        class A(TorchFunctionMode):
+        class MyMode(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
                 return NotImplemented
 
         x = SubTensor()
-        with torch.overrides.push_torch_function_mode(A):
+        with torch.overrides.push_torch_function_mode(MyMode):
             self.assertEqual(torch.mean(x), 0)
             self.assertEqual(torch.mm(x, x), -1)
             self.assertEqual(bar(x), 1)
+            self.assertRaisesRegex(
+                TypeError, r'SubTensor.+MyMode',
+                lambda: self.assertEqual(torch.max(x, x)))
 
     def test_mode_stack(self):
         logs = []
@@ -1138,7 +1141,7 @@ class TestTorchFunctionMode(TestCase):
     def test_push_mode_instance_errors(self):
         class A(TorchFunctionMode):
             pass
-        with self.assertRaisesRegex(ValueError, 'concrete TorchFunctionMode'):
+        with self.assertRaisesRegex(ValueError, 'instance of TorchFunctionMode'):
             with torch.overrides.push_torch_function_mode(A(inner=None)):
                 pass
 
