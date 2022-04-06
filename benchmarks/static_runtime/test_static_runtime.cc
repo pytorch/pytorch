@@ -1307,39 +1307,13 @@ TEST(StaticRuntime, FullLike) {
 
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 4, 2});
+  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   std::vector<IValue> args{
-      a,
-      4,
-      at::ScalarType::Int,
-      at::kStrided,
-      cpu,
-      false,
-      c10::MemoryFormat::Contiguous};
-  std::vector<IValue> args1{
-      a,
-      4,
-      at::ScalarType::Float,
-      at::kStrided,
-      cpu,
-      false,
-      c10::MemoryFormat::Contiguous};
+      a, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
   std::vector<IValue> args2{
-      b,
-      4,
-      at::ScalarType::Float,
-      at::kStrided,
-      cpu,
-      false,
-      c10::MemoryFormat::Contiguous};
+      b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
   testStaticRuntime(full_like_script, args);
-  testStaticRuntime(
-      full_like_script,
-      args,
-      args1,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/false);
   testStaticRuntime(full_like_script, args, args2);
 }
 
