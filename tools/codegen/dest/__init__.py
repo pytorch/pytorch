@@ -1,4 +1,4 @@
-from .lazy_ir import LazyIR as LazyIR
+from .lazy_ir import GenLazyIR as GenLazyIR
 from .lazy_ir import GenLazyShapeInferenceDefinition as GenLazyShapeInferenceDefinition
 from .lazy_ir import GenLazyNativeFuncDefinition as GenLazyNativeFuncDefinition
 from .register_dispatch_key import (

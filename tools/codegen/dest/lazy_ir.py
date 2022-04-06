@@ -81,7 +81,7 @@ def aten_symbol(schema: LazyIrSchema) -> str:
     return f'at::aten::{schema.aten_name}'
 
 @dataclass(frozen=True)
-class LazyIR(ABC):
+class GenLazyIR(ABC):
     backend_index: BackendIndex
     node_base: str
 
@@ -168,7 +168,7 @@ class {schema.node_name} : public {self.node_base} {{
 
 
 @dataclass(frozen=True)
-class TSLazyIR(LazyIR):
+class GenTSLazyIR(GenLazyIR):
 
     def lowering_function(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
         return f"""torch::lazy::TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
@@ -176,35 +176,38 @@ class TSLazyIR(LazyIR):
     {ts_lowering_body(f)}
   }}"""
 
-def lazy_tensor_decls(value_args: List[LazyArgument], tensor_class: str) -> str:
-    lazy_tensor_decls: List[str] = []
-    for arg in value_args:
-        if arg.is_wrapped_scalar:
-            # no lazy tensor wrapper for scalars that are promoted to IR values
-            continue
-        elif isinstance(arg.lazy_type, BaseCType):
-            if arg.lazy_type.type is tensorListValueT:
-                lazy_tensor_decls.append(
-                    f"auto lazy_{arg.name}_tensorlist = torch::lazy::GetTensorList({arg.name});")
-            else:
-                lazy_tensor_decls.append(
-                    f"{tensor_class}Ptr lazy_{arg.name} = "
-                    f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({arg.name}, *common_device);")
-        elif isinstance(arg.lazy_type, OptionalCType):
-            # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
-            # until we encounter a real world example.
-            lazy_tensor_decls.append(
-                f"    {tensor_class}Ptr lazy_{arg.name} = torch::lazy::TryGetLtcTensor({arg.name}.value_or(at::Tensor()));")
-        else:
-            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
-    return ("\n        ").join(lazy_tensor_decls)
+
 
 @dataclass(frozen=True)
-class GenLazyNativeFuncDefinition:
+class GenLazyNativeFuncDefinition(ABC):
     class_method_name: str
     backend_index: BackendIndex
     tensor_class: str
     gen_forced_fallback_code: bool
+
+    def lazy_tensor_decls(self, value_args: List[LazyArgument]) -> str:
+        # Generates lazy_{name} variables for LazyTensors wrapping input tensors
+        lazy_tensor_decls: List[str] = []
+        for arg in value_args:
+            if arg.is_wrapped_scalar:
+                # no lazy tensor wrapper for scalars that are promoted to IR values
+                continue
+            elif isinstance(arg.lazy_type, BaseCType):
+                if arg.lazy_type.type is tensorListValueT:
+                    lazy_tensor_decls.append(
+                        f"auto lazy_{arg.name}_tensorlist = torch::lazy::GetTensorList({arg.name});")
+                else:
+                    lazy_tensor_decls.append(
+                        f"{self.tensor_class}Ptr lazy_{arg.name} = "
+                        f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({arg.name}, *common_device);")
+            elif isinstance(arg.lazy_type, OptionalCType):
+                # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
+                # until we encounter a real world example.
+                lazy_tensor_decls.append(
+                    f"    {self.tensor_class}Ptr lazy_{arg.name} = torch::lazy::TryGetLtcTensor({arg.name}.value_or(at::Tensor()));")
+            else:
+                raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
+        return ("\n        ").join(lazy_tensor_decls)
 
     @method_with_native_function
     def __call__(self, func: NativeFunction) -> List[str]:
@@ -226,7 +229,6 @@ class GenLazyNativeFuncDefinition:
         TORCH_INTERNAL_ASSERT(common_device);
         """
 
-        lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
 
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
@@ -273,7 +275,7 @@ class GenLazyNativeFuncDefinition:
         {fallback_str}
         TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
-        {lazy_tensor_decls_str}
+        {self.lazy_tensor_decls(value_args)}
         {meta_str}
         {node_str}
         {bridge_str}
@@ -312,15 +314,10 @@ class GenLazyShapeInferenceDefinition:
     tensor_class: str
 
     @method_with_native_function
-    # def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex, tensor_class: str) -> List[str]:
     def __call__(self, f: NativeFunction) -> List[str]:
         sig = kernel_signature(f, self.backend_index)
         metadata = self.backend_index.get_kernel(f)
         assert metadata is not None
-        schema = LazyIrSchema(f.func)
-        value_args = schema.filtered_args(values=True, scalars=False)
-        lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
-        node_ctor_input_str = node_ctor_inputs(schema)
 
         # Only generate shape/dtype fn for non-structured kernels,
         # since we just use the meta function for structured kernels
