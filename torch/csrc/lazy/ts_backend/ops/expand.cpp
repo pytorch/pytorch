@@ -14,7 +14,7 @@ Expand::Expand(
           MHash(size, is_scalar_expand)),
       size_(std::move(size)),
       is_scalar_expand_(is_scalar_expand) {
-  addShape(
+  addShapeFromFunction(
       [&]() { return Shape(input.shape().scalar_type(), size_); });
 }
 

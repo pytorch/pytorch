@@ -16,7 +16,7 @@ Narrow::Narrow(
           MHash(base_indices, sizes)),
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
-  addShape([&]() {
+  addShapeFromFunction([&]() {
     return Shape(operand(0).shape().scalar_type(), sizes);
   });
 }

@@ -36,8 +36,8 @@ class TORCH_API BackendImplInterface {
    * IR Tracing
    * */
 
-  // Generate the shape using the provided shape function with the given hash
-  virtual Shape GenerateShape(std::function<Shape()> shape_fn, hash_t hash=0) const;
+  // Get the shape using the provided shape function with the given hash
+  virtual Shape GetShapeFromFunction(std::function<Shape()> shape_fn, hash_t hash=0) const;
 
   /**
    * Data Transfer
@@ -128,7 +128,7 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
-bool hasBackend();
+TORCH_API bool hasBackend();
 TORCH_API const BackendImplInterface* getBackend();
 
 }  // lazy

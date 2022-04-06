@@ -11,19 +11,6 @@
 namespace torch {
 namespace lazy {
 
-// Lazy Tensor is disabled in FBCODE until addressing non-virtual methods (e.g. sizes) in TensorImpl
-#ifndef FBCODE_CAFFE2
-namespace {
-  // This registers the torchscript backend, without which lazy device won't work
-static bool inline init_backend(){
-  torch::lazy::InitTorchScriptBackend();
-  return true;
-}
-static const bool backend_initialized = init_backend();
-
-}
-#endif
-
 class CacheNode : public Node {
  public:
   explicit CacheNode(const std::string& str)
@@ -80,7 +67,6 @@ class CacheNodeWithShape : public TsNode {
       : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0){}
 };
 
-#ifndef FBCODE_CAFFE2
 TEST(CacheTest, ShapeCacheTestForDynamicShape) {
   // enable dynamic shape
   FLAGS_ltc_enable_dynamic_shapes = true;
@@ -93,7 +79,7 @@ TEST(CacheTest, ShapeCacheTestForDynamicShape) {
    * Make sure the cached shape for node (2, 4) is not used for node (4, 2)
    */
   for (auto& node : nodes) {
-    EXPECT_EQ(node.shape(), getBackend()->GenerateShape([&]() {
+    EXPECT_EQ(node.shape(), node.getShapeFromFunction([&]() {
       return node.shape();
     }));
   }
@@ -101,7 +87,6 @@ TEST(CacheTest, ShapeCacheTestForDynamicShape) {
   // reset the flag
   FLAGS_ltc_enable_dynamic_shapes = false;
 }
-#endif
 
 } // namespace lazy
 } // namespace torch
