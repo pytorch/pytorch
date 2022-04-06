@@ -1,12 +1,13 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict image3D uOutput;
-layout(set = 0, binding = 1)          uniform PRECISION restrict Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict image3D uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION restrict Block {
   ivec4 size;
   vec2 clamp;
 } uBlock;

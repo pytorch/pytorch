@@ -1,7 +1,10 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/MaxPooling.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -13,7 +16,7 @@ inline void max_pool1d_kernel(
     scalar_t* C10_RESTRICT op,
     const scalar_t* C10_RESTRICT ip,
     const PoolingParams1D& p) {
-  for (int64_t kj = 0; kj < p.KW; ++kj) {
+  for (const auto kj : c10::irange(p.KW)) {
     int64_t oj = p.valid_output_start(kj);
     int64_t oe = p.valid_output_end(kj);
     int64_t ij = p.index(kj, oj);
@@ -40,7 +43,7 @@ void max_pool1d_impl(
         : std::numeric_limits<scalar_t>::lowest();
 
     at::parallel_for(0, p.NB * p.NC, 0, [&](int64_t begin, int64_t end) {
-      for (int64_t it = begin; it < end; ++it) {
+      for (const auto it : c10::irange(begin, end)) {
         scalar_t* op = OP + it * p.OW;
         const scalar_t* ip = IP + it * p.IW;
         std::fill_n(op, p.OW, FILL);

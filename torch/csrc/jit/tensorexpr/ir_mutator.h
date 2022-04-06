@@ -1,107 +1,64 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Add;
-class Sub;
-class Mul;
-class Div;
-class Mod;
-class Max;
-class Min;
-class And;
-class Or;
-class Xor;
-class Lshift;
-class Rshift;
-class CompareSelect;
-
-#define IMM_DECLARE(Type, Name) class Name##Imm;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
-#undef IMM_DECLARE
-
-class Cast;
-class BitCast;
-class Var;
-class Buf;
-class Ramp;
-class Load;
-class For;
-class Block;
-class Store;
-class Broadcast;
-class IfThenElse;
-class ExprHandle;
-class Expr;
-class Intrinsics;
-class Allocate;
-class Free;
-class Let;
-class Cond;
-class Stmt;
-class Term;
-class Polynomial;
-class RoundOff;
-class MaxTerm;
-class MinTerm;
-class ReduceOp;
-class AtomicAdd;
-class SyncThreads;
-class ExternalCall;
-
 class TORCH_API IRMutator {
  public:
   virtual ~IRMutator() = default;
-  virtual Expr* mutate(Add* v);
-  virtual Expr* mutate(Sub* v);
-  virtual Expr* mutate(Mul* v);
-  virtual Expr* mutate(Div* v);
-  virtual Expr* mutate(Mod* v);
-  virtual Expr* mutate(Max* v);
-  virtual Expr* mutate(Min* v);
-  virtual Expr* mutate(And* v);
-  virtual Expr* mutate(Or* v);
-  virtual Expr* mutate(Xor* v);
-  virtual Expr* mutate(Lshift* v);
-  virtual Expr* mutate(Rshift* v);
-  virtual Expr* mutate(CompareSelect* v);
-#define IMM_MUTATE_DECLARE(Type, Name) virtual Expr* mutate(Name##Imm* v);
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
+  virtual ExprPtr mutate(AddPtr v);
+  virtual ExprPtr mutate(SubPtr v);
+  virtual ExprPtr mutate(MulPtr v);
+  virtual ExprPtr mutate(DivPtr v);
+  virtual ExprPtr mutate(ModPtr v);
+  virtual ExprPtr mutate(MaxPtr v);
+  virtual ExprPtr mutate(MinPtr v);
+  virtual ExprPtr mutate(AndPtr v);
+  virtual ExprPtr mutate(OrPtr v);
+  virtual ExprPtr mutate(XorPtr v);
+  virtual ExprPtr mutate(LshiftPtr v);
+  virtual ExprPtr mutate(RshiftPtr v);
+  virtual ExprPtr mutate(CompareSelectPtr v);
+#define IMM_MUTATE_DECLARE(Type, Name) virtual ExprPtr mutate(Name##ImmPtr v);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
-  virtual Expr* mutate(Cast* v);
-  virtual Expr* mutate(BitCast* v);
-  virtual Expr* mutate(Var* v);
-  virtual Expr* mutate(Buf* v);
-  virtual Expr* mutate(Ramp* v);
-  virtual Expr* mutate(Load* v);
-  virtual Expr* mutate(Broadcast* v);
-  virtual Expr* mutate(IfThenElse* v);
-  virtual Expr* mutate(Intrinsics* v);
+  virtual ExprPtr mutate(CastPtr v);
+  virtual ExprPtr mutate(BitCastPtr v);
+  virtual ExprPtr mutate(VarPtr v);
+  virtual ExprPtr mutate(BufPtr v);
+  virtual ExprPtr mutate(RampPtr v);
+  virtual ExprPtr mutate(LoadPtr v);
+  virtual ExprPtr mutate(BroadcastPtr v);
+  virtual ExprPtr mutate(IfThenElsePtr v);
+  virtual ExprPtr mutate(IntrinsicsPtr v);
 
-  virtual Expr* mutate(Term* v);
-  virtual Expr* mutate(Polynomial* v);
-  virtual Expr* mutate(RoundOff* v);
-  virtual Expr* mutate(MaxTerm* v);
-  virtual Expr* mutate(MinTerm* v);
+  virtual ExprPtr mutate(TermPtr v);
+  virtual ExprPtr mutate(PolynomialPtr v);
+  virtual ExprPtr mutate(RoundOffPtr v);
+  virtual ExprPtr mutate(MaxTermPtr v);
+  virtual ExprPtr mutate(MinTermPtr v);
 
-  virtual Expr* mutate(ReduceOp* v);
+  virtual ExprPtr mutate(ReduceOpPtr v);
 
-  virtual Stmt* mutate(For* v);
-  virtual Stmt* mutate(Block* v);
-  virtual Stmt* mutate(Store* v);
-  virtual Stmt* mutate(AtomicAdd* v);
-  virtual Stmt* mutate(SyncThreads* v);
-  virtual Stmt* mutate(ExternalCall* v);
+  virtual StmtPtr mutate(ForPtr v);
+  virtual StmtPtr mutate(BlockPtr v);
+  virtual StmtPtr mutate(StorePtr v);
+  virtual StmtPtr mutate(AtomicAddPtr v);
+  virtual StmtPtr mutate(SyncThreadsPtr v);
+  virtual StmtPtr mutate(ExternalCallPtr v);
+  virtual StmtPtr mutate(ExternalCallWithAllocPtr v);
 
-  virtual Stmt* mutate(Allocate* v);
-  virtual Stmt* mutate(Free* v);
-  virtual Stmt* mutate(Let* v);
-  virtual Stmt* mutate(Cond* v);
+  virtual StmtPtr mutate(AllocatePtr v);
+  virtual StmtPtr mutate(FreePtr v);
+  virtual StmtPtr mutate(FreeExtPtr v);
+  virtual StmtPtr mutate(PlacementAllocatePtr v);
+  virtual StmtPtr mutate(LetPtr v);
+  virtual StmtPtr mutate(CondPtr v);
 };
 
 } // namespace tensorexpr

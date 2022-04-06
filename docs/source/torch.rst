@@ -1,13 +1,6 @@
 torch
 =====
-The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
-Tensors and arbitrary types, and other useful utilities.
-
-It has a CUDA counterpart, that enables you to run your tensor computations
-on an NVIDIA GPU with compute capability >= 3.0
-
+.. automodule:: torch
 .. currentmodule:: torch
 
 Tensors
@@ -54,9 +47,11 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    asarray
     as_tensor
     as_strided
     from_numpy
+    from_dlpack
     frombuffer
     zeros
     zeros_like
@@ -87,7 +82,10 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
+    argwhere
     cat
+    concat
     conj
     chunk
     dsplit
@@ -96,6 +94,8 @@ Indexing, Slicing, Joining, Mutating Ops
     gather
     hsplit
     hstack
+    index_add
+    index_copy
     index_select
     masked_select
     movedim
@@ -105,8 +105,13 @@ Indexing, Slicing, Joining, Mutating Ops
     permute
     reshape
     row_stack
+    select
     scatter
+    diagonal_scatter
+    select_scatter
+    slice_scatter
     scatter_add
+    scatter_reduce
     split
     squeeze
     stack
@@ -290,6 +295,7 @@ Pointwise Ops
     atanh
     arctanh
     atan2
+    arctan2
     bitwise_not
     bitwise_and
     bitwise_or
@@ -352,6 +358,9 @@ Pointwise Ops
     polygamma
     positive
     pow
+    quantized_batch_norm
+    quantized_max_pool1d
+    quantized_max_pool2d
     rad2deg
     real
     reciprocal
@@ -393,6 +402,7 @@ Reduction Ops
     dist
     logsumexp
     mean
+    nanmean
     median
     nanmedian
     mode
@@ -505,6 +515,7 @@ Other Operations
     gcd
     histc
     histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp
@@ -590,7 +601,25 @@ Utilities
     promote_types
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
+    is_deterministic_algorithms_warn_only_enabled
+    set_deterministic_debug_mode
+    get_deterministic_debug_mode
     set_warn_always
     is_warn_always_enabled
     vmap
     _assert
+
+
+.. Empty submodules added only for tracking.
+.. py:module:: torch.contrib
+.. py:module:: torch.utils.backcompat
+
+.. This submodule is split manually without a top level page.
+.. py:module:: torch.utils
+
+.. This module is only used internally for ROCm builds.
+.. py:module:: torch.utils.hipify
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.utils.model_dump

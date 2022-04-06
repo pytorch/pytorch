@@ -21,7 +21,7 @@ __global__ void ComputeFusedParamsCUDAKernel(
   const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index < N * C) {
     const int64_t c = index % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     const T scale_val = __ldg(gamma + c) * __ldg(rstd + index);
     scale[index] = scale_val;
     bias[index] = __ldg(beta + c) - scale_val * __ldg(mean + index);
@@ -47,7 +47,7 @@ __global__ void InstanceNormForwardCUDAKernel(
     const int64_t nc = kOrder == StorageOrder::NCHW
         ? (index / HxW)
         : (index / (HxW * C) * C + index % C);
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[index] = __ldg(scale + nc) * __ldg(X + index) + __ldg(bias + nc);
 #else
     Y[index] = scale[nc] * X[index] + bias[nc];
@@ -69,7 +69,7 @@ __global__ void ComputeInternalGradientsNCHWCUDAKernel(
   T db_sum = 0;
   for (int64_t j = threadIdx.x; j < HxW; j += blockDim.x) {
     const int64_t index = i * HxW + j;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     ds_sum += __ldg(dY + index) * __ldg(X + index);
     db_sum += __ldg(dY + index);
 #else
@@ -101,7 +101,7 @@ __global__ void ComputeFusedParams(
   const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index < N * C) {
     const int64_t c = index % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     T x = __ldg(ds + index) * __ldg(gamma + c);
     T y = __ldg(db + index) * __ldg(gamma + c);
     x = (y * __ldg(mean + index) - x) *
@@ -136,7 +136,7 @@ __global__ void InstanceNormBackwardCUDAKernel(
     const int64_t c = kOrder == StorageOrder::NCHW
         ? (index / HxW)
         : (index / (HxW * C) * C + index % C);
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dX[index] = __ldg(c1 + c) * __ldg(dY + index) +
         __ldg(c2 + c) * __ldg(X + index) + __ldg(c3 + c);
 #else
@@ -162,7 +162,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
   T sum2 = 0;
   for (int64_t i = threadIdx.x; i < N; i += blockDim.x) {
     const int64_t index = i * C + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     sum1 += (__ldg(ds + index) - __ldg(db + index) * __ldg(mean + index)) *
         __ldg(rstd + index);
     sum2 += __ldg(db + index);

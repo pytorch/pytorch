@@ -137,11 +137,17 @@ when updates are published to the same branch, users can keep up with the latest
 
 Known limitations:
 ^^^^^^^^^^^^^^^^^^
-Torch hub works by importing the package as if it was installed. There're some side effects
+Torch hub works by importing the package as if it was installed. There are some side effects
 introduced by importing in Python. For example, you can see new items in Python caches
 ``sys.modules`` and ``sys.path_importer_cache`` which is normal Python behavior.
+This also means that you may have import errors when importing different models
+from different repos, if the repos have the same sub-package names (typically, a
+``model`` subpackage). A workaround for these kinds of import errors is to
+remove the offending sub-package from the ``sys.modules`` dict; more details can
+be found in `this github issue
+<https://github.com/pytorch/hub/issues/243#issuecomment-942403391>`_.
 
-A known limitation that worth mentioning here is user **CANNOT** load two different branches of
+A known limitation that is worth mentioning here: users **CANNOT** load two different branches of
 the same repo in the **same python process**. It's just like installing two packages with the
 same name in Python, which is not good. Cache might join the party and give you surprises if you
 actually try that. Of course it's totally fine to load them in separate processes.

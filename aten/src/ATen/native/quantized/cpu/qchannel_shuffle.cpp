@@ -31,8 +31,9 @@ Tensor quantized_channel_shuffle_impl(
       self.sizes());
   TORCH_CHECK(
       self.scalar_type() == kQUInt8,
-      "Quantized channel shuffle works only on uint8_t.",
-      "But got:", self.scalar_type());
+      "Quantized channel shuffle works only on ",
+      toString(c10::kQUInt8),
+      " but got ", self.scalar_type());
   const Tensor self_nhwc = self.contiguous(MemoryFormat::ChannelsLast);
   Tensor qy = at::native::empty_affine_quantized(
       self_nhwc.sizes(),

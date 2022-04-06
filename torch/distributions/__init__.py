@@ -90,7 +90,7 @@ from .gumbel import Gumbel
 from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
-from .kl import kl_divergence, register_kl
+from .kl import kl_divergence, register_kl, _add_kl_info
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
 from .lkj_cholesky import LKJCholesky
@@ -113,7 +113,11 @@ from .transforms import *  # noqa: F403
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
+from .wishart import Wishart
 from . import transforms
+
+_add_kl_info()
+del _add_kl_info
 
 __all__ = [
     'Bernoulli',
@@ -155,6 +159,7 @@ __all__ = [
     'Uniform',
     'VonMises',
     'Weibull',
+    'Wishart',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',

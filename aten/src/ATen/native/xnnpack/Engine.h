@@ -13,7 +13,7 @@ namespace xnnpack {
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,

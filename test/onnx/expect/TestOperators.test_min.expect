@@ -1,17 +1,17 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
+    input: "onnx::Min_0"
+    input: "onnx::Min_1"
     output: "2"
     name: "Min_0"
     op_type: "Min"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Min_0"
     type {
       tensor_type {
         elem_type: 1
@@ -27,7 +27,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::Min_1"
     type {
       tensor_type {
         elem_type: 1

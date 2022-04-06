@@ -3,6 +3,8 @@
 
 torch.nn
 ===================================
+.. automodule:: torch.nn
+.. automodule:: torch.nn.modules
 
 These are the basic building blocks for graphs:
 
@@ -331,6 +333,8 @@ Shuffle Layers
 
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
+.. automodule:: torch.nn.parallel
+.. currentmodule:: torch
 
 .. autosummary::
     :toctree: generated
@@ -342,6 +346,7 @@ DataParallel Layers (multi-GPU, distributed)
 
 Utilities
 ---------
+.. automodule:: torch.nn.utils
 
 From the ``torch.nn.utils`` module
 
@@ -389,6 +394,7 @@ in :func:`torch.nn.utils.parameterize.register_parametrization`.
     :toctree: generated
     :nosignatures:
 
+    parametrizations.orthogonal
     parametrizations.spectral_norm
 
 Utility functions to parametrize Tensors on existing Modules.
@@ -396,7 +402,7 @@ Note that these functions can be used to parametrize a given Parameter
 or Buffer given a specific function that maps from an input space to the
 parametrized space. They are not parameterizations that would transform
 an object into a parameter. See the
-`Parametrizations <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`__ tutorial
+`Parametrizations tutorial <https://pytorch.org/tutorials/intermediate/parametrizations.html>`_
 for more information on how to implement your own parametrizations.
 
 .. autosummary::
@@ -452,3 +458,7 @@ Lazy Modules Initialization
     :template: classtemplate.rst
 
     nn.modules.lazy.LazyModuleMixin
+
+
+.. This module is kept only for backward compatibility
+.. py:module:: torch.nn.backends

@@ -60,6 +60,7 @@ static void CanonicalizeOps(Block* block) {
           inputs.at(1) = new_other;
           Value* new_output =
               graph->insertNode(graph->create(it->kind(), inputs))->output();
+          new_output->node()->copyMetadata(*it);
           new_output->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(new_output);
         }
@@ -79,6 +80,7 @@ static void CanonicalizeOps(Block* block) {
             graph->insertNode(graph->create(prim::ConstantChunk, chunks));
         node->addInput(self);
         node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+        node->copyMetadata(*it);
         for (const auto& orig_out : *orig_outputs) {
           orig_out.val->replaceAllUsesWith(node->outputs()[orig_out.offset]);
           node->outputs()[orig_out.offset]->setType(orig_out.val->type());

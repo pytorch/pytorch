@@ -5,14 +5,15 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
@@ -80,7 +81,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0.0;
     }
     std::memcpy(
@@ -109,7 +110,7 @@ public:
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -217,7 +218,7 @@ public:
     __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
@@ -227,7 +228,7 @@ public:
     __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
@@ -321,7 +322,7 @@ Vectorized<float> inline operator/(const Vectorized<float>& a, const Vectorized<
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorized<float> Vectorized<float>::frac() const {
+inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
@@ -375,27 +376,27 @@ Vectorized<float> inline operator^(const Vectorized<float>& a, const Vectorized<
   return _mm256_xor_ps(a, b);
 }
 
-Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
   return (*this == other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
   return (*this != other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
   return (*this > other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
   return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
   return (*this < other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
