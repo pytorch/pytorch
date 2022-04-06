@@ -1,4 +1,4 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -18,7 +18,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input"
     type {

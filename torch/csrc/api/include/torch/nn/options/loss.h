@@ -2,7 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -662,6 +662,8 @@ struct TORCH_API CrossEntropyLossOptions {
   TORCH_ARG(int64_t, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies the amount of smoothing when computing the loss. Default: 0.0
+  TORCH_ARG(double, label_smoothing) = 0.0;
 };
 
 namespace functional {

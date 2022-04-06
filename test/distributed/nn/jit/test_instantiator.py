@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: distributed"]
+
 import pathlib
 import sys
-import unittest
 from typing import Tuple
 
 import torch
@@ -13,7 +14,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.nn.jit import instantiator
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 @torch.jit.interface
@@ -32,7 +33,7 @@ def create_module():
     return MyModule()
 
 
-class TestInstantiator(unittest.TestCase):
+class TestInstantiator(TestCase):
     def test_get_arg_return_types_from_interface(self):
         (
             args_str,

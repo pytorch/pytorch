@@ -55,12 +55,10 @@ Tensor _get_complete_sum(const Tensor& lengths) {
       lengths.type(), "_segment_reduce_cuda_backward_kernel1", ([&] {
         auto* lengths_data_ptr = lengths.data_ptr<index_t>();
         auto* offsets_data_ptr = offsets.data_ptr<index_t>();
-        CUB_WRAPPER(
-            cub::DeviceScan::InclusiveSum,
+        at::cuda::cub::inclusive_sum(
             lengths_data_ptr,
             offsets_data_ptr + 1,
-            segment_count,
-            at::cuda::getCurrentCUDAStream());
+            segment_count);
       }));
   return offsets;
 }

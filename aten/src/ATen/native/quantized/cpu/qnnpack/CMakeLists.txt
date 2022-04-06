@@ -194,6 +194,7 @@ set(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8conv/8x8-neon.c
   src/q8dwconv/mp8x25-neon.c
   src/q8dwconv/mp8x25-neon-per-channel.c
+  src/q8dwconv/mp8x27-neon.c
   src/q8dwconv/up8x9-neon.c
   src/q8dwconv/up8x9-neon-per-channel.c
   src/q8gavgpool/mp8x7p7q-neon.c
@@ -244,6 +245,7 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8conv/4x4c2-sse2.c
   src/q8dwconv/mp8x25-sse2.c
   src/q8dwconv/mp8x25-sse2-per-channel.c
+  src/q8dwconv/mp8x27-sse2.c
   src/q8dwconv/up8x9-sse2.c
   src/q8dwconv/up8x9-sse2-per-channel.c
   src/q8gavgpool/mp8x7p7q-sse2.c
@@ -319,7 +321,6 @@ endif()
 target_include_directories(pytorch_qnnpack PUBLIC include)
 target_include_directories(pytorch_qnnpack PUBLIC src)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/pytorch_qnnpack.h)
-set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/conv_utils.h)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/qnnpack_func.h)
 
 # ---[ Configure clog

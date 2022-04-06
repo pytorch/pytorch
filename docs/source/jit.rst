@@ -60,6 +60,8 @@ Creating TorchScript Code
     ScriptModule
     ScriptFunction
     freeze
+    optimize_for_inference
+    set_fusion_strategy
     save
     load
     ignore
@@ -475,7 +477,7 @@ In this case, data-dependent control flow like this can be captured using
     #print(str(scripted_fn.graph).strip())
 
     for input_tuple in [inputs] + check_inputs:
-        torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+        torch.testing.assert_close(fn(*input_tuple), scripted_fn(*input_tuple))
 
 .. testoutput::
     :hide:
@@ -876,3 +878,7 @@ References
 
     jit_python_reference
     jit_unsupported
+
+.. This package is missing doc. Adding it here for coverage
+.. This does not add anything to the rendered page.
+.. py:module:: torch.jit.mobile

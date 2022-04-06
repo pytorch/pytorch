@@ -376,7 +376,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool1d(input, kernel_size, stride, padding,
-                                          dilation, ceil_mode, return_indices)
+                                          dilation, ceil_mode=ceil_mode, return_indices=return_indices)
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
@@ -392,12 +392,13 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
-                                          dilation, ceil_mode, return_indices)
+                                          dilation, ceil_mode=ceil_mode, return_indices=return_indices)
 
 def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
     r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
 
     Applies the quantized CELU function element-wise.
+
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
 
@@ -492,15 +493,17 @@ def elu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tens
         raise ValueError("Input to 'quantized.elu' must be quantized!")
     return torch.ops.quantized.elu(input, scale, zero_point, alpha)
 
-def hardsigmoid(input: Tensor) -> Tensor:
+def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
+    if inplace:
+        return torch._C._nn.hardsigmoid_(input)  # type: ignore[attr-defined]
     return torch._C._nn.hardsigmoid(input)
 
 def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
-    r"""float(input, min_, max_) -> Tensor
+    r"""float(input, min\_, max\_) -> Tensor
 
     Applies the clamp function element-wise.
     See :class:`~torch.nn.quantized.clamp` for more details.

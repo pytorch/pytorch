@@ -1,15 +1,28 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/max_pool3d_with_indices_backward_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -67,7 +80,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
           int index = t * iheight * iwidth + h * iwidth + w;
           scalar_t val = inputData[index];
 
-          if ((max < val) || THCNumerics<scalar_t>::isnan(val))
+          if ((max < val) || at::_isnan(val))
           {
             max = val;
             maxIndex = index;
@@ -98,8 +111,8 @@ void max_pool3d_with_indices_out_frame(
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
-              cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
+              ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     max_pool3d_with_indices_single_out_frame
@@ -130,7 +143,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int itime, int iheight, int iwidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
+  int dilationT, int dilationH,
   int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
@@ -158,14 +171,14 @@ void max_pool3d_with_indices_backward_out_frame(
   int oheight, int owidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW)
+  int dilationT, int dilationH)
 {
   int offsetZ = 0;
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
-              cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
+              ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     max_pool3d_with_indices_backward_single_out_frame
@@ -176,7 +189,7 @@ void max_pool3d_with_indices_backward_out_frame(
         itime, iheight, iwidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW,
+        dilationT, dilationH,
         offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -229,9 +242,6 @@ void max_pool3d_with_indices_out_cuda_template(
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
-  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
-
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
@@ -250,7 +260,8 @@ void max_pool3d_with_indices_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_out_cuda_template()");
 
   if (input.ndimension() == 4) {
     output.resize_({ nslices, otime, oheight, owidth});
@@ -259,6 +270,10 @@ void max_pool3d_with_indices_out_cuda_template(
   else {
     output.resize_({nbatch, nslices, otime, oheight, owidth});
     indices.resize_({nbatch, nslices, otime, oheight, owidth});
+  }
+
+  if (input.numel() == 0) {
+    return;
   }
 
   Tensor work_input = input.contiguous();
@@ -338,10 +353,12 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
+    "max_pool2d_with_indices_backward_out_cuda_template(): ",
+    "Expected 4D or 5D input tensor, but got ", input.sizes());
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");
+    "max_pool2d_with_indices_backward_out_cuda_template(): ",
+    "Expected 4D or 5D gradOutput tensor, but got ", gradOutput.sizes());
 
   // Resize and initialize result tensor.
   gradInput.resize_as_(input);
@@ -368,7 +385,12 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_backward_out_cuda_template()");
+
+  if (gradOutput.numel() == 0) {
+    return;
+  }
 
   Tensor work_grad_input = gradInput;
   Tensor work_grad_output = gradOutput.contiguous();
@@ -394,7 +416,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
         oheight, owidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        dilationT, dilationH);
     }
   );
 }

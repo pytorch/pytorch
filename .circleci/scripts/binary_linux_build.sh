@@ -11,7 +11,7 @@ NUM_CPUS=$(( $(nproc) - 2 ))
 # Defaults here for **binary** linux builds so they can be changed in one place
 export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
 
-if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
+if [[ "${DESIRED_CUDA}" =~ cu11[0-9] ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 
@@ -26,7 +26,7 @@ else
   build_script='manywheel/build.sh'
 fi
 
-if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
+if [[ "$CIRCLE_BRANCH" == "main" ]] || [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
   export BUILD_DEBUG_INFO=1
 fi
 

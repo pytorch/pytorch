@@ -1,8 +1,8 @@
 #pragma once
 #include <cstring>
-#include <iostream>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <sstream>
 #include <unordered_map>
 

@@ -5,10 +5,13 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler.h>
-#include <torch/csrc/jit/codegen/cuda/shape_inference.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/type_inference.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -72,8 +75,8 @@ class CudaFusionManager {
     // We should not call `EraseShapeInformation(graph);`, graph representation
     // does not incorporate static sizes, but just rank of input tensors, which
     // is exactly what we wanted.
-    Canonicalize(graph, false);
-    auto repr = graph->toString(false);
+    auto canonical_graph = Canonicalize(graph, false);
+    auto repr = canonical_graph->toString(false);
 
     // create new graph_cache_ids_ entry if none existed yet;
     if (graph_cache_ids_.count(repr) == 0) {
@@ -86,10 +89,24 @@ class CudaFusionManager {
     return graph_cache_ids_[repr];
   };
 
+  void unregisterCacheId(std::shared_ptr<Graph>& graph) {
+    auto canonical_graph = Canonicalize(graph, false);
+    auto repr = canonical_graph->toString(false);
+
+    // create new graph_cache_ids_ entry if none existed yet;
+    if (graph_cache_ids_.count(repr) > 0) {
+      int32_t kernel_id = graph_cache_ids_[repr];
+      graph_cache_.erase(kernel_id);
+      graph_cache_ids_.erase(repr);
+    }
+  }
+
   std::vector<at::Tensor> runFusionNode(
       int32_t kernel_id,
       const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
+    TORCH_INTERNAL_ASSERT(
+        graph_cache_.count(kernel_id) > 0, "graph cache miss at run time");
     return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
   }
 
@@ -105,83 +122,6 @@ class CudaFusionManager {
       }
     }
     return false;
-  }
-
-  TensorTypePtr mergeInputTensorType(const std::shared_ptr<Graph>& graph) {
-    // run over inputs to extract common types;
-    TensorTypePtr acc_type = TensorType::get();
-    for (const auto& input : graph->inputs()) {
-      // only check tensor types;
-      if (auto input_type = input->type()->cast<TensorType>()) {
-        if (!input_type->dim().has_value()) {
-          // early termination when detecting undefined tensor;
-          return TensorType::get()->withUndefined();
-        }
-        if (acc_type->dim().has_value()) {
-          // TODO: I think merge cannot handle broadcast - Go verify it later;
-          // TODO: Since we are only handling permutation here, we should just
-          //       merge the stride_index_;
-          acc_type = acc_type->merge(*input_type);
-        } else {
-          acc_type = input_type;
-        }
-      }
-    }
-    return acc_type;
-  }
-
-  // return a permutation order that would undo `permuted`
-  at::DimVector restorePermutation(at::DimVector permuted) {
-    int rank = static_cast<int>(permuted.size());
-    at::DimVector permutation(rank, -1);
-    for (const auto i : c10::irange(rank)) {
-      permutation[permuted[i]] = i;
-    }
-    return permutation;
-  }
-
-  at::DimVector getSortStrideScheme(const TensorTypePtr& type) {
-    // `permute_seq` is the returned permutation to achieve sorted stride;
-    at::DimVector permute_seq;
-
-    auto stride_properties = type->stride_properties().sizes();
-
-    TORCH_INTERNAL_ASSERT(
-        stride_properties.has_value(),
-        "unknown sizes or stride_properties, collapsing shouldn't happen");
-
-    // TODO: reuse this;
-    const int rank = static_cast<int>(stride_properties->size());
-
-    // stores axes with stride_index;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::set<int> ordered_axes;
-
-    // TODO: this does not support broadcast yet;
-    for (const auto i : c10::irange(rank)) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
-      }
-    }
-
-    int unallocated_axis = 0;
-    // we push from slowest to fastest
-    for (int i = rank - 1; i >= 0; i--) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        permute_seq.emplace_back(
-            (*stride_properties)[i]->stride_index_.value());
-      } else {
-        // no designated axis for this slot, so we push an axis w/o designated
-        // order;
-        while (ordered_axes.count(unallocated_axis) != 0) {
-          ++unallocated_axis;
-        }
-        permute_seq.emplace_back(unallocated_axis++);
-      }
-    }
-    return permute_seq;
   }
 
  private:
@@ -202,10 +142,29 @@ class CudaFusionManager {
   int32_t next_unique_id_ = 0;
 };
 
+// Mark string attribute in alias-copy nodes to enable its implementation
+// in the fallback path.
+void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
+  static std::unordered_set<Symbol> alias_copy_op(
+      {prim::view_copy,
+       prim::reshape_copy,
+       prim::squeeze_copy,
+       prim::unsqueeze_copy});
+
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      enableAliasCopyNodes(graph, b);
+    }
+    if (alias_copy_op.find(n->kind()) != alias_copy_op.end()) {
+      n->s_(attr::name, "CudaFusionGroup");
+    }
+  }
+}
+
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
-  FUSER_PERF_SCOPE("compileCudaFusionGroup");
+  FUSER_PERF_SCOPE("nvFuser::Manager::compileCudaFusionGroup");
 
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
@@ -216,37 +175,81 @@ void compileCudaFusionGroup(Node* fusion_node) {
   // This is not a critical code path, it's OK to do graph copy here;
   auto graph = fusion_node->g(attr::Subgraph)->copy();
 
-  // type propagation is needed, as the protocol only requires scalar type on
-  // input tensors.
-  // Note that even for Profiling Executor, scalar type could still be missing,
-  // especially for output tensor from a given node (as profiling node only
-  // insert meta information after itself).
-  TypePropagate(graph);
+  auto compile_fusion = [&]() {
+    // type propagation is needed, as the protocol only requires scalar type on
+    // input tensors.
+    // Note that even for Profiling Executor, scalar type could still be
+    // missing, especially for output tensor from a given node (as profiling
+    // node only insert meta information after itself).
+    PropagateShapesOnGraph(graph);
+    TypePropagate(graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int32_t fusion_cache_id =
-      CudaFusionManager::getManager().registerOrGetCacheId(graph);
-  fusion_node->i_(attr::cache_id, fusion_cache_id);
+    int32_t fusion_cache_id =
+        CudaFusionManager::getManager().registerOrGetCacheId(graph);
+    fusion_node->i_(attr::cache_id, fusion_cache_id);
+  };
+
+  if (useFallback()) {
+    try {
+      compile_fusion();
+    } catch (...) {
+      TORCH_WARN(
+          "FALLBACK path has been taken. This is an indication that codegen"
+          "Failed for some reason. To debug try disable codegen fallback path"
+          "via setting the env variable"
+          "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
+      CudaFusionManager::getManager().unregisterCacheId(graph);
+    }
+  } else {
+    compile_fusion();
+  }
 }
 
 void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
-  FUSER_PERF_SCOPE("runCudaFusionGroup");
+  FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
 
-  TORCH_CHECK(
-      fusion_node->kind() == prim::CudaFusionGroup,
-      "prim::CudaFusionGroup expected");
-  // TODO: should we support runtime compilation with updated dynamic shape;
-  //       shape inference would be needed so we can allocate output;
-  TORCH_CHECK(
-      fusion_node->hasAttribute(attr::cache_id),
-      "node prim::CudaFusionGroup has not been compiled yet");
-  int32_t kernel_id = fusion_node->i(attr::cache_id);
+  // Fallback to use if anything goes wrong
+  auto take_fallback = [&](Stack& stack) {
+    // copying graph here since we are eliminating shape information;
+    auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+    EraseShapeInformation(copied_graph);
+    enableAliasCopyNodes(copied_graph, copied_graph->block());
+    InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
+  };
 
-  // Currently we just construct I/O tensors for static graph;
+  c10::optional<Stack> stack_copy;
+  auto compare_callback = getCudaFuserComparisonCallback();
+  if (compare_callback.run_fallback) {
+    // make a copy of the stack
+    int64_t inputs_size =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->inputs().size());
+    TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
+    stack_copy = Stack();
+    stack_copy->insert(
+        stack_copy->end(), stack.begin(), stack.end() - inputs_size);
+    // deepcopy the last (inputs_size) stack items
+    std::transform(
+        stack.end() - inputs_size,
+        stack.end(),
+        std::back_inserter(*stack_copy),
+        [](const c10::IValue& ivalue) { return ivalue.deepcopy(); });
+  }
 
-  const auto nInputs = fusion_node->g(attr::Subgraph)->inputs().size();
+  auto run_fusion = [&]() {
+    TORCH_CHECK(
+        fusion_node->kind() == prim::CudaFusionGroup,
+        "prim::CudaFusionGroup expected");
+    // TODO: should we support runtime compilation with updated dynamic shape;
+    //       shape inference would be needed so we can allocate output;
+    TORCH_CHECK(
+        fusion_node->hasAttribute(attr::cache_id),
+        "node prim::CudaFusionGroup has not been compiled yet");
 
-  auto execute_lambda = [&]() {
+    int32_t kernel_id = fusion_node->i(attr::cache_id);
+    // Currently we just construct I/O tensors for static graph;
+
+    const auto nInputs = fusion_node->g(attr::Subgraph)->inputs().size();
+
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
     auto outputs =
@@ -259,24 +262,53 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
         std::make_move_iterator(outputs.end()));
   };
 
-  const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
-  int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
-  if (disable_fb_flag) {
-    execute_lambda();
-  } else {
+  if (useFallback()) {
     try {
-      execute_lambda();
+      run_fusion();
     } catch (...) {
       TORCH_WARN(
-          "FALLBACK path is taken. This is an indication that codegen"
+          "FALLBACK path has been taken. This is an indication that codegen"
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
-          "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
-      // copying graph here since we are eliminating shape information;
-      auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
-      EraseShapeInformation(copied_graph);
-      InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
+          "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
+      take_fallback(stack);
     }
+  } else {
+    run_fusion();
+  }
+
+  if (compare_callback.callback != nullptr) {
+    Stack fused_outputs;
+    Stack fallback_outputs;
+    int64_t output_count =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->outputs().size());
+    TORCH_CHECK(
+        output_count <= stack.size(),
+        "Expected ",
+        output_count,
+        " outputs but found only ",
+        stack.size(),
+        " items on the stack");
+
+    fused_outputs.insert(
+        fused_outputs.begin(), stack.end() - output_count, stack.end());
+
+    if (stack_copy) {
+      take_fallback(*stack_copy);
+      TORCH_CHECK(
+          stack_copy->size() == stack.size(),
+          "Fused graph returns stack with ",
+          stack.size(),
+          " items, compared to ",
+          stack_copy->size(),
+          " from unfused graph");
+      fallback_outputs.insert(
+          fallback_outputs.begin(),
+          stack_copy->end() - output_count,
+          stack_copy->end());
+    }
+    auto graph_str = fusion_node->g(attr::Subgraph)->toString();
+    compare_callback.callback(fused_outputs, fallback_outputs, graph_str);
   }
 }
 

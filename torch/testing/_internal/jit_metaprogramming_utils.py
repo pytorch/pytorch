@@ -68,12 +68,12 @@ nn_functional_tests = [
     ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
-    ('dropout', (S, S, S), (0.5,), '', (True,
-                                        ['aten::bernoulli_',
-                                         'aten::empty_like', 'aten::mul', 'aten::div'])),
+    ('dropout', (S, S, S), (0.5,), '', (True, 'aten::native_dropout')),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
-    ('dropout3d', (S, S, S), (0.5,)),
+    ('dropout2d', (S, S, S, S), (0.5,), 'batched'),
+    ('dropout3d', (S, S, S, S), (0.5,)),
+    ('dropout3d', (S, S, S, S, S), (0.5,), 'batched'),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
     ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
@@ -97,7 +97,7 @@ nn_functional_tests = [
     ('hardshrink', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
-    ('softplus', (S, S, S), (),),
+    ('softplus', (S, S, S), (), '', (True,)),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,), '', (True,)),
     ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
@@ -109,8 +109,39 @@ nn_functional_tests = [
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (False, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), None, None, True, ),
+        'training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (0, S, S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+         non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), True, ),
+        'size_zero', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (0, S, S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+         non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), True, ),
+        'size_zero_inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S),
+        (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+         non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), True, ),
+        'with_weight_and_bias_training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            None, non_differentiable(torch.ones(S)), True, ),
+        'with_only_bias_training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            non_differentiable(torch.randn(S)), None, True, ),
+        'with_only_weight_training', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            None, None, False, ),
+        'inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), False, ),
+        'with_weight_and_bias_inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            None, non_differentiable(torch.ones(S)), False, ),
+        'with_only_bias_inference', (True, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)),
+                            non_differentiable(torch.randn(S)), None, False, ),
+        'with_only_weight_inference', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -137,7 +168,7 @@ nn_functional_tests = [
     ('huber_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
-    ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
+    ('margin_ranking_loss', (S,), ((S,), (S,)),),
     ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
@@ -237,6 +268,8 @@ def value_to_literal(value):
     if isinstance(value, str):
         # Quotes string and escapes special characters
         return ascii(value)
+    if isinstance(value, torch.Tensor):
+        return 'torch.' + str(value)
     else:
         return str(value)
 
@@ -336,6 +369,7 @@ def create_traced_fn(self, fn):
         output = traced(*inputs_tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
+        traced_fn.graph = traced.graph  # type: ignore[attr-defined]
         return output
     return traced_fn
 
@@ -498,10 +532,12 @@ def get_nn_module_name_from_kwargs(**kwargs):
         return kwargs['constructor'].__name__
 
 def get_nn_mod_test_name(**kwargs):
-    name = get_nn_module_name_from_kwargs(**kwargs)
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    if 'fullname' in kwargs:
+        test_name = kwargs['fullname']
+    else:
+        test_name = get_nn_module_name_from_kwargs(**kwargs)
+        if 'desc' in kwargs:
+            test_name = "{}_{}".format(test_name, kwargs['desc'])
     return 'test_nn_{}'.format(test_name)
 
 def get_nn_module_class_from_kwargs(**kwargs):
