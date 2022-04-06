@@ -7,7 +7,7 @@ namespace {
 std::atomic<const BackendImplInterface*> backend_impl_registry;
 } // namespace
 
-Shape BackendImplInterface::GetShapeFromFunction(
+Shape BackendImplInterface::ComputeShape(
   std::function<Shape()> shape_fn, hash_t hash) const {
   return shape_fn();
 }

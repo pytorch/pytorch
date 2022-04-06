@@ -47,10 +47,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     default_device_type_ = TSBackendDeviceType(type);
   }
 
-  Shape GetShapeFromFunction(std::function<Shape()> shape_fn, hash_t hash) const override {
-    if (!hash) {
-      return shape_fn();
-    }
+  Shape ComputeShape(std::function<Shape()> shape_fn, hash_t hash) const override {
     static ShapeCache* cache = new ShapeCache(FLAGS_torch_lazy_ts_shape_cache_size);
     auto shape = cache->Get(hash);
     if (shape == nullptr) {

@@ -5,7 +5,6 @@
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/shape.h>
-#include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch {
@@ -79,7 +78,7 @@ TEST(CacheTest, ShapeCacheTestForDynamicShape) {
    * Make sure the cached shape for node (2, 4) is not used for node (4, 2)
    */
   for (auto& node : nodes) {
-    EXPECT_EQ(node.shape(), node.getShapeFromFunction([&]() {
+    EXPECT_EQ(node.shape(), node.computeShape([&]() {
       return node.shape();
     }));
   }

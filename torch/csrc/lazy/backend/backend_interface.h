@@ -36,8 +36,9 @@ class TORCH_API BackendImplInterface {
    * IR Tracing
    * */
 
-  // Get the shape using the provided shape function with the given hash
-  virtual Shape GetShapeFromFunction(std::function<Shape()> shape_fn, hash_t hash=0) const;
+  // Compute the shape using the provided shape function with the given hash
+  // Gives a backend the ability to implement a caching mechanism
+  virtual Shape ComputeShape(std::function<Shape()> shape_fn, hash_t hash) const;
 
   /**
    * Data Transfer
