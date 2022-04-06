@@ -20,10 +20,18 @@ def get_pattern_to_quantize_handlers(
     pattern_to_quantize_handlers = dict()
     for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
-        observation_type = config["observation_type"]
+        observation_type = config.get("observation_type", None)
         dtype_configs = config["dtype_configs"]
+        num_tensor_args_to_observation_type = config.get("num_tensor_args_to_observation_type", {})
+        overwrite_fake_quantizer = config.get("_overwrite_output_fake_quantizer", None)
+        overwrite_observer = config.get("_overwrite_output_observer", None)
         pattern_to_quantize_handlers[pattern] = \
-            get_quantize_handler_cls(observation_type, dtype_configs)
+            get_quantize_handler_cls(
+                observation_type,
+                dtype_configs,
+                num_tensor_args_to_observation_type,
+                overwrite_fake_quantizer,
+                overwrite_observer)
 
     return pattern_to_quantize_handlers
 
