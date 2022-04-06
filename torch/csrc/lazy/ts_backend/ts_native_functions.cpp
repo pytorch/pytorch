@@ -262,7 +262,7 @@ at::Tensor LazyNativeFunctions::diagonal(const at::Tensor& self, int64_t offset,
   dim1 = at::maybe_wrap_dim(dim1, self);
   dim2 = at::maybe_wrap_dim(dim2, self);
   auto diagonal_info = DiagonalInfo {offset, dim1, dim2};
-  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, std::move(diagonal_info));
+  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, diagonal_info);
 
   return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
 }
