@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
+     onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100

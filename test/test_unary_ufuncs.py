@@ -17,7 +17,7 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyNativeDeviceTypes,
-    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
+    onlyCUDA, dtypesIfCUDA, precisionOverride, dtypesIfCPU,
     OpDTypes)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
