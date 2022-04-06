@@ -215,6 +215,10 @@ class _Gather(Function):
         tensor_list = [
             torch.zeros_like(tensor) for i in range(dist.get_world_size(group=group))
         ]
+
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+
         if dist.get_rank(group=group) == dst:
             dist.gather(tensor, tensor_list, dst, group=group)
         else:
@@ -262,14 +266,13 @@ class _Reduce_Scatter(Function):
     @staticmethod
     def forward(ctx, op, group, tensor, *input_tensor_list):
         ctx.group = group
-        dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
+        input_tensor_list = [t if t.is_contiguous() else t.contiguous() for t in input_tensor_list]
+        dist.reduce_scatter(tensor, input_tensor_list, op=op, group=group)
         return tensor
 
     @staticmethod
     def backward(ctx, grad_output):
-        return (None, None, None) + _AllGather.apply(
-            ctx.group, grad_output.contiguous()
-        )
+        return (None, None, None) + _AllGather.apply(ctx.group, grad_output)
 
 
 class _AllGather(Function):
@@ -279,6 +282,10 @@ class _AllGather(Function):
         out_tensor_list = [
             torch.empty_like(tensor) for _ in range(dist.get_world_size(group=group))
         ]
+
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+
         dist.all_gather(out_tensor_list, tensor, group=group)
         return tuple(out_tensor_list)
 
@@ -286,7 +293,7 @@ class _AllGather(Function):
     def backward(ctx, *grad_outputs):
         rank = dist.get_rank()
         gx = torch.empty_like(grad_outputs[rank])
-        dist.reduce_scatter(gx, list(grad_outputs), op=dist.ReduceOp.SUM, group=ctx.group)
+        _Reduce_Scatter.apply(dist.ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         return (None, gx)
 
 
