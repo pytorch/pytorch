@@ -4034,7 +4034,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(fq1()._observer_ctr, fq2()._observer_ctr)
 
     def test_fixed_qparams_patterns(self):
-        hard_sigmoid_keys = [torch.nn.Hardsigmoid, torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
+        hard_sigmoid_keys = [torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
         sigmoid_keys = [torch.nn.Sigmoid, torch.sigmoid, "sigmoid", "sigmoid_"]
         tanh_keys = [torch.nn.Tanh, torch.tanh, "tanh", "tanh_"]
         for k in hard_sigmoid_keys + sigmoid_keys:
