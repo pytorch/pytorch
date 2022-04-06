@@ -489,6 +489,17 @@ and supported quantized modules and functions.
     torch.ao.ns._numeric_suite
     torch.ao.ns._numeric_suite_fx
 
+Quantization Backend Configuration
+----------------------------------
+
+The :doc:`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
+on how to configure the quantization workflows for various backends.
+
+.. toctree::
+    :hidden:
+
+    quantization-backend-configuration
+
 Quantized Tensors
 ---------------------------------------
 
