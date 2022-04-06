@@ -52,6 +52,10 @@ void check_maxpool2d_params(
 // documentation on the APIs
 // Currently, it appears there is no cudnn support for dilated pooling -- we will
 // submit a feature request for this with cudnn
+// TODO: ideally, we would like to use structured kernel support here so we do not have to repeat
+// the input checks, however, that would require us to implement max_pool2d_with_indices_out_quantized_cuda
+// based on how the dispatch table is currently constructed in native_functions.yaml. currently,
+// there is no support for producing indices with cudnn max pooling, so until that becomes available, this cannot be done.
 Tensor quantized_max_pool2d_cudnn(
     const Tensor& qx,
     IntArrayRef kernel_size,
