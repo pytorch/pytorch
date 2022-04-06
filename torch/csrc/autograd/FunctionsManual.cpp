@@ -208,8 +208,7 @@ Tensor norm_backward(
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    auto norm_eq_zero = norm == 0;
-    return self * (grad / norm).masked_fill_(norm_eq_zero, 0);
+    return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
@@ -225,20 +224,17 @@ Tensor norm_backward(
     scale_v = grad / nb_max;
     return self_scaled * scale_v;
   } else if (p < 1.0) {
-    auto self_eq_zero = self == 0;
-    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self_eq_zero, 0);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
     return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    auto norm_eq_zero = norm == 0;
     self_scaled = self.sgn() * self.abs().pow_(p - 1);
     scale_v = grad / norm.pow(p - 1);
-    scale_v.masked_fill_(norm_eq_zero, 0);
+    scale_v.masked_fill_(norm == 0, 0);
     return self_scaled * scale_v;
   } else {
-    auto norm_eq_zero = norm == 0;
     self_scaled = self * self.abs().pow_(p - 2);
     scale_v = grad / norm.pow(p - 1);
-    scale_v.masked_fill_(norm_eq_zero, 0);
+    scale_v.masked_fill_(norm == 0, 0);
     return self_scaled * scale_v;
   }
 }
@@ -265,11 +261,10 @@ Tensor norm_jvp(
     result = at::real(result);
     return result.sum(dim, keepdim);
   } else if (p == 2.0) {
-    auto norm_eq_zero = norm == 0;
     auto result = self_p.mul(self_t.conj());
     result = at::real(result);
     result = result.sum(dim, keepdim);
-    return result.div_(norm).masked_fill_(norm_eq_zero, 0);
+    return result.div_(norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     if (!keepdim && self_p.dim() != 0) {
       norm = unsqueeze_multiple(norm, dim, ndim);
@@ -286,19 +281,16 @@ Tensor norm_jvp(
     }
     return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
   } else if (p < 1.0) {
-    auto self_p_eq_zero = self_p == 0;
-    auto sumpow_t = (self_p.abs().pow_(p - 1).masked_fill_(self_p_eq_zero, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    auto sumpow_t = (self_p.abs().pow_(p - 1).masked_fill_(self_p == 0, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
     return sumpow_t * norm.pow(1 - p);
   } else if (p < 2.0) {
-    auto norm_eq_zero = norm == 0;
     auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
     auto out = sumpow_t / norm.pow(p - 1);
-    return out.masked_fill_(norm_eq_zero, 0);
+    return out.masked_fill_(norm == 0, 0);
   } else {
-    auto norm_eq_zero = norm == 0;
     auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
     auto out = sumpow_t / norm.pow(p - 1);
-    return out.masked_fill_(norm_eq_zero, 0);
+    return out.masked_fill_(norm == 0, 0);
   }
 }
 
