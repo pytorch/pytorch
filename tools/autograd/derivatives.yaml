@@ -2532,12 +2532,15 @@
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
+  result: _fft_r2c(self_t, dim, normalization, onesided)
 
 - name: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
   self: fft_c2r_backward(grad, dim, normalization)
+  result: _fft_c2r(self_t, dim, normalization, last_dim_size)
 
 - name: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
   self: _fft_c2c(grad, dim, normalization, !forward)
+  result: _fft_c2c(self_t, dim, normalization, forward)
 
 - name: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
