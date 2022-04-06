@@ -28,7 +28,7 @@ def hardtanh(g, self, min_val, max_val):
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
     max_val = g.op("Constant", value_t=torch.tensor(max_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
-    return op_with_optional_float_cast(g, "Clip", self, other_operands=[min_val, max_val], opset_before=12)
+    return op_with_optional_float_cast(g, "Clip", self, min_val, max_val, opset_before=12)
 
 
 def clamp(g, self, min, max):
@@ -50,7 +50,7 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
-            return op_with_optional_float_cast(g, "Clip", self, other_operands=[min, max], opset_before=12)
+            return op_with_optional_float_cast(g, "Clip", self, min, max, opset_before=12)
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
@@ -61,9 +61,9 @@ def clamp_min(g, self, min):
     min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
     if sym_help._get_tensor_rank(min) == 0:
         max = unused(g)
-        return op_with_optional_float_cast(g, "Clip", self, other_operands=[min, max], opset_before=12)
+        return op_with_optional_float_cast(g, "Clip", self, min, max, opset_before=12)
     else:
-        return op_with_optional_float_cast(g, "Max", self, other_operands=[min], opset_before=12)
+        return op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
 @parse_args("v", "v")
@@ -72,9 +72,9 @@ def clamp_max(g, self, max):
     max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
     if sym_help._get_tensor_rank(max) == 0:
         min = unused(g)
-        return op_with_optional_float_cast(g, "Clip", self, other_operands=[min, max], opset_before=12)
+        return op_with_optional_float_cast(g, "Clip", self, min, max, opset_before=12)
     else:
-        return op_with_optional_float_cast(g, "Min", self, other_operands=[max], opset_before=12)
+        return op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
 def relu6(g, input):

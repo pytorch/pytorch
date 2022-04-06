@@ -129,8 +129,8 @@ def _avg_pool(name, tuple_fn):
             stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
-            input = op_with_optional_float_cast(g, "Pad", input, opset_before=11,
-                                                pads_i=((0,) * 2 + padding) * 2, mode_s="constant", value_f=0.)
+            input = op_with_optional_float_cast(g, "Pad", input, pads_i=((0,) * 2 + padding) * 2, 
+                                                mode_s="constant", value_f=0., opset_before=11)
             padding = (0,) * len(padding)
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),
