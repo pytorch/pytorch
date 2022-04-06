@@ -187,21 +187,7 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
-  py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
-  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-  py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
-  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs));
-  if (ret.ptr() == nullptr) {
-    // if an exception occurred in a user's implementation of
-    // __torch_function__, throw it
-    throw python_error();
-  }
-  if (ret.ptr() == Py_NotImplemented) {
-    std::string error_msg = "no implementation found for " + module_name + "." + func_name + "' on types that implement __torch_function__: [" + self->ob_type->tp_name + "]";
-    PyErr_SetString(PyExc_TypeError, error_msg.c_str());
-    throw python_error();
-  }
-  return ret.release().ptr();
+  return handle_torch_function_no_python_arg_parser({py::handle(self)}, args_.ptr(), kwargs, func_name.c_str(), torch_api_function.ptr(), module_name.c_str(), "__torch_function__");
 }
 
 // Note: [Overloaded args]
@@ -220,7 +206,7 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
 }
 
 // See Note: [Overloaded args] for what they hold
-auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
+auto handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
   // overloaded_args already all have unique types
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(overloaded_args.size());
@@ -232,6 +218,13 @@ auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &o
   for (auto &arg : overloaded_args) {
     // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), torch_function_name);
+
+    // See https://github.com/pytorch/pytorch/issues/63767
+    if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg)) {
+      TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
+                 "will be an error in future, please define it as a classmethod.");
+    }
+
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function, py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
@@ -926,9 +919,9 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, Py_ssiz
 
 bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               bool raise_exception) {
-  auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
+  size_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
   auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  Py_ssize_t arg_pos = 0;
+  size_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
@@ -1093,7 +1086,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-  auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
+  size_t num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<unsigned> plausible_idxs;
   unsigned i = 0;
   for (auto& signature : signatures_) {
