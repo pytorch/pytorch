@@ -80,8 +80,6 @@ public:
     if (!func_->has_same_interpreter(getPyInterpreter())) {
       const auto& kernels = op.get_all_saved_kernels(keyset.highestPriorityTypeId());
       for (const auto& ker: kernels) {
-        // auto k = dynamic_cast<const PythonKernelHolder*>(ker.kernel.getFunctor_()); // k is OperatorKernel
-        // bool call_k = (k == nullptr) || k->is_same_interpreter(getPyInterpreter());
         if (ker.kernel.is_valid_call(getPyInterpreter())) {
           return ker.kernel.callBoxed(op, keyset, stack);
         }
