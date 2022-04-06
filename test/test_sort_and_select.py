@@ -376,7 +376,6 @@ class TestSortAndSelect(TestCase):
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
-    @skipCUDAIfRocm
     def test_unique_dim(self, device):
         self.assertFalse(hasattr(torch, 'unique_dim'))
 

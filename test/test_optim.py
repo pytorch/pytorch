@@ -620,7 +620,6 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    @skipIfRocm
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
