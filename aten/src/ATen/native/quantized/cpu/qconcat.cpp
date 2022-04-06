@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -138,7 +140,8 @@ Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {
   TORCH_CHECK(
       all_inputs_sharing_qparams(qxs),
       "All inputs should share the same quantization parameters.");
-
+  check_cat_no_zero_dim(qxs);
+  dim = legacy_cat_wrap_dim(dim, qxs);
   double _scale = qxs[0].q_scale();
   int64_t _zero_point = qxs[0].q_zero_point();
   return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
@@ -149,6 +152,8 @@ Tensor& cat_out_quantized_cpu(TensorList qxs, int64_t dim, Tensor& out) {
               "Only per-tensor quantization is supported in 'cat'!")
   TORCH_CHECK(is_valid_quantization_scheme(out),
               "Only per-tensor quantization is supported in 'cat'!")
+  check_cat_no_zero_dim(qxs);
+  dim = legacy_cat_wrap_dim(dim, qxs);
   auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
                                         out.q_zero_point());
   at::native::copy_(out, out_, /*non_blocking=*/false);

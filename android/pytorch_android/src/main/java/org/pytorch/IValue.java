@@ -40,6 +40,24 @@ public class IValue {
   private static final int TYPE_CODE_DICT_STRING_KEY = 13;
   private static final int TYPE_CODE_DICT_LONG_KEY = 14;
 
+  private String[] TYPE_NAMES = {
+    "Unknown",
+    "Null",
+    "Tensor",
+    "Bool",
+    "Long",
+    "Double",
+    "String",
+    "Tuple",
+    "BoolList",
+    "LongList",
+    "DoubleList",
+    "TensorList",
+    "GenericList",
+    "DictStringKey",
+    "DictLongKey",
+  };
+
   @DoNotStrip private final int mTypeCode;
   @DoNotStrip private Object mData;
 
@@ -312,7 +330,14 @@ public class IValue {
     if (typeCode != typeCodeExpected) {
       throw new IllegalStateException(
           String.format(
-              Locale.US, "Expected IValue type %d, actual type %d", typeCodeExpected, typeCode));
+              Locale.US,
+              "Expected IValue type %s, actual type %s",
+              getTypeName(typeCodeExpected),
+              getTypeName(typeCode)));
     }
+  }
+
+  private String getTypeName(int typeCode) {
+    return typeCode >= 0 && typeCode < TYPE_NAMES.length ? TYPE_NAMES[typeCode] : "Unknown";
   }
 }

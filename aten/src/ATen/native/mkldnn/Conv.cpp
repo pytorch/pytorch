@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
@@ -30,9 +31,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
+
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -209,16 +212,18 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::mkldnn_convolution_backward_input(
+    grad_input = mkldnn_convolution_backward_input(
       input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::mkldnn_convolution_backward_weights(
+    std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
       weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
   }
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
 
 }}  // namespace at::native
 

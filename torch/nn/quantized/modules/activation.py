@@ -15,7 +15,7 @@ class ReLU6(torch.nn.ReLU):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU6.png
+    .. image:: ../scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -62,6 +62,10 @@ class Hardswish(torch.nn.Hardswish):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Hardswish(float(scale), int(zero_point))
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point))
+
 class ELU(torch.nn.ELU):
     r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
 
@@ -86,6 +90,10 @@ class ELU(torch.nn.ELU):
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point), mod.alpha)
 
 class LeakyReLU(torch.nn.LeakyReLU):
     r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
@@ -112,6 +120,10 @@ class LeakyReLU(torch.nn.LeakyReLU):
     @classmethod
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
 class Sigmoid(torch.nn.Sigmoid):

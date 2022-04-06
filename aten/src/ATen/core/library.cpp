@@ -7,12 +7,20 @@ namespace torch {
 namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
+  std::string debugString(const char* file, uint32_t line) {
+#ifdef STRIP_ERROR_MESSAGES
+    return std::string();
+#else
+    return c10::str("registered at ", file, ":", line);
+#endif
+  }
+
   std::string debugString(std::string debug, const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
-    return "";
+    return std::string();
 #else
     if (debug.empty()) {
-      return c10::str("registered at ", file, ":", line);
+      return debugString(file, line);
     } else {
       return debug;
     }
@@ -40,6 +48,8 @@ CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppS
   , debug_()
   {}
 
+CppFunction::~CppFunction() = default;
+
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
@@ -55,7 +65,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
         // don't register a library
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerLibrary(
-            *ns_, debugString("", file_, line_)
+            *ns_, debugString(file_, line_)
           )
         );
         // fallthrough
@@ -118,7 +128,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   registrars_.emplace_back(
     c10::Dispatcher::singleton().registerDef(
       std::move(schema),
-      debugString("", file_, line_)
+      debugString(file_, line_)
     )
   );
   return *this;
@@ -225,6 +235,9 @@ Library& Library::_fallback(CppFunction&& f) & {
   // Note if dispatch_key is DispatchKey::Undefined, it'll be ignored here since Undefined
   // isn't a runtime key, you shouldn't register anything to it at all.
   for (auto k : c10::getRuntimeDispatchKeySet(*dispatch_key)) {
+    // mobile doesn't use all dispatch keys, so skip any fallback registrations for the unused keys.
+    auto idx = getDispatchTableIndexForDispatchKey(k);
+    if (idx < 0) continue;
     registrars_.emplace_back(
       c10::Dispatcher::singleton().registerFallback(
         k,

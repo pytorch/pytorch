@@ -2,13 +2,19 @@
 
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
 
-namespace at { namespace native {
+namespace c10 {
+class Scalar;
+}
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&), fill_stub);
+namespace at {
+class Tensor;
+struct TensorIterator;
+
+namespace native {
+
+DECLARE_DISPATCH(void(*)(TensorIterator&, const c10::Scalar&), fill_stub);
 
 Tensor& fill_out(Tensor& self, const Scalar& value);
 

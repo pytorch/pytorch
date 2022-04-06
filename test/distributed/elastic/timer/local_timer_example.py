@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,17 +10,16 @@ import logging
 import multiprocessing as mp
 import signal
 import time
-import unittest
 
 import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
-    TEST_WITH_TSAN,
+    TEST_WITH_DEV_DBG_ASAN,
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
     sandcastle_skip_if,
+    TestCase
 )
 
 
@@ -42,7 +42,7 @@ def _stuck_function(rank, mp_queue):
 
 # timer is not supported on macos or windowns
 if not (IS_WINDOWS or IS_MACOS):
-    class LocalTimerExample(unittest.TestCase):
+    class LocalTimerExample(TestCase):
         """
         Demonstrates how to use LocalTimerServer and LocalTimerClient
         to enforce expiration of code-blocks.
@@ -55,7 +55,7 @@ if not (IS_WINDOWS or IS_MACOS):
         unittest. As of now this will SIGSEGV.
         """
 
-        @sandcastle_skip_if(TEST_WITH_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
+        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         def test_torch_mp_example(self):
             # in practice set the max_interval to a larger value (e.g. 60 seconds)
             mp_queue = mp.get_context("spawn").Queue()
@@ -80,17 +80,13 @@ if not (IS_WINDOWS or IS_MACOS):
 
             server.stop()
 
-        @sandcastle_skip_if(TEST_WITH_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
+        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         def test_example_start_method_spawn(self):
             self._run_example_with(start_method="spawn")
 
-        # @sandcastle_skip_if(TEST_WITH_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
+        # @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         # def test_example_start_method_forkserver(self):
         #     self._run_example_with(start_method="forkserver")
-
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
-        def test_example_start_method_fork(self):
-            self._run_example_with(start_method="fork")
 
         def _run_example_with(self, start_method):
             spawn_ctx = mp.get_context(start_method)

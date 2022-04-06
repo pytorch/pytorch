@@ -107,7 +107,7 @@ class Linear(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
 
         # It is important to multiply by the mask BEFORE calling the `weight_observer`

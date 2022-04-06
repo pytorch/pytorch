@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 #ifdef _WIN32
