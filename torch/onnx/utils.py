@@ -1366,8 +1366,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 def _export_jit_graph_to_onnx_model_proto(
         graph,
         operator_export_type):
-    from torch.onnx.symbolic_helper import _set_onnx_shape_inference
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
+    from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _export_onnx_opset_version
     # Shape inference is required because some ops' exporters
     # generate sub-graphs based on inputs' types.
     _set_onnx_shape_inference(True)

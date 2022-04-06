@@ -20,10 +20,10 @@ class _TestJITIRToONNX:
         graph = parse_ir(graph_ir)
         jit_outs = torch._C._jit_interpret_graph(graph, example_inputs)
 
-        f = torch.onnx.utils._export_jit_graph_to_onnx_model_proto(
+        onnx_proto = torch.onnx.utils._export_jit_graph_to_onnx_model_proto(
             graph,
             torch.onnx.OperatorExportTypes.ONNX)
-        ort_sess = onnxruntime.InferenceSession(f, providers=self.ort_providers)
+        ort_sess = onnxruntime.InferenceSession(onnx_proto, providers=self.ort_providers)
         ort_outs = run_ort(ort_sess, example_inputs)
 
         ort_compare_with_pytorch(ort_outs, jit_outs, rtol=1e-3, atol=1e-7)
