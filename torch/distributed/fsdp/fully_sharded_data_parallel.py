@@ -1074,8 +1074,17 @@ class FullyShardedDataParallel(nn.Module):
             if (
                 not getattr(state_dict[key], "_has_been_cloned", False)
             ):
-                state_dict[key] = state_dict[key].clone().detach()
-                state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                try:
+                    state_dict[key] = state_dict[key].clone().detach()
+                    state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                except BaseException as e:
+                    warnings.warn(
+                        f"Failed to clone() tensor with name {key}. This may mean "
+                        "that this state_dict entry could point to invalid memory "
+                        "regions after returning from state_dict() call if this "
+                        "parameter is managed by FSDP. Please check clone "
+                        f"implementation of {key}. Error: {str(e)}"
+                    )
 
         _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
         return state_dict
@@ -1184,20 +1193,12 @@ class FullyShardedDataParallel(nn.Module):
 
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
-                with self.summon_full_params(recurse=False, writeback=False):
-                    # Since buffers are not sharded and stay casted, restore them to their
-                    # original user module specified types for checkpoint. We take care to
-                    # recast in post_state_dict_hook for consistency with the fact that
-                    # buffers stay casted after forward/backward. We must have the
-                    # call here instead of above because summon_full_params itself
-                    # calls _lazy_init() which would cast the buffers.
-                    if self.mixed_precision is not None and self._is_root:
-                        self._cast_buffers(
-                            dtype=self._orig_buffer_dtypes, recurse=False
-                        )
-                    state_dict = super().state_dict(*args, **kwargs)
-            else:
+            summon_ctx = (
+                self.summon_full_params(recurse=False, writeback=False)
+                if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
+                contextlib.suppress()
+            )
+            with summon_ctx:
                 # Since buffers are not sharded and stay casted, restore them to their
                 # original user module specified types for checkpoint. We take care to
                 # recast in post_state_dict_hook for consistency with the fact that
@@ -2375,7 +2376,8 @@ class FullyShardedDataParallel(nn.Module):
         contained in ``model`` are mapped back to their unflattened parameters.
 
         .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used.
+            primitives are used. However, the state dict is only populated on
+            rank 0. All other ranks return an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -2406,7 +2408,8 @@ class FullyShardedDataParallel(nn.Module):
             full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
                 state for ``model`` 's original unflattened parameters and
                 including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict`.
+                convention of :meth:`torch.optim.Optimizer.state_dict` if on
+                rank 0, and an empty :class:`dict` otherwise.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
