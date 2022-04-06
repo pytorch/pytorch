@@ -1387,8 +1387,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
   // If indexing into sparse dimensions
   if (dim < sparse_dim) {
-    auto nneg_index = at::empty_like(index);
-    {
+    const auto nneg_index = [&index, index_len, &self, size, dim](void) -> Tensor {
+      auto nneg_index = at::empty_like(index);
       // nneg_index = ((index < 0) * index + size) + (index >= 0) * index
       auto* ptr_index = index.data_ptr<int64_t>();
       auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
@@ -1409,7 +1409,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             *dst++ = idx;
           }
       });
-    }
+
+      return nneg_index;
+    }();
 
     const auto dim_indices = indices[dim].contiguous();
 
@@ -1428,6 +1430,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
               && index_len * std::log2(nnz) <= (nnz + index_len) * std::log2(index_len))
         ? true : false;
 
+      // src is a source of indices to binary search in sorted
       Tensor sorted, sorted_idx, src;
       std::tie(sorted, sorted_idx, src) = [
         &dim_indices, &nneg_index, &self,
