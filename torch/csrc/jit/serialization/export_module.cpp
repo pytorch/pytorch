@@ -19,6 +19,7 @@
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #endif
+#include <torch/csrc/jit/serialization/export_utils.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -327,21 +328,6 @@ std::vector<ModuleMethod> getModuleInterfaceExports(
   return ret;
 }
 
-bool isLoweredModule(const Module& m) {
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  bool isLoweredModule = false;
-  for (const auto& atom : type_name.atoms()) {
-    if (atom == "LoweredModule") {
-      isLoweredModule = true;
-      break;
-    }
-  }
-  return isLoweredModule;
-}
-
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
@@ -359,45 +345,6 @@ void getBackendDebugInfoMap(
   for (const auto& c : m.children()) {
     getBackendDebugInfoMap(c, debug_map);
   }
-}
-
-SourceRangeRecords getBackendSourceRanges(const Module& m) {
-  SourceRangeRecords sr_records;
-  if (isLoweredModule(m)) {
-    constexpr size_t kSourceRange = 1;
-    auto backend_debug_info =
-        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
-    const auto& map = backend_debug_info->getDebugInfoMap();
-    if (map) {
-      const auto& map_val = map.value();
-      // This map is map of debug handle-to-DebugInfoTuple
-      // DebugInfoTuple= <source range, op name, inlined_cs_ptr>
-      for (const auto& it : map_val) {
-        auto& source_range =
-            std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
-        sr_records.emplace_back(
-            std::numeric_limits<size_t>::max(), source_range);
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-        auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
-        if (cs_ptr) {
-          for (const auto& e : cs_ptr->vec()) {
-            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-            const auto sr = std::get<kSourceRange>(e);
-            sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
-          }
-        }
-      }
-    }
-  }
-  for (const auto& c : m.children()) {
-    const auto& child_sr_records = getBackendSourceRanges(c);
-    sr_records.reserve(sr_records.size() + child_sr_records.size());
-    std::move(
-        child_sr_records.begin(),
-        child_sr_records.end(),
-        std::back_inserter(sr_records));
-  }
-  return sr_records;
 }
 
 auto& mobileInterfaceCallExport() {
@@ -800,10 +747,36 @@ void save_mobile_module_to(
   ExtraFilesMap jitFiles;
   CompilationOptions options = getOptionsFromGlobal();
   std::vector<IValue> constants;
-  jitModuleToPythonCodeAndConstants(module, &jitFiles, &constants);
+  SourceRangeTagMap m_source_range_tags;
+
+  auto backend_source_range_records = getBackendSourceRanges(module);
+  int64_t m_current_source_range_tag;
+  updateSourceRangeTags(
+      backend_source_range_records,
+      m_source_range_tags,
+      &m_current_source_range_tag);
+
+  auto grouped_by_prefix =
+      jitModuleToPythonCodeAndConstants(module, &jitFiles, &constants);
+  for (auto const& item : grouped_by_prefix) {
+    updateSourceRangeTags(
+        item.second.ranges(), m_source_range_tags, &m_current_source_range_tag);
+    SourceRangePickler sourceRangePickler;
+    auto ivalue = sourceRangePickler.getSourceDebug(
+        item.second.ranges(), m_source_range_tags);
+  }
   mobile::Module mod = jitModuleToMobile(module, options);
-  auto buffer =
-      save_mobile_module_to_bytes(mod, extra_files, jitFiles, constants);
+  auto call_stack_ptrs = mod.getDebugTable().getCallStackPtrMap();
+  BackendDebugInfoMapType debug_handle_cs_ptr_map(
+      call_stack_ptrs.begin(), call_stack_ptrs.end());
+  CallStackDebugInfoPickler callStackDebugInfoPickler;
+  c10::IValue debug_info;
+  if (save_mobile_debug_info) {
+    debug_info = callStackDebugInfoPickler.getMobileDebugInfo(
+        debug_handle_cs_ptr_map, m_source_range_tags);
+  }
+  auto buffer = save_mobile_module_to_bytes(
+      mod, extra_files, jitFiles, constants, debug_info);
   writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
 }
 #endif

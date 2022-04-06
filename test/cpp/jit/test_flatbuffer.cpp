@@ -138,7 +138,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
-#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#if !defined(FB_XPLAT_BUILD) && defined(ENABLE_FLATBUFFER)
 TEST(FlatbufferTest, FlatbufferBackPortTest) {
   Module m("m");
   m.define(R"(
@@ -152,19 +152,19 @@ TEST(FlatbufferTest, FlatbufferBackPortTest) {
   bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
   ASSERT_TRUE(backPortSuccess);
 }
-#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#endif // !defined(FB_XPLAT_BUILD) && defined(ENABLE_FLATBUFFER)
 
 TEST(FlatbufferTest, ExtraFiles) {
-  const auto script = R"JIT(
-    def forward(self):
-        x = torch.rand(5, 5)
-        x = x.mm(x)
-        return x
-  )JIT";
-
-  auto module =
-      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
-  module->define(script);
+  Module module("m");
+  module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  module.register_parameter("bias", torch::ones({20}), false);
+  module.define(R"(
+    def forward(self, input):
+      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1,
+      1], 1)
+  )");
+  // mobile net model
+  // Module module = torch::jit::load("/data/users/pavithran/model.ptl");
   std::ostringstream oss;
   std::unordered_map<std::string, std::string> extra_files;
   extra_files["metadata.json"] = "abc";
@@ -173,19 +173,27 @@ TEST(FlatbufferTest, ExtraFiles) {
   std::unordered_map<std::string, std::string> loaded_extra_files;
 #if defined ENABLE_FLATBUFFER
   std::stringstream ss;
-  module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
+  module._save_for_mobile(
+      "debug_model.ptl",
+      extra_files,
+      /*save_mobile_debug_info=*/true,
+      /*use_flatbuffer=*/false);
 
   loaded_extra_files["metadata.json"] = "";
-  auto mobile_module = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+  auto mobile_module =
+      _load_for_mobile("debug_model.ptl", c10::nullopt, loaded_extra_files);
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  std::cout << __FILE_NAME__ << " " << loaded_extra_files["mobile_info.json"]
+            << std::endl;
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
 
   // load it twice using the same stream
-  auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+  auto mobile_module2 =
+      _load_for_mobile("debug_model.ptl", c10::nullopt, loaded_extra_files);
 #else
   CompilationOptions options;
-  mobile::Module bc = jitModuleToMobile(*module, options);
+  mobile::Module bc = jitModuleToMobile(module, options);
   auto buff = save_mobile_module_to_bytes(bc, extra_files);
 
   loaded_extra_files["metadata.json"] = "";
@@ -197,6 +205,7 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+  ASSERT_TRUE(false);
 }
 
 TEST(FlatbufferTest, Conv) {

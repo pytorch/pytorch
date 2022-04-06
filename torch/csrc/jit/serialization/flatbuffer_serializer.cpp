@@ -22,6 +22,7 @@ using mobile::serialization::CreateDict;
 using mobile::serialization::CreateFunctionDirect;
 using mobile::serialization::CreateIValue;
 using mobile::serialization::CreateList;
+using mobile::serialization::CreateMobileDebugInfo;
 using mobile::serialization::CreateModule;
 using mobile::serialization::CreateObject;
 using mobile::serialization::CreateOperator;
@@ -61,7 +62,8 @@ class FlatbufferSerializer {
       bool include_tensor_data_in_flatbuffer,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
       const ExtraFilesMap& jit_sources = ExtraFilesMap(),
-      const std::vector<IValue>& jit_constants = {});
+      const std::vector<IValue>& jit_constants = {},
+      c10::IValue debug_info = c10::nullopt);
 
  private:
   template <typename It>
@@ -162,7 +164,86 @@ class FlatbufferSerializer {
   std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
 
   const mobile::CompilationUnit* mcu_ = nullptr;
+
+  flatbuffers::Offset<jit::mobile::serialization::MobileDebugInfo>
+  mobileDebugInfoToFB(FlatBufferBuilder& fbb, const IValue& mobile_debug_info);
+
+  flatbuffers::Offset<flatbuffers::Vector<
+      flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
+  mobileDebugInfosToFB(FlatBufferBuilder& fbb, c10::IValue debug_info_node);
+  flatbuffers::Offset<mobile::serialization::InlinedCallStack>
+  serializeInlinedCallStack(
+      FlatBufferBuilder& fbb,
+      const IValue& inlineCallStack);
 };
+
+flatbuffers::Offset<mobile::serialization::InlinedCallStack>
+FlatbufferSerializer::serializeInlinedCallStack(
+    FlatBufferBuilder& fbb,
+    const IValue& inlineCallStack) {
+  flatbuffers::Offset<mobile::serialization::InlinedCallStack>
+      inlineCallOffset = 0;
+  // TODO(@pavithran) check with kimish if this is right
+  if (!inlineCallStack.isNone()) {
+    // get inline call stack
+    const auto& inner = inlineCallStack.toTupleRef().elements();
+    std::string module_type_name, instance_name;
+    if (!inner[0].isNone()) {
+      const auto& names = inner[0].toTupleRef().elements();
+      module_type_name = names[0].toStringRef();
+      instance_name = names[1].toStringRef();
+      // std::cout << "module_type_name: " << module_type_name
+      //           << " instance_name: " << instance_name << std::endl;
+    }
+
+    inlineCallOffset = mobile::serialization::CreateInlinedCallStack(
+        fbb,
+        fbb.CreateSharedString(module_type_name),
+        fbb.CreateSharedString(instance_name),
+        inner[1].toInt(),
+        inner[2].isNone()
+            ? mobile::serialization::InlinedCallStackUnion::NONE
+            : mobile::serialization::InlinedCallStackUnion::InlinedCallStack,
+        serializeInlinedCallStack(fbb, inner[2]).Union(),
+        fbb.CreateSharedString(inner[3].toStringRef()));
+  }
+  return inlineCallOffset;
+}
+
+flatbuffers::Offset<jit::mobile::serialization::MobileDebugInfo>
+FlatbufferSerializer::mobileDebugInfoToFB(
+    FlatBufferBuilder& fbb,
+    const IValue& mobile_debug_info) {
+  const auto& elements = mobile_debug_info.toTupleRef().elements();
+  int64_t sr_start = elements[0].toInt();
+  int64_t sr_end = elements[1].toInt();
+  std::string node_name = elements[2].toStringRef();
+  flatbuffers::Offset<mobile::serialization::InlinedCallStack>
+      inlineCallOffset = serializeInlinedCallStack(fbb, elements[3]);
+
+  auto offset = mobile::serialization::CreateMobileDebugInfo(
+      fbb,
+      sr_start,
+      sr_end,
+      fbb.CreateSharedString(node_name),
+      inlineCallOffset);
+  return offset;
+}
+
+flatbuffers::Offset<flatbuffers::Vector<
+    flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
+FlatbufferSerializer::mobileDebugInfosToFB(
+    FlatBufferBuilder& fbb,
+    c10::IValue debug_info_node) {
+  std::vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>> mdis;
+  auto tuples = std::move(debug_info_node.toTupleRef()).elements();
+  mdis.reserve(tuples.size());
+  // std::cout << "Number of debug infos: " << tuples.size() << std::endl;
+  for (const auto& tuple : tuples) {
+    mdis.emplace_back(mobileDebugInfoToFB(fbb, tuple));
+  }
+  return fbb.CreateVector(mdis);
+}
 
 flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
     CreateFBSchema(
@@ -327,7 +408,8 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     bool include_tensor_data_in_flatbuffer,
     const ExtraFilesMap& extra_files,
     const ExtraFilesMap& jit_sources,
-    const std::vector<IValue>& jit_constants) {
+    const std::vector<IValue>& jit_constants,
+    c10::IValue debug_info) {
   FlatBufferBuilder fbb;
 
   mcu_ = &module.compilation_unit();
@@ -388,6 +470,13 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
 
   const uint32_t bytecode_version =
       static_cast<uint32_t>(module.bytecode_version());
+
+  flatbuffers::Offset<flatbuffers::Vector<
+      flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
+      mobile_debug_infos;
+  if (!debug_info.isNone()) {
+    mobile_debug_infos = mobileDebugInfosToFB(fbb, debug_info);
+  }
 
   auto mod = CreateModule(
       fbb,
@@ -740,9 +829,10 @@ void save_mobile_module(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     const ExtraFilesMap& jit_sources,
-    const std::vector<IValue>& jit_constants) {
+    const std::vector<IValue>& jit_constants,
+    c10::IValue debug_info) {
   auto buffer = save_mobile_module_to_bytes(
-      module, extra_files, jit_sources, jit_constants);
+      module, extra_files, jit_sources, jit_constants, debug_info);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
   ofile.close();
@@ -752,14 +842,16 @@ flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
     const mobile::Module& module,
     const ExtraFilesMap& extra_files,
     const ExtraFilesMap& jit_sources,
-    const std::vector<IValue>& jit_constants) {
+    const std::vector<IValue>& jit_constants,
+    c10::IValue debug_info) {
   FlatbufferSerializer fb_serializer;
   return fb_serializer.serializeModule(
       module,
       /*include_tensor_data_in_flatbuffer*/ true,
       extra_files,
       jit_sources,
-      jit_constants);
+      jit_constants,
+      debug_info);
 }
 
 Module parse_and_initialize_jit_module(

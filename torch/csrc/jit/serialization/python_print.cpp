@@ -1715,7 +1715,7 @@ c10::optional<std::string> printType(
   return c10::nullopt;
 }
 
-void jitModuleToPythonCodeAndConstants(
+std::unordered_map<std::string, PythonPrint> jitModuleToPythonCodeAndConstants(
     const Module& module,
     ExtraFilesMap* jit_sources, // output
     std::vector<IValue>* constants // output
@@ -1753,8 +1753,11 @@ void jitModuleToPythonCodeAndConstants(
     pp_iter->second.printNamedType(type);
   }
   for (const auto& kv : grouped_by_prefix) {
+    // updateSourceRangeTags using kv.second.ranges();
     (*jit_sources)[kv.first] = kv.second.str();
   }
+
+  return grouped_by_prefix;
 }
 
 } // namespace jit

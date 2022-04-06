@@ -11,12 +11,15 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/versions.h>
+#include <flatbuffers/flatbuffers.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
@@ -172,6 +175,64 @@ void parseExtraFiles(
   parseExtraFilesFromVector(extra_files_offsets, &extra_files);
 }
 
+c10::IValue torch::jit::FlatbufferLoader::parseInlinedCallStack(
+    const mobile::serialization::InlinedCallStack* inlinedCallStack,
+    const std::shared_ptr<CompilationUnit>& cu) {
+  std::vector<c10::IValue> elements;
+  elements.reserve(4);
+  auto instance_name = inlinedCallStack->module_instance_name()->str();
+  std::string module_type_name = inlinedCallStack->module_type_name()->str();
+  auto names = c10::ivalue::Tuple::create(instance_name, module_type_name);
+  elements.emplace_back(names);
+  elements.emplace_back(inlinedCallStack->sr_tag());
+  c10::IValue callee;
+  if (inlinedCallStack->calle()) {
+    callee = parseInlinedCallStack(
+        inlinedCallStack->calle_as_InlinedCallStack(), cu);
+  }
+  elements.emplace_back(callee);
+  elements.emplace_back(inlinedCallStack->fn_name());
+  c10::IValue serialized_cs = c10::ivalue::Tuple::create(elements);
+  return serialized_cs;
+}
+
+c10::IValue torch::jit::FlatbufferLoader::parseMobileDebugInfo(
+    const flatbuffers::Vector<flatbuffers::Offset<
+        torch::jit::mobile::serialization::MobileDebugInfo>>*
+        mobile_debug_infos,
+    const std::shared_ptr<CompilationUnit>& cu) {
+  std::vector<c10::IValue> ivalues;
+  ivalues.reserve(mobile_debug_infos->size());
+  for (uint32_t i = 0; i < mobile_debug_infos->size(); ++i) {
+    const auto* mobileDebugInfo = mobile_debug_infos->Get(i);
+    std::vector<c10::IValue> elements;
+    /*
+     * Debug handles and debug info (source range + inlinded callstack)
+     * are serialized as a tuple of 3 elements
+     * {debug_handle, source_range_tag, serialized_callstack}
+     */
+    elements.reserve(4);
+    int64_t debug_handle = mobileDebugInfo->sr_start();
+    int64_t source_range_tag = mobileDebugInfo->sr_end();
+    const std::string& node_name = mobileDebugInfo->node_name()->str();
+
+    elements.emplace_back(debug_handle);
+    elements.emplace_back(source_range_tag);
+    elements.emplace_back(node_name);
+    c10::IValue inlinedCallStack;
+    if (mobileDebugInfo->inlined_call_stack()) {
+      inlinedCallStack =
+          parseInlinedCallStack(mobileDebugInfo->inlined_call_stack(), cu);
+    }
+    elements.emplace_back(inlinedCallStack);
+
+    ivalues.emplace_back(c10::ivalue::Tuple::create(elements));
+  }
+
+  c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
+  return ivalue;
+}
+
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
   module_ = module;
@@ -208,7 +269,24 @@ mobile::Module FlatbufferLoader::parseModule(
   }
 
   module_parsed_ = true;
-  return mobile::Module(module_ivalue.toObject(), mcu_);
+  mobile::Module mobile_module = mobile::Module(module_ivalue.toObject(), mcu_);
+
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  if (const auto* mobile_debug_infos = module->mobile_debug_infos()) {
+    c10::IValue debug_info_ivalue =
+        parseMobileDebugInfo(mobile_debug_infos, cu_);
+    // TODO: how/where to use the deserialized debug info?
+    CallStackDebugInfoUnpickler unpickler;
+    ska::flat_hash_map<int64_t, SourceRange> source_range_map;
+    ska::flat_hash_map<int64_t, DebugInfoTuple> debug_table =
+        unpickler.deserializeDebugInfoIValue(
+            debug_info_ivalue, source_range_map, cu_);
+    MobileDebugTable debug_info_table =
+        MobileDebugTable(debug_table.begin(), debug_table.end());
+    mobile_module.setDebugTable(std::move(debug_info_table));
+  }
+#endif
+  return mobile_module;
 }
 
 std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(

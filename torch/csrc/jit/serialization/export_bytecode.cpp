@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+#include <torch/csrc/jit/serialization/export_utils.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -307,21 +308,6 @@ void checkSchema(const c10::FunctionSchema& schema) {
   TORCH_CHECK(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
-}
-
-bool isLoweredModule(const Module& m) {
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  bool isLoweredModule = false;
-  for (const auto& atom : type_name.atoms()) {
-    if (atom == "LoweredModule") {
-      isLoweredModule = true;
-      break;
-    }
-  }
-  return isLoweredModule;
 }
 
 // Check if the global static map of backend debug info

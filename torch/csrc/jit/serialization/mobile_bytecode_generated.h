@@ -83,6 +83,12 @@ struct StorageDataBuilder;
 struct IValue;
 struct IValueBuilder;
 
+struct InlinedCallStack;
+struct InlinedCallStackBuilder;
+
+struct MobileDebugInfo;
+struct MobileDebugInfoBuilder;
+
 struct ExtraFile;
 struct ExtraFileBuilder;
 
@@ -273,6 +279,47 @@ template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Function>
 
 bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type);
 bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<IValueUnion> *types);
+
+enum class InlinedCallStackUnion : uint8_t {
+  NONE = 0,
+  InlinedCallStack = 1,
+  MIN = NONE,
+  MAX = InlinedCallStack
+};
+
+inline const InlinedCallStackUnion (&EnumValuesInlinedCallStackUnion())[2] {
+  static const InlinedCallStackUnion values[] = {
+    InlinedCallStackUnion::NONE,
+    InlinedCallStackUnion::InlinedCallStack
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesInlinedCallStackUnion() {
+  static const char * const names[3] = {
+    "NONE",
+    "InlinedCallStack",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameInlinedCallStackUnion(InlinedCallStackUnion e) {
+  if (flatbuffers::IsOutRange(e, InlinedCallStackUnion::NONE, InlinedCallStackUnion::InlinedCallStack)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesInlinedCallStackUnion()[index];
+}
+
+template<typename T> struct InlinedCallStackUnionTraits {
+  static const InlinedCallStackUnion enum_value = InlinedCallStackUnion::NONE;
+};
+
+template<> struct InlinedCallStackUnionTraits<torch::jit::mobile::serialization::InlinedCallStack> {
+  static const InlinedCallStackUnion enum_value = InlinedCallStackUnion::InlinedCallStack;
+};
+
+bool VerifyInlinedCallStackUnion(flatbuffers::Verifier &verifier, const void *obj, InlinedCallStackUnion type);
+bool VerifyInlinedCallStackUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<InlinedCallStackUnion> *types);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int FLATBUFFERS_FINAL_CLASS {
  private:
@@ -2144,6 +2191,245 @@ inline flatbuffers::Offset<IValue> CreateIValue(
   return builder_.Finish();
 }
 
+struct InlinedCallStack FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef InlinedCallStackBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_MODULE_TYPE_NAME = 4,
+    VT_MODULE_INSTANCE_NAME = 6,
+    VT_SR_TAG = 8,
+    VT_CALLE_TYPE = 10,
+    VT_CALLE = 12,
+    VT_FN_NAME = 14
+  };
+  const flatbuffers::String *module_type_name() const {
+    return GetPointer<const flatbuffers::String *>(VT_MODULE_TYPE_NAME);
+  }
+  flatbuffers::String *mutable_module_type_name() {
+    return GetPointer<flatbuffers::String *>(VT_MODULE_TYPE_NAME);
+  }
+  const flatbuffers::String *module_instance_name() const {
+    return GetPointer<const flatbuffers::String *>(VT_MODULE_INSTANCE_NAME);
+  }
+  flatbuffers::String *mutable_module_instance_name() {
+    return GetPointer<flatbuffers::String *>(VT_MODULE_INSTANCE_NAME);
+  }
+  int64_t sr_tag() const {
+    return GetField<int64_t>(VT_SR_TAG, 0);
+  }
+  bool mutate_sr_tag(int64_t _sr_tag = 0) {
+    return SetField<int64_t>(VT_SR_TAG, _sr_tag, 0);
+  }
+  torch::jit::mobile::serialization::InlinedCallStackUnion calle_type() const {
+    return static_cast<torch::jit::mobile::serialization::InlinedCallStackUnion>(GetField<uint8_t>(VT_CALLE_TYPE, 0));
+  }
+  const void *calle() const {
+    return GetPointer<const void *>(VT_CALLE);
+  }
+  template<typename T> const T *calle_as() const;
+  const torch::jit::mobile::serialization::InlinedCallStack *calle_as_InlinedCallStack() const {
+    return calle_type() == torch::jit::mobile::serialization::InlinedCallStackUnion::InlinedCallStack ? static_cast<const torch::jit::mobile::serialization::InlinedCallStack *>(calle()) : nullptr;
+  }
+  void *mutable_calle() {
+    return GetPointer<void *>(VT_CALLE);
+  }
+  const flatbuffers::String *fn_name() const {
+    return GetPointer<const flatbuffers::String *>(VT_FN_NAME);
+  }
+  flatbuffers::String *mutable_fn_name() {
+    return GetPointer<flatbuffers::String *>(VT_FN_NAME);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_MODULE_TYPE_NAME) &&
+           verifier.VerifyString(module_type_name()) &&
+           VerifyOffset(verifier, VT_MODULE_INSTANCE_NAME) &&
+           verifier.VerifyString(module_instance_name()) &&
+           VerifyField<int64_t>(verifier, VT_SR_TAG) &&
+           VerifyField<uint8_t>(verifier, VT_CALLE_TYPE) &&
+           VerifyOffset(verifier, VT_CALLE) &&
+           VerifyInlinedCallStackUnion(verifier, calle(), calle_type()) &&
+           VerifyOffset(verifier, VT_FN_NAME) &&
+           verifier.VerifyString(fn_name()) &&
+           verifier.EndTable();
+  }
+};
+
+template<> inline const torch::jit::mobile::serialization::InlinedCallStack *InlinedCallStack::calle_as<torch::jit::mobile::serialization::InlinedCallStack>() const {
+  return calle_as_InlinedCallStack();
+}
+
+struct InlinedCallStackBuilder {
+  typedef InlinedCallStack Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_module_type_name(flatbuffers::Offset<flatbuffers::String> module_type_name) {
+    fbb_.AddOffset(InlinedCallStack::VT_MODULE_TYPE_NAME, module_type_name);
+  }
+  void add_module_instance_name(flatbuffers::Offset<flatbuffers::String> module_instance_name) {
+    fbb_.AddOffset(InlinedCallStack::VT_MODULE_INSTANCE_NAME, module_instance_name);
+  }
+  void add_sr_tag(int64_t sr_tag) {
+    fbb_.AddElement<int64_t>(InlinedCallStack::VT_SR_TAG, sr_tag, 0);
+  }
+  void add_calle_type(torch::jit::mobile::serialization::InlinedCallStackUnion calle_type) {
+    fbb_.AddElement<uint8_t>(InlinedCallStack::VT_CALLE_TYPE, static_cast<uint8_t>(calle_type), 0);
+  }
+  void add_calle(flatbuffers::Offset<void> calle) {
+    fbb_.AddOffset(InlinedCallStack::VT_CALLE, calle);
+  }
+  void add_fn_name(flatbuffers::Offset<flatbuffers::String> fn_name) {
+    fbb_.AddOffset(InlinedCallStack::VT_FN_NAME, fn_name);
+  }
+  explicit InlinedCallStackBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<InlinedCallStack> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<InlinedCallStack>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<InlinedCallStack> CreateInlinedCallStack(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> module_type_name = 0,
+    flatbuffers::Offset<flatbuffers::String> module_instance_name = 0,
+    int64_t sr_tag = 0,
+    torch::jit::mobile::serialization::InlinedCallStackUnion calle_type = torch::jit::mobile::serialization::InlinedCallStackUnion::NONE,
+    flatbuffers::Offset<void> calle = 0,
+    flatbuffers::Offset<flatbuffers::String> fn_name = 0) {
+  InlinedCallStackBuilder builder_(_fbb);
+  builder_.add_sr_tag(sr_tag);
+  builder_.add_fn_name(fn_name);
+  builder_.add_calle(calle);
+  builder_.add_module_instance_name(module_instance_name);
+  builder_.add_module_type_name(module_type_name);
+  builder_.add_calle_type(calle_type);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<InlinedCallStack> CreateInlinedCallStackDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const char *module_type_name = nullptr,
+    const char *module_instance_name = nullptr,
+    int64_t sr_tag = 0,
+    torch::jit::mobile::serialization::InlinedCallStackUnion calle_type = torch::jit::mobile::serialization::InlinedCallStackUnion::NONE,
+    flatbuffers::Offset<void> calle = 0,
+    const char *fn_name = nullptr) {
+  auto module_type_name__ = module_type_name ? _fbb.CreateString(module_type_name) : 0;
+  auto module_instance_name__ = module_instance_name ? _fbb.CreateString(module_instance_name) : 0;
+  auto fn_name__ = fn_name ? _fbb.CreateString(fn_name) : 0;
+  return torch::jit::mobile::serialization::CreateInlinedCallStack(
+      _fbb,
+      module_type_name__,
+      module_instance_name__,
+      sr_tag,
+      calle_type,
+      calle,
+      fn_name__);
+}
+
+struct MobileDebugInfo FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef MobileDebugInfoBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_SR_START = 4,
+    VT_SR_END = 6,
+    VT_NODE_NAME = 8,
+    VT_INLINED_CALL_STACK = 10
+  };
+  int64_t sr_start() const {
+    return GetField<int64_t>(VT_SR_START, 0);
+  }
+  bool mutate_sr_start(int64_t _sr_start = 0) {
+    return SetField<int64_t>(VT_SR_START, _sr_start, 0);
+  }
+  int64_t sr_end() const {
+    return GetField<int64_t>(VT_SR_END, 0);
+  }
+  bool mutate_sr_end(int64_t _sr_end = 0) {
+    return SetField<int64_t>(VT_SR_END, _sr_end, 0);
+  }
+  const flatbuffers::String *node_name() const {
+    return GetPointer<const flatbuffers::String *>(VT_NODE_NAME);
+  }
+  flatbuffers::String *mutable_node_name() {
+    return GetPointer<flatbuffers::String *>(VT_NODE_NAME);
+  }
+  const torch::jit::mobile::serialization::InlinedCallStack *inlined_call_stack() const {
+    return GetPointer<const torch::jit::mobile::serialization::InlinedCallStack *>(VT_INLINED_CALL_STACK);
+  }
+  torch::jit::mobile::serialization::InlinedCallStack *mutable_inlined_call_stack() {
+    return GetPointer<torch::jit::mobile::serialization::InlinedCallStack *>(VT_INLINED_CALL_STACK);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<int64_t>(verifier, VT_SR_START) &&
+           VerifyField<int64_t>(verifier, VT_SR_END) &&
+           VerifyOffset(verifier, VT_NODE_NAME) &&
+           verifier.VerifyString(node_name()) &&
+           VerifyOffset(verifier, VT_INLINED_CALL_STACK) &&
+           verifier.VerifyTable(inlined_call_stack()) &&
+           verifier.EndTable();
+  }
+};
+
+struct MobileDebugInfoBuilder {
+  typedef MobileDebugInfo Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_sr_start(int64_t sr_start) {
+    fbb_.AddElement<int64_t>(MobileDebugInfo::VT_SR_START, sr_start, 0);
+  }
+  void add_sr_end(int64_t sr_end) {
+    fbb_.AddElement<int64_t>(MobileDebugInfo::VT_SR_END, sr_end, 0);
+  }
+  void add_node_name(flatbuffers::Offset<flatbuffers::String> node_name) {
+    fbb_.AddOffset(MobileDebugInfo::VT_NODE_NAME, node_name);
+  }
+  void add_inlined_call_stack(flatbuffers::Offset<torch::jit::mobile::serialization::InlinedCallStack> inlined_call_stack) {
+    fbb_.AddOffset(MobileDebugInfo::VT_INLINED_CALL_STACK, inlined_call_stack);
+  }
+  explicit MobileDebugInfoBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<MobileDebugInfo> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<MobileDebugInfo>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<MobileDebugInfo> CreateMobileDebugInfo(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    int64_t sr_start = 0,
+    int64_t sr_end = 0,
+    flatbuffers::Offset<flatbuffers::String> node_name = 0,
+    flatbuffers::Offset<torch::jit::mobile::serialization::InlinedCallStack> inlined_call_stack = 0) {
+  MobileDebugInfoBuilder builder_(_fbb);
+  builder_.add_sr_end(sr_end);
+  builder_.add_sr_start(sr_start);
+  builder_.add_inlined_call_stack(inlined_call_stack);
+  builder_.add_node_name(node_name);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<MobileDebugInfo> CreateMobileDebugInfoDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    int64_t sr_start = 0,
+    int64_t sr_end = 0,
+    const char *node_name = nullptr,
+    flatbuffers::Offset<torch::jit::mobile::serialization::InlinedCallStack> inlined_call_stack = 0) {
+  auto node_name__ = node_name ? _fbb.CreateString(node_name) : 0;
+  return torch::jit::mobile::serialization::CreateMobileDebugInfo(
+      _fbb,
+      sr_start,
+      sr_end,
+      node_name__,
+      inlined_call_stack);
+}
+
 struct ExtraFile FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef ExtraFileBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -2228,7 +2514,8 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_OBJECT_TYPES = 18,
     VT_JIT_SOURCES = 20,
     VT_JIT_CONSTANTS = 22,
-    VT_OPERATOR_VERSION = 24
+    VT_OPERATOR_VERSION = 24,
+    VT_MOBILE_DEBUG_INFOS = 26
   };
   uint32_t bytecode_version() const {
     return GetField<uint32_t>(VT_BYTECODE_VERSION, 0);
@@ -2296,6 +2583,12 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_operator_version(uint32_t _operator_version = 0) {
     return SetField<uint32_t>(VT_OPERATOR_VERSION, _operator_version, 0);
   }
+  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *mobile_debug_infos() const {
+    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *>(VT_MOBILE_DEBUG_INFOS);
+  }
+  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *mutable_mobile_debug_infos() {
+    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *>(VT_MOBILE_DEBUG_INFOS);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint32_t>(verifier, VT_BYTECODE_VERSION) &&
@@ -2321,6 +2614,9 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyOffset(verifier, VT_JIT_CONSTANTS) &&
            verifier.VerifyVector(jit_constants()) &&
            VerifyField<uint32_t>(verifier, VT_OPERATOR_VERSION) &&
+           VerifyOffset(verifier, VT_MOBILE_DEBUG_INFOS) &&
+           verifier.VerifyVector(mobile_debug_infos()) &&
+           verifier.VerifyVectorOfTables(mobile_debug_infos()) &&
            verifier.EndTable();
   }
 };
@@ -2362,6 +2658,9 @@ struct ModuleBuilder {
   void add_operator_version(uint32_t operator_version) {
     fbb_.AddElement<uint32_t>(Module::VT_OPERATOR_VERSION, operator_version, 0);
   }
+  void add_mobile_debug_infos(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>> mobile_debug_infos) {
+    fbb_.AddOffset(Module::VT_MOBILE_DEBUG_INFOS, mobile_debug_infos);
+  }
   explicit ModuleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -2385,8 +2684,10 @@ inline flatbuffers::Offset<Module> CreateModule(
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types = 0,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> jit_sources = 0,
     flatbuffers::Offset<flatbuffers::Vector<uint32_t>> jit_constants = 0,
-    uint32_t operator_version = 0) {
+    uint32_t operator_version = 0,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>> mobile_debug_infos = 0) {
   ModuleBuilder builder_(_fbb);
+  builder_.add_mobile_debug_infos(mobile_debug_infos);
   builder_.add_operator_version(operator_version);
   builder_.add_jit_constants(jit_constants);
   builder_.add_jit_sources(jit_sources);
@@ -2413,7 +2714,8 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
     const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types = nullptr,
     const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *jit_sources = nullptr,
     const std::vector<uint32_t> *jit_constants = nullptr,
-    uint32_t operator_version = 0) {
+    uint32_t operator_version = 0,
+    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *mobile_debug_infos = nullptr) {
   auto extra_files__ = extra_files ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*extra_files) : 0;
   auto methods__ = methods ? _fbb.CreateVector<uint32_t>(*methods) : 0;
   auto ivalues__ = ivalues ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>(*ivalues) : 0;
@@ -2421,6 +2723,7 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
   auto object_types__ = object_types ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>(*object_types) : 0;
   auto jit_sources__ = jit_sources ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*jit_sources) : 0;
   auto jit_constants__ = jit_constants ? _fbb.CreateVector<uint32_t>(*jit_constants) : 0;
+  auto mobile_debug_infos__ = mobile_debug_infos ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>(*mobile_debug_infos) : 0;
   return torch::jit::mobile::serialization::CreateModule(
       _fbb,
       bytecode_version,
@@ -2433,7 +2736,8 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
       object_types__,
       jit_sources__,
       jit_constants__,
-      operator_version);
+      operator_version,
+      mobile_debug_infos__);
 }
 
 inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type) {
@@ -2517,11 +2821,36 @@ inline bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatb
   return true;
 }
 
+inline bool VerifyInlinedCallStackUnion(flatbuffers::Verifier &verifier, const void *obj, InlinedCallStackUnion type) {
+  switch (type) {
+    case InlinedCallStackUnion::NONE: {
+      return true;
+    }
+    case InlinedCallStackUnion::InlinedCallStack: {
+      auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::InlinedCallStack *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    default: return true;
+  }
+}
+
+inline bool VerifyInlinedCallStackUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<InlinedCallStackUnion> *types) {
+  if (!values || !types) return !values && !types;
+  if (values->size() != types->size()) return false;
+  for (flatbuffers::uoffset_t i = 0; i < values->size(); ++i) {
+    if (!VerifyInlinedCallStackUnion(
+        verifier,  values->Get(i), types->GetEnum<InlinedCallStackUnion>(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline const torch::jit::mobile::serialization::Module *GetModule(const void *buf) {
   return flatbuffers::GetRoot<torch::jit::mobile::serialization::Module>(buf);
 }
 
-inline Module* GetMutableModule(void* buf) {
+inline Module *GetMutableModule(void *buf) {
   return flatbuffers::GetMutableRoot<Module>(buf);
 }
 
