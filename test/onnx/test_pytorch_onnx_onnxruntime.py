@@ -3563,7 +3563,6 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.min(x, x + 1)
         self.run_test(MyMinInt(), torch.randn(3, 3).to(torch.int32))
 
-    @skipIfUnsupportedMaxOpsetVersion(11)
     def test_max_int(self):
         """Max <= opset 11 is float only; but use casting for compatibility
         """
