@@ -8,7 +8,10 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from ...observer import default_affine_fixed_qparams_observer
+from ...observer import (
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
+)
 from ...fake_quantize import FixedQParamsFakeQuantize
 from ...fuser_method_mappings import reverse_sequential_wrapper2
 
@@ -328,21 +331,38 @@ def _get_binary_op_configs():
     return binary_op_configs
 
 
-_HARDSIGMOID_MODULE_CONFIG = {
-    "pattern": torch.nn.Hardsigmoid,
-    "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-    # TODO: The following two keys are temporary, since we don't want to put observer in the configs
-    # we expect that it's provided by user
-    # What we want to put here is the requirement on observers, in this case dtype,
-    # quant_min, quant_max etc., but we need to first move all configs to
-    # backend_config_dict to do that, we'll remove these keys after we fully migrated
-    # everything to use backend_config_dict
-    "_overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer),
-    "_overwrite_output_observer": default_affine_fixed_qparams_observer,
-    "dtype_configs": [
-        weighted_op_int8_dtype_config,
-    ],
-}
+def _get_fixed_qparams_op_configs():
+    fixed_qparams_op_configs = []
+    for fixed_qparam_op, output_observer in [
+            (torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer),
+            (torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer),
+            ("hardsigmoid", default_affine_fixed_qparams_observer),
+            ("hardsigmoid_", default_affine_fixed_qparams_observer),
+            (torch.nn.Sigmoid, default_affine_fixed_qparams_observer),
+            (torch.sigmoid, default_affine_fixed_qparams_observer),
+            ("sigmoid", default_affine_fixed_qparams_observer),
+            ("sigmoid_", default_affine_fixed_qparams_observer),
+            (torch.nn.Tanh, default_symmetric_fixed_qparams_observer),
+            (torch.tanh, default_symmetric_fixed_qparams_observer),
+            ("tanh", default_symmetric_fixed_qparams_observer),
+            ("tanh_", default_symmetric_fixed_qparams_observer),
+    ]:
+        fixed_qparams_op_configs.append({
+            "pattern": fixed_qparam_op,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            # TODO: The following two keys are temporary, since we don't want to put observer in the configs
+            # we expect that it's provided by user
+            # What we want to put here is the requirement on observers, in this case dtype,
+            # quant_min, quant_max etc., but we need to first move all configs to
+            # backend_config_dict to do that, we'll remove these keys after we fully migrated
+            # everything to use backend_config_dict
+            "_overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=output_observer),
+            "_overwrite_output_observer": output_observer,
+            "dtype_configs": [
+                weighted_op_int8_dtype_config,
+            ],
+        })
+    return fixed_qparams_op_configs
 
 _CAT_CONFIG = {
     "pattern": torch.cat,
@@ -398,7 +418,7 @@ def get_native_backend_config_dict():
             *_get_linear_configs(),
             *_get_conv_configs(),
             *_get_binary_op_configs(),
-            _HARDSIGMOID_MODULE_CONFIG,
+            *_get_fixed_qparams_op_configs(),
             _CAT_CONFIG,
             *_get_bn_configs(),
         ],
