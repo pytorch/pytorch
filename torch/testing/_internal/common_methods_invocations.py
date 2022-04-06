@@ -10572,7 +10572,12 @@ op_db: List[OpInfo] = [
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples',
-                            active_if=TEST_WITH_ROCM), ],
+                            active_if=TEST_WITH_ROCM),
+               # mv for the sample with shapes (S, S, M, M), (M,) has some variance in the
+               # backward on CPU
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=0, rtol=1e-5)}),
+                            'TestCommon', 'test_noncontiguous_samples',
+                            device_type='cpu'), ],
            skips=(
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"),
@@ -12651,6 +12656,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("67470!"),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu', dtypes=(torch.long,)),
+               # mv for the sample with shapes (S, S, M, M), (M,) has some variance in the
+               # backward on CPU
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=0, rtol=1e-5)}),
+                            'TestCommon', 'test_noncontiguous_samples',
+                            device_type='cpu'),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
                # Fails on XLA.

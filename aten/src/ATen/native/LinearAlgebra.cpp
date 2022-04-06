@@ -1661,11 +1661,12 @@ Tensor _matmul_impl(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
-    // optimization: use mm instead of bmm by folding tensor1's batch into
-    // its leading matrix dimension
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and some condition on the strides is fulfilled
+
+    // optimization: use mm instead of bmm by folding the batch of the larger tensor
+    // into its leading matrix dimension
     const auto transpose = dim_tensor2 > dim_tensor1;
     const auto t1 = transpose ? MaybeOwned<Tensor>::owned(tensor2.mT())
                               : MaybeOwned<Tensor>::borrowed(tensor1);
