@@ -211,8 +211,9 @@ class GenLazyNativeFuncDefinition:
     backend_index: BackendIndex
     tensor_class: str
 
-    def gen_shape_call(self, func: NativeFunction):
+    def gen_shape_call(self, func: NativeFunction) -> str:
         metadata = self.backend_index.get_kernel(func)
+        assert metadata is not None
         schema = LazyIrSchema(func.func)
         all_args = schema.filtered_args()
         returns_length = len(schema.returns)
