@@ -39,7 +39,16 @@ namespace at {
 // See Note [Functionalization: Mutation Removal] for details on mutation removal.
 
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
-  explicit FunctionalTensorWrapper(const Tensor& value);
+  // Setting "include_reapply_views_key" to true will add the "FunctionalizeAddBackViews" dispatch key
+  // to the wrapper's keyset.
+  // This will cause any view->view_copy conversions performed on the tensor to be undone, after mutations are removed.
+  // NOTE: the "reapply view" logic is a little funky right now - adding the FunctionalizeAddBackViews key on each tensor wrapper
+  // here doesn't technically do anything, since we're dispatching on the inner tensor and not the wrapper when we're
+  // inside of the functionalization kernels.
+  // Technically, the only reason that "AddBackViews" works right now for functorch is because we set TLS properly
+  // (which we need anyway for factory functions, but shouldn't be necessary for view_copy operators).
+  // Depending on how important the view_copy_to_view conversion is for functorch, maybe we should fix this.
+  explicit FunctionalTensorWrapper(const Tensor& value, bool include_reapply_views_key=false);
   // Additional constructor to create a FunctionalTensorWrapper directly from an underlying tensor that was created from a view.
   // For example, the code b = a.view1() will generate a constructor call to FunctionalTensorWrapper(b, a, view1_meta)
   explicit FunctionalTensorWrapper(const Tensor& view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta);
@@ -95,7 +104,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
  private:
   const char* tensorimpl_type_name() const override;
-  void set_constructor_metadata();
+  void set_constructor_metadata(bool include_reapply_views_key=false);
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 
   // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.
@@ -123,10 +132,10 @@ TORCH_API bool isFunctionalTensor(const c10::List<Tensor>& t_list);
 TORCH_API bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list);
 
-TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
-TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list);
-TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
-TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
+TORCH_API Tensor to_functional_tensor(const Tensor& tensor, bool include_reapply_views_key=false);
+TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list, bool include_reapply_views_key=false);
+TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list, bool include_reapply_views_key=false);
+TORCH_API TensorList to_functional_tensor(const TensorList& t_list, bool include_reapply_views_key=false);
 
 TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);

@@ -42,19 +42,18 @@ mutated_view_idx_binding = Binding(
 
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
-def name(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool, include_namespace: bool) -> str:
+def name(f: NativeFunction, *, is_reverse: bool, include_namespace: bool) -> str:
     # For inplace_view ops, the lambda calls out to the corresponding functional view op
-    fn = functional_op if f.tag is Tag.inplace_view else f
-    name = fn.func.name.unambiguous_name()
+    api_name = f.func.name.unambiguous_name()
     if is_reverse:
         # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
         if include_namespace:
-            return f'at::functionalization::FunctionalInverses::{name}_inverse'
+            return f'at::functionalization::FunctionalInverses::{api_name}_inverse'
         else:
-            return f'{name}_inverse'
+            return f'{api_name}_inverse'
     # in the forward case, we just diretly call into the at::_ops API (so we always need the namespace)
     assert include_namespace
-    return f'at::_ops::{name}::call'
+    return f'at::_ops::{api_name}::call'
 
 
 def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:

@@ -605,12 +605,13 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 static PyObject * THPVariable__to_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
+  static PythonArgParser parser({"_to_functional_tensor(Tensor t, *, bool reapply_views=False)"}, /*traceable=*/true);
 
-  ParsedArgs<1> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
-  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  auto reapply_views = r.toBool(1);
+  auto wrapped = at::functionalization::impl::to_functional_tensor(self_, reapply_views);
   return wrap(wrapped);
   END_HANDLE_TH_ERRORS
 }
@@ -661,7 +662,15 @@ static PyObject * THPVariable__sync(PyObject *self, PyObject* args, PyObject* kw
 static PyObject * THPVariable__enable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_enable_functionalization(*, bool reapply_views=False)"}, /*traceable=*/true);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  const auto reapply_views = r.toBool(0);
+
   c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, true);
+  if (reapply_views) {
+      c10::impl::tls_set_dispatch_key_included(at::DispatchKey::FunctionalizeAddBackViews, true);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -670,6 +679,7 @@ static PyObject * THPVariable__disable_functionalization(PyObject *self, PyObjec
 {
   HANDLE_TH_ERRORS
   c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, false);
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::FunctionalizeAddBackViews, false);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
