@@ -132,10 +132,10 @@ def _communicate_optim_state(
                 unpadded_numel = flat_param._orig_size.numel()  # type: ignore[attr-defined]
                 tensor_state[state_name] = tensor_buffer[:unpadded_numel].cpu()
         # Zero-dimension tensor state and non-tensor state: take this rank's
-        # value directly
+        # value directly (`deepcopy()`ing to avoid aliasing surprises)
         elif to_save:
             if _is_zero_dim_tensor(value):
-                zero_dim_tensor_state[state_name] = value.cpu()
+                zero_dim_tensor_state[state_name] = value
             else:
                 non_tensor_state[state_name] = value
     return state
