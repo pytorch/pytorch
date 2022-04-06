@@ -208,8 +208,7 @@ Tensor norm_backward(
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    auto norm_eq_zero = norm == 0;
-    return self * (grad / norm).masked_fill_(norm_eq_zero, 0);
+    return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
@@ -225,20 +224,17 @@ Tensor norm_backward(
     scale_v = grad / nb_max;
     return self_scaled * scale_v;
   } else if (p < 1.0) {
-    auto self_eq_zero = self == 0;
-    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self_eq_zero, 0);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
     return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    auto norm_eq_zero = norm == 0;
     self_scaled = self.sgn() * self.abs().pow_(p - 1);
     scale_v = grad / norm.pow(p - 1);
-    scale_v.masked_fill_(norm_eq_zero, 0);
+    scale_v.masked_fill_(norm == 0, 0);
     return self_scaled * scale_v;
   } else {
-    auto norm_eq_zero = norm == 0;
     self_scaled = self * self.abs().pow_(p - 2);
     scale_v = grad / norm.pow(p - 1);
-    scale_v.masked_fill_(norm_eq_zero, 0);
+    scale_v.masked_fill_(norm == 0, 0);
     return self_scaled * scale_v;
   }
 }
