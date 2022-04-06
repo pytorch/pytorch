@@ -40,6 +40,11 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
                 args = list(node.args)
                 args[1] = [1]
                 node.args = tuple(args)
+        elif node.target is torch.ops.aten.masked_fill and node.args[2] == float("-inf"):
+            # Fx graph to torchscript fails for -inf
+            args = list(node.args)
+            args[2] = -3.403 * 10**37
+            node.args = tuple(args)
 
     for node in fx_g.graph.nodes:
         new_kwargs = {}
