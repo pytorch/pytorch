@@ -16,8 +16,13 @@ struct TORCH_API RegisterCudaFuseGraph
   static bool registerPass(bool enabled) {
     bool old_flag = PassManager::isRegistered();
     if (enabled) {
+#ifdef USE_ROCM
+      bool has_rocm = true;
+#else
+      bool has_rocm = false;
+#endif
       TORCH_CHECK(
-          at::globalContext().hasCUDA() && !at::globalContext().hasHIP(),
+          at::globalContext().hasCUDA() && !has_rocm,
           "Running CUDA fuser is only supported on CUDA builds.");
       PassManager::registerPass(fuser::cuda::fuseGraph);
     } else {
