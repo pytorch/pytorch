@@ -189,7 +189,7 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
   return norm_backward(grad, self, p_, norm, {}, true);
 }
 
-__ubsan_ignore_function__ Tensor norm_backward(
+Tensor norm_backward(
     Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
   // NB: we could've masked_fill the zero elements with an arbitrary value like 1 to
   //     appease the ASAN but decided not to because of the perf hit from the masked_fill
