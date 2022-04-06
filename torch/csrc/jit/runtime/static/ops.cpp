@@ -2304,9 +2304,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   return [](ProcessedNode* p_node) {
     const auto in1_s = p_node->Input(1).toScalar();
     const auto& in0_t = p_node->Input(0).toTensor();
-    if (p_node->Output(0).isNone()) {
-      const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
-      const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+    const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+    const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+    if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
       const auto device = p_node->Input(4).toOptional<c10::Device>();
       const auto pin_memory = p_node->Input(5).toOptional<bool>();
       const auto memory_format =
