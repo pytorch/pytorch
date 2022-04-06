@@ -8,15 +8,23 @@ on:
 
 jobs:
   upload-test-stats:
-    runs-on: [self-hosted, linux.2xlarge]
+    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-18.04
 
     steps:
+      - name: Print workflow information
+        env:
+          TRIGGERING_WORKFLOW: ${{ toJSON(github.event.workflow_run) }}
+        run: echo "${TRIGGERING_WORKFLOW}"
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - uses: actions/setup-python@v3
 
-      - run: pip install requests==2.26
+      - run: |
+          pip install requests==2.26
+          pip install rockset==0.8.3
 
       - name: Upload test stats
         env:
