@@ -40,12 +40,6 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
                 args = list(node.args)
                 args[1] = [1]
                 node.args = tuple(args)
-        elif node.target == torch.ops.aten.avg_pool2d_backward:
-            # Handle empty strides
-            if node.args[3] == []:
-                args = list(node.args)
-                args[3] = [1, 1]
-                node.args = tuple(args)
 
     for node in fx_g.graph.nodes:
         new_kwargs = {}
