@@ -1236,7 +1236,7 @@ class TestQuantizedOps(TestCase):
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
-    def test_max_pool2d(self, X, kernel, stride, dilation, padding, ceil_mode):
+    def test_max_pool2d_mod(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
