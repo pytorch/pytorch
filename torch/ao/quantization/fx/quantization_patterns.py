@@ -19,10 +19,18 @@ from .pattern_utils import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
+from .quantization_types import NodePattern
 
 from abc import ABC
 import operator
 from typing import Any, Callable, Dict, Optional
+
+def _default_root_node_getter(node_pattern):
+    if node_pattern is None:
+        return node_pattern
+    while not isinstance(node_pattern, Node):
+        node_pattern = node_pattern[-1]
+    return node_pattern
 
 # -------------------------
 # Pattern Registrations
@@ -34,18 +42,34 @@ from typing import Any, Callable, Dict, Optional
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns
     """
-    def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
+    def __init__(
+            self,
+            node_pattern: NodePattern,
+            modules: Dict[str, torch.nn.Module],
+            root_node_getter: Callable = None,
+            is_custom_module=False,
+            is_standalone_module=False):
         """ Records pattern information in __init__, which will be used
         in convert
         """
-        # this is an indicator of whether all the inputs are Node or not
-        # since some op might be quantized differently depending on whether
-        # all inputs are tensors or not, e.g. add/mul
-        if isinstance(node, Node):
-            self.num_tensor_args = len(node.args)
-        else:
-            self.num_tensor_args = 0
-        self.all_node_args_are_tensors = True
+        self.node_pattern = node_pattern
+        self.modules = modules
+        if root_node_getter is None:
+            root_node_getter = _default_root_node_getter
+        self.root_node = root_node_getter(node_pattern)
+        self.is_custom_module_ = is_custom_module
+        self.is_standalone_module_ = is_standalone_module
+        self.num_tensor_args = 0
+        # determine how many of the first two args are Tensors (versus scalars)
+        # this distinguishes things like "x + y" from "x + 2" or "2 + x"
+        if isinstance(self.root_node, Node):
+            cache_for_no_tensor_check: Dict[Node, bool] = dict()
+            for arg_idx in range(len(self.root_node.args)):
+                arg = self.root_node.args[arg_idx]
+                if isinstance(arg, Node) and (
+                        not all_node_args_have_no_tensors(
+                            arg, self.modules, cache_for_no_tensor_check)):
+                    self.num_tensor_args += 1
 
     # TODO: can remove after the is_dynamic flag is defined, so that we can
     # move embedding op to backend_config_dict
@@ -86,7 +110,12 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
-@register_quant_pattern(operator.add)
+    def is_custom_module(self):
+        return self.is_custom_module_
+
+    def is_standalone_module(self):
+        return self.is_standalone_module_
+
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
 @register_quant_pattern(operator.truediv)
@@ -109,32 +138,19 @@ class QuantizeHandler(ABC):
 class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(
             self,
-            node: Node,
-            modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-        self.relu_node = None
-        if (
-            node.op == 'call_function' and
-                node.target in (torch.nn.functional.relu, torch.relu)
-        ) or (
-            node.op == 'call_module' and
-                isinstance(modules[str(node.target)], torch.nn.ReLU)
-        ):
-            self.relu_node = node
-            node = node.args[0]  # type: ignore[assignment]
-        self.binary_op_node = node
-        self.binary_op = node.target
+            node_pattern: NodePattern,
+            modules: Dict[str, torch.nn.Module],
+            root_node_getter: Callable = None):
+        super().__init__(node_pattern, modules, root_node_getter)
 
         # determine how many of the first two args are Tensors (versus scalars)
         # this distinguishes things like "x + y" from "x + 2" or "2 + x"
         self.num_tensor_args = 0
         cache_for_no_tensor_check: Dict[Node, bool] = dict()
-        for arg_idx in range(len(self.binary_op_node.args)):
-            arg = self.binary_op_node.args[arg_idx]
+        for arg_idx in range(len(self.root_node.args)):
+            arg = self.root_node.args[arg_idx]
             if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg, modules, cache_for_no_tensor_check)):
                 self.num_tensor_args += 1
-        self.all_node_args_are_tensors = \
-            (self.num_tensor_args == len(self.binary_op_node.args))
 
     def is_general_tensor_value_op(self) -> bool:
         return self.num_tensor_args == 1
@@ -188,7 +204,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
     """
     pass
 
-@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer)
 @register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
 @register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_observer)
 @register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_observer)
@@ -201,12 +216,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('tanh', default_symmetric_fixed_qparams_observer)
 @register_quant_pattern('tanh_', default_symmetric_fixed_qparams_observer)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
-    def __init__(self,
-                 node: Node,
-                 modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-        self.node = node
-
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern, is_training) -> Optional[Callable]:
         act_dtype = activation_dtype(qconfig)
@@ -261,9 +270,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return True
 
-class CustomModuleQuantizeHandler(QuantizeHandler):
-    pass
-
 @register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
@@ -298,8 +304,10 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return True
 
+# TODO: not used, can be removed after torch.quantization namespace is deprecated
+class CustomModuleQuantizeHandler(QuantizeHandler):
+    pass
+
+# TODO: not used, can be removed after torch.quantization namespace is deprecated
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
-    """ Converts an observed standalone module to quantized standalone module
-    by calling convert_fx on the observed standalone module.
-    """
     pass
