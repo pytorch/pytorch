@@ -101,7 +101,7 @@ class MklSparseCsrDescriptor
     sparse_matrix_t raw_descriptor;
 
     // Assuming that the last two dimensions are block elements of the matrix
-    if (values.dim() == 3 && crow_indices.dim() == 1 && col_indices.dim() == 1) {
+    if (values.dim() == 3) {
       TORCH_CHECK(
           values.size(-1) == values.size(-2),
           "MKL Sparse doesn't support matrices with non-square blocks.");
