@@ -1037,6 +1037,26 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
+    def test_sharded_tensor_dim(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        st = sharded_tensor.empty(spec, 10, 20, 5, init_rrefs=True)
+        self.assertEqual(3, st.dim())
+
+        st = sharded_tensor.empty(spec, 10, init_rrefs=True)
+        self.assertEqual(1, st.dim())
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
     def test_state_dict(self):
         spec = ChunkShardingSpec(
             dim=0,

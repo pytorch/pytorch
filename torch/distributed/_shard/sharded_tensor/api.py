@@ -10,6 +10,8 @@ from typing import (
 )
 import weakref
 
+import copy
+import math
 import threading
 import torch
 import torch.distributed as dist
@@ -684,6 +686,169 @@ class ShardedTensor(object):
             raise NotImplementedError("Only single local shard is supported.")
         return self.local_shards()[0].tensor
 
+    def contiguous(self) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with the local tensor is made to contiguous.
+        """
+        if self.is_contiguous():
+            return self
+        local_shards = []
+        for shard in self.local_shards():
+            local_shards.append(
+                Shard(shard.tensor.contiguous(), shard.metadata)
+            )
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards,
+            self._metadata,
+            process_group=self._process_group,
+            init_rrefs=self._init_rrefs,
+        )
+
+    def masked_fill(self, mask, value) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with each shard has been filled elements
+        with value where mask is True. The shape of mask must be broadcastable
+        with the shape of the underlying tensor.
+
+        Args:
+            mask (BoolTensor): the boolean mask.
+            value (float): the value to fill in with.
+
+        Returns:
+            A :class:`ShardedTensor` object whose shards have been applied masked_fill.
+        """
+        local_shards = []
+        if mask.size() != self.size():
+            raise ValueError('mask size must match with the size of the sharded tensor.')
+        current_rank = dist.get_rank(self._process_group)
+        rank_idx = None
+        for idx, placement in enumerate(self._sharding_spec.placements):
+            if placement.rank() == current_rank:
+                rank_idx = idx
+        shard_metadata = self._metadata.shards_metadata[rank_idx]
+        sharding_dim = self._sharding_spec.dim
+        local_mask = mask.narrow(
+            sharding_dim,
+            shard_metadata.shard_offsets[sharding_dim],
+            shard_metadata.shard_sizes[sharding_dim],
+        )
+        for shard in self.local_shards():
+            local_shards.append(
+                Shard(shard.tensor.masked_fill(local_mask, value), shard.metadata)
+            )
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards,
+            self._metadata,
+            process_group=self._process_group,
+            init_rrefs=self._init_rrefs,
+        )
+
+    def type_as(self, tensor) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with each shard has been
+        cast to the type of the given tensor.
+
+        Args:
+            tensor (Tensor): the tensor which has the desired type.
+
+        Returns:
+            A :class:`ShardedTensor` object whose shards have been applied type_as.
+        """
+        if isinstance(tensor, ShardedTensor):
+            tensor = tensor.local_tensor()
+        if self.dtype == tensor.dtype:
+            return self
+        local_shards = []
+        for shard in self.local_shards():
+            local_shards.append(
+                Shard(shard.tensor.type_as(tensor), shard.metadata)
+            )
+        st_meta = copy.deepcopy(self._metadata)
+        st_meta.tensor_properties.dtype = tensor.dtype
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards,
+            st_meta,
+            process_group=self._process_group,
+            init_rrefs=self._init_rrefs,
+        )
+
+    def view(self, *shape) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with the same data as the
+        self tensor but of a different shape for its local tensor.
+
+        For now, we only support to pass through the view op to the local
+        tensor.
+
+        Args:
+            shape (torch.Size or int...) – the desired size.
+
+        Returns:
+            A :class:`ShardedTensor` object whose shards have been applied
+                with view to its local tensor.
+        """
+        st_size = list(self.size())
+        total_size = math.prod(st_size)
+        new_st_size = list(shape)
+        new_total_size = math.prod(new_st_size)
+        if (new_total_size < 0):
+            pos = new_st_size.index(-1)
+            new_st_size[pos] = total_size * -1 // new_total_size
+        st_size = tuple(new_st_size)
+        new_st_size[self.sharding_spec().dim] //= self._process_group.size()
+        new_local_tensor = self.local_tensor().view(*new_st_size)
+        return ShardedTensor._init_from_local_tensor(
+            new_local_tensor.contiguous(),
+            self.sharding_spec(),
+            st_size,
+            process_group=self._process_group,
+        )
+
+    def transpose(self, dim0, dim1) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with the given dimensions transposed.
+        During the transpose, we keep the original shading dim, e.g., if the
+        tensor is sharded by dim 0 and if we call transpose(1, 0). The returned
+        tensor will be sharded by dim 1.
+
+        Args:
+            dim0 (int): the first dimension to be transposed.
+            dim1 (int): the second dimension to be transposed.
+
+        Returns:
+            A :class:`ShardedTensor` object whose dims have been transposed
+                specified in the input.
+        """
+        def _swap_meta_data(data, idx0, idx1):
+            """
+            Swap the item at idx0 and idx1 in the data list.
+            """
+            data[idx0], data[idx1] = data[idx1], data[idx0]
+
+        if dim0 == dim1:
+            return self
+        local_shards = []
+        for shard in self.local_shards():
+            shard_meta_data = copy.deepcopy(shard.metadata)
+            _swap_meta_data(shard_meta_data.shard_offsets, dim0, dim1)
+            _swap_meta_data(shard_meta_data.shard_sizes, dim0, dim1)
+            local_shards.append(
+                Shard(shard.tensor.transpose(dim0, dim1).contiguous(), shard_meta_data)
+            )
+        st_meta = copy.deepcopy(self._metadata)
+        for shard_metadata in st_meta.shards_metadata:
+            _swap_meta_data(shard_metadata.shard_offsets, dim0, dim1)
+            _swap_meta_data(shard_metadata.shard_sizes, dim0, dim1)
+        st_size = list(st_meta.size)
+        _swap_meta_data(st_size, dim0, dim1)
+        st_meta.size = tuple(st_size)
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards,
+            st_meta,
+            process_group=self._process_group,
+            init_rrefs=self._init_rrefs,
+        )
+
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
@@ -737,6 +902,15 @@ class ShardedTensor(object):
                 f"Argument ``dim`` must be within the range of tensor dimensions [0, {len(size)})"
             )
         return size[dim]
+
+    def dim(self) -> int:
+        """
+        Returns a `int` which represents the dimension of the tensor.
+
+        Returns:
+            A `int` represents the dimension of the tensor.
+        """
+        return len(self._metadata.size)
 
 
     def is_pinned(self) -> bool:
