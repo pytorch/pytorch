@@ -7,9 +7,8 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import CPUOffload, MixedPrecision
+from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FlatParameter
-from torch.distributed.fsdp.wrap import wrap, enable_wrap
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -38,12 +37,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-def _run_test_summon_full_param_writeback(cls, writeback, modify_outer, *fsdp_args, **fsdp_kwargs):
-    with enable_wrap(wrapper_cls=FSDP, *fsdp_args, **fsdp_kwargs):
-        lin1 = wrap(nn.Linear(5, 5, bias=False).cuda(cls.rank))
-        lin2 = nn.Linear(5, 3, bias=False).cuda(cls.rank)
-        model = wrap(nn.Sequential(lin1, lin2))
-
+def _run_test_summon_full_param_writeback(cls, writeback, cpu_offload, modify_outer):
+    lin1 = FSDP(nn.Linear(5, 5, bias=False).cuda(cls.rank), cpu_offload=cpu_offload)
+    lin2 = nn.Linear(5, 3, bias=False).cuda(cls.rank)
+    model = FSDP(nn.Sequential(lin1, lin2), cpu_offload=cpu_offload)
 
     # set the value
     outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -76,18 +73,15 @@ class TestSummonFullParamsNoShard(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("writeback", [True, False])
     @parametrize("modify_outer", [True, False])
-    @parametrize("mixed_precision", [True, False])
     # TODO: CPUOffload summon + writeback does not
     # work when param is not sharded
     # (currently when world_size == 1)
-    def test_summon_full_param_writeback(self, writeback, modify_outer, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_summon_full_param_writeback(self, writeback, modify_outer):
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
-            modify_outer=modify_outer,
             cpu_offload=CPUOffload(offload_params=False),
-            mixed_precision=mixed_precision,
+            modify_outer=modify_outer,
         )
 
 
@@ -109,27 +103,20 @@ class TestSummonFullParams(FSDPTest):
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
-    @parametrize("mixed_precision", [True, False])
     @parametrize("modify_outer", [True, False])
-    def test_summon_full_param_writeback(self, writeback, cpu_offload, mixed_precision, modify_outer):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
         return _run_test_summon_full_param_writeback(
-            self,
-            writeback,
-            modify_outer,
-            cpu_offload=cpu_offload,
-            mixed_precision=mixed_precision,
+            self, writeback, cpu_offload, modify_outer
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [True, False])
-    def test_summon_full_param_shard_value(self, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_summon_full_param_shard_value(self):
+
         raw_model = nn.Linear(10, 11)
         raw_model_size = self.get_model_param_count(raw_model)
         expected_shard_size = self.get_expected_sharded_size(raw_model_size)
 
-        model = FSDP(raw_model.cuda(self.rank), mixed_precision=mixed_precision)
+        model = FSDP(raw_model.cuda(self.rank))
         self.assertEqual(expected_shard_size, self.get_model_param_count(model))
 
         # we're assuming a single flatenned param
@@ -152,15 +139,11 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("recurse", [True, False])
     @parametrize("summon_outer", [True, False])
-    @parametrize("mixed_precision", [True, False])
-    def test_summon_full_param_recursive(self, recurse, summon_outer, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_summon_full_param_recursive(self, recurse, summon_outer):
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
-                nn.Linear(5, 3, bias=False)
-            ),
-            mixed_precision=mixed_precision,
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
+            )
         ).cuda(self.rank)
 
         global_inner_numel = self.get_model_param_count(nn.Linear(5, 5, bias=False))
@@ -226,15 +209,11 @@ class TestSummonFullParams(FSDPTest):
             output.backward()
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [True, False])
-    def test_summon_full_params_respects_reshard_after_forward(self, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_summon_full_params_respects_reshard_after_forward(self):
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
-                nn.Linear(5, 3, bias=False)
-            ),
-            mixed_precision=mixed_precision,
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
+            )
         ).cuda(self.rank)
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -245,6 +224,7 @@ class TestSummonFullParams(FSDPTest):
 
         # trigger lazy init
         model(torch.zeros(5).cuda(self.rank))
+
         # the root FSDP module keeps all params around
         self.assertEqual(
             outer_full_param_size, outer_param._full_param_padded.storage().size()
@@ -311,15 +291,11 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
-    @parametrize("mixed_precision", [True, False])
-    def test_reshard_outside_forward_backward_iteration(self, rank0_only, offload_to_cpu, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_reshard_outside_forward_backward_iteration(self, rank0_only, offload_to_cpu):
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
-                nn.Linear(5, 1, bias=False)
-            ),
-            mixed_precision=mixed_precision,
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 1, bias=False)
+            )
         ).cuda(self.rank)
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -345,10 +321,6 @@ class TestSummonFullParams(FSDPTest):
         # now lets repeat it with summon done in between
 
         output = model(torch.zeros(5).cuda(self.rank))
-        self.assertEqual(
-            outer_full_param_size, outer_param._full_param_padded.storage().size()
-        )
-        self.assertEqual(0, inner_param._full_param_padded.storage().size())
         with model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(
@@ -365,12 +337,10 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
-    @parametrize("mixed_precision", [True, False])
-    def test_params_are_unflattenned(self, rank0_only, offload_to_cpu, mixed_precision):
+    def test_params_are_unflattenned(self, rank0_only, offload_to_cpu):
         layer_shape = (10, 12)
         model = nn.Linear(*layer_shape, bias=False).cuda(self.rank)
-        mixed_precision = MixedPrecision() if mixed_precision else None
-        fsdp_model = FSDP(deepcopy(model), mixed_precision=mixed_precision).cuda(self.rank)
+        fsdp_model = FSDP(deepcopy(model)).cuda(self.rank)
 
         def _get_flat_param():
             return fsdp_model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -398,17 +368,13 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
-    @parametrize("mixed_precision", [True, False])
-    def test_params_count_and_value(self, rank0_only, offload_to_cpu, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+    def test_params_count_and_value(self, rank0_only, offload_to_cpu):
         fsdp_model = FSDP(
             NestedWrappedModule(
                 group=dist.distributed_c10d._get_default_group(),
                 wrap_fsdp=True,
                 fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
-                mixed_precision=mixed_precision,
-            ),
-            mixed_precision=mixed_precision,
+            )
         )
         model = NestedWrappedModule(
             group=dist.distributed_c10d._get_default_group(),
