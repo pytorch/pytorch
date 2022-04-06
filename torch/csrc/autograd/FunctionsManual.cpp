@@ -189,11 +189,10 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
   return norm_backward(grad, self, p_, norm, {}, true);
 }
 
-Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  // NB: zero entries of `norm` or `self` (for p < 1.0) are replaced with something
-  // arbitrary (such as ones) to avoid division by zero. Though output value will then
-  // later replaced with zeros after division, we cannot simply replace with inf from the
-  // outset because the numerator may also sometimes be zero.
+__ubsan_ignore_float_divide_by_zero__ Tensor norm_backward(
+    Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: we could've masked_fill the zero elements with an arbitrary value like 1 to
+  //     appease the ASAN but decided not to because of the perf hit from the masked_fill
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -210,7 +209,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     return self.sgn() * grad;
   } else if (p == 2.0) {
     auto norm_eq_zero = norm == 0;
-    return self * (grad / norm.masked_fill(norm_eq_zero, 1.)).masked_fill_(norm_eq_zero, 0);
+    return self * (grad / norm).masked_fill_(norm_eq_zero, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
@@ -227,18 +226,18 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     return self_scaled * scale_v;
   } else if (p < 1.0) {
     auto self_eq_zero = self == 0;
-    self_scaled = self.sgn() * self.abs().masked_fill_(self_eq_zero, 1.).pow_(p - 1).masked_fill_(self_eq_zero, 0);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self_eq_zero, 0);
     return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
     auto norm_eq_zero = norm == 0;
     self_scaled = self.sgn() * self.abs().pow_(p - 1);
-    scale_v = grad / norm.masked_fill(norm_eq_zero, 1.).pow_(p - 1);
+    scale_v = grad / norm.pow(p - 1);
     scale_v.masked_fill_(norm_eq_zero, 0);
     return self_scaled * scale_v;
   } else {
     auto norm_eq_zero = norm == 0;
     self_scaled = self * self.abs().pow_(p - 2);
-    scale_v = grad / norm.masked_fill(norm_eq_zero, 1.).pow_(p - 1);
+    scale_v = grad / norm.pow(p - 1);
     scale_v.masked_fill_(norm_eq_zero, 0);
     return self_scaled * scale_v;
   }
