@@ -1,4 +1,5 @@
 from collections import namedtuple
+from typing import List, Dict, Any
 import operator
 import torch
 from .observation_type import ObservationType
@@ -290,7 +291,7 @@ def _get_conv_configs():
     return conv_configs
 
 def _get_binary_op_configs():
-    binary_op_configs = []
+    binary_op_configs: List[Dict[str, Any]] = []
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
         # will need to change this to NO_OBSERVER later after we implemented
@@ -302,8 +303,8 @@ def _get_binary_op_configs():
     dtype_configs = [
         weighted_op_int8_dtype_config,
     ]
-    for op_with_quantized_bop_scalar_variant in \
-        [operator.add, torch.add, operator.mul, torch.mul]:
+    for op_with_quantized_bop_scalar_variant in [
+            operator.add, torch.add, operator.mul, torch.mul]:
         binary_op_configs.append({
             "pattern": (torch.nn.ReLU, op_with_quantized_bop_scalar_variant),
             "num_tensor_args_to_observation_type": num_tensor_args_to_observation_type_mapping,
