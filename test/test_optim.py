@@ -228,6 +228,12 @@ class TestOptim(TestCase):
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
 
+        # Make sure that device of state['step'] is still CPU
+        new_state_dict = optimizer_cuda.state_dict()
+        if 'step' in state_dict['state'][0] and torch.is_tensor(state_dict['state'][0]['step']):
+            for state in new_state_dict['state'].values():
+                self.assertEqual(state['step'].device.type, 'cpu')
+
         for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
