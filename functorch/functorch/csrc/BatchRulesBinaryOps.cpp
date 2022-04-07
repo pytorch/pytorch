@@ -422,6 +422,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(softshrink_backward);
   BINARY_POINTWISE(tanh_backward);
   BINARY_POINTWISE(threshold_backward);
+  BINARY_POINTWISE(silu_backward);
 
   using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
   using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
