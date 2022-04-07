@@ -95,14 +95,6 @@ generate_aten(
     generator = "//tools/codegen:gen",
 )
 
-py_binary(
-    name = "generate_code",
-    srcs = ["tools/setup_helpers/generate_code.py"],
-    deps = [
-        "//tools/autograd",
-    ],
-)
-
 libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType.h",
         "torch/csrc/autograd/generated/VariableType_0.cpp",
@@ -162,8 +154,8 @@ genrule(
         "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --gen_lazy_ts_backend",
-    tools = [":generate_code"],
+    cmd = "$(location //tools/setup_helpers:generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --gen_lazy_ts_backend",
+    tools = ["//tools/setup_helpers:generate_code"],
 )
 
 filegroup(
@@ -1616,17 +1608,12 @@ cc_library(
 )
 
 # torch
-py_binary(
-    name = "gen_version_header",
-    srcs = ["tools/setup_helpers/gen_version_header.py"],
-)
-
 genrule(
     name = "version_h",
     srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
     outs = ["torch/csrc/api/include/torch/version.h"],
-    cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
-    tools = [':gen_version_header'],
+    cmd = "$(location //tools/setup_helpers:gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
+    tools = ['//tools/setup_helpers:gen_version_header'],
 )
 
 py_binary(
