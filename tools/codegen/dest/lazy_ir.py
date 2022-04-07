@@ -204,7 +204,8 @@ class GenLazyNativeFuncDefinition(ABC):
                 # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
                 # until we encounter a real world example.
                 lazy_tensor_decls.append(
-                    f"    {self.tensor_class}Ptr lazy_{arg.name} = torch::lazy::TryGetLtcTensor({arg.name}.value_or(at::Tensor()));")
+                    f"    {self.tensor_class}Ptr lazy_{arg.name} = "
+                    f"torch::lazy::TryGetLtcTensor({arg.name}.value_or(at::Tensor()));")
             else:
                 raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
         return ("\n        ").join(lazy_tensor_decls)
