@@ -1,6 +1,7 @@
 #include <ATen/native/TensorTransformations.h>
 #include <ATen/native/IndexKernel.h>  // for flip_stub
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
