@@ -52,6 +52,7 @@ enum class BackendComponent : uint8_t {
   HIPBit,
   XLABit,
   MLCBit,
+  IPUBit,
   XPUBit,
   HPUBit,
   VEBit,
@@ -352,12 +353,15 @@ enum class DispatchKey : uint16_t {
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
-  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher
-  // This kernel assumes it is at the very top of the dispatcher. If you add
-  // a key above, make sure to update the fallback implementation for this.
+  // This kernel assumes it is the top-most non-functorch-related DispatchKey.
+  // If you add a key above, make sure to update the fallback implementation for
+  // this.
   PythonTLSSnapshot,
+
+  // This key should be at the very top of the dispatcher
+  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
@@ -390,6 +394,7 @@ enum class DispatchKey : uint16_t {
   // CUDA]
   XLA, // lives out of tree at https://github.com/pytorch/xla
   MLC, // lives out of tree at https://github.com/pytorch/MLCompute
+  IPU, // lives out of tree at https://github.com/graphcore/poptorch
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
@@ -413,6 +418,7 @@ enum class DispatchKey : uint16_t {
   _QuantizedHIP,
   _QuantizedXLA,
   _QuantizedMLC,
+  _QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   _QuantizedHPU,
   _QuantizedVE,
@@ -434,6 +440,7 @@ enum class DispatchKey : uint16_t {
   // [Masquerading as CUDA]
   _SparseXLA,
   _SparseMLC,
+  _SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
   _SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
@@ -454,6 +461,7 @@ enum class DispatchKey : uint16_t {
   _AutogradHIP,
   AutogradXLA,
   AutogradMLC,
+  AutogradIPU,
   AutogradXPU,
   AutogradHPU,
   _AutogradVE,

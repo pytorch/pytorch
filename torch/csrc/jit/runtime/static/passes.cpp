@@ -226,33 +226,6 @@ C10_UNUSED void ClipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
-  std::string pattern = R"IR(
-    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
-        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat)
-        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
-        return (%y1))IR";
-  std::string fused_pattern = R"IR(
-    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
-        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
-        return (%y0))IR";
-  SubgraphRewriter fuse;
-  fuse.RegisterRewritePattern(pattern, fused_pattern);
-  fuse.runOnGraph(graph);
-
-  std::string pattern2 = R"IR(
-    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
-        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy)
-        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
-        return (%y1))IR";
-  std::string fused_pattern2 = R"IR(
-    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
-        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
-        return (%y0))IR";
-  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
-  fuse.runOnGraph(graph);
-}
-
 C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -362,8 +335,6 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 
     ClipRangesToGatherToOffsets(graph);
   }
-
-  ToLengthsToOffsets(graph);
 #endif
 }
 
@@ -1077,6 +1048,78 @@ void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+namespace {
+
+Node* maybeUserWithKind(Value* value, c10::Symbol kind) {
+  auto& uses = value->uses();
+  if (uses.size() != 1) {
+    return nullptr;
+  }
+  auto* user = uses[0].user;
+  if (user->kind() != kind) {
+    return nullptr;
+  }
+  return user;
+}
+
+} // namespace
+
+void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
+  std::vector<Node*> to_erase;
+  for (auto* node : graph->nodes()) {
+    if (node->kind() != aten::split) {
+      continue;
+    }
+    auto axis_opt = toIValue(node->input(2));
+    if (!axis_opt) {
+      continue;
+    }
+    auto axis = *axis_opt;
+    auto* split_node_output = node->output();
+    auto* list_unpack_node =
+        maybeUserWithKind(split_node_output, prim::ListUnpack);
+    if (list_unpack_node == nullptr) {
+      continue;
+    }
+    std::vector<Node*> squeeze_nodes;
+    squeeze_nodes.reserve(list_unpack_node->outputs().size());
+    for (auto* output : list_unpack_node->outputs()) {
+      auto* squeeze_node = maybeUserWithKind(output, aten::squeeze);
+      if (squeeze_node == nullptr) {
+        break;
+      }
+      auto dim_opt = toIValue(squeeze_node->input(1));
+      if (!dim_opt || *dim_opt != axis) {
+        break;
+      }
+      squeeze_nodes.push_back(squeeze_node);
+    }
+    auto num_outputs = list_unpack_node->outputs().size();
+    if (squeeze_nodes.size() != num_outputs) {
+      continue;
+    }
+    auto* split_and_squeeze_node = graph->create(
+        c10::Symbol::fromQualString("static_runtime::fused_split_and_squeeze"),
+        num_outputs);
+    split_and_squeeze_node->addInput(node->input(0));
+    split_and_squeeze_node->addInput(node->input(1));
+    split_and_squeeze_node->addInput(node->input(2));
+    split_and_squeeze_node->insertBefore(node);
+    for (const auto i : c10::irange(num_outputs)) {
+      auto* squeeze_node = squeeze_nodes[i];
+      split_and_squeeze_node->output(i)->copyMetadata(squeeze_node->output());
+      squeeze_node->output()->replaceAllUsesWith(
+          split_and_squeeze_node->output(i));
+    }
+    to_erase.insert(to_erase.end(), squeeze_nodes.begin(), squeeze_nodes.end());
+    to_erase.push_back(list_unpack_node);
+    to_erase.push_back(node);
+  }
+  for (auto* node : to_erase) {
+    node->destroy();
+  }
 }
 
 } // namespace jit

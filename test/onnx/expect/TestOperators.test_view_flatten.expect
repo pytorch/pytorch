@@ -1,4 +1,4 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -62,21 +62,31 @@ graph {
     }
   }
   node {
-    input: "onnx::Unsqueeze_7"
-    output: "onnx::Concat_9"
-    name: "Unsqueeze_6"
-    op_type: "Unsqueeze"
+    output: "onnx::Unsqueeze_10"
+    name: "Constant_6"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
   node {
-    input: "onnx::Concat_12"
-    input: "onnx::Concat_9"
-    output: "onnx::Reshape_10"
-    name: "Concat_7"
+    input: "onnx::Unsqueeze_7"
+    input: "onnx::Unsqueeze_10"
+    output: "onnx::Concat_11"
+    name: "Unsqueeze_7"
+    op_type: "Unsqueeze"
+  }
+  node {
+    input: "onnx::Concat_14"
+    input: "onnx::Concat_11"
+    output: "onnx::Reshape_12"
+    name: "Concat_8"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -86,16 +96,16 @@ graph {
   }
   node {
     input: "onnx::Shape_0"
-    input: "onnx::Reshape_10"
-    output: "11"
-    name: "Reshape_8"
+    input: "onnx::Reshape_12"
+    output: "13"
+    name: "Reshape_9"
     op_type: "Reshape"
   }
   name: "torch_jit"
   initializer {
     dims: 1
     data_type: 7
-    name: "onnx::Concat_12"
+    name: "onnx::Concat_14"
     raw_data: "\001\000\000\000\000\000\000\000"
   }
   input {
@@ -121,16 +131,16 @@ graph {
     }
   }
   output {
-    name: "11"
+    name: "13"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_param: "Reshape11_dim_0"
+            dim_param: "Reshape13_dim_0"
           }
           dim {
-            dim_param: "Reshape11_dim_1"
+            dim_param: "Reshape13_dim_1"
           }
         }
       }
@@ -138,5 +148,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }
