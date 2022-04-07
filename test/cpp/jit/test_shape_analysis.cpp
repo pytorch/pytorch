@@ -407,5 +407,22 @@ TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   EXPECT_EQ(get_shape_cache_size(), 4);
 }
 
+TEST(ShapeAnalysisTest, ShapeCacheMultipleFn) {
+  clear_shape_cache();
+
+  std::shared_ptr<Operator> op =
+      getOperatorForLiteral("aten::mm(Tensor self, Tensor mat2) -> Tensor");
+  const FunctionSchema* schema = &(op->schema());
+
+  c10::IValue const_size_1 = std::vector<int64_t>{64, 56};
+  c10::IValue const_size_2 = std::vector<int64_t>{64, 56};
+  c10::IValue const_size_3 = std::vector<int64_t>{64, 20};
+
+  c10::optional<int64_t> sym_dim = c10::nullopt;
+  c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
+  c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
+  c10::SymbolicShape ss3 = c10::SymbolicShape({sym_dim, sym_dim});
+}
+
 } // namespace jit
 } // namespace torch

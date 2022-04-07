@@ -1102,15 +1102,16 @@ struct ArgumentsHasher {
     hash_val = at::hash_combine(std::hash<size_t>{}(arg_vec.size()), hash_val);
     for (const CanonicalArg& arg : arg_vec) {
       size_t cur_arg = 0;
-      if (const IValue* iv = c10::get_if<IValue>(&arg)) {
-        // IValue refuses to hash a List
-        if (iv->isList()) {
-          cur_arg = iv->toListRef().size();
-          for (const IValue& iv : iv->toListRef()) {
-            cur_arg = at::hash_combine(cur_arg, IValue::hash(iv));
+      if (const IValue* ival = c10::get_if<IValue>(&arg)) {
+        // IValue doesn't hash List (as Python doesn't), so we will do a custom
+        // list hash
+        if (ival->isList()) {
+          cur_arg = ival->toListRef().size();
+          for (const IValue& elem_ival : ival->toListRef()) {
+            cur_arg = at::hash_combine(cur_arg, IValue::hash(elem_ival));
           }
         } else {
-          cur_arg = IValue::hash(iv);
+          cur_arg = IValue::hash(ival);
         }
       } else {
         cur_arg = c10::get<CanonicalizedSymbolicShape>(arg).hash();
