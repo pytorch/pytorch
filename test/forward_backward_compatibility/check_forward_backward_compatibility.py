@@ -116,6 +116,22 @@ ALLOW_LIST = [
     ("quantized::softmax", datetime.date(2022, 4, 15)),
     ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
+    ("aten::std", datetime.date(2022, 5, 1)),
+    ("aten::std.dim", datetime.date(2022, 5, 1)),
+    ("aten::std.names_dim", datetime.date(2022, 5, 1)),
+    ("aten::std.names_out", datetime.date(2022, 5, 1)),
+    ("aten::std.out", datetime.date(2022, 5, 1)),
+    ("aten::std_mean", datetime.date(2022, 5, 1)),
+    ("aten::std_mean.dim", datetime.date(2022, 5, 1)),
+    ("aten::std_mean.names_dim", datetime.date(2022, 5, 1)),
+    ("aten::var", datetime.date(2022, 5, 1)),
+    ("aten::var.dim", datetime.date(2022, 5, 1)),
+    ("aten::var.names_dim", datetime.date(2022, 5, 1)),
+    ("aten::var.names_out", datetime.date(2022, 5, 1)),
+    ("aten::var.out", datetime.date(2022, 5, 1)),
+    ("aten::var_mean", datetime.date(2022, 5, 1)),
+    ("aten::var_mean.dim", datetime.date(2022, 5, 1)),
+    ("aten::var_mean.names_dim", datetime.date(2022, 5, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
