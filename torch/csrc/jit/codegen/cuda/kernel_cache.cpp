@@ -529,7 +529,13 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
         // This is the check for an empty tensor;
         TORCH_INTERNAL_ASSERT(
             empty_tensor_check && empty_type_check,
-            "Non empty tensor cannot be found at tensor_map in ",
+            "Is empty tensor? ",
+            !empty_tensor_check,
+            " Is empty type check? ",
+            !empty_type_check,
+            " Output empty tensor check failed for tensor: ",
+            out_tv->toString(),
+            " In function: ",
             __FUNCTION__);
 
         // TODO: would need to clean up this part when
