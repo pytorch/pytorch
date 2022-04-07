@@ -20,6 +20,7 @@
 
 #include <fmt/format.h>
 #include <torch/csrc/deploy/interpreter/builtin_registry.h>
+#include <torch/csrc/deploy/interpreter/adapter.h>
 
 namespace py = pybind11;
 using namespace py::literals;
@@ -322,7 +323,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   }
 
   IValue toIValue(Obj obj) const override {
-    return torch::jit::toTypeInferredIValue(unwrap(obj));
+    return torch::deploy::fromPyObj<IValue>(unwrap(obj));
   }
 
   Obj call(Obj obj, at::ArrayRef<Obj> args) override {
