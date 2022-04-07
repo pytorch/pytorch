@@ -3146,7 +3146,7 @@ TEST(StaticRuntime, LifetimeExtendedThroughIf) {
             d = torch.linear(b, b)
         else:
             b = a.view((1, 1))
-            d = b * c
+            d = b * c # extra op to avoid IfThenElse optimization
         return c.clone(), d.clone()
   )JIT";
   testStaticRuntime(src, {at::tensor({5.0, 10.0, 42.0}), true});
@@ -3164,11 +3164,28 @@ TEST(StaticRuntime, LifetimeExtendedThroughIfDeeplyNested) {
                 d = torch.linear(b, b)
             else:
                 d = torch.linear(c, c)
-                d = d * d
+                d = d * d # extra op to avoid IfThenElse optimization
         else:
             b = a.view((1, 1))
             d = b * c
         return c.clone(), d.clone()
   )JIT";
   testStaticRuntime(src, {at::tensor({5.0, 10.0, 42.0}), true, true});
+}
+
+TEST(StaticRuntime, LifetimeExtendedThroughAliasInSubBlock) {
+  // The prim::If node creates an alias of `b`; its lifetime needs to
+  // be extended
+  const auto src = R"JIT(
+    def forward(self, a, cond: bool):
+        b = torch.abs(a)
+        if cond:
+            d = b.view(a.size())
+        else:
+            d = b * b
+            d = d * d # extra op to avoid ifThenElse optimization
+        e = torch.argmin(a) # b is still alive, don't overwrite it!
+        return d.clone(), e.clone()
+  )JIT";
+  testStaticRuntime(src, {at::tensor({5.0, 10.0, 42.0}), true});
 }

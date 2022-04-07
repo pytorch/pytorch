@@ -425,21 +425,34 @@ ManagedTensorRanges::ManagedTensorRanges(
       continue;
     }
 
-    auto inputs = collectValuesWithTrackedLifetimes(node->inputs());
     auto outputs = collectValuesWithTrackedLifetimes(node->outputs());
-    for (auto* input : inputs) {
-      auto* input_lifetime = getLifetime(input);
-      DCHECK(input_lifetime != nullptr);
-      for (auto* output : outputs) {
-        if (mayContainAlias(alias_db, input, output)) {
-          auto* output_lifetime = getLifetime(output);
-          DCHECK(output_lifetime != nullptr);
-          input_lifetime->end =
-              std::max(output_lifetime->end, input_lifetime->end);
-        }
-      }
+    auto checkOutputsForAliases =
+        [this, &outputs, &alias_db](const auto& inputs) {
+          for (auto* input : inputs) {
+            auto* input_lifetime = getLifetime(input);
+            if (!input_lifetime) {
+              continue;
+            }
+            for (auto* output : outputs) {
+              if (mayContainAlias(alias_db, input, output)) {
+                auto* output_lifetime = getLifetime(output);
+                DCHECK(output_lifetime != nullptr);
+                input_lifetime->end =
+                    std::max(output_lifetime->end, input_lifetime->end);
+              }
+            }
+          }
+        };
+
+    auto inputs = collectValuesWithTrackedLifetimes(node->inputs());
+    checkOutputsForAliases(inputs);
+    auto it = values_from_outer_scope.find(node);
+    if (it != values_from_outer_scope.end()) {
+      auto& outer_scope_values = it->second;
+      checkOutputsForAliases(outer_scope_values);
     }
   }
+
   for (auto* managed_tensor : managed_tensor_values) {
     auto* lifetime = getLifetime(managed_tensor);
     DCHECK(lifetime && lifetime->end <= num_nodes);
