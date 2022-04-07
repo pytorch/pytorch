@@ -753,16 +753,18 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
 
     operands = list(args)
     origin_dtype = operands[0].type().scalarType()
-    for operand in operands:
-        # we simply assume all input operands are the same type.
-        assert operand.type().scalarType() == origin_dtype
 
     require_cast = not sym_help._is_fp(operands[0]) and \
         (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
 
     if require_cast:
+        for operand in operands:
+            # we simply assume all input operands are the same type.
+            if operand.isCompleteTensor():
+                assert operand.type().scalarType() == origin_dtype, \
+                    f"We assume input operands of {op_name} are of the same data type."
         for i, operand in enumerate(operands):
-            if not sym_help._is_fp(operand):
+            if operand.isCompleteTensor() and not sym_help._is_fp(operand):
                 operands[i] = g.op("Cast", operand, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
 
     self = g.op(op_name, *operands, **kwargs)
