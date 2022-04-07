@@ -1157,7 +1157,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
 
         self.assertEqual(obs.quant_min, 0)
-        self.assertEqual(obs.quant_max, 127)
+        self.assertEqual(obs.quant_max, 255)
 
     def test_embedding_bag_qat_config(self):
         class Model(nn.Module):
