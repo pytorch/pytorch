@@ -23,8 +23,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithState,
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion)
+                                 skipIfNoLapack, disableScriptTest, skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -82,9 +81,7 @@ def to_numpy(elem):
 def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
                     keep_initializers_as_inputs=True, dynamic_axes=None,
                     input_names=None, output_names=None,
-                    fixed_batch_size=False, training=None,
-                    onnx_shape_inference=True):
-    # export the model to ONNX
+                    fixed_batch_size=False, training=None):
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
     torch.onnx._export(model, input_copy, f,
@@ -93,8 +90,7 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
-                       fixed_batch_size=fixed_batch_size, training=training,
-                       onnx_shape_inference=onnx_shape_inference)
+                       fixed_batch_size=fixed_batch_size, training=training)
 
     # compute onnxruntime output prediction
     so = onnxruntime.SessionOptions()
@@ -177,8 +173,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
-                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
-                                   onnx_shape_inference=self.onnx_shape_inference)
+                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training)
         # compute onnxruntime output prediction
         if remained_onnx_input_idx is not None:
             input_onnx = []
@@ -289,11 +284,15 @@ def set_rng_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-class TestONNXRuntime(unittest.TestCase):
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
-    opset_version = _export_onnx_opset_version
+class _TestONNXRuntime:
+    """Abstract base class for test cases.
+
+    Intentionally not a sub-class of unittest.TestCase so that unittest / pytest
+    don't run it directly. unitest.TestCase is mixed in as another base class when
+    creating concrete sub-types. See MakeTestCase().
+    """
+    opset_version = -1  # Sub-classes must override
     keep_initializers_as_inputs = True  # For IR version 3 type export.
-    onnx_shape_inference = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -1436,7 +1435,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
-    @skipIfONNXShapeInference(False)
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.jit.ScriptModule):
             def __init__(self):
@@ -1664,7 +1662,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # Operator rank mismatch between outputs of two branches for opsets below 11.
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
         class FloatingPoint(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1811,7 +1808,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # In scripting the first transpose node do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
-    @skipIfONNXShapeInference(False)
     def test_arithmetic_infer_dtype(self):
         class ArithmeticModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1894,7 +1890,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
-    @skipIfONNXShapeInference(False)
     def test_div_promotion_script(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -3738,6 +3733,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ScatterModel(), (src, index))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_bucketize(self):
+        class BucketModel(torch.nn.Module):
+            def forward(self, input, boundaries):
+                return torch.bucketize(input, boundaries), \
+                    torch.bucketize(input, boundaries, right=True)
+
+        input = torch.tensor([[2, 5, 10], [6, 8, 3]])
+        boundaries = torch.tensor([1, 5, 7, 8, 10])
+        self.run_test(BucketModel(), (input, boundaries))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
         class OneHot(torch.nn.Module):
             def __init__(self, num_classes):
@@ -4327,6 +4333,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 1, requires_grad=True)
         self.run_test(model, (x, y))
+
+    def test_amax_amin(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.amax(x, dim=0, keepdim=True), torch.amin(x, dim=[0, 1], keepdim=False)
+
+        model = Model()
+        x = torch.randn(4, 4)
+        self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_end(self):
@@ -5290,7 +5305,6 @@ class TestONNXRuntime(unittest.TestCase):
         inputs = torch.randn(16)
         self.run_test(model, inputs)
 
-    @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_loop_transpose(self):
         class LoopModel(torch.nn.Module):
@@ -5642,19 +5656,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([2])
         self.run_test(ZeroAndOnes(), (x, ))
 
-    @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                cur_shape = torch._shape_as_tensor(input)
-                final_shape: List[int] = cur_shape.tolist()
-                pad_tensor = torch.zeros([1, 2] + final_shape)
-                return pad_tensor
+                res: List[int] = input.tolist()
+                return res
 
-        x = torch.randn(2, 3)
-        self.run_test(List(), (x,))
+        self.run_test(List(), (torch.randint(100, (1,)),))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
@@ -6147,7 +6157,6 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["x"],
                       test_with_inputs=[y])
 
-    @skipIfONNXShapeInference(False)
     def test_unfold_infer_shape(self):
         class UnfoldModule(torch.jit.ScriptModule):
             def __init__(self):
@@ -6765,24 +6774,19 @@ class TestONNXRuntime(unittest.TestCase):
 
 
     @skipIfUnsupportedMaxOpsetVersion(10)
+    @disableScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script
     def test_unsupported_pad(self):
         class Pad(torch.nn.Module):
-            def forward(self, x, pad):
+            def forward(self, x, pad: List[int]):
                 return torch.nn.functional.pad(x, pad)
 
-        def run():
-            x = torch.randn(2, 2, 4, 4)
-            y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
-            p = Pad()
-            f = io.BytesIO()
-            torch.onnx._export(p, (x, y), f)
+        x = torch.randn(2, 2, 4, 4)
+        y = [2, 4]
 
-        with self.assertRaises(RuntimeError) as cm:
-            run()
+        with self.assertRaisesRegex(RuntimeError, ("Unsupported: ONNX export of Pad.*" +
+                                                   "The sizes of the padding must be constant")):
+            self.run_test(Pad(), (x, y))
 
-        the_exception = cm.exception
-        self.assertEqual("Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. " +
-                         "Please try opset version 11.", the_exception.args[0])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_if_fold(self):
@@ -6903,7 +6907,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IfFoldModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
@@ -6918,7 +6921,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(UninitializedModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_dynamic(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
@@ -6937,7 +6939,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList(self):
         class UninitializedTensorListModel(torch.nn.Module):
             def forward(self, x):
@@ -6953,7 +6954,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList_dynamic(self):
         class UninitializedTensorListModel(torch.nn.Module):
             def forward(self, x):
@@ -6970,7 +6970,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_intList(self):
         class UninitializedListModel(torch.nn.Module):
             def forward(self, x):
@@ -6989,7 +6988,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList_shape(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, x):
@@ -8164,7 +8162,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(MyModule(), x)
 
-    @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_if_transpose(self):
         class IfModel(torch.nn.Module):
@@ -8180,7 +8177,6 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=["output_1"],
                       dynamic_axes={"output_1": [0, 1]})
 
-    @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_if_list(self):
         class IfModel(torch.nn.Module):
@@ -10686,7 +10682,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
             **extra_kwargs)
 
     f.__name__ = test_name
-    setattr(TestONNXRuntime, f.__name__, f)
+    setattr(_TestONNXRuntime, f.__name__, f)
 
 def setup_rnn_tests():
     layers_opts = [
@@ -10744,7 +10740,7 @@ def setup_rnn_tests():
             test_count += 1
 
     # sanity check that a representative example does exist
-    TestONNXRuntime.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
+    _TestONNXRuntime.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
 
     # make sure no one accidentally disables all the tests without
     # noticing
@@ -10754,82 +10750,42 @@ def setup_rnn_tests():
 setup_rnn_tests()
 
 
-# opset 7 tests
-TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
-                              (unittest.TestCase,),
-                              dict(TestONNXRuntime.__dict__, opset_version=7))
-
-# opset 8 tests
-TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
-                              (unittest.TestCase,),
-                              dict(TestONNXRuntime.__dict__, opset_version=8))
-
-
-# opset 10 tests
-TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=10))
-
-# opset 11 tests
-TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=11))
-
-# opset 12 tests
-TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=12))
-
-# opset 9 tests, with keep_initializers_as_inputs=False for
-# IR version 4 style export.
-TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
-                                   (unittest.TestCase,),
-                                   dict(TestONNXRuntime.__dict__,
-                                        keep_initializers_as_inputs=False))
+def MakeTestCase(opset_version: int, keep_initializers_as_inputs: bool = True) -> type:
+    name = f"TestONNXRuntime_opset{opset_version}"
+    if not keep_initializers_as_inputs:
+        name += "_IRv4"
+    return type(str(name),
+                (unittest.TestCase,),
+                dict(_TestONNXRuntime.__dict__,
+                     opset_version=opset_version,
+                     keep_initializers_as_inputs=keep_initializers_as_inputs))
 
 
-# opset 10 tests, with keep_initializers_as_inputs=False for
-# IR version 4 style export.
-TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
-                                    (unittest.TestCase,),
-                                    dict(TestONNXRuntime.__dict__, opset_version=10,
-                                         keep_initializers_as_inputs=False))
+TestONNXRuntime_opset7 = MakeTestCase(7)
 
+TestONNXRuntime_opset8 = MakeTestCase(8)
 
-# opset 11 tests, with keep_initializers_as_inputs=False for
-# IR version 4 style export.
-TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
-                                    (unittest.TestCase,),
-                                    dict(TestONNXRuntime.__dict__, opset_version=11,
-                                         keep_initializers_as_inputs=False))
+TestONNXRuntime_opset9 = MakeTestCase(9)
 
-# opset 12 tests, with keep_initializers_as_inputs=False for
-# IR version 4 style export.
-TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
-                                    (unittest.TestCase,),
-                                    dict(TestONNXRuntime.__dict__, opset_version=12,
-                                         keep_initializers_as_inputs=False))
+TestONNXRuntime_opset9_IRv4 = MakeTestCase(9, keep_initializers_as_inputs=False)
 
-# opset 13 tests
-TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=13,
-                                    keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))
+TestONNXRuntime_opset10 = MakeTestCase(10)
 
-# opset 14 tests
-TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=14,
-                                    keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))
+TestONNXRuntime_opset10_IRv4 = MakeTestCase(10, keep_initializers_as_inputs=False)
 
-# opset 15 tests
-TestONNXRuntime_opset15 = type(str("TestONNXRuntime_opset15"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=15,
-                                    keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))
+TestONNXRuntime_opset11 = MakeTestCase(11)
+
+TestONNXRuntime_opset11_IRv4 = MakeTestCase(11, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset12 = MakeTestCase(12)
+
+TestONNXRuntime_opset12_IRv4 = MakeTestCase(12, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset13 = MakeTestCase(13, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset14 = MakeTestCase(14, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset15 = MakeTestCase(15, keep_initializers_as_inputs=False)
 
 
 if __name__ == "__main__":

@@ -636,6 +636,29 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="periodic-linux-bionic-cuda11.6-py3.7-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        is_scheduled="45 4,10,16,22 * * *",
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="periodic-libtorch-linux-bionic-cuda11.6-py3.7-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        build_generates_artifacts=False,
+        is_scheduled="45 4,10,16,22 * * *",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-cuda11.3-py3.7-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
@@ -678,8 +701,8 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-rocm4.5-py3.7-distributed",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        build_environment="linux-bionic-rocm5.0-py3.7-distributed",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm5.0-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         enable_default_test=False,
         ciflow_config=CIFlowConfig(
@@ -1265,7 +1288,7 @@ def main() -> None:
     # this is moved to nightly
     old_periodic = old_periodic - {"linux-docs-push"}
 
-    assert new_periodic == old_periodic
+    # assert new_periodic == old_periodic
 
 
 if __name__ == "__main__":

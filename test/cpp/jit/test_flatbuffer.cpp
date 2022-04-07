@@ -1177,6 +1177,7 @@ Module jitModuleFromBuffer(void* data) {
       mobilem._ivalue(), files, constants, 8);
 }
 
+#if defined(ENABLE_FLATBUFFER)
 TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -1189,20 +1190,21 @@ TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   inputs.emplace_back(at::Scalar(2.0));
   auto ref = m.forward(inputs);
 
-  auto data = save_jit_module_to_bytes(m);
-  Module m2 = jitModuleFromBuffer(data.data());
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, /*use_fatbuffer=*/true);
+  auto mm = _load_for_mobile(ss);
+  auto m2 = load(ss);
+
   auto res = m2.forward(inputs);
+  auto resm = mm.forward(inputs);
 
   auto resd = res.toTensor();
   auto refd = ref.toTensor();
+  auto resmd = resm.toTensor();
   ASSERT_TRUE(resd.equal(refd));
-
-  mobile::Module m3 = parse_mobile_module(data.data(), data.size());
-  res = m3.forward(inputs);
-  resd = res.toTensor();
-  refd = ref.toTensor();
-  ASSERT_TRUE(resd.equal(refd));
+  ASSERT_TRUE(resmd.equal(refd));
 }
+#endif
 
 TEST(TestSourceFlatbuffer, CheckAttrAccess) {
   Module m("m");
