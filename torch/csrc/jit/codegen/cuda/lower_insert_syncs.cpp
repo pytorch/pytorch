@@ -145,7 +145,21 @@ class WarSyncInserter : private kir::ExprMutator {
     kir::ExprMutator::handle(ite);
   }
 
-  void handle(kir::Sync* sync) final {
+  void handle(kir::BlockSync* sync) final {
+    // Register the sync for the active for loop
+    sync_hit_.back() = true;
+    // Run through the active allocations, if a read was hit, register there was
+    // a sync after the read. If there's subsequent reads on this buffer the
+    // sync_after_read will be cleared.
+    for (auto& entry : smem_allocations_) {
+      auto& alloc_stack = entry.second;
+      if (alloc_stack.back().read_hit) {
+        alloc_stack.back().sync_after_read = true;
+      }
+    }
+  }
+
+  void handle(kir::GridSync* sync) final {
     // Register the sync for the active for loop
     sync_hit_.back() = true;
     // Run through the active allocations, if a read was hit, register there was
@@ -191,9 +205,11 @@ class WarSyncInserter : private kir::ExprMutator {
     // Mark write has been hit for all output tvs
     auto out_tvs = ir_utils::filterByType<TensorView>(expr->outputs());
     for (auto out_tv : out_tvs) {
-      if (out_tv->getMemoryType() != MemoryType::Shared) {
+      if (out_tv->getMemoryType() != MemoryType::Shared ||
+          GpuLower::current()->syncMap().needsRawSync(out_tv).none()) {
         continue;
       }
+
       auto& entry = getMemInfo(out_tv);
 
       // If this is the first write and there's a sync in one of the loops after
@@ -207,9 +223,11 @@ class WarSyncInserter : private kir::ExprMutator {
     // Mark read was hit, if sync_after_read was set, clear it.
     auto inp_tvs = ir_utils::filterByType<TensorView>(expr->inputs());
     for (auto inp_tv : inp_tvs) {
-      if (inp_tv->getMemoryType() != MemoryType::Shared) {
+      if (inp_tv->getMemoryType() != MemoryType::Shared ||
+          GpuLower::current()->syncMap().needsRawSync(inp_tv).none()) {
         continue;
       }
+
       auto& entry = getMemInfo(inp_tv);
       entry.read_hit = true;
       // Clear the sync_after_read if it was set because there was another write
@@ -223,10 +241,7 @@ class WarSyncInserter : private kir::ExprMutator {
     sync_hit_.push_back(false);
 
     // If there is no real iterating loop WAR syncs aren't necessary
-    within_iter_loop_ = within_iter_loop_ ||
-        !(for_loop->iter_domain()->isThread() ||
-          for_loop->iter_domain()->isBroadcast() ||
-          for_loop->iter_domain()->extent()->isOneInt());
+    within_iter_loop_ = within_iter_loop_ || !for_loop->isTrivial();
 
     // Process the expressions in the for loop
     kir::ExprMutator::handle(for_loop);
@@ -260,7 +275,7 @@ class WarSyncInserter : private kir::ExprMutator {
 
     // WAR Sync is necessary in this loop, register its insertion.
     if (insert_sync) {
-      auto sync_expr = IrBuilder::create<kir::Sync>(true);
+      auto sync_expr = IrBuilder::create<kir::BlockSync>(true);
       kir::ExprMutator::registerInsertAfter(
           for_loop->body().exprs().back(), sync_expr, &for_loop->body());
       handle(sync_expr);
@@ -376,15 +391,56 @@ class ValidatePlacementAfterWrites : private kir::IrVisitor {
   const std::unordered_set<Expr*>& writes_;
 };
 
+namespace {
+
+Val* getGridSyncBufferSize(const ParallelTypeBitmap& ptb) {
+  // See the comment above for getGridCommWorkBufferSize.
+  TORCH_INTERNAL_ASSERT(
+      ptb.hasBID(),
+      "Detected  needing a grid sync but no grid bits set in bitmap.");
+  Val* buffer_size = GpuLower::current()->kernel()->oneVal();
+  for (auto pt : kParallelTypeBIDs) {
+    if (!ptb.get(pt)) {
+      continue;
+    }
+    auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
+    if (pt_dim == nullptr || pt_dim->isOneInt()) {
+      continue;
+    }
+    buffer_size = IrBuilder::mulExpr(buffer_size, pt_dim);
+  }
+  return buffer_size;
+}
+
+// Copied from lower_index.cpp, may be worth either removing this function and
+// doing it inline or reusing the function from lower_index.cpp
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init) {
+  const std::vector<IterDomain*> new_buffer_ids = {
+      IrBuilder::create<IterDomain>(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size)};
+  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
+  const auto buffer_tv =
+      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
+  return IrBuilder::create<kir::Allocate>(
+      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
+}
+
+} // namespace
+
 class ReadAfterWriteSyncs : public kir::ExprMutator {
  private:
   using kir::ExprMutator::handle;
 
   //! Traverse up the loop stack from loops_it and if a halo loop is
   //! found, place a given sync expr before the outer-most halo loop.
+  // TODO: What needs to be done here for gmem comm?
   bool insertBeforeHaloLoop(
       std::vector<kir::ForLoop*>::iterator loops_it,
-      kir::Sync* sync_expr,
+      Expr* sync_expr,
+      Expr* maybe_alloc,
       const std::unordered_set<Expr*>& writes) {
     std::vector<kir::ForLoop*>::iterator halo_loop_it;
     bool halo_loop_found = false;
@@ -424,6 +480,10 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       auto place_in = *(halo_loop_it - 1);
       kir::ExprMutator::registerInsertBefore(
           halo_loop, sync_expr, &place_in->body());
+      if (maybe_alloc != nullptr) {
+        kir::ExprMutator::registerInsertBefore(
+            halo_loop, maybe_alloc, &place_in->body());
+      }
     }
 
     return true;
@@ -435,7 +495,8 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       return;
     }
 
-    if (sync_after_.size() > 0 && sync_after_.front() == expr) {
+    if (sync_after_.size() > 0 && sync_after_.front().first == expr) {
+      auto sync_bitmap = sync_after_.front().second;
       sync_after_.pop_front();
       auto last_writes = last_writes_.front();
       last_writes_.pop_front();
@@ -450,8 +511,16 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       // TODO: This may be a common operation, could be worth making a utility
       // out of or saving state for tensor view ID -> for loop
       // TODO: Explicitly test the 3 cases below
-
-      auto sync_expr = IrBuilder::create<kir::Sync>();
+      Expr* sync_expr = nullptr;
+      kir::Allocate* maybe_alloc = nullptr;
+      if (sync_bitmap.hasBID()) {
+        maybe_alloc = allocGlobalBufferForGridComm(
+            getGridSyncBufferSize(sync_bitmap), DataType::Int, true);
+        sync_expr = IrBuilder::create<kir::GridSync>(
+            sync_bitmap, maybe_alloc->buffer());
+      } else {
+        sync_expr = IrBuilder::create<kir::BlockSync>();
+      }
       if (out_tv->getComputeAtPosition() == 0) {
         // Sync should be placed at global scope, after its outer most loop if
         // it has one.
@@ -465,8 +534,10 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
             "Tried to place after, ",
             place_after->toString(),
             ", but could not find this expression at the global scope.");
-
-        registerInsertAfter(*(place_after_it + 1), sync_expr, nullptr);
+        registerInsertAfter(*(place_after_it), sync_expr, nullptr);
+        if (maybe_alloc != nullptr) {
+          registerInsertAfter(place_after, maybe_alloc, nullptr);
+        }
       } else {
         // Find the last loop in computeAt of out_tv, this is the loop where we
         // would place an allocation for out_tv
@@ -485,7 +556,8 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         TORCH_INTERNAL_ASSERT(loops_it != for_loops_.end());
 
         // block sync must be placed before halo-extended loops
-        if (insertBeforeHaloLoop(loops_it, sync_expr, last_writes)) {
+        if (insertBeforeHaloLoop(
+                loops_it, sync_expr, maybe_alloc, last_writes)) {
           return;
         }
 
@@ -503,6 +575,9 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         }
 
         registerInsertAfter(place_after, sync_expr, &place_in->body());
+        if (maybe_alloc != nullptr) {
+          registerInsertAfter(place_after, maybe_alloc, &place_in->body());
+        }
       }
     }
   }
@@ -514,11 +589,6 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         "this pass should be run before any conditionals are placed in code.");
   }
 
-  // Clear the modify status for all shared memory buffers
-  static void cleanSharedMemory(std::unordered_map<Val*, Expr*>& smem) {
-    smem.clear();
-  }
-
   // Return a set of expressions that modify shared-memory
   // tensors. Expressions are excluded when syncthreads are already
   // placed.
@@ -526,9 +596,31 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       const std::unordered_map<Val*, Expr*>& smem,
       const std::vector<Val*>& tvs) const {
     std::unordered_set<Expr*> last_writes;
-    for (auto tv : tvs) {
+    for (auto tv : ir_utils::filterByType<TensorView>(tvs)) {
+      if (GpuLower::current()->syncMap().needsRawSync(tv).none()) {
+        continue;
+      }
+      if (tv->getMemoryType() != MemoryType::Shared) {
+        continue;
+      }
       auto it = smem.find(tv);
       if (it != smem.end()) {
+        last_writes.insert(it->second);
+      }
+    }
+    return last_writes;
+  }
+
+  std::unordered_set<Expr*> isModifiedGlobalMemory(
+      const std::unordered_map<Val*, Expr*>& gmem,
+      const std::vector<Val*>& tvs) const {
+    std::unordered_set<Expr*> last_writes;
+    for (auto tv : ir_utils::filterByType<TensorView>(tvs)) {
+      if (GpuLower::current()->syncMap().needsRawSync(tv).none()) {
+        continue;
+      }
+      auto it = gmem.find(tv);
+      if (it != gmem.end()) {
         last_writes.insert(it->second);
       }
     }
@@ -539,6 +631,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
     // Fusion shared_memory values
     // Tracks if shared memory is modified
     std::unordered_map<Val*, Expr*> smem;
+    std::unordered_map<Val*, Expr*> gmem;
 
     // Flatten all the expressions
     auto flattened_exprs = ExprFlattener::flatten(_exprs);
@@ -549,14 +642,36 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         continue;
       }
 
-      auto last_writes = isModifiedSharedMemory(smem, expr->inputs());
-      if (!last_writes.empty()) {
+      auto last_gmem_writes = isModifiedGlobalMemory(gmem, expr->inputs());
+      if (!last_gmem_writes.empty()) {
         TORCH_INTERNAL_ASSERT(
             prev_tv_expr != nullptr,
             "Can't require sync on inputs, however, detected it's needed.");
-        sync_after_.push_back(prev_tv_expr);
-        last_writes_.push_back(last_writes);
-        cleanSharedMemory(smem);
+        ParallelTypeBitmap bitmap;
+        for (auto entry : gmem) {
+          TORCH_INTERNAL_ASSERT(entry.first->isA<TensorView>());
+          auto sync_bits = GpuLower::current()->syncMap().needsRawSync(
+              entry.first->as<TensorView>());
+          bitmap |= sync_bits;
+        }
+        // Temporarily do full grid sync.
+        sync_after_.emplace_back(std::make_pair(prev_tv_expr, bitmap));
+        last_writes_.push_back(last_gmem_writes);
+        gmem.clear();
+      }
+
+      auto last_smem_writes = isModifiedSharedMemory(smem, expr->inputs());
+      if (!last_smem_writes.empty()) {
+        TORCH_INTERNAL_ASSERT(
+            prev_tv_expr != nullptr,
+            "Can't require sync on inputs, however, detected it's needed.");
+        ParallelTypeBitmap bitmap;
+        bitmap.set(ParallelType::TIDx);
+        bitmap.set(ParallelType::TIDy);
+        bitmap.set(ParallelType::TIDz);
+        sync_after_.emplace_back(std::make_pair(prev_tv_expr, bitmap));
+        last_writes_.push_back(last_smem_writes);
+        smem.clear();
       }
 
       for (auto tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
@@ -566,6 +681,9 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         if (tv->getMemoryType() == MemoryType::Shared &&
             !tv->isDoubleBuffered()) {
           smem[tv] = expr;
+        }
+        if (tv->getMemoryType() == MemoryType::Global) {
+          gmem[tv] = expr;
         }
       }
 
@@ -580,7 +698,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
 
  private:
   //! Keep track of expressions that must be followed by syncthreads
-  std::deque<Expr*> sync_after_;
+  std::deque<std::pair<Expr*, ParallelTypeBitmap>> sync_after_;
 
   //! Keep track of write expressions that must be placed before
   //! syncthreads.
