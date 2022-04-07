@@ -110,17 +110,17 @@ TEST(IrTest, DimensionNodeTest) {
       /*num_outputs*/ 1,
       /*hash_seed*/ kHashSeed);
 
-  auto size0 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(node1, 0));
-  auto size1 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(node1, 1));
+  auto size0 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
+  auto size1 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
 
   ASSERT_EQ(DIM0, size0->getStaticValue());
-  ASSERT_EQ(DIM1, size0->getStaticValue());
+  ASSERT_EQ(DIM1, size1->getStaticValue());
 
-  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(MakeNode<SizeAdd>(size0, size1));
-  ASSERT_EQ(DIM0 + DIM1, add_dim);
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(MakeNode<SizeAdd>(Value{size0}, Value{size1}));
+  ASSERT_EQ(DIM0 + DIM1, add_dim->getStaticValue());
 
-  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(MakeNode<SizeMul>(size0, size1));
-  ASSERT_EQ(DIM0 * DIM1, mul_dim);
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(MakeNode<SizeMul>(Value{size0}, Value{size1}));
+  ASSERT_EQ(DIM0 * DIM1, mul_dim->getStaticValue());
 }
 
 } // namespace lazy
