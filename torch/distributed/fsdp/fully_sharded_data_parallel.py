@@ -1352,8 +1352,6 @@ class FullyShardedDataParallel(nn.Module):
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, *args)
-        elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
