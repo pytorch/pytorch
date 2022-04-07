@@ -1,6 +1,7 @@
 import torch
 import copy
 from torch.testing._internal.common_methods_invocations import op_db
+from functorch_additional_op_db import additional_op_db
 from enum import Enum
 import functorch._src.top_operators_github_usage as top_ops
 import pprint
@@ -546,7 +547,7 @@ def print_coverage_info(th=100, nn=25):
 
 def get_name_to_opinfo_map():
     dct = {}
-    for op in op_db:
+    for op in (op_db + additional_op_db):
         def add(name, op):
             if name not in dct:
                 dct[name] = []
@@ -571,6 +572,12 @@ FACTORY_FNS = {
     'full', 'randperm', 'eye', 'randint', 'linspace', 'logspace',
 }
 
+VJP_EXEMPTIONS = {
+    'nn.functional.dropout',  # not actually problem, randomness testing artifact
+    'nn.functional.dropout2d',  # not actually problem, randomness testing artifact
+    'nn.functional.rrelu',  # not actually problem, randomness testing artifact
+}
+
 VMAP_EXEMPTIONS = {
     'randn_like',  # randomness
     'rand_like',  # randomness
@@ -583,10 +590,14 @@ VMAP_EXEMPTIONS = {
     'svd',  # There isn't a bug, it is just nondeterministic so we can't test it.
     'nn.functional.embedding',  # We support everything except the sparse option.
     'nn.functional.dropout',  # randomness
+    'nn.functional.dropout2d',  # randomness
+    'bernoulli',  # randomness
+    'multinomial',  # randomness
+    'normal',  # randomness
 }
 
 JVP_EXEMPTIONS = {
-    'nn.functional.dropout',  # not actually problem, randomness testing artifact
+    'nn.functional.dropout2d',  # not actually problem, randomness testing artifact
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
     # 'normal',
     # 'bernoulli',
@@ -613,8 +624,9 @@ class Operator:
         """Returns NO if any opinfos have a skip or xfail for the test"""
         if not self.has_opinfo():
             return Support.UNKNOWN
-        if not any([in_functorch_lagging_op_db(o) for o in self.opinfos]):
-            return Support.UNKNOWN
+        if not any([o in additional_op_db for o in self.opinfos]):
+            if not any([in_functorch_lagging_op_db(o) for o in self.opinfos]):
+                return Support.UNKNOWN
         for opinfo in self.opinfos:
             for decorator in opinfo.decorators:
                 if not hasattr(decorator, 'test_name'):
@@ -637,6 +649,8 @@ class Operator:
 
     def supports_vjp(self):
         if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in VJP_EXEMPTIONS:
             return Support.YES
         return self.no_opinfos_skip_test('test_vjp')
 
@@ -695,8 +709,6 @@ class Operator:
 
     def _supports_vmapjvp_base(self, test):
         if self.name in FACTORY_FNS:
-            return Support.YES
-        if self.name in VMAP_EXEMPTIONS:
             return Support.YES
         if self.name in JVP_EXEMPTIONS:
             return Support.YES
@@ -794,12 +806,27 @@ print(opset.summary())
 result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
 
+print("=" * 30 + " Top 60 Summary " + "=" * 30)
+opset = OperatorSet.from_top_ops_threshold(35, 25)
+result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
+result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
+#kresult = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+#kpprint.pprint(result)
+# result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+# result = opset.query(Operator.supports_fast_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+# pprint.pprint(result)
+print(opset.summary())
+
 print("=" * 30 + " Top 125 Summary " + "=" * 30)
 opset = OperatorSet.from_top125()
-# result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
-# pprint.pprint(result)
-result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+result = opset.query(Operator.supports_vmap, (Support.NO, Support.UNKNOWN))
 pprint.pprint(result)
+#kresult = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+#kpprint.pprint(result)
 # result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
 # result = opset.query(Operator.supports_fast_vmapjvp, (Support.NO, Support.UNKNOWN))
