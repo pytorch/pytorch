@@ -2468,6 +2468,9 @@ def _get_param_to_unflat_param_names(
     parameters, these mapped-to lists always contain a single element. The
     unflattened parameter names should match the keys of the model state dict.
 
+    For shared parameters, only the first parameter name is included (following
+    the ``torch.nn.Module.parameters()`` order).
+
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
@@ -2489,15 +2492,15 @@ def _get_param_to_unflat_param_names(
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
-                assert param not in param_to_unflat_param_names, \
-                    f"Incorrect recursion; already visited {param_name}"
-                if isinstance(param, FlatParameter):
-                    param_to_unflat_param_names[param] = [
-                        clean_param_name(prefix, param_info)
-                        for param_info in param._param_infos
-                    ]
-                else:
-                    param_to_unflat_param_names[param] = [prefix + param_name]
+                prefixed_param_names = [
+                    clean_param_name(prefix, param_info)
+                    for param_info in param._param_infos
+                ] if isinstance(param, FlatParameter) else [prefix + param_name]
+                # If this parameter has already been visited, then it is a
+                # shared parameter; then, only take the first parameter name
+                is_shared_param = param in param_to_unflat_param_names
+                if not is_shared_param:
+                    param_to_unflat_param_names[param] = prefixed_param_names
 
         for submodule_name, submodule in module.named_children():
             if submodule is not None:
