@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from ..package_exporter import PackagingError
+from ..package_exporter_no_torch import PackagingError
 
 
 def find_first_use_of_broken_modules(exc: PackagingError) -> Dict[str, List[str]]:
