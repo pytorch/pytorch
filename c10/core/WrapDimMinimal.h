@@ -18,7 +18,7 @@ static inline int64_t maybe_wrap_dim(
     // Branch-less version of dim + (dim < 0 ? dim_post_expr : 0)
     return dim + dim_post_expr * (dim < 0);
   }
-  // Check for edge-cases out-of-line
+  // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
   return c10::detail::maybe_wrap_dim_slow(dim, dim_post_expr, wrap_scalar);
 }
 

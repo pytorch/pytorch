@@ -27,9 +27,9 @@ int64_t maybe_wrap_dim_slow(
       "], but got ",
       dim,
       ")");
-  if (dim < 0)
-    dim += dim_post_expr;
-  return dim;
+
+  TORCH_INTERNAL_ASSERT(
+      false, "should never reach here as dim should be out-of-bounds");
 }
 
 } // namespace detail
