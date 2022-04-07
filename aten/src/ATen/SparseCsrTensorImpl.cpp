@@ -57,6 +57,12 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       col_indices_(std::move(col_indices)),
       values_(std::move(values)) {
   set_storage_access_should_throw();
+  is_non_overlapping_and_dense_ = false;
+  set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
+}
+
+const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
+  return "SparseCsrTensorImpl";
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
