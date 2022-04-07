@@ -18,10 +18,11 @@ namespace lazy {
 namespace {
 LazyTensorPtr GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const BackendDevice& device) {
+  static auto backend = getBackend();
   if (!tensor.defined()) {
     return torch::lazy::LazyTensorPtr();
   }
-  auto lazy_tensor = TryGetLtcTensor(tensor);
+  auto lazy_tensor = backend->UnwrapLazyTensor(tensor);
   return lazy_tensor ? lazy_tensor : LazyTensor::Create(tensor, device);
 }
 }  // namespace
@@ -473,25 +474,23 @@ torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
-  auto* impl = dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
-  if (impl == nullptr) {
-    // return c10::make_intrusive<LazyTensor>();
-    return LazyTensorPtr();
-  }
-  return impl->tensor();
+  static auto backend = getBackend();
+  return backend->UnwrapLazyTensor(tensor);
 }
 
 LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
-  auto lazy_tensor = TryGetLtcTensor(tensor);
+  static auto backend = getBackend();
+  auto lazy_tensor = backend->UnwrapLazyTensor(tensor);
   CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
   return lazy_tensor;
 }
 
 std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
+  static auto backend = getBackend();
   std::vector<LazyTensorPtr> ltc_tensors;
   ltc_tensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
-    ltc_tensors.push_back(TryGetLtcTensor(tensor));
+    ltc_tensors.push_back(backend->UnwrapLazyTensor(tensor));
   }
   return ltc_tensors;
 }

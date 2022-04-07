@@ -179,7 +179,15 @@ class GenTSLazyIR(GenLazyIR):
 
 
 @dataclass(frozen=True)
-class GenLazyNativeFuncDefinition(ABC):
+class GenLazyNativeFunc(ABC):
+    """
+    A note on subclassing:
+    It is possible for a backend to override codegen functionality by subclassing, but this is not a maintainable
+    approach since there is no clear API surface.  Consider this a last resort escape hatch, and try to design
+    for the right backend interface APIs to allow the same generated code to work on multiple backends.
+
+    We can't gaurantee we don't break your backend if you subclass here.
+    """
     class_method_name: str
     backend_index: BackendIndex
     tensor_class: str
