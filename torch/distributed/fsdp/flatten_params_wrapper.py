@@ -305,12 +305,14 @@ class FlatParameter(nn.Parameter):
     def _num_unflattened_params(self) -> int:
         """Returns the number of unflattened parameters that comprise this
         flattened parameter."""
-        assert hasattr(self, "_param_infos"), \
-            "`_param_infos` has not been set, meaning this `FlatParameter` " \
+        assert hasattr(self, "_param_infos"), (
+            "`_param_infos` has not been set, meaning this `FlatParameter` "
             "has not been initialized yet"
+        )
         num_unflat_params = len(self._param_infos)
-        assert num_unflat_params > 0, "`FlatParameter` corresponding to 0 " \
-            "unflattened parameters"
+        assert num_unflat_params > 0, (
+            "`FlatParameter` corresponding to 0 " "unflattened parameters"
+        )
         return num_unflat_params
 
     @property
@@ -319,9 +321,7 @@ class FlatParameter(nn.Parameter):
 
     def metadata(self) -> Tuple[List[str], List[torch.Size], List[int]]:
         """Return tuple of (names, shapes, numels) metadata for this flat parameter."""
-        return ParamMetadata(
-            self._param_names, self._param_shapes, self._param_numels
-        )
+        return ParamMetadata(self._param_names, self._param_shapes, self._param_numels)
 
     def shard_metadata(
         self,

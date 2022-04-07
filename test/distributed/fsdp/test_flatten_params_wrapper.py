@@ -339,7 +339,6 @@ class TestFlattenParams(TestCase):
         self.assertEqual((begin, end), (150, 299))
 
 
-
 @unittest.skipIf(not torch.cuda.is_available(), "test requires a GPU")
 class TestFlattenParamsCUDA(TestFlattenParams):
     def _get_transformer(self, seed=0):
