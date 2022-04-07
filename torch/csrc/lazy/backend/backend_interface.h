@@ -6,14 +6,9 @@
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/shape.h>
-#include <torch/csrc/lazy/core/tensor.h>
 
 namespace torch {
 namespace lazy {
-
-struct TORCH_API TensorBuilder {
-    virtual LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) const;
-};
 
 /**
  * Work in progress- don't treat this as a stable interface yet!
@@ -53,12 +48,6 @@ class TORCH_API BackendImplInterface {
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const = 0;
-
-  virtual const TensorBuilder& GetTensorBuilder() const;
-  
-  // Unwraps a LazyTensor object hidden inside an at::Tensor
-  //   (or, if create=True, creates one in a backend-specific way)
-  virtual LazyTensorPtr UnwrapLazyTensor(const at::Tensor& tensor, bool create=false) const;
 
   /**
    * Lowering, Compilation, Execution
