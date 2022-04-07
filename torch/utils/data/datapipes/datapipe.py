@@ -2,7 +2,7 @@ import functools
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
-from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn
+from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn, DILL_AVAILABLE
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 T = TypeVar('T')
@@ -93,13 +93,17 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
-        state_dict = {}
-        for k, v in self.__dict__.items():
-            if callable(v):
-                state_dict[k] = serialize_fn(v)
-            else:
-                state_dict[k] = v
-        return state_dict
+        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
+        if DILL_AVAILABLE:
+            state_dict = {}
+            for k, v in self.__dict__.items():
+                if callable(v):
+                    state_dict[k] = serialize_fn(v)
+                else:
+                    state_dict[k] = v
+            return state_dict
+        else:
+            return self.__dict__
 
     def __setstate__(self, state_dict):
         for k, v in state_dict.items():
@@ -192,13 +196,17 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
-        state_dict = {}
-        for k, v in self.__dict__.items():
-            if callable(v):
-                state_dict[k] = serialize_fn(v)
-            else:
-                state_dict[k] = v
-        return state_dict
+        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
+        if DILL_AVAILABLE:
+            state_dict = {}
+            for k, v in self.__dict__.items():
+                if callable(v):
+                    state_dict[k] = serialize_fn(v)
+                else:
+                    state_dict[k] = v
+            return state_dict
+        else:
+            return self.__dict__
 
     def __setstate__(self, state_dict):
         for k, v in state_dict.items():
