@@ -3733,6 +3733,17 @@ class _TestONNXRuntime:
         self.run_test(ScatterModel(), (src, index))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_bucketize(self):
+        class BucketModel(torch.nn.Module):
+            def forward(self, input, boundaries):
+                return torch.bucketize(input, boundaries), \
+                    torch.bucketize(input, boundaries, right=True)
+
+        input = torch.tensor([[2, 5, 10], [6, 8, 3]])
+        boundaries = torch.tensor([1, 5, 7, 8, 10])
+        self.run_test(BucketModel(), (input, boundaries))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
         class OneHot(torch.nn.Module):
             def __init__(self, num_classes):
