@@ -78,7 +78,6 @@ from torch.ao.quantization.quantize import (
 )
 
 from ..utils import (
-    get_combined_dict,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
