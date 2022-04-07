@@ -17,6 +17,7 @@
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
@@ -31,16 +32,50 @@ cudnn_frontend::MatMulDesc_v8 getLinearDescriptor(cudnnDataType_t dataType) {
     .build();
 }
 
+// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+namespace {
+// we currently set the maximum number of input dimensions to 5
+// this can be increased, if necessary
+constexpr uint8_t max_num_input_dim = 5;
+struct LinearParams {
+  c10::DeviceIndex device_id;
+  cudnnDataType_t dataType;
+  int input_size[max_num_input_dim];
+  uint8_t input_dim;
+  at::MemoryFormat memory_format;
+  int64_t weight_size[2];
+  bool deterministic;
+  bool allow_tf32;
+};
 struct CacheKey {
+  LinearParams params;
   uint8_t input_alignment;
   uint8_t weight_alignment;
   uint8_t output_alignment;
   // default to -1 when no bias
   int8_t bias_alignment;
 };
-
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-namespace {
+void setLinearParams(
+    LinearParams* params, const at::Tensor& input, const at::Tensor& weight,
+    bool deterministic, bool allow_tf32) {
+  // operator datatype needs to be int32 for int8 matmul, but we can
+  // set the datatype for output tensor to int32 or fp32
+  memset(params, 0, sizeof(LinearParams));
+  params->device_id = at::cuda::current_device();
+  params->dataType = CUDNN_DATA_INT32;
+  // ASSERT(weight.dim() == input.dim())
+  params->input_dim = input.dim();
+  params->memory_format = input.suggest_memory_format();
+  for (int i = 0; i < params->input_dim; ++i) {
+    params->input_size[i] = input.sizes()[i];
+    params->weight_size[i] = weight.sizes()[i];
+  }
+  for (int i = 0; i < 2; ++i) {
+    params->weight_size[i] = weight.sizes()[i];
+  }
+  params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
+}
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
@@ -85,6 +120,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   CacheKey key;
   bool deterministic{true};
   bool allow_tf32{false};
+  setLinearParams(&key.params, input, orig_weight, deterministic, allow_tf32);
 
   key.input_alignment = cudnn_utils::getAlignment(input);
   key.output_alignment = cudnn_utils::getAlignment(linear_output);
@@ -276,6 +312,9 @@ at::Tensor PackedLinearWeightCudnn::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
+  TORCH_CHECK(act.dim() <= max_num_input_dim, "Number of dimensions for input tensor exeeds ", max_num_input_dim,
+  "; Increase max_num_input_dim in aten/src/ATen/native/quantized/cudnn/Linear.cpp to a larger value, if necessary, and recompile.");
+
   std::vector<int64_t> original_output_shape{act.sizes().vec()}; // 2D
   original_output_shape.back() = orig_weight.size(0); // output channels
   // cudnn expects tensors to be at least 3D. we will prepend a dummy dimension for quantized_output

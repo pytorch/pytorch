@@ -194,7 +194,7 @@ class GitRepo:
                     frc = self.get_commit(from_values.pop())
                     toc = self.get_commit(to_values.pop())
                     # FRC branch might have PR number added to the title
-                    if not frc.title != toc.title or frc.author_date != toc.author_date:
+                    if frc.title != toc.title or frc.author_date != toc.author_date:
                         # HACK: Same commit were merged, reverted and landed again
                         # which creates a tracking problem
                         if (
