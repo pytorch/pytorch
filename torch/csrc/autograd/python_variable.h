@@ -2,7 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 #include <memory>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/Export.h>

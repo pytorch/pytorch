@@ -1,0 +1,50 @@
+[
+   {
+      "name": "ONNX exporter",
+      "patterns": [
+         ".jenkins/caffe2/*",
+         "docs/source/onnx.rst",
+         "test/onnx/**",
+         "tools/onnx/**",
+         "torch/_C/__init__.pyi.in",
+         "torch/csrc/jit/passes/onnx.*",
+         "torch/csrc/jit/passes/onnx/**",
+         "torch/csrc/jit/serialization/export.*",
+         "torch/csrc/jit/serialization/onnx.*",
+         "torch/csrc/onnx/**",
+         "torch/onnx/**"
+      ],
+      "approved_by": ["BowenBao", "garymm"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "NVFuser",
+      "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+      "approved_by": ["csarofeen", "ngimel"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "OSS CI",
+      "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
+      "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "Documentation",
+      "patterns": ["docs/**", "torch/*docs.py"],
+      "approved_by": ["mruberry", "ngimel", "janeyx99"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "Mobile",
+      "patterns": ["ios/**", "android/**", "test/mobile/**"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "dreiss"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "superuser",
+      "patterns": ["*"],
+      "approved_by": ["pytorch/metamates"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   }
+]

@@ -85,19 +85,19 @@ DONT_REQUIRE_DERIVATIVE = {
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
-    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
+    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone', 'diag_embed',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
     'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
     '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
-    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
-    'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex', 'index_put',
+    'neg', 'complex', 'select', 'where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_linalg_svd', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
@@ -111,10 +111,11 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
     'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
+    'cholesky_inverse',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
-    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    '_to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
     'sparse_mask_helper_cuda', '_sparse_addmm',
 }
 
@@ -359,12 +360,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${name} that does not support it ${msg}");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${name} that does not support it ${msg}");
 }
 """)
 
@@ -952,9 +953,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
         def get_msg() -> str:
             if is_out_fn:
-                msg = name + " (because it is an out= function)"
+                msg = "because it is an out= function"
             else:
-                msg = name
+                msg = ("because it has not been implemented yet.\\nPlease file an issue "
+                       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+                       "so that we can prioritize its implementation.")
             return msg
         res = ""
         to_check: List[str] = []
@@ -964,13 +967,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name))
             elif is_tensor_list_type(inp.type):
                 cond = FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp="_t")
-                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, msg=get_msg())
+                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, name=name, msg=get_msg())
             else:
                 raise RuntimeError(f'Unsupported input type for "{name}" when forbidding forward AD usage.')
 
         if len(to_check) > 0:
             cond = " || ".join(to_check)
-            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, msg=get_msg())
+            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name, msg=get_msg())
         return res
 
     body: List[str] = []

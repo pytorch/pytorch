@@ -20,15 +20,9 @@ void listUnpack(Stack& stack, size_t num_outputs);
 
 void tupleConstruct(Stack& stack, size_t num_inputs);
 
-void namedTupleConstruct(
-    Stack& stack,
-    at::TupleTypePtr type,
-    size_t num_inputs);
+void namedTupleConstruct(Stack& stack, c10::TypePtr type, size_t num_inputs);
 
-void listConstruct(
-    Stack& stack,
-    const at::ListType& list_type,
-    size_t num_inputs);
+void listConstruct(Stack& stack, const c10::Type& list_type, size_t num_inputs);
 
 void dictConstruct(Stack& stack, const c10::Type& type, size_t num_inputs);
 

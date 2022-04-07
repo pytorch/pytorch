@@ -1,6 +1,8 @@
-#include <c10/util/Exception.h>
+#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/csrc/deploy/elf_file.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
+
 #include <torch/cuda.h>
 
 #include <dlfcn.h>
@@ -9,6 +11,12 @@
 
 struct ExeSection {
   const char* sectionName;
+  bool customLoader;
+};
+
+struct InterpreterSymbol {
+  const char* startSym;
+  const char* endSym;
   bool customLoader;
 };
 
@@ -27,6 +35,18 @@ const std::initializer_list<ExeSection> pythonInterpreterSection = {
     {".torch_deploy_payload.interpreter_cpu", false},
 };
 
+const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
+    {"_binary_libtorch_deployinterpreter_all_so_start",
+     "_binary_libtorch_deployinterpreter_all_so_end",
+     true},
+    {"_binary_libtorch_deployinterpreter_cuda_so_start",
+     "_binary_libtorch_deployinterpreter_cuda_so_end",
+     false},
+    {"_binary_libtorch_deployinterpreter_cpu_so_start",
+     "_binary_libtorch_deployinterpreter_cpu_so_end",
+     false},
+};
+
 static bool writeDeployInterpreter(FILE* dst) {
   TORCH_INTERNAL_ASSERT(dst);
   const char* payloadStart = nullptr;
@@ -36,20 +56,35 @@ static bool writeDeployInterpreter(FILE* dst) {
   std::ifstream("/proc/self/cmdline") >> exePath;
   ElfFile elfFile(exePath.c_str());
   for (const auto& s : pythonInterpreterSection) {
-    at::optional<Section> payloadSection = elfFile.findSection(s.sectionName);
-    if (payloadSection != at::nullopt) {
+    multipy::optional<Section> payloadSection =
+        elfFile.findSection(s.sectionName);
+    if (payloadSection != multipy::nullopt) {
       payloadStart = payloadSection->start;
       customLoader = s.customLoader;
       size = payloadSection->len;
-      TORCH_CHECK(payloadSection.has_value(), "Missing the payload section");
+      MULTIPY_CHECK(payloadSection.has_value(), "Missing the payload section");
       break;
     }
   }
+  if (payloadStart == nullptr) {
+    const char* libStart = nullptr;
+    const char* libEnd = nullptr;
+    for (const auto& s : kInterpreterSearchPath) {
+      libStart = (const char*)dlsym(nullptr, s.startSym);
+      if (libStart) {
+        libEnd = (const char*)dlsym(nullptr, s.endSym);
+        customLoader = s.customLoader;
+        break;
+      }
+    }
+    MULTIPY_CHECK(
+        libStart != nullptr && libEnd != nullptr,
+        "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=" +
+            std::to_string(torch::cuda::is_available()));
 
-  TORCH_CHECK(
-      payloadStart != nullptr,
-      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
-      torch::cuda::is_available());
+    size = libEnd - libStart;
+    payloadStart = libStart;
+  }
   size_t written = fwrite(payloadStart, 1, size, dst);
   TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
   return customLoader;
@@ -67,12 +102,12 @@ InterpreterManager::InterpreterManager(
     // can be used for balancing work across GPUs
     I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
     instances_.back().pImpl_->setFindModule(
-        [this](const std::string& name) -> at::optional<std::string> {
+        [this](const std::string& name) -> multipy::optional<std::string> {
           auto it = registeredModuleSource_.find(name);
           if (it != registeredModuleSource_.end()) {
             return it->second;
           } else {
-            return at::nullopt;
+            return multipy::nullopt;
           }
         });
   }
@@ -157,11 +192,11 @@ void ReplicatedObj::unload(const Interpreter* onThisInterpreter) {
 
 ReplicatedObj InterpreterSession::createMovable(Obj obj) {
   TORCH_DEPLOY_TRY
-  TORCH_CHECK(
+  MULTIPY_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
 
-  TORCH_CHECK(
+  MULTIPY_CHECK(
       impl_->isOwner(obj),
       "Cannot create movable from an object that lives in different session");
 
@@ -182,6 +217,11 @@ using dlopen_t = void* (*)(const char*, int);
 // function.
 static dlopen_t find_real_dlopen() {
   void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
+  // libdl is gone on some newer systems.
+  if (!libc) {
+    // libc.so won't open with dlopen because it's a linker script.
+    libc = dlopen("libc.so.6", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
+  }
   TORCH_INTERNAL_ASSERT(libc);
   auto dlopen_ = (dlopen_t)dlsym(libc, "dlopen");
   TORCH_INTERNAL_ASSERT(dlopen_);
@@ -233,11 +273,12 @@ Interpreter::Interpreter(
     deploySetSelfPtr(handle_);
   }
 
+  auto extra_python_paths = env->getExtraPythonPaths();
   void* newInterpreterImpl = dlsym(handle_, "newInterpreterImpl");
   AT_ASSERT(newInterpreterImpl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
-      ((InterpreterImpl * (*)()) newInterpreterImpl)());
-
+      ((InterpreterImpl * (*)(const std::vector<std::string>&))
+           newInterpreterImpl)(extra_python_paths));
   env->configureInterpreter(this);
 }
 

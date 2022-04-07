@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/SortingUtils.h>
+#include <ATen/native/Activation.h>
+#include <ATen/native/TopKImpl.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
@@ -615,7 +616,7 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
-void qgelu_kernel(const Tensor& qx, Tensor& qy) {
+void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
   int64_t zero_point = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float scale = qx.q_scale();
@@ -626,40 +627,83 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy) {
   float output_scale = scale;
   float inv_output_scale = 1.0 / output_scale;
   const auto kAlphaVec = Vectorized<float>(M_SQRT1_2);
+  const auto kBetaVec = Vectorized<float>(M_SQRT2 * M_2_SQRTPI * 0.5);
+  const auto kKappaVec = Vectorized<float>(0.044715);
   const auto kOneVec = Vectorized<float>(1);
   const auto kPointFiveVec = Vectorized<float>(0.5);
 
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
-    qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
-        output_scale,
-        output_zero_point,
-        c10::nullopt);
-    auto iter = TensorIterator::unary_op(qy, qx);
+  if (approximate == GeluType::Tanh) {
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
+      qy = at::_empty_affine_quantized(
+          qx.sizes(),
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+          at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+          output_scale,
+          output_zero_point,
+          c10::nullopt);
+      auto iter = TensorIterator::unary_op(qy, qx);
 
-    using Vec = Vectorized<scalar_t>;
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value_qx) -> scalar_t {
-          const auto value_dx =
-              at::native::dequantize_val(scale, zero_point, value_qx);
-          const auto value_dy =
-              value_dx * 0.5 * (1 + std::erf(value_dx * M_SQRT1_2));
-          return at::native::quantize_val<scalar_t>(
-              output_scale, output_zero_point, value_dy);
-        },
-        [&](Vec value_qx) -> Vec {
-          auto value_dx = value_qx.dequantize(
-              scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (auto & value : value_dx) {
-            value = value * kPointFiveVec * (kOneVec + (value * kAlphaVec).erf());
-          }
-          return Vec::quantize(
-              value_dx, output_scale, output_zero_point, inv_output_scale);
-        });
-  });
+      using Vec = Vectorized<scalar_t>;
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t value_qx) -> scalar_t {
+            const auto value_dx =
+                at::native::dequantize_val(scale, zero_point, value_qx);
+
+            const auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+            const auto kKappa = 0.044715;
+            const auto x_cube = value_dx * value_dx * value_dx;
+            const auto inner = kBeta * (value_dx + kKappa * x_cube);
+            const auto value_dy = 0.5 * value_dx * (1.0 + std::tanh(inner));
+
+            return at::native::quantize_val<scalar_t>(
+                output_scale, output_zero_point, value_dy);
+          },
+          [&](Vec value_qx) -> Vec {
+            auto value_dx = value_qx.dequantize(
+                scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+            for (auto & value : value_dx) {
+              auto value_cube = value * value * value;
+              auto inner = kBetaVec * (value + kKappaVec * value_cube);
+              value = kPointFiveVec * value * (kOneVec + inner.tanh());
+            }
+            return Vec::quantize(
+                value_dx, output_scale, output_zero_point, inv_output_scale);
+          });
+    });
+  } else {
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
+      qy = at::_empty_affine_quantized(
+          qx.sizes(),
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+          at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+          output_scale,
+          output_zero_point,
+          c10::nullopt);
+      auto iter = TensorIterator::unary_op(qy, qx);
+
+      using Vec = Vectorized<scalar_t>;
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t value_qx) -> scalar_t {
+            const auto value_dx =
+                at::native::dequantize_val(scale, zero_point, value_qx);
+            const auto value_dy =
+                value_dx * 0.5 * (1 + std::erf(value_dx * M_SQRT1_2));
+            return at::native::quantize_val<scalar_t>(
+                output_scale, output_zero_point, value_dy);
+          },
+          [&](Vec value_qx) -> Vec {
+            auto value_dx = value_qx.dequantize(
+                scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+            for (auto & value : value_dx) {
+              value = value * kPointFiveVec * (kOneVec + (value * kAlphaVec).erf());
+            }
+            return Vec::quantize(
+                value_dx, output_scale, output_zero_point, inv_output_scale);
+          });
+    });
+  }
 }
 
 
@@ -2029,6 +2073,9 @@ void qupsample_bilinear2d_nhwc_kernel(
         const auto rwidth = area_pixel_compute_scale<float>(
             input_width, output_width, align_corners, scales_w);
 
+        const int64_t input_q_zero_point = input.q_zero_point();
+        const int64_t output_q_zero_point = output.q_zero_point();
+
         for (const auto b : c10::irange(nbatch)) {
           auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
               idata + b * input_height * input_width * channels);
@@ -2069,8 +2116,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                   output_height,
                   output_width,
                   channels,
-                  output.q_zero_point(),
-                  input.q_zero_point(),
+                  output_q_zero_point,
+                  input_q_zero_point,
                   inverse_scale,
                   h0lambda,
                   h1lambda,
@@ -2088,8 +2135,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
                 pos2[0] = at::native::quantize_val<scalar_t>(
                               inverse_scale,
-                              output.q_zero_point(),
-                              result - input.q_zero_point())
+                              output_q_zero_point,
+                              result - input_q_zero_point)
                               .val_;
                 pos1 += 1;
                 pos2 += 1;

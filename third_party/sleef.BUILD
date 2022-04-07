@@ -15,10 +15,6 @@ SLEEF_COPTS = [
     "-fno-math-errno",
     "-fno-trapping-math",
     "-DCAFFE2_USE_GLOO",
-    "-DCUDA_HAS_FP16=1",
-    "-DHAVE_GCC_GET_CPUID",
-    "-DUSE_AVX",
-    "-DUSE_AVX2",
     "-std=gnu99",
 ]
 

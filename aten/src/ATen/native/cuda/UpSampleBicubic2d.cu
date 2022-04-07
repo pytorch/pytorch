@@ -170,8 +170,6 @@ static void upsample_bicubic2d_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_height = input.size(2);
   int input_width = input.size(3);
 
@@ -227,8 +225,6 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_height = input_size[2];
   int input_width = input_size[3];
 

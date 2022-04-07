@@ -102,11 +102,7 @@ if(CUDA_FOUND)
 endif()
 
 # Find cuDNN.
-if(CAFFE2_STATIC_LINK_CUDA AND NOT USE_STATIC_CUDNN)
-  message(WARNING "cuDNN will be linked statically because CAFFE2_STATIC_LINK_CUDA is ON. "
-    "Set USE_STATIC_CUDNN to ON to suppress this warning.")
-endif()
-if(CAFFE2_STATIC_LINK_CUDA OR USE_STATIC_CUDNN)
+if(USE_STATIC_CUDNN)
   set(CUDNN_STATIC ON CACHE BOOL "")
 else()
   set(CUDNN_STATIC OFF CACHE BOOL "")
@@ -322,15 +318,9 @@ if(CAFFE2_USE_CUDNN)
     TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    if(USE_WHOLE_CUDNN)
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
-    else()
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDNN_LIBRARY_PATH})
-    endif()
+    set_property(
+      TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+      ${CUDNN_LIBRARY_PATH})
     set_property(
       TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
       "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)

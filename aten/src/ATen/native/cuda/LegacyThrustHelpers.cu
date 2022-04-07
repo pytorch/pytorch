@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/cuda/cub_definitions.cuh>
 
 #include <ATen/cuda/ThrustAllocator.h>
 #include <thrust/device_ptr.h>
@@ -32,6 +33,8 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
   auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
   thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, LTOp<int64_t>());
 }
+
+#if !CUB_SUPPORTS_SCAN_BY_KEY()
 
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count) {
@@ -73,6 +76,8 @@ template
 void embedding_dense_backward_cuda_scan<int>(Tensor &sorted_indices, Tensor &count);
 template
 void embedding_dense_backward_cuda_scan<int64_t>(Tensor &sorted_indices, Tensor &count);
+
+#endif
 
 template<typename index_t>
 int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets) {

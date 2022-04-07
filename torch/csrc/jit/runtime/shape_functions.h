@@ -77,7 +77,7 @@ def slice(
         end_val += self[dim]
     if start_val < 0:
         start_val = 0
-    elif start_val >= self[dim]:
+    elif start_val > self[dim]:
         start_val = self[dim]
     if end_val < start_val:
         end_val = start_val
@@ -93,12 +93,12 @@ def check_cat_no_zero_dim(tensors: List[List[int]]):
     for tensor in tensors:
         assert len(tensor) > 0
 
-
 def legacy_cat_wrap_dim(dim: int, tensor_sizes: List[List[int]]):
     out_dim: Optional[int] = None
     for size in tensor_sizes:
-        if len(size) != 0 and size != [0] and out_dim is not None:
-            out_dim = maybe_wrap_dim(dim, len(size))
+        if not (len(size) == 1 and size[0] == 0):
+            if out_dim is None:
+                out_dim = maybe_wrap_dim(dim, len(size))
     if out_dim is None:
         out_dim = dim
     return out_dim
@@ -343,7 +343,7 @@ def conv2d(
 
 def batch_norm(
     input: List[int],
-    weight: List[int],
+    weight: Optional[List[int]],
     bias: Optional[List[int]],
     running_mean: Optional[List[int]],
     running_var: Optional[List[int]],
@@ -448,7 +448,7 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
             out.append(elem)
         return out
     slice_numel = 1
-    for i in range(start_dim, end_dim - start_dim + 1):
+    for i in range(start_dim, end_dim + 1):
         slice_numel *= input[i]
     # TODO: use slicing when slice optimization has landed
     # slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
