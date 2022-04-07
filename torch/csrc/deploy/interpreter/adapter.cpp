@@ -12,11 +12,7 @@ using torch::deploy::Obj;
 namespace torch {
 namespace deploy {
 
-inline py::object toPyObj(at::IValue value){
-    return torch::jit::toPyObject(value);
-}
-
-py::object toPyObj(IValue value){
+inline py::object toPyObj<IValue>(at::IValue value){
     return torch::jit::toPyObject(value);
 }
 

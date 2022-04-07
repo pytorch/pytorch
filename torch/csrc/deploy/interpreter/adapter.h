@@ -12,10 +12,10 @@ namespace torch {
 namespace deploy {
 
 inline template<typename T>
-py::object toPyObj(T);
+py::object toPyObj<T>(T);
 
 inline template<typename T>
-T fromPyObj(py::handle);
+T fromPyObj<T>(py::handle);
 
 } // namespace deploy
 } // namespace torch
