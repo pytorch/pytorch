@@ -55,7 +55,9 @@ namespace at { namespace cuda {
   _(cuDevicePrimaryCtxGetState)                  \
   _(cuLinkCreate)                                \
   _(cuLinkAddData)                               \
-  _(cuLinkComplete)
+  _(cuLinkComplete)                              \
+  _(cuFuncSetAttribute)                          \
+  _(cuFuncGetAttribute)
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
 #define AT_FORALL_NVRTC(_) \

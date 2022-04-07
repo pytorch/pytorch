@@ -67,11 +67,7 @@ class KernelIrScanner : private IrVisitor {
         summary_.global_allocations.push_back(allocate);
         break;
       case MemoryType::Shared:
-        if (ExpressionEvaluator::isConst(allocate->size())) {
-          summary_.static_smem_allocations.push_back(allocate);
-        } else {
-          summary_.dynamic_smem_allocations.push_back(allocate);
-        }
+        summary_.dynamic_smem_allocations.push_back(allocate);
         break;
       case MemoryType::Local:
         if (!ExpressionEvaluator::isConst(allocate->size())) {
