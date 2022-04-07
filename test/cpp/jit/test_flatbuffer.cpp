@@ -1222,7 +1222,6 @@ TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   ASSERT_TRUE(resd.equal(refd));
   ASSERT_TRUE(resmd.equal(refd));
 }
-#endif
 
 TEST(TestSourceFlatbuffer, CheckAttrAccess) {
   Module m("m");
@@ -1288,6 +1287,7 @@ TEST(TestSourceFlatbuffer,
     AT_ASSERT(resd == refd);
   }
 }
+#endif
 
 } // namespace jit
 } // namespace torch
