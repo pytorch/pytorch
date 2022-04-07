@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/util.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
 #include <c10/util/ArrayRef.h>
@@ -89,7 +90,9 @@ ApproximateClockToUnixTimeConverter::makeConverter() {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) {
+    const std::vector<std::vector<int64_t>>& shapes,
+    at::RecordFunctionHandle op_id,
+    const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;
     if (sequence_nr >= 0) {
@@ -102,31 +105,17 @@ std::string getNvtxStr(
       str = name;
 #endif
     }
-    if (shapes.size() > 0) {
-      std::stringstream s;
-      s << str;
-      s << ", sizes = [";
-      for (const auto idx : c10::irange(shapes.size())) {
-        if (shapes[idx].size() > 0) {
-          s << "[";
-          for (const auto dim : c10::irange(shapes[idx].size())) {
-            s << shapes[idx][dim];
-            if (dim < shapes[idx].size() - 1) {
-              s << ", ";
-            }
-          }
-          s << "]";
-        } else {
-          s << "[]";
-        }
-        if (idx < shapes.size() - 1) {
-          s << ", ";
-        }
-      }
-      s << "]";
-      return s.str();
+    if (op_id > 0) {
+      str = fmt::format("{}, op_id = {}", str, op_id);
     }
-
+    if (shapes.size() > 0) {
+      str = fmt::format("{}, sizes = {}", str, shapesToStr(shapes));
+    }
+    // Include the op ids of the input edges so
+    // you can build the network graph
+    if (input_op_ids.size() > 0) {
+      str = fmt::format("{}, input_op_ids = {}", str, inputOpIdsToStr(input_op_ids));
+    }
     return str;
   } else {
     return name;
@@ -185,17 +174,41 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
+std::vector<std::vector<int64_t>> flattenList(c10::List<c10::IValue> list, std::string fn_name) {
+  std::vector<std::vector<int64_t>> tensor_dims;
+  for (const c10::IValue input : list) {
+    if (input.isTensor()) {
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        tensor_dims.push_back(input.toTensor().sizes().vec());
+      }
+    }
+  }
+  return tensor_dims;
+}
+
+std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn, bool flatten_list_enabled) {
   std::vector<std::vector<int64_t>> sizes;
   sizes.reserve(fn.inputs().size());
   for (const c10::IValue& input : fn.inputs()) {
-    if (!input.isTensor()) {
-      sizes.emplace_back();
-      continue;
-    }
-    const at::Tensor& tensor = input.toTensor();
-    if (tensor.defined()) {
-      sizes.push_back(input.toTensor().sizes().vec());
+    if (input.isTensor()) {
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        sizes.push_back(input.toTensor().sizes().vec());
+      } else {
+        sizes.emplace_back();
+      }
+    } else if (input.isList()) {
+      std::vector<std::vector<int64_t>> tmp_sizes;
+      if (flatten_list_enabled) {
+        tmp_sizes = flattenList(input.toList(), std::string(fn.name()));
+      }
+      // Extend the current sizes array by the array returned from input sizes
+      if (!tmp_sizes.empty()) {
+        sizes.insert(sizes.end(), tmp_sizes.begin(), tmp_sizes.end());
+      } else {
+        sizes.emplace_back();
+      }
     } else {
       sizes.emplace_back();
     }
@@ -204,23 +217,37 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
-  std::ostringstream oss;
-  oss << "[";
+  std::string str("[");
   for (const auto t_idx : c10::irange(shapes.size())) {
     if (t_idx > 0) {
-      oss << ", ";
+      str = fmt::format("{}, ", str);
     }
-    oss << "[";
+    str = fmt::format("{}[", str);
     for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
       if (s_idx > 0) {
-        oss << ", ";
+        str = fmt::format("{}, ", str);
       }
-      oss << shapes[t_idx][s_idx];
+      str = fmt::format("{}{}", str, shapes[t_idx][s_idx]);
     }
-    oss << "]";
+    str = fmt::format("{}]", str);
   }
-  oss << "]";
-  return oss.str();
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string inputOpIdsToStr(const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+  std::string str("[");
+  int idx = 0;
+
+  for (const auto& op_id_info_pair : input_op_ids) {
+    if (idx++ > 0) {
+      str = fmt::format("{}, ", str);
+    }
+    // (OpId,OutputNr)
+    str = fmt::format("{}({},{})", str, op_id_info_pair.first, op_id_info_pair.second);
+  }
+  str = fmt::format("{}]", str);
+  return str;
 }
 
 std::string dtypesToStr(const std::vector<std::string>& types) {

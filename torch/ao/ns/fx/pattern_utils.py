@@ -8,7 +8,7 @@ from torch.fx.graph import Node
 
 from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
-from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
+from torch.ao.quantization.fx.backend_config.utils import get_native_quant_patterns
 from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
@@ -66,7 +66,8 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     # * multiple ops: (torch.nn.ReLU, torch.nn.Conv2d)
     # For fusions, we only care about patterns composed of multiple ops.
     # TODO(future PR): allow customizations from default patterns.
-    all_quant_patterns = get_default_quant_patterns()
+    all_quant_patterns = get_native_quant_patterns()
+
     default_base_op_idx = 0
     for quant_pattern, _quant_handler in all_quant_patterns.items():
         # Only patterns of multiple ops are fusions, ignore
