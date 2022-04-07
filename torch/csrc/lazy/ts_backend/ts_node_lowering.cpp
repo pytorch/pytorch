@@ -368,10 +368,10 @@ class TSNodeLowering : public TSNodeLoweringInterface {
   // FIXME(alanwaketan): One day we should code-gen all view ops, or at
   // least move the lowering to the IR nodes.
   TSOpVector LowerDiagonalViewUpdate(const DiagonalViewUpdate* node) {
-    // Since we promise the backends that we never generate any inplace update IR,
-    // therefore we clone the target first and then update the clone instead.
-    // Because the clone is transient and will never be aliased, it's safe
-    // to use copy_ on it.
+    // Since we promise the backends that we never generate any aliased
+    // inplace update IR, therefore we clone the target first and then
+    // update the clone inplace instead. Since the clone is transient,
+    // it will never be aliased, and therefore it's safe.
     auto* destination = GenerateClone(loctx()->GetOutputOp(node->operand(0)));
 
     // Replay the diagonal.
