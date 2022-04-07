@@ -50,8 +50,7 @@ std::vector<int> nms_cpu_upright(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -127,7 +126,7 @@ std::vector<int> soft_nms_cpu_upright(
   EArrXi pending = AsEArrXt(indices);
   while (pending.size() > 0) {
     // Exit if already enough proposals
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<unsigned>(topN)) {
       break;
     }
 
@@ -560,8 +559,7 @@ std::vector<int> nms_cpu_rotated(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -626,7 +624,7 @@ std::vector<int> soft_nms_cpu_rotated(
   EArrXi pending = AsEArrXt(indices);
   while (pending.size() > 0) {
     // Exit if already enough proposals
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 

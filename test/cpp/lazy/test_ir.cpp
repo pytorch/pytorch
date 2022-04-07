@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
@@ -24,11 +25,8 @@ class TestLeafNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
-  const Shape& shape(size_t i) const override { return shape_; }
-  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
  private:
   size_t param_;
-  Shape shape_;
 };
 
 TEST(IrTest, BasicTest) {
@@ -54,22 +52,22 @@ TEST(IrTest, MetaDataTest) {
   node = MakeNode<TestLeafNode>(1);
   auto metaWithEmptyDebug = node->metadata();
   EXPECT_EQ(metaWithEmptyDebug.scope.size(), 0);
-  EXPECT_EQ(metaWithEmptyDebug.frame_info.size(), 0);
+  EXPECT_EQ(metaWithEmptyDebug.frame_info.size(), 1);
 
   {
     ScopePusher scope("TestScope");
     node = MakeNode<TestLeafNode>(1);
     auto metaWithScope = node->metadata();
     EXPECT_EQ(metaWithScope.scope, "TestScope.1");
-    EXPECT_EQ(metaWithScope.frame_info.size(), 0);
+    EXPECT_EQ(metaWithScope.frame_info.size(), 1);
   }
 
   SourceLocation dummySourceLocation;
   dummySourceLocation.file = "file";
   dummySourceLocation.function = "function";
   dummySourceLocation.line = 10;
-  RegisterGetFrameInfo(
-      [&]() -> std::vector<SourceLocation> { return {dummySourceLocation}; });
+  GetPythonFramesFunction() =
+      [&]() -> std::vector<SourceLocation> { return {dummySourceLocation}; };
   node = MakeNode<TestLeafNode>(1);
   auto metaWithSourceLoc = node->metadata();
   EXPECT_EQ(metaWithSourceLoc.scope.size(), 0);
