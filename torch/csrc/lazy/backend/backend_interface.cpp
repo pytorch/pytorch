@@ -1,5 +1,4 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
-#include <torch/csrc/lazy/core/tensor_impl.h>
 
 namespace torch {
 namespace lazy {
@@ -23,27 +22,6 @@ BackendRegistrar::BackendRegistrar(
   backend_impl_registry.store(backend_impl_interface);
 }
 
-const TensorBuilder& BackendImplInterface::GetTensorBuilder() const{
-  static TensorBuilder tensor_builder;
-  return tensor_builder;
-}
-
-LazyTensorPtr TensorBuilder::TryGetLtcTensor(const at::Tensor& tensor) const {
-  auto* impl = dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
-  if (impl == nullptr) {
-    return LazyTensorPtr();
-  }
-  return impl->tensor();
-}
-
-LazyTensorPtr BackendImplInterface::UnwrapLazyTensor(const at::Tensor& tensor, bool create) const {
-  auto* impl = dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
-  if (impl == nullptr) {
-    return LazyTensorPtr();
-  }
-  return impl->tensor();
-}
-
 at::Tensor MakeTensorFromComputationData(
     const BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
@@ -64,7 +42,6 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
     BackendDevice device) {
   return getBackend()->CreateLoweringContext(name, device);
 }
-
 
 }  // namespace lazy
 }  // namespace torch

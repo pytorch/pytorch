@@ -5,7 +5,7 @@ import re
 import yaml
 from collections import namedtuple, Counter
 from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple, Type
-from tools.codegen.dest.lazy_ir import GenLazyIR, GenTSLazyIR, GenLazyNativeFunc
+from tools.codegen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml, NamespaceHelper
 from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
@@ -127,7 +127,6 @@ class default_args:
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
-    lazy_nativefunc_generator: Type[GenLazyNativeFunc] = GenLazyNativeFunc
     backend_name: str = "TorchScript"
 
 def main() -> None:
@@ -178,24 +177,21 @@ def main() -> None:
                         lazy_ir_generator, options.backend_name)
 
 
-def run_gen_lazy_tensor(
-    aten_path: str, source_yaml: str, output_dir: str,
-    dry_run: bool, impl_path: Optional[str],
-    node_base: str = default_args.node_base,
-    node_base_hdr: Optional[str] = default_args.node_base_hdr,
-    tensor_class: str = default_args.tensor_class,
-    tensor_class_hdr: str = default_args.tensor_class_hdr,
-    shape_inference_hdr: str = default_args.shape_inference_hdr,
-    lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
-    lazy_nativefunc_generator: Type[GenLazyNativeFunc] = default_args.lazy_nativefunc_generator,
-    # build_in_tree is true for TS backend and affects include paths
-    build_in_tree: bool = False,
-    # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
-    # it must match how ATen was built
-    per_operator_headers: bool = False,
-    backend_name: str = default_args.backend_name,
-    gen_forced_fallback_code: bool = False
-) -> None:
+def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
+                        dry_run: bool, impl_path: Optional[str],
+                        node_base: str = default_args.node_base,
+                        node_base_hdr: Optional[str] = default_args.node_base_hdr,
+                        tensor_class: str = default_args.tensor_class,
+                        tensor_class_hdr: str = default_args.tensor_class_hdr,
+                        shape_inference_hdr: str = default_args.shape_inference_hdr,
+                        lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
+                        # build_in_tree is true for TS backend and affects include paths
+                        build_in_tree: bool = False,
+                        # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
+                        # it must match how ATen was built
+                        per_operator_headers: bool = False,
+                        backend_name: str = default_args.backend_name,
+                        gen_forced_fallback_code: bool = False) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
 
@@ -330,10 +326,10 @@ def run_gen_lazy_tensor(
         'namespace_epilogue': ns_helper.epilogue,
         'native_function_definitions':
         list(concat_map_codegen(
-            lazy_nativefunc_generator(f'{backend_key}NativeFunctions',
-                                      backend_indices[backend_key],
-                                      tensor_class,
-                                      gen_forced_fallback_code),
+            dest.GenLazyNativeFuncDefinition(f'{backend_key}NativeFunctions',
+                                             backend_indices[backend_key],
+                                             tensor_class,
+                                             gen_forced_fallback_code),
             grouped_native_functions,
             codegenInplaceVariant=True
         )),
