@@ -898,7 +898,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.saddmm: lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
-        torch.scatter_reduce: lambda input, dim, index, src, reduce: -1,
+        torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
         torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
@@ -1391,7 +1391,7 @@ def handle_torch_function(
         torch_func_method = overloaded_arg.__torch_function__
         if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg:
             warnings.warn("Defining your `__torch_function__ as a plain method is deprecated and "
-                          "will be an error in PyTorch 1.11, please define it as a classmethod.",
+                          "will be an error in future, please define it as a classmethod.",
                           DeprecationWarning)
 
         # Use `public_api` instead of `implementation` so __torch_function__
