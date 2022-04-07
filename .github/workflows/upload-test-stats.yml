@@ -8,9 +8,14 @@ on:
 
 jobs:
   upload-test-stats:
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ubuntu-18.04
 
     steps:
+      - name: Print workflow information
+        env:
+          TRIGGERING_WORKFLOW: ${{ toJSON(github.event.workflow_run) }}
+        run: echo "${TRIGGERING_WORKFLOW}"
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
