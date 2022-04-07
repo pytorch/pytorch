@@ -92,66 +92,72 @@ TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
 
 class MemoryPlanner {
  public:
-  MemoryPlanner(
+  explicit MemoryPlanner(
       BlockRunner* block_runner,
       const BlockInfo& block_info,
       bool enable_out_variant,
-      bool manage_output_tensors);
-
+      bool manage_output_tensors,
+      bool optimize_memory);
   // disable copying and moving
   MemoryPlanner(const MemoryPlanner&) = delete;
   MemoryPlanner& operator=(const MemoryPlanner&) = delete;
   MemoryPlanner(MemoryPlanner&&) = delete;
   MemoryPlanner& operator=(MemoryPlanner&&) = delete;
-  virtual ~MemoryPlanner() = default;
-
-  virtual std::unique_ptr<MemoryPlanner> maybeClone(
-      BlockRunner* /*new_block_runner*/,
-      const FastMap<at::Tensor*, at::Tensor*>& /*old_tensor_to_new*/) const {
-    return nullptr;
-  }
 
   void allocate();
   void deallocate();
-  // Make this function return true if something has gone horribly wrong during
-  // the inference run and we should fall back to the StandardMemoryPlanner
-  // strategy. Typically, this is due to performance related issues - perhaps
-  // there were too many dynamic shapes/reallocations.
-  // StaticRuntime checks this function after calling deallocate(). If true, it
-  // destructs the MemoryPlanner it's holding, so make sure that deallocate()
-  // does _all_ required cleanup.
-  virtual bool shouldFallBackToStandardStrategy() const = 0;
+  void deallocateOutputTensors();
 
-  size_t totalNumManagedTensors() const {
+  size_t total_num_managed_tensors() const {
     return num_managed_tensors_;
   }
 
-  size_t totalReusedTensors() const {
-    return reused_tensors_;
-  }
-
-  size_t totalNumManagedOutputTensors() const {
+  size_t total_num_managed_output_tensors() const {
     return managed_output_tensors_.size();
   }
 
-  size_t totalNumUnmanaged() const {
-    return numUnmanagedNonScalars() + numUnmanagedScalars();
+  C10_NODISCARD size_t total_num_unmanaged() const {
+    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
   }
 
-  size_t numUnmanagedNonScalars() const {
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
   }
 
-  size_t numUnmanagedScalars() const {
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
     return num_unmanaged_scalar_ivalues_;
   }
 
-  size_t totalManaged() const {
+  size_t total_managed() const {
     return managed_bytes_;
+  }
+
+  size_t total_reused_tensors() const {
+    return reused_tensors_;
   }
 
   size_t numOutputBufferBytes() const {
     return output_buffer_bytes_;
+  }
+
+  // Check if `ivalue` is contained as a managed tensor. Only used in DCHECK().
+  bool isManagedOutputTensor(const IValue& ivalue) const {
+    if (!output_buffer_ || // output buffer got already deallocated.
+        output_buffer_bytes_ == 0 || // memory planning is not yet initialized.
+        !ivalue.isTensor() // a non-tensor is never managed
+    ) {
+      return false;
+    }
+    const auto& tensor = ivalue.toTensor();
+    if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
+      return false;
+    }
+    // TODO: Improve this once D31357486 is landed.
+    uint8_t* tensor_ptr =
+        static_cast<uint8_t*>(tensor.storage().data_ptr().get());
+    uint8_t* buffer_start = static_cast<uint8_t*>(output_buffer_.get());
+    uint8_t* buffer_end = buffer_start + output_buffer_bytes_;
+    return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
   }
 
   bool isManagedStorageImpl(const at::StorageImpl* impl) const {
@@ -170,48 +176,11 @@ class MemoryPlanner {
     return impl_p >= start && impl_p < end;
   }
 
-  // Only used in DCHECK()
-  bool isManagedOutputTensor(const at::Tensor& tensor) const {
-    if (output_buffer_bytes_ == 0 || output_buffer_start_ == nullptr) {
-      return false;
-    }
-    DCHECK_NE(output_buffer_end_, nullptr);
-    if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
-      return false;
-    }
-    auto* tensor_ptr = static_cast<uint8_t*>(tensor.storage().data_ptr().get());
-    return output_buffer_start_ <= tensor_ptr &&
-        tensor_ptr < output_buffer_end_;
-  }
-
   bool overlapWithInternalBuffer(void* data_ptr) {
     return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
   }
 
- protected:
-  uint8_t* allocateBuffer(size_t num_bytes);
-
-  size_t managed_bytes_{0};
-  size_t reused_tensors_{0};
-
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors' storages that should be backed by that
-  // same data. Thus, if memonger is disabled, all vectors are of
-  // size 1.
-  // We allocate StorageImpls ourselves so that 1) we don't have to do
-  // an extra two loads per Tensor (which will likely miss in the CPU
-  // data cache) first reading the Storage (i.e., StorageImpl pointer)
-  // from the TensorImpl object and then second dereferencing it and
-  // 2) our memory access pattern during allocate() has high locality.
-  // We don't have any guarantee that the model doesn't change the
-  // Storage for managed tensors out from under us during execution,
-  // so we have to check the StorageImpls each time we deallocate.
-  std::vector<std::pair<size_t, at::StorageImpl>>
-      managed_tensor_storage_impls_{};
-
  private:
-  void deallocateOutputTensors();
-
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
@@ -225,121 +194,40 @@ class MemoryPlanner {
   // to an ordinary "strong reference" state.
   std::vector<IValue*> borrowed_ivalues_needing_incref_;
 
+  // each pair contains the size (in bytes) of data to be allocated
+  // and a vector of Tensors' storages that should be backed by that
+  // same data. Thus, if memonger is disabled, all vectors are of
+  // size 1.
+
+  // We allocate StorageImpls ourselves so that 1) we don't have to do
+  // an extra two loads per Tensor (which will likely miss in the CPU
+  // data cache) first reading the Storage (i.e., StorageImpl pointer)
+  // from the TensorImpl object and then second dereferencing it and
+  // 2) our memory access pattern during allocate() has high locality.
+  std::vector<std::pair<size_t, at::StorageImpl>>
+      managed_tensor_storage_impls_{};
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to check the StorageImpls each time we deallocate.
+  std::vector<StorageGroup> managed_tensors_{};
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors_{};
   at::DataPtr buffer_; // allocated each time we call Run()
   uint8_t* buffer_start_{nullptr};
   uint8_t* buffer_end_{nullptr};
-
-  // We don't own the output buffer, but we store the
-  // start/end of the last one we allocated for the debug checks
-  // (e.g. for isManagedOutputTensor)
-  uint8_t* output_buffer_start_{nullptr};
-  uint8_t* output_buffer_end_{nullptr};
-
   size_t num_managed_tensors_{0};
+  size_t managed_bytes_{0};
+  size_t reused_tensors_{0};
   size_t num_unmanaged_scalar_ivalues_{0};
 
+  at::DataPtr output_buffer_;
   size_t output_buffer_bytes_{0};
 
-  virtual void allocateManagedTensors() = 0;
-  virtual void deallocateManagedTensors() = 0;
-
+  void allocateManagedTensors();
   void allocateOutputTensors();
+
+  static size_t compute_aligned_tensor_size(size_t nbytes);
+  static at::DataPtr allocate_buffer(size_t size);
 };
-
-class StandardMemoryPlanner : public MemoryPlanner {
- public:
-  StandardMemoryPlanner(
-      BlockRunner* block_runner,
-      const BlockInfo& block_info,
-      bool enable_out_variant,
-      bool manage_output_tensors,
-      bool optimize_memory);
-
-  bool shouldFallBackToStandardStrategy() const override {
-    // Already using standard strategy!
-    return false;
-  }
-
- protected:
-  void allocateManagedTensors() override;
-  void deallocateManagedTensors() override;
-
-  std::vector<StorageGroup> managed_tensors_{};
-};
-
-class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
- public:
-  PrecomputedOffsetsMemoryPlanner(
-      BlockRunner* block_runner,
-      const BlockInfo& block_info,
-      bool enable_out_variant,
-      bool managed_output_tensors,
-      bool optimize_memory,
-      size_t max_allowed_reallocs);
-
-  struct ManagedTensor {
-    ManagedTensor(
-        at::Tensor* tensor_,
-        const Value* value_,
-        at::StorageImpl* storage_impl_,
-        size_t size_,
-        size_t offset_)
-        : tensor(tensor_),
-          value(value_),
-          storage_impl(storage_impl_),
-          size(size_),
-          offset(offset_) {}
-    at::Tensor* tensor;
-    const Value* value;
-    at::StorageImpl* storage_impl;
-    size_t size;
-    size_t offset;
-  };
-
-  std::unique_ptr<MemoryPlanner> maybeClone(
-      BlockRunner* new_block_runner,
-      const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new)
-      const override;
-
-  bool shouldFallBackToStandardStrategy() const override {
-    auto result = num_reallocs_ >= max_allowed_reallocs_;
-    if (result) {
-      VLOG(1) << "Too many reallocations in PrecomputedOffsetsMemoryPlanner; "
-              << num_reallocs_
-              << " is >= the maximum allowed number of reallocs "
-              << max_allowed_reallocs_
-              << ". Falling back to StandardMemoryPlanner.";
-    }
-    return result;
-  }
-
- protected:
-  void allocateManagedTensors() override;
-  void deallocateManagedTensors() override;
-
-  BlockRunner* block_runner_;
-  const BlockInfo& block_info_;
-
-  bool enable_out_variant_;
-  bool manage_output_tensors_;
-  bool optimize_memory_;
-
-  size_t num_reallocs_{0};
-  size_t max_allowed_reallocs_;
-
-  std::vector<ManagedTensor> managed_tensors_;
-};
-
-// Strategies used by PrecomputedOffsetsMemoryPlanner, exposed here for testing
-TORCH_API size_t assignOffsetsOptimized(
-    std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
-        managed_tensors,
-    const ManagedTensorRanges& ranges);
-
-TORCH_API size_t assignOffsetsNaive(
-    std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
-        managed_tensors);
 
 } // namespace jit
 } // namespace torch

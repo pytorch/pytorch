@@ -12,7 +12,7 @@ so many models will not work out of the box.
 This is a list of current assumptions for use with
 this feature.
 
-- Inference only execution
+- Inference only execution, CPU only
 - Static input dtypes
 - Static input shapes (the runtime supports dynamic shapes, but excessive dynamic shapes may degrade performance)
 
@@ -99,7 +99,7 @@ This algorithm is based on [arXiv:2001.03288](https://arxiv.org/pdf/2001.03288.p
 
 The paper describes the algorithm in detail, but the key considerations are:
 
-1) This algorithm will tend to me more efficient with respect to maximum memory usage
+1) This algorithm will tend to be more efficient with respect to maximum memory usage
 2) This algorithm will *not* resize the tensor buffer since recomputing offsets is a quadratic operation. Therefore,
 to avoid performance degradation, the model should be warmed up with the largest possible inputs.
 

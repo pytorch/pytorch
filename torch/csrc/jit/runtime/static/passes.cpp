@@ -39,7 +39,7 @@ bool forwardHasOp(
 
 namespace {
 C10_UNUSED
-void concatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
+void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
@@ -93,7 +93,7 @@ void concatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 C10_UNUSED
-void castedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
+void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g):
@@ -124,7 +124,7 @@ void castedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 C10_UNUSED
-void concatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
+void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
@@ -143,7 +143,7 @@ void concatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGatherRangesLengthsToOffsets(
+C10_UNUSED void ClipRangesGatherRangesLengthsToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -161,7 +161,7 @@ C10_UNUSED void clipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
+C10_UNUSED void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   // fuse without lengths-to-offsets
   std::string pattern = R"IR(
@@ -178,7 +178,7 @@ C10_UNUSED void clipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void precomputeMultiplierShiftForSigridHash(
+C10_UNUSED void PrecomputeMultiplierShiftForSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d):
@@ -196,7 +196,7 @@ C10_UNUSED void precomputeMultiplierShiftForSigridHash(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesToGatherToOffsets(
+C10_UNUSED void ClipRangesToGatherToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %to0_in0, %to0_in1, %to0_in2):
@@ -227,7 +227,7 @@ C10_UNUSED void clipRangesToGatherToOffsets(
 }
 
 C10_UNUSED
-void clipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
+void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h):
@@ -243,7 +243,7 @@ void clipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGatherRangesSigridHash(
+C10_UNUSED void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g):
@@ -261,7 +261,7 @@ C10_UNUSED void clipRangesGatherRangesSigridHash(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGatherRangesX2SigridHashPrecompute(
+C10_UNUSED void ClipRangesGatherRangesX2SigridHashPrecompute(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
   std::string pattern = R"IR(
@@ -302,38 +302,38 @@ C10_UNUSED void clipRangesGatherRangesX2SigridHashPrecompute(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void splitOutPrecomputeOpsForSparseNN(
+C10_UNUSED void SplitOutPrecomputeOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
-  precomputeMultiplierShiftForSigridHash(graph);
+  PrecomputeMultiplierShiftForSigridHash(graph);
   ConstantPropagation(graph);
   ConstantPooling(graph);
 #endif
 }
 } // namespace
 
-void fuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
-  splitOutPrecomputeOpsForSparseNN(graph);
+  SplitOutPrecomputeOpsForSparseNN(graph);
 
-  concatAddMulReplaceNaNClip(graph);
-  castedBatchOneHotLengths(graph);
-  concatBatchMatMulBatchGather(graph);
+  ConcatAddMulReplaceNaNClip(graph);
+  CastedBatchOneHotLengths(graph);
+  ConcatBatchMatMulBatchGather(graph);
 
   if (FLAGS_enable_clip_ranges_gather_fusions) {
-    clipRangesGatherRangesLengthsToOffsets(graph);
+    ClipRangesGatherRangesLengthsToOffsets(graph);
   }
-  clipRangesGatherSigridHash(graph);
-  clipRangesGatherRangesSigridHash(graph);
+  ClipRangesGatherSigridHash(graph);
+  ClipRangesGatherRangesSigridHash(graph);
 
-  clipRangesGatherRangesX2SigridHashPrecompute(graph);
+  ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
   if (FLAGS_enable_clip_ranges_gather_fusions) {
     // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
     // clip_ranges+gather_ranges
-    clipRangesGather(graph);
+    ClipRangesGather(graph);
 
-    clipRangesToGatherToOffsets(graph);
+    ClipRangesToGatherToOffsets(graph);
   }
 #endif
 }
@@ -391,7 +391,7 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema("static_runtime::create_owned_ref(...) -> ..."));
 }
 
-void fuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%input):
         %0 : Tensor = aten::sign(%input)
@@ -416,7 +416,7 @@ namespace {
 
 using TupleUnpackBlock = std::vector<Node*>;
 
-std::vector<TupleUnpackBlock> collectVariadicTupleUnpackFusionCandidates(
+std::vector<TupleUnpackBlock> CollectVariadicTupleUnpackFusionCandidates(
     const std::shared_ptr<Graph>& graph) {
   std::vector<TupleUnpackBlock> candidates;
   auto nodes = graph->nodes();
@@ -435,7 +435,7 @@ std::vector<TupleUnpackBlock> collectVariadicTupleUnpackFusionCandidates(
   return candidates;
 }
 
-void fuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
+void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
   TORCH_CHECK(nodes.size() > 0);
   auto graph = nodes[0]->owningGraph();
   auto var_unpack = graph->create(
@@ -458,9 +458,9 @@ void fuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
 
 } // namespace
 
-void useVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
-  for (auto& c : collectVariadicTupleUnpackFusionCandidates(graph)) {
-    fuseTupleUnpackBlock(c);
+void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
+  for (auto& c : CollectVariadicTupleUnpackFusionCandidates(graph)) {
+    FuseTupleUnpackBlock(c);
   }
 }
 
@@ -514,7 +514,7 @@ void useVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
 //                         |
 //                         v
 
-void replaceWithMaybeCopy(
+void ReplaceWithMaybeCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
@@ -597,7 +597,7 @@ void replaceWithMaybeCopy(
 #endif
 }
 
-void replaceWithCopy(
+void ReplaceWithCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
@@ -685,7 +685,7 @@ void replaceWithCopy(
 #endif
 }
 
-void eliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
+void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
   const auto equally_split = fromQualString("fb::equally_split");
   std::vector<Node*> to_remove;
   DepthFirstGraphNodeIterator graph_it(graph);
@@ -753,7 +753,7 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
 
 } // namespace
 
-void fuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
@@ -833,7 +833,7 @@ void fuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 } // namespace jit
 
-void removeImmutableInputDictLookups(
+void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
   AliasDb db(graph);
@@ -904,7 +904,7 @@ void removeImmutableInputDictLookups(
   marker->destroy();
 }
 
-void useVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
+void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
   // Migration to v2 is still in progress. For now, SR will support
   // both versions of this op.
   UseVariadicOp(
@@ -919,10 +919,10 @@ void useVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
 
 namespace {
 
-void createOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
+void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   for (auto* node : block->nodes()) {
     for (auto* sub_block : node->blocks()) {
-      createOwnedRefsForSpecialValuesHelper(graph, sub_block);
+      CreateOwnedRefsForSpecialValuesHelper(graph, sub_block);
     }
   }
 
@@ -951,7 +951,7 @@ void createOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   }
 }
 
-void forceNonEmptyOutputsHelper(Value* none_value, Block* block) {
+void ForceNonEmptyOutputsHelper(Value* none_value, Block* block) {
   for (auto* node : block->nodes()) {
     bool needs_output = false;
     for (auto* sub_block : node->blocks()) {
@@ -960,7 +960,7 @@ void forceNonEmptyOutputsHelper(Value* none_value, Block* block) {
         needs_output = true;
       }
 
-      forceNonEmptyOutputsHelper(none_value, sub_block);
+      ForceNonEmptyOutputsHelper(none_value, sub_block);
     }
 
     if (needs_output) {
@@ -994,19 +994,19 @@ Node* findOrCreateNoneConstant(Graph& graph) {
 
 } // namespace
 
-void createOwnedRefsForSpecialIValues(Graph& graph) {
-  createOwnedRefsForSpecialValuesHelper(graph, graph.block());
+void CreateOwnedRefsForSpecialValues(Graph& graph) {
+  CreateOwnedRefsForSpecialValuesHelper(graph, graph.block());
 }
 
-void forceNonEmptyOutputs(Graph& graph) {
+void ForceNonEmptyOutputs(Graph& graph) {
   auto* none_node = findOrCreateNoneConstant(graph);
-  forceNonEmptyOutputsHelper(none_node->output(), graph.block());
+  ForceNonEmptyOutputsHelper(none_node->output(), graph.block());
   if (!none_node->hasUses()) {
     none_node->destroy();
   }
 }
 
-void eliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
   auto input_is_constant_list =
       [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
         auto input_opt = toIValue(node->input(input_idx));
@@ -1066,7 +1066,7 @@ Node* maybeUserWithKind(Value* value, c10::Symbol kind) {
 
 } // namespace
 
-void useSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
+void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
   std::vector<Node*> to_erase;
   for (auto* node : graph->nodes()) {
     if (node->kind() != aten::split) {
