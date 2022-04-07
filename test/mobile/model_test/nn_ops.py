@@ -417,9 +417,9 @@ class NNUtilsModule(torch.nn.Module):
         )
 
     def forward(self):
-        a = [torch.tensor([1,2,3]), torch.tensor([3,4])]
+        a = [torch.tensor([1, 2, 3]), torch.tensor([3, 4])]
         b = nn.utils.rnn.pad_sequence(a, batch_first=True)
-        # c = nn.utils.rnn.pack_padded_sequence(b, batch_first=True, lengths=torch.tensor([3,2]))
+        # c = nn.utils.rnn.pack_padded_sequence(b, batch_first=True, lengths=torch.tensor([3, 2]))
         input = torch.randn(2, 50)
         return len(
             self.flatten(input),
