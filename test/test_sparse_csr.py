@@ -51,6 +51,12 @@ _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 binary_functions_with_dense_output = ['mm', 'mv', ]
 binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_functions_with_dense_output, op_db))
 
+UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
+    'abs',
+    'conj_physical',
+    'neg',
+]
+
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
 def _test_addmm_addmv(
@@ -1539,9 +1545,11 @@ class TestSparseCSR(TestCase):
             self.assertIs(actual, sample.input)
             self.assertEqual(actual, expect)
 
-    @unittest.expectedFailure
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
+        if op.name not in UNARY_EWISE_CSR_ALLOW_AUTOGRAD:
+            self.skipTest(f"Skipped! Unary op {op.name} not supported with CSR input and autograd")
+
         samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
@@ -1554,18 +1562,23 @@ class TestSparseCSR(TestCase):
 
             def fn(input):
                 output = op.gradcheck_wrapper(op.get_op(), input, *sample.args, **sample.kwargs)
-                output = output.to_dense()
                 if sample.output_process_fn_grad is not None:
                     return sample.output_process_fn_grad(output)
                 return output
 
-            # NotImplementedError inside gradcheck when computing numerical Jacobian
-            self.assertTrue(torch.autograd.gradcheck(fn, (sparse_input,), fast_mode=False, check_sparse_nnz=True))
-
-            # RuntimeError: Unsupported input layout: SparseCsr
+            # Compute sparse result
             output = fn(sparse_input)
-            output.backward(torch.ones_like(output))
-            assert torch.is_tensor(sparse_input.grad)
+            covector = torch.randn_like(output)
+            output.backward(covector)
+            self.assertTrue(torch.is_tensor(sparse_input.grad))
+            self.assertTrue(sparse_input.grad.is_sparse_csr)
+
+            # Compute dense result and compare with sparse result
+            dense_input = sparse_input.detach().to_dense().requires_grad_(True)
+            dense_output = fn(dense_input)
+            dense_covector = covector.to_dense()
+            dense_output.backward(dense_covector)
+            self.assertEqual(sparse_input.grad, dense_input.grad)
 
     @dtypes(torch.float64)
     def test_autograd_dense_output_addmm(self, device, dtype):
