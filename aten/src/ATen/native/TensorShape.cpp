@@ -1734,7 +1734,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           &dim_indices_offset_counts_per_thread,
           &index_counts,
           &dim_indices,
-          nnz, nnz_grain_size
+          nnz
       ](void) -> Tensor {
         // stores the result
         auto selected_dim_indices = at::empty_like(res_dim_indices);
