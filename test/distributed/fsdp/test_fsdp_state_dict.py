@@ -91,6 +91,19 @@ class TestFSDPStateDict(FSDPTest):
         )
         return model
 
+    def _get_non_fsdp_root_module(self, *fsdp_args, **fsdp_kwargs):
+        class FSDPContainer(nn.Module):
+            def __init__(self, fsdp_1, fsdp_2):
+                super().__init__()
+                self.non_fsdp_lin = nn.Linear(10, 10, bias=False).cuda()
+                self.fsdp_1 = fsdp_1
+                self.fsdp_2 = fsdp_2
+
+        return FSDPContainer(
+            self._get_simple_nested_model(*fsdp_args, **fsdp_kwargs),
+            self._get_simple_nested_model(*fsdp_args, **fsdp_kwargs),
+        )
+
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
         model = FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs)
         return model
@@ -108,6 +121,7 @@ class TestFSDPStateDict(FSDPTest):
         match as expected.
         """
         for model_call in [
+            partial(self._get_non_fsdp_root_module, cpu_offload=cpu_offload),
             partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
             partial(self._get_simple_model, cpu_offload=cpu_offload),
         ]:

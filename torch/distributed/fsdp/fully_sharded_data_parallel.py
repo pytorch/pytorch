@@ -441,6 +441,14 @@ class FullyShardedDataParallel(nn.Module):
             StateDictType.LOCAL_STATE_DICT: self._local_pre_load_state_dict_hook,
             StateDictType.SHARDED_STATE_DICT: self._sharded_pre_load_state_dict_hook,
         }
+        self._register_load_state_dict_post_hook(
+            self._post_load_state_dict_hook, with_module=True,
+        )
+        self._post_load_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: self._full_post_load_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: self._local_post_load_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: self._sharded_post_load_state_dict_hook,
+        }
 
         # Flag to guard against preparing gradients multiple times per backward pass.
         self._pre_backward_hook_has_run = False
@@ -1234,12 +1242,29 @@ class FullyShardedDataParallel(nn.Module):
         with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT):
             return self.state_dict(*args, **kwargs)
 
+    def _full_post_load_state_dict_hook(self) -> None:
+        # We should exit summon_full_params context.
+        assert getattr(self, '_entered_full_param_ctx', None) is not None
+        self._entered_full_param_ctx.__exit__(None, None, None)
+
     def _full_pre_load_state_dict_hook(
         self,
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
         prefix: str,
     ) -> None:
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
+        # We do not expect to be calling pre-hooks twice without post-hook
+        # call in between.
+        assert getattr(self, '_entered_full_param_ctx', None) is None
+        # Note that it needs writeback=True to persist.
+        self._entered_full_param_ctx = self._summon_full_params(
+            recurse=False, writeback=True
+        )
+        self._entered_full_param_ctx.__enter__()
+
+    def _local_post_load_state_dict_hook(self) -> None:
+        pass
+
 
     def _local_pre_load_state_dict_hook(
         self,
@@ -1275,6 +1300,9 @@ class FullyShardedDataParallel(nn.Module):
             load_tensor = F.pad(load_tensor, [0, flat_param.num_padded])
         state_dict[key] = load_tensor
 
+    def _sharded_post_load_state_dict_hook(self) -> None:
+        pass
+
     def _sharded_pre_load_state_dict_hook(
         self,
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
@@ -1300,6 +1328,14 @@ class FullyShardedDataParallel(nn.Module):
             torch.cuda.synchronize()
         # Dispatch into state_dict specific implementation of pre-hook.
         self._pre_load_state_dict_hook_fn[self._state_dict_type](state_dict, prefix)
+
+    @staticmethod
+    def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
+        # Code that is common for all state_dict impls
+        self = cast(FullyShardedDataParallel, module)
+        # Dispatch into state_dict type specific implementation of post-hook for
+        # loading state_dict.
+        self._post_load_state_dict_hook_fn[self._state_dict_type]()
 
     def load_state_dict(
         self,
@@ -1345,15 +1381,7 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
         """
-        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            # Note that it needs writeback=True to persist
-            with self._summon_full_params(writeback=True):
-                return super().load_state_dict(state_dict, *args)
-
-        elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
-            return super().load_state_dict(state_dict, *args)
-        else:
-            raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
+        return super().load_state_dict(state_dict, *args)
 
     def _load_local_state_dict(
         self,
