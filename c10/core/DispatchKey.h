@@ -52,6 +52,7 @@ enum class BackendComponent : uint8_t {
   HIPBit,
   XLABit,
   MLCBit,
+  IPUBit,
   XPUBit,
   HPUBit,
   VEBit,
@@ -395,6 +396,7 @@ enum class DispatchKey : uint16_t {
   // CUDA]
   XLA, // lives out of tree at https://github.com/pytorch/xla
   MLC, // lives out of tree at https://github.com/pytorch/MLCompute
+  IPU, // lives out of tree at https://github.com/graphcore/poptorch
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
@@ -418,6 +420,7 @@ enum class DispatchKey : uint16_t {
   _QuantizedHIP,
   _QuantizedXLA,
   _QuantizedMLC,
+  _QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   _QuantizedHPU,
   _QuantizedVE,
@@ -439,6 +442,7 @@ enum class DispatchKey : uint16_t {
   // [Masquerading as CUDA]
   _SparseXLA,
   _SparseMLC,
+  _SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
   _SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
@@ -459,6 +463,7 @@ enum class DispatchKey : uint16_t {
   _AutogradHIP,
   AutogradXLA,
   AutogradMLC,
+  AutogradIPU,
   AutogradXPU,
   AutogradHPU,
   _AutogradVE,
