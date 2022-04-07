@@ -12,7 +12,6 @@ from .match_utils import (
     MatchAllNode,
 )
 from .pattern_utils import (
-    get_default_fusion_patterns,
     sorted_patterns_dict,
 )
 
