@@ -34,7 +34,7 @@ void where_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_COMPLEX_TYPES(dtype, "where_cuda", [&] {
       gpu_kernel(
         iter,
-        [=] GPU_KERNEL (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+        [=] GPU_LAMBDA (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
   });
