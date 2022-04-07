@@ -242,8 +242,12 @@ class FlatParameter(nn.Parameter):
                 begin += param_numel
                 end += param_numel
                 continue
-            assert 0 <= param_offset.begin < param_numel
-            assert 0 <= param_offset.end < param_numel
+            assert 0 <= param_offset.begin < param_numel, (
+                param_offset.begin, param_numel
+            )
+            assert 0 <= param_offset.end < param_numel, (
+                param_offset.end, param_numel
+            )
             if not found_not_none:
                 begin += param_offset.begin
                 found_not_none = True

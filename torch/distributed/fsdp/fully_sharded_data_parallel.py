@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import functools
+import math
 import traceback
 import warnings
 from contextlib import contextmanager
@@ -30,9 +31,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
+from torch.distributed._shard.sharding_spec import (
+    ChunkShardingSpec,
+    EnumerableShardingSpec,
+)
 from torch.distributed._sharded_tensor import (
     Shard,
     ShardedTensor,
+    ShardMetadata,
     init_from_local_shards,
 )
 from torch.distributed.distributed_c10d import _get_default_group
@@ -43,6 +49,8 @@ from .flatten_params_wrapper import (
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
+    ParamMetadata,
+    ParamOffset,
 )
 from .optim_utils import (
     OPTIM_TARGET_RANK,
@@ -52,7 +60,14 @@ from .optim_utils import (
     _get_param_to_param_id,
     _unflatten_optim_state,
 )
-from .utils import _apply_to_tensors, _replace_by_prefix
+from .shard_utils import (
+    reshard_flatten_tensor,
+    ShardSizeInfo,
+)
+from .utils import (
+    _apply_to_tensors,
+    _replace_by_prefix,
+)
 from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
@@ -218,7 +233,7 @@ class StateDictType(Enum):
                context manager as follows:
                    >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
                    >>>     state = fsdp.state_dict()  # loads local state dict
-            3. [Planned for future support] ``sharded_state_dict/load_sharded_state_dict``: this pair of APIs
+            3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
                return and load sharded, unflattened parameters. The ``state_dict``
                return by ``sharded_state_dict`` can be used by all other parallel
                schemes (resharding may be required).
@@ -1124,12 +1139,179 @@ class FullyShardedDataParallel(nn.Module):
 
         return state_dict
 
+    def _dry_shard_unflattened_params(
+        self, param_metadata: ParamMetadata
+    ) -> List[Optional[ShardSizeInfo]]:
+        r"""
+        Calculates the unflattened parameters sharding information for self.rank.
+        The returned value is a list of ShardSizeInfo. The i-th ShardSizeInfo
+        represents the shard information of i-th parameter stored by self.rank.
+        If i-th element is None, self.rank does not have any shard of i-th parameter.
+        """
+        avg_flat_shard_size = math.ceil(
+            sum(numel for numel in param_metadata.numels) / self.world_size
+        )
+        curr_rank = 0
+        curr_flat_shard_size = 0
+        curr_rank_shard_infos = []
+        shard_size_infos = []
+        for param_index, shape in enumerate(param_metadata.shapes):
+            """Process a new param."""
+            cut_dim = cut_index = 0
+            cut_unit_size = math.prod(shape) // shape[cut_dim]
+            remain_indices = shape[cut_dim]
+            shard_size_infos.append(None)
+            while cut_index < shape[cut_dim]:
+                """ Process a new param shard. """
+                shard_size_info = ShardSizeInfo(list(shape), [], [])
+                cut_count = math.ceil(
+                    (avg_flat_shard_size - curr_flat_shard_size) / cut_unit_size
+                )
+                # Take all remaining elements if this rank is the last rank or if this rank
+                # still has enough budget.
+                if curr_rank == (self.world_size - 1) or remain_indices <= cut_count:
+                    cut_count = remain_indices
+
+                # The current algorithm simply cuts on the first dimension.
+                shard_size_info.shard_offsets = [0 for _ in shape]
+                shard_size_info.shard_offsets[cut_dim] = cut_index
+                shard_size_info.shard_size = shard_size_info.full_size[:]
+                shard_size_info.shard_size[cut_dim] = cut_count
+                # Only preserve the param shard information if the parm shard
+                # belongs to self.rank.
+                if self.rank == curr_rank:
+                    shard_size_infos[-1] = shard_size_info
+                curr_flat_shard_size += cut_count * cut_unit_size
+                cut_index += cut_count
+                remain_indices -= cut_count
+                if curr_flat_shard_size >= avg_flat_shard_size and curr_rank != (
+                    self.world_size - 1
+                ):
+                    curr_rank += 1
+                    curr_flat_shard_size = 0
+
+        return shard_size_infos
+
+    def _reshard_params_to_convex(
+        self, param_metadata: ParamMetadata, flat_param: FlatParameter
+    ):
+        r"""
+        Converts each local shard of FlatParam to the unflattened, sharded
+        parameters. The original shards of FlatParam are created with regard to
+        the flattened, concatenated tensors. Therefore, there is no gurantee
+        each shard can be unflattened to a convex-shape tensor. This API will
+        invoke resharding to guarantee the convex property.
+        """
+        shard_size_infos = self._dry_shard_unflattened_params(param_metadata)
+
+        # Map the unflattened parameters sharding information into the new
+        # flattened tensor.
+        flattened_param_offsets = []
+        for shard_size_info in shard_size_infos:
+            if shard_size_info is None:
+                flattened_param_offsets.append(None)
+                continue
+            begin = (
+                math.prod(shard_size_info.full_size[1:])
+                * shard_size_info.shard_offsets[0]
+            )
+            end = begin + math.prod(shard_size_info.shard_size) - 1
+            flattened_param_offsets.append(ParamOffset(begin, end))
+
+        (
+            new_shard_begin, 
+            new_shard_end
+        ) = flat_param.get_global_offset_from_param_offsets(flattened_param_offsets)
+        # placement is not used, any valid str is acceptable.
+        local_shard_metadata = ShardMetadata(
+            [new_shard_begin],
+            [new_shard_end - new_shard_begin + 1],
+            placement="rank0/cuda:0"
+        )
+        flattened_shard_metadata = [None for _ in range(self.world_size)]
+        dist.all_gather_object(
+            flattened_shard_metadata,
+            local_shard_metadata,
+            group=self.process_group,
+        )
+
+        # Reshard the current sharded, flattened tensor into a new one. All shards
+        # of the new sharded, flattened tensor can be converted to unflattened,
+        # sharded tensors with convext shapes.
+        shard_offset = self.rank * flat_param.numel()
+
+        flat_param_view = (
+            flat_param.narrow(0, 0, flat_param.numel() - flat_param.num_padded)
+            if flat_param.num_padded > 0
+            else flat_param
+        )
+        local_shards = [
+            Shard.from_tensor_and_offsets(flat_param_view, [shard_offset], self.rank)
+        ]
+        sharded_flat_param = init_from_local_shards(
+            local_shards, flat_param.full_numel, process_group=self.process_group
+        )
+        new_flat_param_shard = reshard_flatten_tensor(
+            sharded_flat_param,
+            EnumerableShardingSpec(flattened_shard_metadata),
+            self.world_size,
+            self.rank,
+            self.compute_device,
+            self.process_group,
+        )
+
+        # Construct the sharded, unflatten parameters from the new local shards.
+        new_params = []
+        found_none = False
+        new_flat_shard_offset = 0
+        for shape, shard_size_info in zip(param_metadata.shapes, shard_size_infos):
+            if shard_size_info is None:
+                local_shards = []
+            else:
+                assert list(shape) == list(shard_size_info.full_size)
+                param_shard_size = math.prod(shard_size_info.shard_size)
+                param_shard = new_flat_param_shard.narrow(
+                    0, new_flat_shard_offset, param_shard_size
+                ).view(shard_size_info.shard_size)
+                new_flat_shard_offset += param_shard_size
+                local_shards = [
+                    Shard.from_tensor_and_offsets(
+                        param_shard, shard_size_info.shard_offsets, self.rank
+                    )
+                ]
+            new_params.append(
+                init_from_local_shards(
+                    local_shards, *shape, process_group=self.process_group
+                )
+            )
+        return new_params
+
     def _sharded_post_state_dict_hook(
         self,
         state_dict: "OrderedDict[str, torch.Tensor]",
         prefix: str,
     ) -> "OrderedDict[str, torch.Tensor]":
-        raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518")
+        # Reshard the flat param to unflattend, sharded parameters.
+        flat_param_key = f"{prefix}{FSDP_WRAPPED_MODULE}.{FLAT_PARAM}"
+        state_dict.pop(flat_param_key)
+        flat_param = self.module.flat_param
+        sharded_orig_params = self._reshard_params_to_convex(
+            self.module.flat_param.metadata(), flat_param
+        )
+
+        # Return the unflattended, sharded parameters in the state_dict.
+        orig_param_keys = []
+        for module_name, _, param_name in self.module.flat_param._param_infos:
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            orig_param_keys.append(f"{prefix}{module_name}{param_name}")
+        assert len(orig_param_keys) == len(sharded_orig_params)
+        for key, param in zip(orig_param_keys, sharded_orig_params):
+            state_dict[key] = param
+        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+        return state_dict
 
     @staticmethod
     def _post_state_dict_hook(
@@ -1214,12 +1396,16 @@ class FullyShardedDataParallel(nn.Module):
             # TODO: support offload to CPU in post state dict hook.
             return state_dict
 
-        elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
-            assert getattr(self.module, FLAT_PARAM, None) is not None
-            assert isinstance(self.module.flat_param, FlatParameter)
+        elif self._state_dict_type in (
+            StateDictType.LOCAL_STATE_DICT,
+            StateDictType.SHARDED_STATE_DICT
+        ):
+            if not self.module.flat_param._is_sharded:
+                raise RuntimeError(
+                    "local_state_dict/sharded_state_dict can only be called "
+                    "when parameters are flatten and sharded."
+                )
             return super().state_dict(*args, **kwargs)
-        elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
@@ -1231,6 +1417,16 @@ class FullyShardedDataParallel(nn.Module):
         """
         with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT):
             return self.state_dict(*args, **kwargs)
+
+    def _sharded_state_dict(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Returns the sharded states of the module. Parameters are unflattened and
+        sharded, so the resulting state_dict can be used with any parallelism
+        (e.g., DPP, model parallelism, and single trainer) after a valid
+        resharding.
+        """
+        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+            return self.state_dict(self, *args, **kwargs)
 
     def _full_pre_load_state_dict_hook(
         self,
@@ -1278,7 +1474,32 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
         prefix: str,
     ) -> None:
-        raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
+        if not self.module.flat_param._is_sharded:
+            raise RuntimeError(
+                "load_sharded_state_dict can only be called when parameters "
+                "are flatten and sharded."
+            )
+        params = []
+        param_keys = []
+        for module_name, _, param_name in self.module.flat_param._param_infos:
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            _key_prefix = prefix.replace(f"{FPW_MODULE}.", "").replace(
+                f"{FSDP_WRAPPED_MODULE}.", ""
+            )
+            key = f"{_key_prefix}{module_name}{param_name}"
+            param_keys.append(key)
+            params.append(state_dict[key])
+        flat_param = self._shuffle_sharded_state_dict(
+            params,
+            self.module.flat_param.numel(),
+            self.module.flat_param.num_padded,
+        )
+        for key in param_keys:
+            del state_dict[key]
+        state_dict[f"{prefix}_fsdp_wrapped_module.flat_param"] = flat_param
 
     @staticmethod
     def _pre_load_state_dict_hook(
@@ -1344,11 +1565,10 @@ class FullyShardedDataParallel(nn.Module):
             # Note that it needs writeback=True to persist
             with self.summon_full_params(writeback=True):
                 return super().load_state_dict(state_dict, *args)
-
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
+            return super().load_state_dict(state_dict, strict=False)
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
@@ -1362,6 +1582,70 @@ class FullyShardedDataParallel(nn.Module):
         """
         with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT):
             return self.load_state_dict(state_dict, *args)
+
+    def _shuffle_sharded_state_dict(
+        self, params: List[Any], shard_size: int, num_padded: int
+    ):
+        r"""
+        Given the params passed in `_load_sharded_state_dict`, this API
+        redistributes the params so that each rank get the current local shard
+        for FlatParam. Params should be ShardedTensor.
+        """
+        all_local_tensors = []
+        shard_offset = 0
+        for param in params:
+            local_shards = param.local_shards()
+            if len(local_shards) > 0:
+                local_shard = local_shards[0]
+                all_local_tensors.append(local_shard.tensor)
+                stride = param.size().numel() // param.size()[0]
+                assert stride * param.size()[0] == param.size().numel()
+                shard_offset += local_shard.metadata.shard_offsets[0] * stride
+            elif len(all_local_tensors) == 0:
+                shard_offset += param.size().numel()
+        flat_param_size = sum([param.size().numel() for param in params])
+        assert (
+            math.ceil(flat_param_size / self.world_size) == shard_size
+        ), "Shard size mismatches when doing resharding for load_sharded_state_dict."
+        if all_local_tensors:
+            sharded_flat_param = FlatParameter(all_local_tensors, requires_grad=False)
+            local_shards = [
+                Shard.from_tensor_and_offsets(
+                    sharded_flat_param, [shard_offset], self.rank
+                )
+            ]
+        else:
+            local_shards = []
+        sharded_flat_param = init_from_local_shards(local_shards, flat_param_size)
+        sharding_spec = ChunkShardingSpec(dim=0, placements=["rank0/cuda:0"])
+        new_local_shard = reshard_flatten_tensor(
+            sharded_flat_param,
+            sharding_spec,
+            self.world_size,
+            self.rank,
+            self.compute_device,
+            self.process_group,
+        )
+        if new_local_shard.size().numel() > 0:
+            if num_padded > 0:
+                new_local_shard = F.pad(new_local_shard, [0, num_padded])
+        else:
+            assert num_padded == shard_size
+            new_local_shard = torch.zeros(
+                (shard_size,),
+                dtype=sharded_flat_param.dtype,
+                device=self.compute_device,
+            )
+        assert new_local_shard.numel() == shard_size
+        return new_local_shard
+
+    def _load_sharded_state_dict(
+        self,
+        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        strict: bool = True,
+    ) -> NamedTuple:
+        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+            return self.load_state_dict(state_dict, strict)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         self._lazy_init()

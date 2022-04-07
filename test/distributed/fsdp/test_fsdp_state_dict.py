@@ -50,7 +50,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 INNER_SHAPE = [4, 4]
 OUTER_SHAPE = [4, 5]
 
-_SUPPORTED_STATE_DICT_IMPLS = ["state_dict", "local_state_dict"]
+_SUPPORTED_STATE_DICT_IMPLS = ["state_dict", "local_state_dict", "sharded_state_dict"]
 
 STATE_DICT_MAPPING = {
     "state_dict": StateDictType.FULL_STATE_DICT,
@@ -246,7 +246,7 @@ class TestFSDPStateDict(FSDPTest):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
             self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
-        elif state_dict_type == "state_dict":
+        elif state_dict_type in ("state_dict", "sharded_state_dict"):
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
             local_keys = local_model.state_dict().keys()

@@ -1,6 +1,7 @@
 import bisect
 import itertools
 import math
+from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 import torch
@@ -14,6 +15,15 @@ from torch.distributed._shard.sharding_spec import (
 from torch.distributed.nn.functional import (
     all_to_all_single,
 )
+
+# Represents the metadata information of a shard. This class is tailred for the
+# FSDP use cases. Uses a different naming to avoid conflict with ShardMetadata
+# in torch.distributed._shard.
+@dataclass
+class ShardSizeInfo:
+    full_size: List[int]
+    shard_offsets: List[int]
+    shard_size: List[int]
 
 
 def _sharding_spec_to_offsets(
