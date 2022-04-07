@@ -26,12 +26,13 @@ import collections
 import functools
 import types
 import warnings
-from typing import Dict, Set, List, Any, Callable, Iterable, Type
+from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator
 
 import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
-    _has_torch_function_variadic, _add_docstr)
+    _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
+import contextlib
 
 __all__ = [
     "get_ignored_functions",
@@ -1384,6 +1385,15 @@ def handle_torch_function(
     # overloaded_args already have unique types.
     types = tuple(map(type, overloaded_args))
 
+    # Check for __torch_function__ mode.
+    mode = _get_torch_function_mode()
+    if mode is not None:
+        # NB: unlike on tensors, modes are instances
+        with _no_torch_function_mode():
+            result = mode.__torch_function__(public_api, types, args, kwargs)
+        if result is not NotImplemented:
+            return result
+
     # Call overrides
     for overloaded_arg in overloaded_args:
         # This call needs to become a classmethod call in the future.
@@ -1402,9 +1412,13 @@ def handle_torch_function(
             return result
 
     func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
-    raise TypeError("no implementation found for '{}' on types that implement "
-                    '__torch_function__: {}'
-                    .format(func_name, [type(arg) for arg in overloaded_args]))
+    msg = (
+        "no implementation found for '{}' on types that implement "
+        '__torch_function__: {}'
+    ).format(func_name, [type(arg) for arg in overloaded_args])
+    if mode is not None:
+        msg += f" nor in mode {mode}"
+    raise TypeError(msg)
 
 has_torch_function = _add_docstr(
     _has_torch_function,
@@ -1587,3 +1601,235 @@ def is_tensor_like(inp):
     True
     """
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+
+def _wrap_init(f):
+    undef = object()
+
+    @functools.wraps(f)
+    def wrapped(self, *args, inner=undef, **kwargs):
+        if inner is undef:
+            raise TypeError(
+                "missing inner keyword argument; instead of constructing a TorchModeFunction directly, "
+                "pass the constructor to push_torch_function_mode"
+            )
+        self.inner = inner
+        return f(self, *args, **kwargs)
+    return wrapped
+
+
+def _wrap_torch_function(f):
+    @functools.wraps(f)
+    def wrapped(self, *args, **kwargs):
+        with enable_torch_function_mode(self.inner):
+            return f(self, *args, **kwargs)
+    return wrapped
+
+
+# Implementation note: I had a choice about how much of mode stacks
+# to implement in Python versus in C++.  At time of writing, I did not care
+# too much about implementation efficiency; however, I do care about making it
+# hard for users to implement modes in the wrong way.  In the end, it turned
+# out to be possible to implement mode stacks entirely from userland, with the
+# C++ API providing only _get_torch_function_mode() and
+# _set_torch_function_mode(), so I opted to provide some unsafe C++ bindings and
+# have the bulk of the logic for managing the stack in Python, which helped
+# simplify the C++ API surface.  It would also have been valid to build in the
+# notion of mode stack directly into C++ but in this design it's substantially
+# more difficult to interact with TorchFunctionModeMeta.
+
+
+class TorchFunctionModeMeta(type):
+    """
+    Metaclass for :class:`TorchFunctionMode`; it does two things:
+
+        * Adds an implicit ``inner`` kwarg to ``__init__``, to
+          allow the modes to be chained together to form a stack.
+
+        * Reenables the inner mode, so that by default PyTorch API calls
+          will compositionally proceed to the next mode on the stack.
+
+    The default behavior for the second bullet is important, as it is easy to
+    accidentally write ``__torch_function__`` implementations that are not
+    compositional, and the wrapping here makes the obvious code do the
+    right thing (aka, this is why there is a metaclass).
+    """
+    def __new__(metacls, name, bases, dct):
+        if '__init__' in dct:
+            dct['__init__'] = _wrap_init(dct['__init__'])
+        if '__torch_function__' in dct:
+            dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
+        return super().__new__(metacls, name, bases, dct)
+
+
+class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
+    """
+    A ``TorchFunctionMode`` allows you to override the meaning of all
+    ``__torch_function__`` overrideable functions within a dynamic scope,
+    without having to actually create a tensor subclass or manually
+    monkey-patch functions in the PyTorch API.  Some common situations
+    where you should use a mode:
+
+        * You want to override the meaning of factory functions, or other
+          functions that do not otherwise take a tensor as an argument
+          (these cannot be overridden with tensor subclasses).
+
+        * You want to override the behavior of all functions without needing
+          to wrap your inputs in tensor subclasses; e.g., if you are just
+          interested in logging intermediate computations.
+
+        * You want to control the order of execution of various tensor
+          subclasses explicitly, rather than implicitly via the return of
+          ``NotImplemented``.
+
+    Independent subclasses of :class:`TorchFunctionMode` are compositional:
+    modes can be pushed onto a stack with :func:`push_torch_function_mode`.
+    When you call functions in the PyTorch API inside your
+    ``__torch_function__`` implementation, by default, they will forward on to
+    the next mode on the mode stack.  If you want recursively call back into
+    your current ``__torch_function__`` implementation, either explicitly
+    invoke ``self.__torch_function__(...)``, or use the context manager
+    ``enable_torch_function_mode(self, replace=self.inner)`` to make PyTorch
+    API self-referential (beware of infinite loops, in this case!)
+    """
+    # Force metaclass to generate constructor at the base of the hierarchy
+    def __init__(self):
+        pass
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        raise NotImplementedError()
+
+
+class BaseTorchFunctionMode(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
+
+
+# This is private API as I'm not sure it's possible for users to use this
+# compositionally (easy to discard too many modes).  It is useful for
+# library code though, e.g., in handle_torch_function
+@contextlib.contextmanager
+def _no_torch_function_mode() -> Iterator[None]:
+    old = _get_torch_function_mode()
+    _set_torch_function_mode(None)
+    try:
+        yield
+    finally:
+        _set_torch_function_mode(old)
+
+
+@contextlib.contextmanager
+def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
+    """
+    Context manager that sets the current :class:`TorchFunctionMode`; see the
+    class for more information on what modes are.  This function is
+    non-compositional; if there is already an existing mode, it will raise an
+    error; prefer using :func:`push_torch_function_mode` if your
+    ``__torch_function__`` implementation can defer to an inner mode.
+
+    This function is safe to use inside a ``__torch_function__`` mode handler,
+    as the mode is guaranteed to be disabled in this context.  You can use
+    this context manager to reinstate the mode so that calls to overridable
+    APIs recursively call back into your mode handler (this can easily cause
+    infinite loops, so use with care!)
+
+    Args:
+        mode (:class:`TorchFunctionMode`, Tensor-like class or None): the
+            mode to set as current mode.  If you pass a Tensor-like class,
+            it will be treated as a non-compositional mode with no state,
+            which is convenient if you have an existing tensor subclass
+            that you'd like to apply globally in a quick and dirty way.
+            Passing None will disable the current mode.
+        replace (:class:`TorchFunctionMode` or Tensor-like class): the
+            mode to replace.  You can use this argument to change the mode in
+            a situation where you know what the current mode is (and you are
+            intentionally overwriting it.)  If you don't know what the current
+            mode is, use ``ignore_preexisting`` instead.
+        ignore_preexisting (bool): if True, ignore any preexisting mode
+            and overwrite it with the passed mode.
+    """
+    if not (
+        mode is None or
+        isinstance(mode, TorchFunctionMode) or
+        (isinstance(mode, type) and not issubclass(mode, TorchFunctionMode))
+    ):
+        raise TypeError(
+            "expected to get TorchFunctionMode, Tensor-like class or None as argument, got "
+            f"{type(mode)} instead"
+        )
+    old = _get_torch_function_mode()
+    # Short circuit.  It is valid to reset a mode to yourself, we won't error
+    # here
+    if old is mode:
+        yield
+        return
+    if old is not None and not ignore_preexisting and old is not replace:
+        if isinstance(mode, TorchFunctionMode):
+            help_text = (
+                'Use push_torch_function_mode instead.'
+            )
+        else:
+            help_text = (
+                'If you intended to completely override the preexisting mode, '
+                'pass ignore_preexisting=True.  This can result in unexpected '
+                'behavior; please consider rewriting your mode to be a subclass '
+                'of TorchFunctionMode to make it compositional!'
+            )
+        raise ValueError(
+            'Attempted to enable_torch_function_mode, but there is already an '
+            f'active mode {old}.  {help_text}'
+        )
+    # NB: we don't require TorchFunctionMode since this is intended to also
+    # let you directly pass a Tensor subclass type to "mode-ify" it.
+    if not hasattr(mode, '__torch_function__'):
+        raise ValueError(
+            'The argument passed to enable_torch_function_mode must implement '
+            '__torch_function__'
+        )
+    _set_torch_function_mode(mode)
+    try:
+        yield
+    finally:
+        _set_torch_function_mode(old)
+
+
+@contextlib.contextmanager
+def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
+    """
+    Context manager that pushes a :class:`TorchFunctionMode` onto the current
+    mode stack; see the class for more information on what modes are.  Stacked
+    modes can delegate to each other by invoking the ``__torch_function__``
+    method for the ``inner`` mode.
+
+    Args:
+        ctor: a function that when invoked as ``ctor(inner=...)`` produces
+            a :class:`TorchFunctionMode`.  If your :class:`TorchFunctionMode`
+            has no ``__init__`` implementation, you can simply pass the class
+            itself (e.g., ``push_torch_function_mode(MyMode)``); otherwise,
+            use ``functools.partial`` to partially apply the constructor with all
+            non-inner arguments (e.g.,
+            ``push_torch_function_mode(partial(MyMode, arg))``)
+    """
+    if isinstance(ctor, TorchFunctionMode):
+        raise ValueError(
+            'Expected a TorchFunctionMode constructor function, but got an '
+            f'instance of TorchFunctionMode {ctor}.  Consider using '
+            'enable_torch_function_mode instead.'
+        )
+    old = _get_torch_function_mode()
+    if old is None:
+        inner = BaseTorchFunctionMode(inner=None)
+    else:
+        inner = old
+    mode = ctor(inner=inner)
+    if not isinstance(mode, TorchFunctionMode):
+        raise ValueError(
+            'The callable passed to push_torch_function_mode must return '
+            'a TorchFunctionMode'
+        )
+    _set_torch_function_mode(mode)
+    try:
+        yield mode
+    finally:
+        _set_torch_function_mode(old)
