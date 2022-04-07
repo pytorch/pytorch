@@ -51,6 +51,7 @@ jobs:
           printenv
           echo "${GH}"
           echo "${JOB}"
+          cat ${GITHUB_EVENT_PATH}
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
