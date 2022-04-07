@@ -13407,25 +13407,29 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
         # Compare F.conv2d padding='same' output against manual padding
         # Without strides/dilation
         x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype)
         y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=(2, 2))[..., 1:, :]
         actual = F.conv2d(x, y, padding='same')
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # With dilation
         y = torch.rand(1, 1, 3, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=(2, 3), dilation=2)
         actual = F.conv2d(x, y, padding='same', dilation=2)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # Dilation with asymmetric padding
         y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1:, 1:]
         actual = F.conv2d(x, y, padding='same', dilation=3)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     def test_conv3d_same_padding(self, device):
         # Compare F.conv3d padding='same' output against manual padding
