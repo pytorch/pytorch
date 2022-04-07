@@ -29,10 +29,7 @@ def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
     job_id = int(report.parts[0].rpartition("_")[2])
 
     print(f"Parsing test report: {report}, job id: {job_id}")
-    root = ET.parse(
-        report,
-        ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)),  # type: ignore[call-arg]
-    )
+    root = ET.parse(report)
 
     test_cases = []
     for test_case in root.findall("testcase"):
@@ -63,13 +60,6 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     time = ret.get("time")
     if time:
         ret["time"] = float(time)
-    timestamp = ret.get("timestamp")
-    if timestamp:
-        # Timestamps reported are not valid ISO8601 because they have no timezone. Add one.
-        # This assumes that
-        ret["timestamp"] = (
-            datetime.datetime.fromisoformat(timestamp).astimezone().isoformat()
-        )
 
     # Convert inner and outer text into special dict elements.
     # e.g.
@@ -89,11 +79,7 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     # becomes
     #    {"foo": {"text": "hello"}}
     for child in element:
-        # Special handling for comments.
-        if child.tag is ET.Comment:  # type: ignore[comparison-overlap]
-            ret["comment"] = child.text
-        else:
-            ret[child.tag] = process_xml_element(child)
+        ret[child.tag] = process_xml_element(child)
     return ret
 
 
