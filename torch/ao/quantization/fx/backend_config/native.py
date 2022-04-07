@@ -167,12 +167,12 @@ def _get_linear_configs():
     # 2.1 linear relu fusion
     linear_configs.append({
         "pattern": (torch.nn.ReLU, torch.nn.Linear),
-        "dtype_configs": dtype_configs ,
+        "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     })
     linear_configs.append({
         "pattern": (torch.nn.functional.relu, torch.nn.Linear),
-        "dtype_configs": dtype_configs ,
+        "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     })
 
@@ -181,7 +181,7 @@ def _get_linear_configs():
     linear_configs.append({
         "pattern": nni.LinearReLU,
         "observation_type": observation_type,
-        "dtype_configs": dtype_configs ,
+        "dtype_configs": dtype_configs,
         "root_module": torch.nn.Linear,
         "reference_quantized_module_for_root": nnqr.Linear,
         "qat_module": nniqat.LinearReLU,
@@ -226,7 +226,7 @@ def _get_linear_configs():
     # 3.1 linear bn fusion
     linear_configs.append({
         "pattern": (nn.BatchNorm1d, nn.Linear),
-        "dtype_configs": dtype_configs ,
+        "dtype_configs": dtype_configs,
         "fuser_method": reverse2(fuse_linear_bn)
     })
 
