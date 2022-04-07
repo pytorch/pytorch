@@ -311,15 +311,17 @@ void assertShapeEqual(
   assertShapeEqual(actual->at(0), symb_expected);
 }
 
+const FunctionSchema* getSchema(const char* name) {
+  return &(getOperatorForLiteral(name)->schema());
+}
 } // namespace
 
 TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
   // Figure out how to fetch a function schema
 
   // Ask someone else how to create a function schema / operator in C++
-  std::shared_ptr<Operator> op = getOperatorForLiteral(
+  auto schema = getSchema(
       "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
-  const FunctionSchema* schema = &(op->schema());
 
   c10::IValue const_size_1 = std::vector<int64_t>{64, 56, 56};
   c10::IValue const_size_2 = std::vector<int64_t>{1, 56, 56};
@@ -360,10 +362,7 @@ TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
 
 TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   clear_shape_cache();
-
-  std::shared_ptr<Operator> op =
-      getOperatorForLiteral("aten::mm(Tensor self, Tensor mat2) -> Tensor");
-  const FunctionSchema* schema = &(op->schema());
+  auto schema = getSchema("aten::mm(Tensor self, Tensor mat2) -> Tensor");
 
   c10::IValue const_size_1 = std::vector<int64_t>{64, 56};
   c10::IValue const_size_2 = std::vector<int64_t>{64, 56};
@@ -407,21 +406,51 @@ TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   EXPECT_EQ(get_shape_cache_size(), 4);
 }
 
-TEST(ShapeAnalysisTest, ShapeCacheMultipleFn) {
+TEST(ShapeAnalysisTest, ShapeCacheMultipleFns) {
   clear_shape_cache();
 
-  std::shared_ptr<Operator> op =
-      getOperatorForLiteral("aten::mm(Tensor self, Tensor mat2) -> Tensor");
-  const FunctionSchema* schema = &(op->schema());
+  auto squeeze_op =
+      getSchema("aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)");
+  auto mul_tensor =
+      getSchema("aten::mul.Tensor(Tensor self, Tensor other) -> Tensor");
+  auto mul_scalar =
+      getSchema("aten::mul.Scalar(Tensor self, Scalar other) -> Tensor");
+  auto div_tensor =
+      getSchema("aten::div.Tensor(Tensor self, Tensor other) -> Tensor");
+  auto matmul = getSchema("aten::mm(Tensor self, Tensor mat2) -> Tensor");
 
-  c10::IValue const_size_1 = std::vector<int64_t>{64, 56};
-  c10::IValue const_size_2 = std::vector<int64_t>{64, 56};
-  c10::IValue const_size_3 = std::vector<int64_t>{64, 20};
+  c10::IValue const_int = 1;
 
   c10::optional<int64_t> sym_dim = c10::nullopt;
   c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
-  c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
-  c10::SymbolicShape ss3 = c10::SymbolicShape({sym_dim, sym_dim});
+
+  auto res = calculateSymbolicShapesOnOp(squeeze_op, {ss1, const_int});
+  assertShapeEqual(res, {sym_dim, 64});
+
+  // Show that cache can handle multiple functions
+  res = calculateSymbolicShapesOnOp(mul_scalar, {ss1, const_int});
+  assertShapeEqual(res, {sym_dim, 64});
+  EXPECT_EQ(get_shape_cache_size(), 2);
+
+  res = calculateSymbolicShapesOnOp(mul_tensor, {ss1, ss1});
+  assertShapeEqual(res, {sym_dim, 64});
+  EXPECT_EQ(get_shape_cache_size(), 3);
+
+  // Even when the expected outcome is the same, should not collide
+  res = calculateSymbolicShapesOnOp(div_tensor, {ss1, ss1});
+  assertShapeEqual(res, {sym_dim, 64});
+  EXPECT_EQ(get_shape_cache_size(), 4);
+
+  // Don't lose cached objects
+  res = calculateSymbolicShapesOnOp(mul_scalar, {ss1, const_int});
+  assertShapeEqual(res, {sym_dim, 64});
+  EXPECT_EQ(get_shape_cache_size(), 4);
+
+  res = calculateSymbolicShapesOnOp(matmul, {ss1, ss1});
+  // SSA can infer that sym_dim is 64 as both tensors
+  // use the same sym_dim
+  assertShapeEqual(res, {64, 64});
+  EXPECT_EQ(get_shape_cache_size(), 5);
 }
 
 } // namespace jit
