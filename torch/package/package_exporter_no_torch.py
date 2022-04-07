@@ -183,6 +183,7 @@ class PackageExporter:
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
         zip_file_writer_type: Type[PackageZipFileWriter] = DefaultPackageZipFileWriter,
+        auto_extern_c_extension_modules: bool = False,
     ):
         """
         Create an exporter.
@@ -193,9 +194,12 @@ class PackageExporter:
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
             zip_file_writer_type: A subclass of PackageZipFileWriter which would be used to instantiate the zip file
+            auto_extern_c_extension_modules: Flag whether to enable autoly extern c extension modules (``True``),
+                or disable (``False``).
         """
 
         self.zip_file = zip_file_writer_type(f)
+        self.auto_extern_c_extension_modules = auto_extern_c_extension_modules
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
@@ -516,7 +520,17 @@ class PackageExporter:
             if filename is None:
                 packaging_error = PackagingErrorReason.NO_DUNDER_FILE
             elif filename.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
-                packaging_error = PackagingErrorReason.IS_EXTENSION_MODULE
+                if self.auto_extern_c_extension_modules:
+                    self.extern([module_name])
+                    self.dependency_graph.add_node(
+                        module_name,
+                        action=_ModuleProviderAction.EXTERN,
+                        is_package=is_package,
+                        provided=True,
+                    )
+                    return
+                else:
+                    packaging_error = PackagingErrorReason.IS_EXTENSION_MODULE
             else:
                 packaging_error = PackagingErrorReason.SOURCE_FILE_NOT_FOUND
                 error_context = f"filename: {filename}"

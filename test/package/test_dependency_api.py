@@ -370,6 +370,38 @@ class TestDependencyAPINoTorch(TestDependencyAPI):
         self.PackageImporter = PackageImporterNoTorch
         self.PackageExporter = PackageExporterNoTorch
 
+    @skipIf(IS_WINDOWS, "extension modules have a different file extension on windows")
+    def test_auto_extern_c_extension_modules(self):
+        """auto extern c extionsion modules when c module included in interning package."""
+
+        def create_module(name):
+            spec = importlib.machinery.ModuleSpec(name, self, is_package=False)  # type: ignore[arg-type]
+            module = importlib.util.module_from_spec(spec)
+            ns = module.__dict__
+            ns["__spec__"] = spec
+            ns["__loader__"] = self
+            ns["__file__"] = f"{name}.so"
+            ns["__cached__"] = None
+            return module
+
+        class BrokenImporter(Importer):
+            def __init__(self):
+                self.modules = {
+                    "foo": create_module("foo"),
+                    "bar": create_module("bar"),
+                }
+
+            def import_module(self, module_name):
+                return self.modules[module_name]
+
+        buffer = BytesIO()
+        with self.PackageExporter(
+            buffer, importer=BrokenImporter(), auto_extern_c_extension_modules=True
+        ) as exporter:
+            exporter.intern(["foo", "bar"])
+            exporter.save_source_string("my_module", "import foo; import bar")
+        self.assertListEqual(exporter.externed_modules(), ["bar", "foo"])
+
 
 if __name__ == "__main__":
     run_tests()
