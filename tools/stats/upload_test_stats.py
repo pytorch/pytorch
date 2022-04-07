@@ -57,11 +57,14 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
     # By default, all attributes are strings. Apply a few special conversions
     # here for well-known attributes so that they are the right type in Rockset.
-    if line := ret.get("line"):
+    line = ret.get("line")
+    if line:
         ret["line"] = int(line)
-    if time := ret.get("time"):
+    time = ret.get("time")
+    if time:
         ret["time"] = float(time)
-    if timestamp := ret.get("timestamp"):
+    timestamp = ret.get("timestamp")
+    if timestamp:
         # Timestamps reported are not valid ISO8601 because they have no timezone. Add one.
         # This assumes that
         ret["timestamp"] = (
