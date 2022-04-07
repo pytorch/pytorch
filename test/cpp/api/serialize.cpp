@@ -355,6 +355,7 @@ TEST(SerializeTest, ErrorOnMissingKey) {
   // We want the errors to contain hierarchy information, too.
   ASSERT_THROWS_WITH(
       torch::load(model2, stream), "No such serialized tensor 'a.b.x'");
+  stream.seekg(0, stream.beg);
   ASSERT_THROWS_WITH(
       torch::load(model3, stream), "No such serialized submodule: 'a.x'");
 }
