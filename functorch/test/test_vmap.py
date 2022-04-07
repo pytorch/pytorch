@@ -1420,6 +1420,18 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, 'inplace'):
             vmap(Tensor.copy_, in_dims=(None, 0))(x, y)
 
+    def test_silu_backward(self):
+        test = self._vmap_test
+        device = 'cpu'
+        getter = TensorFactory.randp1
+        B0 = 7
+        op = torch.ops.aten.silu_backward
+
+        # Single vmap: op(Tensor, Tensor)
+        test(op, (getter([B0, 3], device), getter([B0, 3], device)))
+        test(op, (getter([], device), getter([B0], device)), in_dims=(None, 0))
+        test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
+
     @parametrize('case', [
         subtest(_make_case(torch.add), name='add'),
         subtest(_make_case(lambda x, y: x + y), name='add_dunder'),
