@@ -8547,53 +8547,8 @@ Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 add_docstr(torch.scatter_reduce, r"""
 scatter_reduce(input, dim, index, src, reduce, *, include_self=True) -> Tensor
 
-Reduces all values from the :attr:`input` tensor to the indices specified in
-the :attr:`index` tensor. For each value in :attr:`input`, its output index is
-specified by its index in :attr:`input` for ``dimension != dim`` and by the
-corresponding value in :attr:`index` for ``dimension = dim``.
-The applied reduction for non-unique indices is defined via the :attr:`reduce`
-argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
-For non-existing indices, the output will be filled with the identity of the
-applied reduction (1 for :obj:`"prod"` and 0 otherwise).
-
-It is also required that ``index.size(d) == input.size(d)`` for all dimensions ``d``.
-Moreover, if :attr:`output_size` is defined the the values of :attr:`index` must be
-between ``0`` and ``output_size - 1`` inclusive.
-
-
-For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
-
-    out[index[i][j][k]][j][k] += input[i][j][k]  # if dim == 0
-    out[i][index[i][j][k]][k] += input[i][j][k]  # if dim == 1
-    out[i][j][index[i][j][k]] += input[i][j][k]  # if dim == 2
-
-Note:
-    This out-of-place operation is similar to the in-place versions of
-    :meth:`~torch.Tensor.scatter_` and :meth:`~torch.Tensor.scatter_add_`,
-    in which the output tensor is automatically created according to the
-    maximum values in :attr:`index` and filled based on the identity of the
-    applied reduction.
-
-Note:
-    {forward_reproducibility_note}
-
-Args:
-    input (Tensor): the input tensor
-    dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter and reduce.
-    src (Tensor): the source elements to scatter and reduce
-    reduce (str): the reduction operation to apply for non-unique indices
-        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
-
-Example::
-
-    >>> src = torch.tensor([1, 2, 3, 4, 5, 6])
-    >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
-    >>> input = torch.zeros(3)
-    >>> torch.scatter_reduce(input, 0, index, src, reduce="sum")
-    tensor([4, 12, 5])
-
-""".format(**reproducibility_notes))
+Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
+""")
 
 add_docstr(torch.select,
            r"""
@@ -12015,7 +11970,6 @@ Performs the same operation as :func:`torch.view_as_real`, but all output tensor
 are freshly created instead of aliasing the input.
 """)
 
-
 add_docstr(torch.view_as_complex_copy,
            r"""
 Performs the same operation as :func:`torch.view_as_complex`, but all output tensors
@@ -12024,77 +11978,126 @@ are freshly created instead of aliasing the input.
 
 add_docstr(torch.as_strided_copy,
            r"""
-See :func:`torch.Tensor.as_strided_copy`
+Performs the same operation as :func:`torch.as_strided`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.diagonal_copy,
            r"""
-See :func:`torch.Tensor.diagonal_copy`
+Performs the same operation as :func:`torch.diagonal`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
 
-
-add_docstr(torch.narrow_copy,
+add_docstr(torch.expand_copy,
            r"""
-See :func:`torch.Tensor.narrow_copy`
+Performs the same operation as :func:`torch.expand`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.permute_copy,
            r"""
-See :func:`torch.Tensor.permute_copy`
+Performs the same operation as :func:`torch.permute`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.select_copy,
            r"""
-See :func:`torch.Tensor.select_copy`
+Performs the same operation as :func:`torch.select`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.detach_copy,
            r"""
-See :func:`torch.Tensor.detach_copy`
+Performs the same operation as :func:`torch.detach`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.slice_copy,
            r"""
-See :func:`torch.Tensor.slice_copy`
+Performs the same operation as :func:`torch.slice`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.split_copy,
            r"""
-See :func:`torch.Tensor.split_copy`
+Performs the same operation as :func:`torch.split`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
 
+add_docstr(torch.split_with_sizes_copy,
+           r"""
+Performs the same operation as :func:`torch.split_with_sizes`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
 
 add_docstr(torch.squeeze_copy,
            r"""
-See :func:`torch.Tensor.squeeze_copy`
+Performs the same operation as :func:`torch.squeeze`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.t_copy,
            r"""
-See :func:`torch.Tensor.t_copy`
+Performs the same operation as :func:`torch.t`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.transpose_copy,
            r"""
-See :func:`torch.Tensor.transpose_copy`
+Performs the same operation as :func:`torch.transpose`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
-
 
 add_docstr(torch.unsqueeze_copy,
            r"""
-See :func:`torch.Tensor.unsqueeze_copy`
+Performs the same operation as :func:`torch.unsqueeze`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
 
+add_docstr(torch.indices_copy,
+           r"""
+Performs the same operation as :func:`torch.indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.values_copy,
+           r"""
+Performs the same operation as :func:`torch.values`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.crow_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.crow_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.col_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.col_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
 
 add_docstr(torch.unbind_copy,
            r"""
-See :func:`torch.Tensor.unbind_copy`
+Performs the same operation as :func:`torch.unbind`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_copy,
+           r"""
+Performs the same operation as :func:`torch.view`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unfold_copy,
+           r"""
+Performs the same operation as :func:`torch.unfold`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.alias_copy,
+           r"""
+Performs the same operation as :func:`torch.alias`, but all output tensors
+are freshly created instead of aliasing the input.
 """)
