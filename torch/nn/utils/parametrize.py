@@ -573,7 +573,6 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
     else:
         return tensor_name in parametrizations
 
-
 def remove_parametrizations(
     module: Module, tensor_name: str, leave_parametrized: bool = True
 ) -> Module:
@@ -644,3 +643,15 @@ def remove_parametrizations(
         orig_cls = module.__class__.__bases__[0]
         module.__class__ = orig_cls
     return module
+
+def type_before_parametrizations(module: Module) -> type:
+    r"""Returns the module type before parametrizations were applied and if not,
+    then it returns the module type.
+
+     Args:
+        module (nn.Module): module to get type of
+    """
+    if is_parametrized(module):
+        return module.__class__.__bases__[0]
+    else:
+        return type(module)
