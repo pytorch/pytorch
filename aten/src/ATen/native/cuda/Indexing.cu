@@ -1,11 +1,13 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
@@ -13,6 +15,18 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/masked_fill_native.h>
+#endif
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
