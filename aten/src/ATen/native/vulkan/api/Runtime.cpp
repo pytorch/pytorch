@@ -12,8 +12,8 @@ namespace {
 void find_requested_layers_and_extensions(
     std::vector<const char*>& enabled_layers,
     std::vector<const char*>& enabled_extensions,
-    std::vector<const char*>& requested_layers,
-    std::vector<const char*>& requested_extensions) {
+    const std::vector<const char*>& requested_layers,
+    const std::vector<const char*>& requested_extensions) {
 
   // Get supported instance layers
   uint32_t layer_count = 0;
