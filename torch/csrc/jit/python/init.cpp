@@ -80,6 +80,7 @@
 #include <torch/csrc/jit/python/script_init.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
@@ -162,6 +163,28 @@ void initJITBindings(PyObject* module) {
               return c10::nullopt;
             }
             return shapeComputeGraphForSchema(n->schema());
+          })
+      .def(
+          "_jit_decomposition_graph_for_node",
+          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+            if (!n->maybeSchema()) {
+              return c10::nullopt;
+            }
+            return DecompositionGraphForSchema(n->schema());
+          })
+      .def("_jit_pass_run_decompositions", RunDecompositions)
+      // using Node* here instead of Schema because looking up the schema
+      // and passing it in from Python will have a different pointer than the
+      // schema that is globally used for caching
+      .def(
+          "_jit_register_shape_compute_graph_for_node",
+          [](Node* n, std::shared_ptr<Graph>& graph) {
+            if (n->maybeSchema()) {
+              const FunctionSchema& schema = n->schema();
+              RegisterShapeComputeGraphForSchema(schema, graph);
+            } else {
+              TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
+            }
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
@@ -640,6 +663,30 @@ void initJITBindings(PyObject* module) {
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
 #endif
+      .def(
+          "_jit_nvfuser_set_comparison_callback",
+          [](bool run_fallback, py::function fn) {
+            // If set, then the callback will be run after each nvfuser fusion
+            // group is executed. Can be used for testing accuracy.
+            // If run_fallback == True, then a fallback will be run and
+            // unfused_outputs will be nonempty, showing the result if the
+            // fusion didn't take place. Otherwise, unfused_outputs will
+            // be empty
+            auto fn_ptr = std::make_shared<py::function>(fn);
+            auto callback_lambda = [fn_ptr](
+                                       const Stack& fused_outputs,
+                                       const Stack& unfused_outputs,
+                                       const std::string& graph_ir) {
+              py::gil_scoped_acquire acquire{};
+              (*fn_ptr)(fused_outputs, unfused_outputs, graph_ir);
+            };
+            setCudaFuserComparisonCallback({run_fallback, callback_lambda});
+          })
+      .def(
+          "_jit_nvfuser_clear_comparison_callback",
+          []() {
+            setCudaFuserComparisonCallback({false, nullptr});
+          })
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -1305,11 +1352,15 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
-  m.def("parse_ir", [](const std::string& input) {
-    auto graph = std::make_shared<Graph>();
-    parseIR(input, &*graph);
-    return graph;
-  });
+  m.def(
+      "parse_ir",
+      [](const std::string& input, bool parse_tensor_constants) {
+        auto graph = std::make_shared<Graph>();
+        parseIR(input, &*graph, parse_tensor_constants);
+        return graph;
+      },
+      py::arg("input"),
+      py::arg("parse_tensor_constants") = false);
   m.def("parse_schema", parseSchema);
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;

@@ -55,11 +55,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
   return result_tensors;
 }
 
-/*
- * This result of this function cannot be used by itself. The result needs to
- * be wrapped in torch.nested.NestedTensor.
- */
-Tensor _nested_tensor(
+Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,

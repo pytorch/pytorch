@@ -1588,3 +1588,23 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
 
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
+
+TEST(UseSplitAndSqueeze, Fusion) {
+  const auto src = R"IR(
+    graph(%x: Tensor):
+      %dim: int = prim::Constant[value=1]()
+      %split_size: int = prim::Constant[value=1]()
+      %split: Tensor[] = aten::split(%x, %split_size, %dim)
+      %a: Tensor, %b: Tensor = prim::ListUnpack(%split)
+      %c: Tensor = aten::squeeze(%a, %dim)
+      %d: Tensor = aten::squeeze(%b, %dim)
+      return (%c, %d)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  UseSplitAndSqueeze(graph);
+  EXPECT_TRUE(
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));
+}
