@@ -85,7 +85,7 @@ def main(args):
 
     # Handle manual rewrite
     if args.context.upper() == "OPENGL":
-        old_ops = list(op for op in predict_net.op)
+        old_ops = [op for op in predict_net.op]
         del predict_net.op[:]
         for op in old_ops:
             op.type = 'OpenGL{}'.format(op.type)
