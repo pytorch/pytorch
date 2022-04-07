@@ -12,7 +12,7 @@ namespace {
 void find_requested_device_extensions(
     VkPhysicalDevice physical_device,
     std::vector<const char*>& enabled_extensions,
-    std::vector<const char*>& requested_extensions) {
+    const std::vector<const char*>& requested_extensions) {
   uint32_t device_extension_properties_count = 0;
   VK_CHECK(vkEnumerateDeviceExtensionProperties(
       physical_device, nullptr, &device_extension_properties_count, nullptr));
@@ -100,12 +100,16 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
     properties_{},
     memory_properties_{},
     queue_families_{},
-    compute_queue_family_index_{},
+    num_compute_queues_{},
     num_requested_queues_{num_queues},
     queue_usage_{},
     handle_(VK_NULL_HANDLE),
-    queues_{},
-    queue_{VK_NULL_HANDLE} {
+    queues_{} {
+  // This should never happen, but double check to be safe
+  TORCH_CHECK(
+      VK_NULL_HANDLE != physical_handle_,
+      "Pytorch Vulkan Adapter: VK_NULL_HANDLE passed to Adapter constructor!")
+
   vkGetPhysicalDeviceProperties(physical_handle_, &properties_);
   vkGetPhysicalDeviceMemoryProperties(physical_handle_, &memory_properties_);
 
@@ -117,24 +121,17 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
   vkGetPhysicalDeviceQueueFamilyProperties(
       physical_handle_, &queue_family_count, queue_families_.data());
 
-  queue_usage_.reserve(num_requested_queues_);
-  queues_.reserve(num_requested_queues_);
-  // TODO: remove. Enumerate all compute queues when initting device
-  compute_queue_family_index_ = queue_families_.size();
-  for (const auto i : c10::irange(queue_families_.size())) {
-    const VkQueueFamilyProperties& properties = queue_families_[i];
-    // Selecting the first queue family with compute ability
-    if (properties.queueCount > 0 && (properties.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
-      compute_queue_family_index_ = i;
-      break;
+  // Find the total number of compute queues
+  for (const uint32_t family_i : c10::irange(queue_families_.size())) {
+    const VkQueueFamilyProperties& properties = queue_families_[family_i];
+    // Check if this family has compute capability
+    if (properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+      num_compute_queues_ += properties.queueCount;
     }
   }
 
-  if (compute_queue_family_index_ >= queue_families_.size()) {
-    TORCH_WARN(
-        "Pytorch Vulkan Adapter: Device does not have a queue family "
-        "with compute capabilities");
-  }
+  queue_usage_.reserve(num_requested_queues_);
+  queues_.reserve(num_requested_queues_);
 }
 
 Adapter::Adapter(Adapter&& other) noexcept
@@ -142,15 +139,13 @@ Adapter::Adapter(Adapter&& other) noexcept
     properties_(other.properties_),
     memory_properties_(other.memory_properties_),
     queue_families_(std::move(other.queue_families_)),
-    compute_queue_family_index_(other.compute_queue_family_index_),
+    num_compute_queues_(other.num_compute_queues_),
     num_requested_queues_(other.num_requested_queues_),
     queue_usage_(std::move(other.queue_usage_)),
     handle_(other.handle_),
-    queues_(std::move(other.queues_)),
-    queue_(other.queue_) {
+    queues_(std::move(other.queues_)) {
   other.physical_handle_ = VK_NULL_HANDLE;
   other.handle_ = VK_NULL_HANDLE;
-  other.queue_ = VK_NULL_HANDLE;
 }
 
 Adapter::~Adapter() {
@@ -166,10 +161,13 @@ void Adapter::init_device() {
   // simultaneously, so lock the mutex before initializing
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if C10_LIKELY(VK_NULL_HANDLE == physical_handle_) {
-    return;
-  }
-  // This device has already been initialized
+  // Do not initialize the device if there are no compute queues available
+  TORCH_CHECK(
+      num_compute_queues_ > 0,
+      "Pytorch Vulkan Adapter: Cannot initialize Adapter as this device does not "
+      "have any queues that support compute!")
+
+  // This device has already been initialized, no-op
   if C10_LIKELY(VK_NULL_HANDLE != handle_) {
     return;
   }
@@ -212,11 +210,6 @@ void Adapter::init_device() {
       break;
     }
   }
-
-  TORCH_CHECK(
-      queue_create_infos.size() > 0,
-      "Pytorch Vulkan Adapter: Device cannot be initialized as it "
-      "does not have any queue families with compute capabilities.");
 
   //
   // Create the VkDevice
@@ -270,8 +263,6 @@ void Adapter::init_device() {
     // Initial usage value
     queue_usage_.push_back(0);
   }
-
-  vkGetDeviceQueue(handle_, compute_queue_family_index_, 0, &queue_);
 }
 
 Adapter::Queue Adapter::request_queue() {

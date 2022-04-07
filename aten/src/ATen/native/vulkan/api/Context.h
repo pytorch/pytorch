@@ -122,11 +122,11 @@ inline Resource& Context::resource() {
 }
 
 inline VkDevice Context::device() {
-  return runtime()->get_adapter(adapter_i_).device_handle();
+  return device_;
 }
 
 inline VkQueue Context::queue() {
-  return runtime()->get_adapter(adapter_i_).compute_queue();
+  return queue_.handle;
 }
 
 namespace detail {

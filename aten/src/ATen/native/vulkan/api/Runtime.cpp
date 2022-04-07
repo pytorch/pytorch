@@ -203,9 +203,18 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 uint32_t select_first(const std::vector<Adapter>& adapters) {
   if (adapters.size() == 0) {
     TORCH_WARN("Pytorch Vulkan Runtime: no device adapters are available for selection!");
-    return adapters.size();
+    return adapters.size() + 1; // return out of range to signal invalidity
   }
-  return 0;
+
+  // Select the first adapter that has compute capability
+  for (const uint32_t i : c10::irange(adapters.size())) {
+    if (adapters[i].num_compute_queues() > 0) {
+      return i;
+    }
+  }
+
+  TORCH_WARN("Pytorch Vulkan Runtime: no device adapters support compute!");
+  return adapters.size() + 1;
 }
 
 //

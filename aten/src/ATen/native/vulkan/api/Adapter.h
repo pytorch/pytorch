@@ -63,21 +63,20 @@ class Adapter final {
   VkPhysicalDeviceProperties properties_;
   VkPhysicalDeviceMemoryProperties memory_properties_;
   std::vector<VkQueueFamilyProperties> queue_families_;
-  uint32_t compute_queue_family_index_;
   // Queue Management
+  uint32_t num_compute_queues_;
   uint32_t num_requested_queues_;
   using UsageHeuristic = uint32_t; // In case the UsageHeuristic type needs to be changed later
   std::vector<UsageHeuristic> queue_usage_;
   // Handles
   VkDevice handle_;
   std::vector<Queue> queues_;
-  VkQueue queue_;
 
  public:
   VkPhysicalDevice physical_handle() const;
-  uint32_t compute_queue_family_index() const;
   VkDevice device_handle() const;
-  VkQueue compute_queue() const;
+
+  uint32_t num_compute_queues() const;
 
   void init_device();
   Queue request_queue();
@@ -96,7 +95,6 @@ class Adapter final {
 
   std::string stringize() const;
   friend std::ostream& operator<<(std::ostream& os, const Adapter& adapter);
-
 };
 
 //
@@ -107,16 +105,12 @@ inline VkPhysicalDevice Adapter::physical_handle() const {
   return physical_handle_;
 }
 
-inline uint32_t Adapter::compute_queue_family_index() const {
-  return compute_queue_family_index_;
-}
-
 inline VkDevice Adapter::device_handle() const {
   return handle_;
 }
 
-inline VkQueue Adapter::compute_queue() const {
-  return queue_;
+inline uint32_t Adapter::num_compute_queues() const {
+  return num_compute_queues_;
 }
 
 } // namespace api
