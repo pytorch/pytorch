@@ -17,7 +17,8 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
 import torch.utils.cpp_extension
 from autograd_helper import CustomFunction as CustomFunction2
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
-                                 skipIfUnsupportedMaxOpsetVersion)
+                                 skipIfUnsupportedMaxOpsetVersion,
+                                 skipIfNoCuda)
 from verify import verify
 
 import torchvision
@@ -1305,6 +1306,24 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_deduplicate_initializers_torchscript(self):
         self._test_deduplicate_initializers(torchscript=True)
+
+    @skipIfNoCuda
+    def test_deduplicate_initializers_diff_devices(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w_cpu = torch.nn.Parameter(torch.ones(3, device=torch.device("cpu")))
+                self.w_cuda = torch.nn.Parameter(torch.ones(3, device=torch.device("cuda")))
+
+            def forward(self, x, y):
+                return x + self.w_cpu, y + self.w_cuda
+
+        x = torch.randn(3, 3, device=torch.device("cpu"))
+        y = torch.randn(3, 3, device=torch.device("cuda"))
+        f = io.BytesIO()
+        torch.onnx.export(Model(), (x, y), f, opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), {"w_cpu"})
 
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
