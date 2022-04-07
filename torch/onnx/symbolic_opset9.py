@@ -751,6 +751,7 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     opset_before = kwargs.pop("opset_before", None)
     target_float_t = kwargs.pop("target_float_t", "Float")
 
+    args = list(args)
     origin_dtype = args[0].type().scalarType()
     for arg in args:
         # we simply assume all input operands are the same type.
@@ -762,7 +763,7 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     if require_cast:
         for i, arg in enumerate(args):
             if not sym_help._is_fp(arg):
-                args[i] = g.op("Cast", *arg, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
+                args[i] = g.op("Cast", *args, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
 
     self = g.op(op_name, *args, **kwargs)
 
