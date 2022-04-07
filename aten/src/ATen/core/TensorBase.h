@@ -370,6 +370,12 @@ class TORCH_API TensorBase {
     return impl_->is_cuda();
   }
 
+  /// Returns if a `Tensor` has IPU backend.
+  bool is_ipu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ipu();
+  }
+
   /// Returns if a `Tensor` has XPU backend.
   bool is_xpu() const {
     // NB: this is not a native function to avoid dispatching overhead.
