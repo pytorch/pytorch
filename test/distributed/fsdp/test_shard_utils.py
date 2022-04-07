@@ -1,23 +1,24 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-    EnumerableShardingSpec,
-)
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard,
     ShardMetadata,
+)
+from torch.distributed._shard.sharding_spec import (
+    ChunkShardingSpec,
+    EnumerableShardingSpec,
 )
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp.shard_utils import (
     _offsets_to_split_sizes,
     reshard_flatten_tensor,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+
 
 class TestShardUtils(TestCase):
     def test_offsets_to_split_sizes(self):
@@ -112,6 +113,7 @@ class TestShardUtils(TestCase):
             [0, 0, 0, 0, 0, 0],
         ]
         _get_and_check_split_sizes(world_size, in_offsets, out_offsets, in_split_sizes)
+
 
 class TestShardUtilsDistributed(FSDPTest):
     @property
