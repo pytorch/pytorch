@@ -9,7 +9,6 @@ from typing import (
     Callable,
     Dict,
     Generator,
-    List,
     Optional,
     Set,
     Tuple,

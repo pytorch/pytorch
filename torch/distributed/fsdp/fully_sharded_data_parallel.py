@@ -281,7 +281,6 @@ class FullyShardedDataParallel(nn.Module):
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             parameters are ignored by this instance. (Default: ``None``)
-            
     """
 
     def __init__(
