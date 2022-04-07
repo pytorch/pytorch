@@ -6,6 +6,7 @@ import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable
+from torch.nn.utils.parametrize import is_parametrized
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
@@ -326,10 +327,6 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             assert (
                 0 < qrange_len <= 2**31
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
-        if dtype == torch.qint8:
-            quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
-        else:
-            quant_min, quant_max = 0, qrange_len - 1
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
@@ -360,3 +357,16 @@ def _parent_name(target):
         return '', r[0]
     else:
         return r[0], r[1]
+
+def has_no_children_ignoring_parametrizations(module):
+    """
+    Checks if module._modules is empty or
+    if module is a parametrization, checks that module._modules only has
+    the 'parametrizations' module
+    """
+    if len(module._modules) == 0:
+        return True
+    elif is_parametrized(module):
+        return len(module._modules) == 1 and 'parametrizations' in module._modules
+    else:
+        return False
