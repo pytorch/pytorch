@@ -512,6 +512,74 @@ def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor
     return result.coalesce()
 
 
+def _sparse_coo_reduction_helper(op,
+                                 mask_input: Tensor,
+                                 dim_: Tuple[int, ...],
+                                 keepdim: bool,
+                                 reduce: str) -> Tensor:
+    values, indices = mask_input._values(), mask_input._indices()
+    new_values, new_indices = None, None
+    num_sparse_dims = mask_input.sparse_dim()
+    reduced_sparse_dims = []
+    retained_sparse_dims = []
+    reduced_dense_dims = []
+
+    if mask_input.ndim == 0:
+        return mask_input.clone()
+
+    if keepdim:
+        shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
+    else:
+        shape = tuple(mask_input.shape[i] for i in range(mask_input.ndim) if i not in dim_)
+
+    for d in dim_:
+        if d < num_sparse_dims:
+            reduced_sparse_dims.append(d)
+        else:
+            reduced_dense_dims.append(d + 1 - num_sparse_dims)
+
+    if len(reduced_dense_dims) > 0:
+        if reduce == "sum":
+            new_values = op(new_values, dim=dd, keepdim=reduced_dense_dims, dtype=mask_input.dtype)
+        else:
+            for dd in reversed(reduced_dense_dims):
+                new_values = op(new_values, dim=dd, keepdim=bool(keepdim), dtype=mask_input.dtype)
+    else:
+        new_values = values.clone()
+
+    reduce_all_sparse_dims = len(reduced_sparse_dims) == num_sparse_dims
+
+    if (reduce_all_sparse_dims):
+        new_values = op(new_values, dim=0, dtype=mask_input.dtype)
+        if (keepdim):
+            for _ in range(num_sparse_dims):
+                new_values = new_values.unsqueeze(0)
+        return new_values.to_sparse()
+
+    new_indices = indices.clone()
+    if keepdim:
+        new_indices[reduced_sparse_dims, :] = 0
+    else:
+        retained_sparse_dims = [i for i in range(num_sparse_dims) if i not in set(reduced_sparse_dims)]
+        new_indices = new_indices.index_select(0, torch.tensor(retained_sparse_dims).to(mask_input.device))
+
+    if (new_indices.numel() > 0):
+        new_indices, inverse_indices = torch.unique(new_indices, return_inverse=True, dim=1)
+        out_shape = list(new_values.shape)
+        out_shape[0] = new_indices.shape[1]
+        for _ in range(new_values.ndim - 1):
+            inverse_indices = inverse_indices.unsqueeze(-1)
+        scatter_indices = inverse_indices.expand(new_values.shape)
+        # temporary workaround for issue with bfloat16
+        dtype = mask_input.dtype
+        if dtype in {torch.bfloat16}:
+            new_values = new_values.to(torch.float)
+            new_values = new_values.new_empty(out_shape).scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False).to(dtype=dtype)
+        else:
+            new_values = new_values.new_empty(out_shape).scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False)
+    return torch.sparse_coo_tensor(new_indices, new_values, shape, dtype=mask_input.dtype, device=mask_input.device)
+
+
 def _sparse_csr_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
     """Sparse variant of torch.where. Supports sparse CSR tensors.
     """
@@ -694,32 +762,7 @@ def sum(input: Tensor,
         return torch.sum(mask_input, dim_, bool(keepdim), dtype=dtype)
 
     elif input.layout == torch.sparse_coo:
-        if mask_input.ndim == 0:
-            # Workaround https://github.com/pytorch/pytorch/issues/65400
-            dim_ = ()
-
-        result = torch.sparse.sum(mask_input, dim=list(dim_), dtype=dtype)
-        if result.dtype != dtype:
-            # https://github.com/pytorch/pytorch/issues/65392
-            # https://github.com/pytorch/pytorch/pull/66153
-            result = result.to(dtype)
-
-        if result.ndim == 0 and result.layout == torch.strided:
-            result = result.to_sparse()
-
-        if keepdim and mask_input.ndim > 0:
-            # torch.sparse.sum does not support keepdim argument, so,
-            # here we restore the squeezed dimensions
-            if mask_input.dense_dim() > 0:
-                raise NotImplementedError('torch._masked.sum on hybrid COO sparse tensor')
-            indices = result._indices().new_zeros((mask_input.ndim, result._nnz()))
-            original_dims = tuple(i for i in range(mask_input.ndim) if i not in dim_)
-            indices[original_dims, ] = result._indices()
-            shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
-            result = torch.sparse_coo_tensor(indices, result._values(), shape, dtype=result.dtype, device=result.device)
-
-        return result
-
+        return _sparse_coo_reduction_helper(torch.sum, mask_input, dim_, keepdim, 'sum')
     elif input.layout == torch.sparse_csr:
         return torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
     else:
