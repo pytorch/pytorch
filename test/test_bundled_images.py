@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: mobile"]
 
+import numpy
 import torch
 import torch.utils.bundled_inputs
 import io
 import cv2
 from torch.testing._internal.common_utils import TestCase
+
+BAD_IMG_PATH = "caffe2/test/test_img/bad_image.gif"
 
 torch.ops.load_library("//caffe2/torch/fb/operators:decode_bundled_image")
 
@@ -79,3 +82,40 @@ class TestBundledImages(TestCase):
             im2_tensor = torch.ops.fb.image_decode_to_NCHW(byte_tensor, weight, bias)
             self.assertEqual(raw_data.shape, im2_tensor.shape)
             self.assertEqual(raw_data, im2_tensor, atol=0.1, rtol=1e-01)
+
+    def test_decode_bundled_bad_image_or_empty(self):
+        """If the operator fails to decode an image, it returns a
+        0-color-channel image tensor with size 0x0.
+        """
+
+        # Use in TorchScript
+        @torch.jit.script
+        def decode_image(image: torch.Tensor) -> torch.Tensor:
+            return torch.ops.fb.decode_bundled_image_or_empty(image)
+
+        with open(BAD_IMG_PATH, "rb") as f:
+            bad_img_data = f.read()
+            np_data = numpy.frombuffer(bad_img_data, dtype=numpy.uint8)
+            image = decode_image(torch.from_numpy(np_data))
+            # decoding returns a 1x0x0x0 NCHW tensor
+            self.assertTrue(4 == len(image.shape))
+            self.assertTrue(0 == image.numel())
+            n, c, w, h = image.size()
+            self.assertTrue(1 == n)
+            self.assertTrue(0 == c)
+            self.assertTrue(0 == w)
+            self.assertTrue(0 == h)
+
+    def test_decode_bundled_bad_image(self):
+        """If the operator fails to decode an image, it throws an exception."""
+
+        # Use in TorchScript
+        @torch.jit.script
+        def decode_image(image: torch.Tensor) -> torch.Tensor:
+            return torch.ops.fb.decode_bundled_image(image)
+
+        with open(BAD_IMG_PATH, "rb") as f:
+            bad_img_data = f.read()
+            np_data = numpy.frombuffer(bad_img_data, dtype=numpy.uint8)
+            with self.assertRaises(RuntimeError):
+                image = decode_image(torch.from_numpy(np_data))
