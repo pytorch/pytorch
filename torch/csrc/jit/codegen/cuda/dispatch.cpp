@@ -54,6 +54,9 @@ void Val::dispatch(T handler, Val* val) {
         case DataType::Int:
           ptr(handler)->handle(val->as<Int>());
           return;
+        case DataType::ComplexDouble:
+          ptr(handler)->handle(val->as<ComplexDouble>());
+          return;
         default:
           break;
       }
@@ -101,6 +104,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
+    case ExprType::MmaOp:
+      ptr(handler)->handle(expr->as<MmaOp>());
+      return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
       return;
@@ -120,6 +126,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
       return;
+    case ExprType::ViewDtypeOp:
+      ptr(handler)->handle(expr->as<ViewDtypeOp>());
+      return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
       return;
@@ -127,8 +136,11 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
-    case ExprType::Sync:
-      ptr(handler)->handle(expr->as<kir::Sync>());
+    case ExprType::BlockSync:
+      ptr(handler)->handle(expr->as<kir::BlockSync>());
+      return;
+    case ExprType::GridSync:
+      ptr(handler)->handle(expr->as<kir::GridSync>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -150,6 +162,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(handler)->handle(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::AllocateFusedReduction:
+      ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -179,6 +194,9 @@ void Val::constDispatch(T handler, const Val* val) {
           return;
         case DataType::Int:
           ptr(handler)->handle(val->as<Int>());
+          return;
+        case DataType::ComplexDouble:
+          ptr(handler)->handle(val->as<ComplexDouble>());
           return;
         default:
           break;
@@ -227,6 +245,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
+    case ExprType::MmaOp:
+      ptr(handler)->handle(expr->as<MmaOp>());
+      return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
       return;
@@ -246,6 +267,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
       return;
+    case ExprType::ViewDtypeOp:
+      ptr(handler)->handle(expr->as<ViewDtypeOp>());
+      return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
       return;
@@ -253,8 +277,11 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
-    case ExprType::Sync:
-      ptr(handler)->handle(expr->as<kir::Sync>());
+    case ExprType::BlockSync:
+      ptr(handler)->handle(expr->as<kir::BlockSync>());
+      return;
+    case ExprType::GridSync:
+      ptr(handler)->handle(expr->as<kir::GridSync>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -276,6 +303,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(handler)->handle(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::AllocateFusedReduction:
+      ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -316,6 +346,9 @@ void Val::mutatorDispatch(T mutator, Val* val) {
           return;
         case DataType::Int:
           ptr(mutator)->mutate(val->as<Int>());
+          return;
+        case DataType::ComplexDouble:
+          ptr(mutator)->mutate(val->as<ComplexDouble>());
           return;
         default:
           break;
@@ -364,6 +397,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(mutator)->mutate(expr->as<WelfordOp>());
       return;
+    case ExprType::MmaOp:
+      ptr(mutator)->mutate(expr->as<MmaOp>());
+      return;
     case ExprType::BroadcastOp:
       ptr(mutator)->mutate(expr->as<BroadcastOp>());
       return;
@@ -383,6 +419,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::GatherOp:
       ptr(mutator)->mutate(expr->as<GatherOp>());
       return;
+    case ExprType::ViewDtypeOp:
+      ptr(mutator)->mutate(expr->as<ViewDtypeOp>());
+      return;
     case ExprType::ViewOp:
       ptr(mutator)->mutate(expr->as<ViewOp>());
       return;
@@ -390,8 +429,11 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::Allocate:
       ptr(mutator)->mutate(expr->as<kir::Allocate>());
       return;
-    case ExprType::Sync:
-      ptr(mutator)->mutate(expr->as<kir::Sync>());
+    case ExprType::BlockSync:
+      ptr(mutator)->mutate(expr->as<kir::BlockSync>());
+      return;
+    case ExprType::GridSync:
+      ptr(mutator)->mutate(expr->as<kir::GridSync>());
       return;
     case ExprType::InitMagicZero:
       ptr(mutator)->mutate(expr->as<kir::InitMagicZero>());
@@ -413,6 +455,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(mutator)->mutate(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::AllocateFusedReduction:
+      ptr(mutator)->mutate(expr->as<kir::AllocateFusedReduction>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -530,6 +575,9 @@ void OptOutConstDispatch::handle(const Double* stmt) {
 void OptOutConstDispatch::handle(const Int* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ComplexDouble* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const NamedScalar* stmt) {
   unhandled(stmt);
 }
@@ -566,6 +614,9 @@ void OptOutConstDispatch::handle(const ReductionOp* stmt) {
 void OptOutConstDispatch::handle(const WelfordOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const MmaOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const BroadcastOp* stmt) {
   unhandled(stmt);
 }
@@ -585,6 +636,9 @@ void OptOutConstDispatch::handle(const ShiftOp* stmt) {
 void OptOutConstDispatch::handle(const GatherOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ViewDtypeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const ViewOp* stmt) {
   unhandled(stmt);
 }
@@ -592,7 +646,10 @@ void OptOutConstDispatch::handle(const ViewOp* stmt) {
 void OptOutConstDispatch::handle(const kir::Allocate* stmt) {
   unhandled(stmt);
 }
-void OptOutConstDispatch::handle(const kir::Sync* stmt) {
+void OptOutConstDispatch::handle(const kir::BlockSync* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GridSync* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::InitMagicZero* stmt) {
@@ -616,6 +673,9 @@ void OptOutConstDispatch::handle(const kir::GridBroadcast* stmt) {
 void OptOutConstDispatch::handle(const kir::GridWelford* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::AllocateFusedReduction* stmt) {
+  unhandled(stmt);
+}
 
 void OptOutDispatch::unhandled(Statement*) {}
 
@@ -627,6 +687,9 @@ void OptOutDispatch::handle(Double* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(Int* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(ComplexDouble* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(NamedScalar* stmt) {
@@ -665,6 +728,9 @@ void OptOutDispatch::handle(ReductionOp* stmt) {
 void OptOutDispatch::handle(WelfordOp* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(MmaOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(BroadcastOp* stmt) {
   unhandled(stmt);
 }
@@ -684,6 +750,9 @@ void OptOutDispatch::handle(ShiftOp* stmt) {
 void OptOutDispatch::handle(GatherOp* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(ViewDtypeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(ViewOp* stmt) {
   unhandled(stmt);
 }
@@ -691,7 +760,10 @@ void OptOutDispatch::handle(ViewOp* stmt) {
 void OptOutDispatch::handle(kir::Allocate* stmt) {
   unhandled(stmt);
 }
-void OptOutDispatch::handle(kir::Sync* stmt) {
+void OptOutDispatch::handle(kir::BlockSync* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GridSync* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::InitMagicZero* stmt) {
@@ -713,6 +785,9 @@ void OptOutDispatch::handle(kir::GridBroadcast* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridWelford* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::AllocateFusedReduction* stmt) {
   unhandled(stmt);
 }
 
