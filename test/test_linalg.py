@@ -5272,9 +5272,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
 
-    # CUDA 11.6 issue failure https://github.com/pytorch/pytorch/issues/75434
-    @skipCUDAIf(torch.version.cuda is not None
-                and torch.version.cuda.split(".") == ["11", "6"], "There's a bug in CUDA 11.6")
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -5342,9 +5339,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                 torch.linalg.lu_factor(torch.empty(1, 2, 2), pivot=False)
 
-    # CUDA 11.6 issue failure https://github.com/pytorch/pytorch/issues/75434
-    @skipCUDAIf(torch.version.cuda is not None
-                and torch.version.cuda.split(".") == ["11", "6"], "There's a bug in CUDA 11.6")
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -5373,9 +5367,6 @@ class TestLinalg(TestCase):
         if self.device_type == 'cuda':
             run_test(False)
 
-    # CUDA 11.6 issue failure https://github.com/pytorch/pytorch/issues/75434
-    @skipCUDAIf(torch.version.cuda is not None
-                and torch.version.cuda.split(".") == ["11", "6"], "There's a bug in CUDA 11.6")
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.double)
