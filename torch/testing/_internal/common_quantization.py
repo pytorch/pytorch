@@ -715,6 +715,7 @@ class QuantizationTestCase(TestCase):
             """
             for layer_name, result_type_to_data in act_compare_dict.items():
                 for result_type, layer_data in result_type_to_data.items():
+                    print("layer data:", layer_data)
                     self.assertTrue(
                         len(layer_data) == 2,
                         f"Layer {layer_name} does not have exactly two model results.")
