@@ -247,7 +247,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kStrided) {
     return grad.to_dense();
   }
-  AT_ERROR("Unsupported input layout: ", input_.layout());
+  AT_ERROR("to_dense_backward: Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
