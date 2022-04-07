@@ -45,9 +45,9 @@ template_rule(
     out = "third_party/oneDNN/include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "2",
-        "@DNNL_VERSION_MINOR@": "5",
-        "@DNNL_VERSION_PATCH@": "2",
-        "@DNNL_VERSION_HASH@": "a9302535553c73243c632ad3c4c80beec3d19a1e",
+        "@DNNL_VERSION_MINOR@": "6",
+        "@DNNL_VERSION_PATCH@": "0",
+        "@DNNL_VERSION_HASH@": "52b5f107dd9cf10910aaa19cb47f3abf9b349815",
     },
 )
 
