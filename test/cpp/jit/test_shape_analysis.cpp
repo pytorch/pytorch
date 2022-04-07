@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
@@ -293,16 +294,21 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
 
 namespace {
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+void assertShapeEqual(c10::SymbolicShape& a, c10::SymbolicShape& e) {
+  auto a_canonical = CanonicalizedSymbolicShape(a);
+  auto e_canonical = CanonicalizedSymbolicShape(e);
+  EXPECT_EQ(a_canonical, e_canonical);
+}
+
 void assertShapeEqual(
     c10::optional<std::vector<c10::SymbolicShape>>& actual,
     std::vector<c10::optional<int64_t>> expected) {
   ASSERT_TRUE(actual.has_value());
   ASSERT_EQ(actual->size(), 1);
-  auto a_canonical = CanonicalizedSymbolicShape(actual->at(0));
 
   auto symb_expected = c10::SymbolicShape(expected);
-  auto b_canonical = CanonicalizedSymbolicShape(symb_expected);
-  ASSERT_EQ(a_canonical, b_canonical);
+  assertShapeEqual(actual->at(0), symb_expected);
 }
 
 } // namespace
@@ -350,6 +356,46 @@ TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
 
   res = calculateSymbolicShapesOnOp(schema, std::vector<SSAInput>{ss2, ss3});
   assertShapeEqual(res, {sym_dim, 64, sym_dim, sym_dim});
+}
+
+TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
+  clear_shape_cache();
+
+  std::shared_ptr<Operator> op =
+      getOperatorForLiteral("aten::mm(Tensor self, Tensor mat2) -> Tensor");
+  const FunctionSchema* schema = &(op->schema());
+
+  c10::IValue const_size_1 = std::vector<int64_t>{64, 56};
+  c10::IValue const_size_2 = std::vector<int64_t>{64, 56};
+  c10::IValue const_size_3 = std::vector<int64_t>{64, 20};
+
+  c10::optional<int64_t> sym_dim = c10::nullopt;
+  c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
+  c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
+
+  auto res = calculateSymbolicShapesOnOp(schema, {ss1, const_size_1});
+  assertShapeEqual(res, {sym_dim, 56});
+  auto res1_val = res->at(0);
+
+  // The exact same arguments should return the exact same result
+  res = calculateSymbolicShapesOnOp(schema, {ss1, const_size_1});
+  auto res2_val = res->at(0);
+  EXPECT_EQ(res1_val, res2_val);
+  EXPECT_EQ(get_shape_cache_size(), 1);
+
+  // Same shape but different symbols should return same shape
+  // but different symbolic indicies
+  res = calculateSymbolicShapesOnOp(schema, {ss2, const_size_2});
+  auto res3_val = res->at(0);
+
+  assertShapeEqual(res3_val, res2_val);
+  EXPECT_NE(res3_val, res2_val);
+  EXPECT_EQ(get_shape_cache_size(), 1);
+
+  // Different concrete shape should be cached separately
+  res = calculateSymbolicShapesOnOp(schema, {ss1, const_size_2});
+  assertShapeEqual(res, {sym_dim, 20});
+  EXPECT_EQ(get_shape_cache_size(), 2);
 }
 
 } // namespace jit

@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <memory>
@@ -173,6 +174,17 @@ bool symbolicShapeAnalysisTestModeEnabled() {
   return symbolic_shape_analysis_test_mode;
 }
 
+using SSArgument = c10::variant<ShapeArguments, IValue>;
+
+std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
+  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
+    out << *iv;
+  } else {
+    out << c10::get<ShapeArguments>(sa);
+  }
+  return out;
+}
+
 namespace {
 
 bool isListOfInts(const TypePtr& type) {
@@ -243,8 +255,6 @@ c10::SymbolicShape extractListShape(
   return c10::SymbolicShape(output_shape);
 }
 
-} // namespace
-
 // Symbolic Shape Analysis works through iteratively partially evaluating
 // a TorchScript shape compute graph by inputing properties from input
 // Tensors. We can substitute in properties like `len(x)` and `x[1]`
@@ -258,17 +268,6 @@ c10::SymbolicShape extractListShape(
 // deduce that the 4th dimension has the same symbolic shape as inp[3], which
 // means that we do know its concrete value statically but we can asssign sets
 // of tensor dimensions which must be equal at runtime.
-
-using SSArgument = c10::variant<ShapeArguments, IValue>;
-
-std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
-  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
-    out << *iv;
-  } else {
-    out << c10::get<ShapeArguments>(sa);
-  }
-  return out;
-}
 
 struct SymbolicShapeOpAnalyzer {
   std::shared_ptr<Graph> shape_compute_graph_;
@@ -1058,6 +1057,166 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
   }
 }
 
+// SHAPE CACHINHG CODE
+using CanonicalArg = c10::variant<CanonicalizedSymbolicShape, IValue>;
+using CanonicalArgVec = std::vector<CanonicalArg>;
+using CanonicalRet = std::vector<CanonicalizedSymbolicShape>;
+using ShapeCacheKey = std::tuple<c10::OperatorName, CanonicalArgVec>;
+
+CanonicalArgVec cannonicalizeVec(
+    const std::vector<SSAInput>& arg_vec,
+    std::unordered_map<int64_t, int64_t>& ss_map) {
+  CanonicalArgVec canonical_args;
+  canonical_args.reserve(arg_vec.size());
+  for (auto& arg : arg_vec) {
+    if (const IValue* iv = c10::get_if<IValue>(&arg)) {
+      canonical_args.push_back(iv->deepcopy());
+    } else {
+      auto& ss = c10::get<at::SymbolicShape>(arg);
+      canonical_args.emplace_back(CanonicalizedSymbolicShape(ss, ss_map));
+    }
+  }
+  return canonical_args;
+}
+
+std::vector<CanonicalizedSymbolicShape> cannonicalizeVec(
+    const std::vector<at::SymbolicShape>& ret_vec,
+    std::unordered_map<int64_t, int64_t>& ss_map) {
+  std::vector<CanonicalizedSymbolicShape> canonical_rets;
+  canonical_rets.reserve(ret_vec.size());
+  for (auto& ss : ret_vec) {
+    canonical_rets.emplace_back(CanonicalizedSymbolicShape(ss, ss_map));
+  }
+  return canonical_rets;
+}
+
+struct ArgumentsHasher {
+  size_t operator()(const ShapeCacheKey& cacheKey) const {
+    auto& op_name = std::get<0>(cacheKey);
+    auto& arg_vec = std::get<1>(cacheKey);
+
+    // Only need operator name, as the the arguments can disambiguate the
+    // overloads
+    size_t hash_val = c10::hash<c10::OperatorName>()(op_name);
+
+    hash_val = at::hash_combine(std::hash<size_t>{}(arg_vec.size()), hash_val);
+    for (const CanonicalArg& arg : arg_vec) {
+      size_t cur_arg = 0;
+      if (const IValue* iv = c10::get_if<IValue>(&arg)) {
+        // IValue refuses to hash a List
+        if (iv->isList()) {
+          cur_arg = iv->toListRef().size();
+          for (const IValue& iv : iv->toListRef()) {
+            cur_arg = at::hash_combine(cur_arg, IValue::hash(iv));
+          }
+        } else {
+          cur_arg = IValue::hash(iv);
+        }
+      } else {
+        cur_arg = c10::get<CanonicalizedSymbolicShape>(arg).hash();
+      }
+      hash_val = at::hash_combine(hash_val, cur_arg);
+    }
+    return hash_val;
+  }
+};
+
+struct ArgumentsComparer {
+  bool operator()(const ShapeCacheKey& key1, const ShapeCacheKey& key2) const {
+    return key1 == key2;
+  }
+};
+
+using ShapeCache = lazy::Cache<
+    ShapeCacheKey,
+    std::vector<CanonicalizedSymbolicShape>,
+    ArgumentsHasher,
+    ArgumentsComparer>;
+
+std::unique_ptr<ShapeCache> shapeCache = nullptr;
+constexpr size_t kShapeCacheSize = 1024;
+
+ShapeCacheKey get_cache_key(
+    const FunctionSchema* schema,
+    const std::vector<SSAInput>& arg_vec,
+    std::unordered_map<int64_t, int64_t>& ss_map) {
+  CanonicalArgVec canonical_args = cannonicalizeVec(arg_vec, ss_map);
+  return std::make_tuple(schema->operator_name(), canonical_args);
+}
+
+void cache_shape_function(
+    const FunctionSchema* schema,
+    const std::vector<SSAInput>& arg_vec,
+    const std::vector<at::SymbolicShape>& ret_vec) {
+  TORCH_INTERNAL_ASSERT(shapeCache);
+  auto ss_map = std::unordered_map<int64_t, int64_t>();
+  auto cache_key = get_cache_key(schema, arg_vec, ss_map);
+  auto can_ret_vec = std::make_shared<std::vector<CanonicalizedSymbolicShape>>(
+      cannonicalizeVec(ret_vec, ss_map));
+  shapeCache->Add(cache_key, can_ret_vec);
+}
+
+c10::optional<std::vector<at::SymbolicShape>> get_cached_shape_function(
+    const FunctionSchema* schema,
+    const std::vector<SSAInput>& arg_vec) {
+  if (!shapeCache) {
+    shapeCache = std::make_unique<ShapeCache>(kShapeCacheSize);
+  }
+  auto ss_map = std::unordered_map<int64_t, int64_t>();
+  auto cache_key = get_cache_key(schema, arg_vec, ss_map);
+  auto cached_ret_vec = shapeCache->Get(cache_key);
+  if (!cached_ret_vec) {
+    return c10::nullopt;
+  }
+  // Decanonicalize the return values
+  auto inverse_ss_map = std::unordered_map<int64_t, int64_t>();
+  for (auto& ss_val : ss_map) {
+    inverse_ss_map[ss_val.second] = ss_val.first;
+  }
+  std::vector<at::SymbolicShape> ret_vec;
+  for (auto& css : *cached_ret_vec) {
+    ret_vec.emplace_back(css.toSymbolicShape(inverse_ss_map));
+  }
+  return ret_vec;
+}
+
+} // namespace
+
+// Function only to access the cache, used for testing
+TORCH_API void clear_shape_cache() {
+  if (shapeCache) {
+    return shapeCache->Clear();
+  }
+}
+
+TORCH_API size_t get_shape_cache_size() {
+  TORCH_INTERNAL_ASSERT(shapeCache);
+  return shapeCache->Numel();
+}
+
+c10::SymbolicShape CanonicalizedSymbolicShape::toSymbolicShape(
+    std::unordered_map<int64_t, int64_t> inverse_ss_map) const {
+  if (!values_.has_value()) {
+    return c10::SymbolicShape();
+  }
+  std::vector<at::ShapeSymbol> sizes;
+  for (long long cur_val : *values_) {
+    if (cur_val >= 0) {
+      sizes.push_back(at::ShapeSymbol::fromStaticSize(cur_val));
+      continue;
+    }
+    auto res = inverse_ss_map.find(cur_val);
+    if (res != inverse_ss_map.end()) {
+      sizes.push_back(at::ShapeSymbol::fromStaticSize(res->second));
+    } else {
+      auto new_symbol = at::ShapeSymbol::newSymbol();
+      inverse_ss_map.insert({cur_val, new_symbol.value()});
+      sizes.push_back(new_symbol);
+    }
+  }
+  return c10::SymbolicShape(sizes);
+}
+
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   AliasDb db(graph);
   PropagateShapesOnBlock(graph->block(), db);
@@ -1075,6 +1234,10 @@ TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs) {
+  if (auto cached_ret_vec = get_cached_shape_function(schema, inputs)) {
+    return cached_ret_vec;
+  }
+
   std::vector<SSArgument> ssa_args;
   for (auto& arg : inputs) {
     if (const IValue* ival = c10::get_if<IValue>(&arg)) {
@@ -1086,7 +1249,11 @@ calculateSymbolicShapesOnOp(
   }
 
   auto op_analyzer = SymbolicShapeOpAnalyzer(schema);
-  return op_analyzer.run(ssa_args);
+  auto res = op_analyzer.run(ssa_args);
+  if (res.has_value()) {
+    cache_shape_function(schema, inputs, res.value());
+  }
+  return res;
 }
 
 } // namespace jit

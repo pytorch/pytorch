@@ -56,7 +56,7 @@ calculateSymbolicShapesOnOp(
 
 struct TORCH_API CanonicalizedSymbolicShape {
   CanonicalizedSymbolicShape(
-      c10::SymbolicShape& orig_shape,
+      const c10::SymbolicShape& orig_shape,
       std::unordered_map<int64_t, int64_t>& ss_map) {
     init(orig_shape, ss_map);
   }
@@ -66,12 +66,21 @@ struct TORCH_API CanonicalizedSymbolicShape {
     init(orig_shape, new_ssmap);
   }
 
+  size_t hash() const {
+    if (!values_.has_value()) {
+      return 98024139491283;
+    }
+    return c10::hash<std::vector<int64_t>>()(values_.value());
+  }
+
+  c10::SymbolicShape toSymbolicShape(
+      std::unordered_map<int64_t, int64_t> inverse_ss_map) const;
+
  private:
   c10::optional<std::vector<int64_t>> values_;
-  std::vector<bool> is_symbolic_;
 
   void init(
-      c10::SymbolicShape& orig_shape,
+      const c10::SymbolicShape& orig_shape,
       std::unordered_map<int64_t, int64_t>& ss_map) {
     auto sizes = orig_shape.sizes();
     if (!sizes) {
@@ -82,11 +91,9 @@ struct TORCH_API CanonicalizedSymbolicShape {
     int64_t cur_symbolic_index = -(int64_t)ss_map.size() - 1;
     for (auto& cur_shape : *sizes) {
       if (cur_shape.is_static()) {
-        is_symbolic_.emplace_back(false);
         values_->push_back(cur_shape.static_size());
       } else {
         // Check for aliasing
-        is_symbolic_.emplace_back(true);
         auto it = ss_map.find(cur_shape.value());
 
         if (it == ss_map.end()) {
@@ -109,10 +116,12 @@ struct TORCH_API CanonicalizedSymbolicShape {
     if (!a.values_.has_value()) {
       return true;
     }
-    return (
-        a.values_.value() == b.values_.value() &&
-        a.is_symbolic_ == b.is_symbolic_);
+    return a.values_.value() == b.values_.value();
   };
 };
+
+TORCH_API void clear_shape_cache();
+TORCH_API size_t get_shape_cache_size();
+
 } // namespace jit
 } // namespace torch
