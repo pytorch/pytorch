@@ -796,7 +796,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
         # write to S3 to go to Rockset as well
         import uuid
         for flaky_test in flaky_tests:
-            flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
+            # flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
             flaky_test["workflow_id"] = workflow_id
             key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
             obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
