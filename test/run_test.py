@@ -872,7 +872,7 @@ def get_selected_tests(options):
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
-    # these tests failing in CUDA 11.6 temporary disabling them
+    # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if LooseVersion(torch.version.cuda) == "11.6":
         options.exclude.extend(["distributions/test_constraints"])
 
