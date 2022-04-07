@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 
 
 if not dist.is_available():
@@ -56,7 +57,7 @@ def _run_test_summon_full_param_writeback(cls, writeback, modify_outer, *fsdp_ar
         # This sets the local shard value
         p[0] = cls.rank + 2
 
-    with model.summon_full_params(writeback=writeback):
+    with model.summon_full_params(model, writeback=writeback):
         with torch.no_grad():
             p.copy_(torch.zeros_like(p))
 
@@ -137,7 +138,7 @@ class TestSummonFullParams(FSDPTest):
 
         my_shard = torch.clone(next(model.parameters()))
 
-        with model.summon_full_params():
+        with model.summon_full_params(model):
             self.assertEqual(raw_model_size, self.get_model_param_count(model))
             parameters = list(model.parameters())
             all_shards = FlatParameter(parameters, requires_grad=False)
@@ -185,7 +186,7 @@ class TestSummonFullParams(FSDPTest):
             global_inner_numel if recurse or not summon_outer else shard_inner_numel
         )
 
-        with model_to_summon.summon_full_params(recurse=recurse):
+        with model_to_summon.summon_full_params(model_to_summon, recurse=recurse):
             self.assertEqual(expected_outer_numel, outer_param.numel())
             self.assertEqual(expected_inner_numel, inner_param.numel())
 
@@ -197,7 +198,7 @@ class TestSummonFullParams(FSDPTest):
                 self.a = nn.Parameter(torch.zeros(5))
 
             def forward(self, fsdp_module):
-                with fsdp_module.summon_full_params():
+                with fsdp_module.summon_full_params(fsdp_module):
                     pass
 
         model = FSDP(MyModule()).cuda(self.rank)
@@ -213,7 +214,7 @@ class TestSummonFullParams(FSDPTest):
         output = model(torch.ones(2).cuda(self.rank))
 
         def bad_backwards_hook(tensor):
-            with model.summon_full_params():
+            with model.summon_full_params(model):
                 pass
             return None
 
@@ -252,7 +253,7 @@ class TestSummonFullParams(FSDPTest):
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         # similarly summon_full_params should have the same behavior
-        with model.summon_full_params():
+        with model.summon_full_params(model):
             pass
         self.assertEqual(
             outer_full_param_size, outer_param._full_param_padded.storage().size()
@@ -270,7 +271,7 @@ class TestSummonFullParams(FSDPTest):
             # This sets the local shard value
             p[0] = self.rank + 2
 
-        with model.summon_full_params(writeback=True):
+        with model.summon_full_params(model, writeback=True):
             self.assertEqual(1, p.numel())
             with torch.no_grad():
                 p.copy_(torch.zeros_like(p))
@@ -299,7 +300,7 @@ class TestSummonFullParams(FSDPTest):
             else list(local_model.parameters())
         )
 
-        with model.summon_full_params(recurse=True, rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
+        with model.summon_full_params(model, recurse=True, rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             # Below sleep causes failures without stream synchronization in
             # summon_full_params fix.
             torch.cuda._sleep(1000000)
@@ -307,6 +308,29 @@ class TestSummonFullParams(FSDPTest):
             fsdp_params = [p.clone() for p in model.parameters()]
 
         self.assertEqual(fsdp_params, params_to_compare)
+
+    @skip_if_lt_x_gpu(2)
+    def test_summon_from_non_fsdp(self):
+        class FSDPContainer(nn.Module):
+            def __init__(self, fsdp_1, fsdp_2):
+                super().__init__()
+                self.fsdp_1 = fsdp_1
+                self.fsdp_2 = fsdp_2
+
+        model_fsdp = FSDPContainer(
+            FSDP(DeterministicModel(wrap_fsdp=True)),
+            FSDP(DeterministicModel(wrap_fsdp=True))
+        )
+        model_no_fsdp = FSDPContainer(
+            DeterministicModel(wrap_fsdp=False),
+            DeterministicModel(wrap_fsdp=False),
+        )
+
+        params_to_compare = list(model_no_fsdp.parameters())
+        with FullyShardedDataParallel.summon_full_params(model_fsdp):
+            fsdp_params = [p.clone() for p in model_fsdp.parameters()]
+
+        self.assertEqual(params_to_compare, fsdp_params)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
@@ -349,7 +373,7 @@ class TestSummonFullParams(FSDPTest):
             outer_full_param_size, outer_param._full_param_padded.storage().size()
         )
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
-        with model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
+        with model.summon_full_params(model, rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(
             outer_full_param_size, outer_param._full_param_padded.storage().size()
@@ -357,7 +381,7 @@ class TestSummonFullParams(FSDPTest):
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         output.backward()
-        with model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
+        with model.summon_full_params(model, rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(0, outer_param._full_param_padded.storage().size())
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
@@ -378,7 +402,7 @@ class TestSummonFullParams(FSDPTest):
         flattened_param = _get_flat_param()
         self.assertEqual(layer_shape[0] * layer_shape[1] / 2, flattened_param.numel())
 
-        with fsdp_model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
+        with fsdp_model.summon_full_params(fsdp_model, rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             if self.rank == 0 or not rank0_only:
                 self.assertEqual(fsdp_model.weight.shape, model.weight.shape)
                 expected_device = (
@@ -426,7 +450,7 @@ class TestSummonFullParams(FSDPTest):
             if not rank0_only or self.rank == 0 else
             list(p.clone() for p in fsdp_model.parameters())
         )
-        with fsdp_model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only):
+        with fsdp_model.summon_full_params(fsdp_model, rank0_only=rank0_only, writeback=not rank0_only):
             for p1, p2 in itertools.zip_longest(
                 fsdp_model.parameters(), params_to_compare
             ):
@@ -449,7 +473,7 @@ class TestSummonFullParams(FSDPTest):
         )
 
         with self.assertRaisesRegex(ValueError, "is not supported"):
-            with fsdp_model.summon_full_params(rank0_only=True, writeback=True):
+            with fsdp_model.summon_full_params(fsdp_model, rank0_only=True, writeback=True):
                 pass
 
     @skip_if_lt_x_gpu(2)
@@ -470,7 +494,7 @@ class TestSummonFullParams(FSDPTest):
             fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
         )
         model.register_buffer("buffer", torch.ones(1))
-        with fsdp_model.summon_full_params():
+        with fsdp_model.summon_full_params(fsdp_model):
             for call in ["named_parameters", "named_buffers"]:
                 for (n1, p1), (n2, p2) in itertools.zip_longest(
                     getattr(fsdp_model, call)(prefix=prefix, recurse=recurse),
