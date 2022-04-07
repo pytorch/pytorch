@@ -22,7 +22,6 @@ jobs:
   #     docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
 
   upload-test-stats:
-    needs: linux-xenial-py3_7-gcc5_4-build
     runs-on: [self-hosted, linux.2xlarge]
 
     steps:
