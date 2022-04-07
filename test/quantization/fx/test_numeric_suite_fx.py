@@ -1317,7 +1317,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
 
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_op_with_either_fp32_or_int8_input(self):
         """
         Verify that shadowing works with ops which accept either fp32 or
@@ -1336,7 +1335,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M()
         res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),),
-            results_len=2)
+            # Note: shadowing relu by itself is currently not supported,
+            # this test is just testing that it does not crash
+            results_len=0)
 
     def _test_int8_shadows_int8_impl(self, m):
         """
@@ -1856,7 +1857,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mp_shadows_mq(torch.randn(1, 1, 1, 1))
         act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger, 'fp32')
-        self.assertTrue(len(act_compare_dict) == 4)
+        self.assertTrue(len(act_compare_dict) == 3)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
