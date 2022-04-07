@@ -30,8 +30,6 @@ from .qconfig_utils import (
 
 from .quantization_patterns import (
     QuantizeHandler,
-    CustomModuleQuantizeHandler,
-    StandaloneModuleQuantizeHandler,
 )
 
 from .quantization_types import (
@@ -488,8 +486,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     # default (no observer)
     new_arg = arg
 
-    is_standalone_module = qhandler is not None and \
-        isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
     assert qconfig is not None
     if not is_standalone_module:
         # regular flow for most nodes, except standalone modules
@@ -713,8 +710,7 @@ def maybe_insert_output_observer_for_node(
     assert qconfig is not None
     assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
-    is_standalone_module = qhandler is not None and \
-        isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
 
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
     should_insert_observer = dtype not in DO_NOT_OBS_DTYPE_LIST + [torch.float]
@@ -1212,7 +1208,6 @@ def insert_observers_for_model(
                     is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
                         (qhandler is not None and qhandler.is_general_tensor_value_op())
-
                     is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
@@ -1252,7 +1247,7 @@ def insert_observers_for_model(
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
-                            if isinstance(qhandler, CustomModuleQuantizeHandler):
+                            if qhandler is not None and qhandler.is_custom_module():
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)
 
                 else:  # output
@@ -1295,7 +1290,7 @@ def run_prepare_fx_on_standalone_modules(
     ) in matches.items():
         if qhandler is None:
             continue
-        elif not isinstance(qhandler, StandaloneModuleQuantizeHandler):
+        elif not qhandler.is_standalone_module():
             continue
 
         sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
