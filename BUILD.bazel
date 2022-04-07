@@ -96,16 +96,6 @@ generate_aten(
 )
 
 py_library(
-    name = "tools_autograd",
-    srcs = glob(["tools/autograd/*.py"]),
-    data = glob([
-        "tools/autograd/*.yaml",
-        "tools/autograd/templates/*",
-    ]),
-    deps = ["//tools/codegen"],
-)
-
-py_library(
     name = "tools_jit",
     srcs = glob(["tools/jit/*.py"]),
     data = glob(["tools/jit/templates/*"]),
@@ -115,8 +105,8 @@ py_binary(
     name = "generate_code",
     srcs = ["tools/setup_helpers/generate_code.py"],
     deps = [
-        ":tools_autograd",
         ":tools_jit",
+        "//tools/autograd",
     ],
 )
 
