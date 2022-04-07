@@ -331,16 +331,14 @@ class ShardedTensor(object):
             is compatible with CPU.
         """
         # TODO: make this a __torch_function__ op once ShardedTensor becomes a
-        # torch.Tensor subclass
+        # torch.Tensor subclass, see https://github.com/pytorch/pytorch/issues/75402
         if memory_format != torch.preserve_format and \
                 memory_format != torch.contiguous_format:
             raise RuntimeError("Only `torch.contiguous_format` or "
                                "`torch.preserve_format` is supported!")
         all_on_cpu = True
         for meta in self.metadata().shards_metadata:
-            if meta.placement.device().type != "cpu":
-                all_on_cpu = False
-                break
+            all_on_cpu &= (meta.placement.device().type == "cpu")
 
         # if every shard is already on CPU, return the original object
         if all_on_cpu:

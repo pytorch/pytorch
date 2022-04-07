@@ -1502,7 +1502,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         new_st = st.cpu(process_group=gloo_pg)
         # return a copy of orginal st
         self.assertNotEqual(st, new_st)
-        # check the spec is the same
+        # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
         # now it should be ProcessGroupGloo since it's on CPU
@@ -1512,6 +1512,37 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))
         for i, remote_device_after in enumerate(spec_after_move.placements):
             remote_device_before = spec_before_move.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_after.device()), "cpu")
+
+        # ensure metdata also get changed to CPU
+        metas = new_st.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device()), "cpu")
+
+        # Test if a mixed sharded tensor (ShardedTensor with different devices) to cpu
+        mixed_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
+        new_st = st.cpu()
+        # return a copy of orginal st
+        self.assertNotEqual(st, new_st)
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(mixed_spec.dim, spec_after_move.dim)
+        self.assertEqual(len(mixed_spec.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = mixed_spec.placements[i]
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_after.device()), "cpu")
 
