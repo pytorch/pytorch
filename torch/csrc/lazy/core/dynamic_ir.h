@@ -30,12 +30,12 @@ namespace lazy {
  * prevent this from happening, we introduce DimensionNode, a new type
  * of Node that abstracts the operation of getting the dimensions of a
  * Tensor.
- * 
+ *
  * Consider the following example:
  * ```
  * numel = x.shape()[0] * x.shape()[1]
  * ```
- * 
+ *
  * Here, `x.shape()[i]` will be a SizeNode (subclass of DimensionNode),
  * and the multiplication of the two SizeNodes will be represented by
  * a SizeMul (also a subclass of DimensionNode). Through this, we can
@@ -47,7 +47,7 @@ class TORCH_API DimensionNode : public lazy::TsNode {
  public:
   DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
 
-  // N.B. Node doesn't have sizes() so we don't need to override it to 
+  // N.B. Node doesn't have sizes() so we don't need to override it to
   // throw an error
 
   // TODO: Fix this when John lands input shape API. Change

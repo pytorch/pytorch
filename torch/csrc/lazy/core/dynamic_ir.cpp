@@ -4,14 +4,14 @@ namespace torch {
 namespace lazy {
 
 DimensionNode::DimensionNode(OpKind op, OpList operands, hash_t hash_seed):
-  TsNode(op, operands, /*num_outputs=*/1, 
+  TsNode(op, operands, /*num_outputs=*/1,
   /* node_hash */ HashCombine(op.hash(), hash_seed)){}
 
 std::string DimensionNode::ToString() const {
   return "DimensionNode";
 }
 
-SizeNode::SizeNode(Value input, size_t dim): 
+SizeNode::SizeNode(Value input, size_t dim):
     DimensionNode(OpKind{c10::Symbol::fromQualString("aten::size")}, {input}, MHash(dim)),
     dim_(dim) {};
 
