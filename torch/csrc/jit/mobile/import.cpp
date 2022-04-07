@@ -540,6 +540,7 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  in.seekg(0, in.beg);
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::ZipFileFormat: {

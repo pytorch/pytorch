@@ -3213,6 +3213,7 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: mul_
+    SparseCsrCPU, SparseCsrCUDA: mul__scalar_sparse_csr
 
 # multiply, alias for mul
 - func: multiply.Tensor(Tensor self, Tensor other) -> Tensor
@@ -4136,6 +4137,10 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split
+
+- func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
+  variants: function, method
+  device_guard: False
 
 - func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
@@ -6092,15 +6097,15 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   structured_delegate: scatter_reduce.two_out
   variants: function, method
 
-- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce) -> Tensor(a!)
+- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: scatter_reduce.two_out
   variants: method
 
-- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, Tensor(a!) out) -> Tensor(a!)
+- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:

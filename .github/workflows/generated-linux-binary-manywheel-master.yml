@@ -165,7 +165,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: manywheel-py3_7-cuda10_2
           retention-days: 14
@@ -257,7 +257,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_7-cuda10_2
