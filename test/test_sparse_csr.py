@@ -138,6 +138,16 @@ class TestSparseCSR(TestCase):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
+    @onlyCPU
+    def test_csr_stride(self):
+        a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device='cpu', index_dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have strides"):
+            a.stride()
+
+        with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have strides"):
+            a.stride(-1)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_constructor_shape_inference(self, device, dtype):
         crow_indices = [0, 2, 4]

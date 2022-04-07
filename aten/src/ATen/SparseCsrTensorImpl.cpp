@@ -113,4 +113,21 @@ void SparseCsrTensorImpl::set_member_tensors(
   sizes_and_strides_.set_sizes(size);
   refresh_numel();
 }
+
+IntArrayRef SparseCsrTensorImpl::strides() const {
+  TORCH_CHECK(false, "Sparse CSR tensors do not have strides.");
+}
+int64_t SparseCsrTensorImpl::stride(int64_t d) const {
+  TORCH_CHECK(false, "Sparse CSR tensors do not have strides.");
+}
+void SparseCsrTensorImpl::set_size(int64_t dim, int64_t new_size) {
+  TORCH_CHECK(false, "Sparse CSR tensors do not have set_size.");
+}
+void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
+  TORCH_CHECK(false, "Sparse CSR tensors do not have set_stride.");
+}
+void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
+  TORCH_CHECK(false, "Sparse CSR tensors do not have set_storage_offset.");
+}
+
 } // namespace at
