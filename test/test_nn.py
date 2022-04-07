@@ -19484,8 +19484,8 @@ class TestNNDeviceType(NNTestCase):
         atol = 1e-5
         rtol = 1e-7
         if "cuda" in device:
-            atol = 3e-4
-            rtol = 3e-3
+            atol = 1e-3
+            rtol = 1e-2
 
         for batch_first in (False, True):
             def perm_fn(x):
