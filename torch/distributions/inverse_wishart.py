@@ -235,7 +235,7 @@ class InverseWishart(ExponentialFamily):
         # Implemented Sampling using Bartlett decomposition
         noise = _clamp_with_eps(
             self._dist_chi2.rsample(sample_shape).sqrt()
-        ).reciprocal().diag_embed(dim1=-2, dim2=-1)
+        ).diag_embed(dim1=-2, dim2=-1)
 
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
@@ -243,13 +243,13 @@ class InverseWishart(ExponentialFamily):
             dtype=noise.dtype,
             device=noise.device,
         )
-        chol = self._unbroadcasted_scale_tril @ noise
+        chol = torch.linalg.solve_triangular(self._unbroadcasted_scale_tril @ noise, torch.eye(p), upper=False)
         return chol @ chol.transpose(-2, -1)
 
     def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
         r"""
         .. warning::
-            In some cases, sampling algorithn based on Bartlett decomposition may return singular matrix samples.
+            In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.
             Several tries to correct singular samples are performed by default, but it may end up returning
             singular matrix samples. Sigular samples may return `-inf` values in `.log_prob()`.
             In those cases, the user should validate the samples and either fix the value of `df`
