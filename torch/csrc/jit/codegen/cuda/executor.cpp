@@ -13,6 +13,7 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -56,6 +57,18 @@ typedef unsigned long long int uint64_t;
 )";
 }
 
+static const std::string& defineComplexTypes() {
+  static std::string result = std::string(R"ESCAPE(
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define INFINITY POS_INFINITY
+#define NEG_INFINITY __int_as_float(0xff800000)
+#define NAN __int_as_float(0x7fffffff)
+)ESCAPE") +
+      at::cuda::get_traits_string() + at::cuda::get_complex_body_string() +
+      at::cuda::get_cmath_string() + at::cuda::get_complex_math_string();
+  return result;
+}
+
 } // namespace
 
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
@@ -70,7 +83,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
-      executor_utils::kernelPreamble() + kernel + "}\n";
+      defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
@@ -169,12 +182,15 @@ void FusionExecutor::compileFusion(
   c10::DeviceGuard dg(options_.device);
 
   TORCH_INTERNAL_ASSERT(
-      options.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
-  auto properties = at::cuda::getDeviceProperties(options.device.index());
+      options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
+  auto properties = at::cuda::getDeviceProperties(options_.device.index());
   max_device_smem = properties->sharedMemPerBlock;
   warp_size_ = properties->warpSize;
 
-  lowered_ = std::make_unique<GpuLower>(fusion);
+  lowered_ = std::make_unique<GpuLower>(
+      fusion,
+      options_.index_mode == KernelIndexMode::INT64 ? DataType::Int
+                                                    : DataType::Int32);
   const auto kernel = lowered_->kernel();
   fusion_ = lowered_->kernel()->as<Fusion>();
 
@@ -464,8 +480,12 @@ LaunchParams FusionExecutor::computeLaunchParams(
       }
       maximum_value = std::max(maximum_value, *val);
     }
-    expr_eval.bind(p_type, maximum_value);
-    launch_params.bind(maximum_value, p_type);
+    // Protect for size-0 tensors, they still have a value so would prefer to
+    // bind nothing than 0
+    if (maximum_value > 0) {
+      expr_eval.bind(p_type, maximum_value);
+      launch_params.bind(maximum_value, p_type);
+    }
   }
 
   // Re-run the integer machine with all
@@ -552,23 +572,41 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 }
 
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
+    const at::ArrayRef<IValue>& inputs,
     kir::ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
   const auto kernel = lowered_->kernel();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
-  for (const auto i : c10::irange(kernel->outputs().size())) {
-    TORCH_INTERNAL_ASSERT(
-        kernel->outputs()[i]->isA<TensorView>(),
-        "Cannot allocate outputs that are not tensors.");
-    auto output = kernel->outputs()[i]->as<TensorView>();
-    if (alias_indices.count(i) == 0) {
-      outputs.push_back(
-          inferAndAllocOutput(output, expr_eval, options_, false));
+  for (const auto out_i : c10::irange(kernel->outputs().size())) {
+    // Dummy output.
+    if (kernel->outputs()[out_i]->isFusionInput()) {
+      for (auto inp_i : c10::irange(kernel->inputs().size())) {
+        if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
+          TORCH_INTERNAL_ASSERT(
+              inp_i < inputs.size(),
+              "Issue with an input showing up as output, couldn't find input.");
+          TORCH_INTERNAL_ASSERT(
+              inputs[inp_i].isTensor(),
+              "Cannot register a scalar as an output in a fusion.");
+          outputs.push_back(inputs[inp_i].toTensor());
+          break;
+        }
+      }
     } else {
-      // aliasing to inputs, no need to allocate real output
-      outputs.push_back(inferAndAlloc(output, {}, expr_eval, options_, false));
+      TORCH_INTERNAL_ASSERT(
+          kernel->outputs()[out_i]->isA<TensorView>(),
+          "Cannot allocate outputs that are not tensors.");
+      auto output = kernel->outputs()[out_i]->as<TensorView>();
+      if (alias_indices.count(out_i) == 0) {
+        outputs.push_back(
+            inferAndAllocOutput(output, expr_eval, options_, false));
+      } else {
+        // aliasing to inputs, no need to allocate real output
+        outputs.push_back(
+            inferAndAlloc(output, {}, expr_eval, options_, false));
+      }
     }
   }
   return outputs;
@@ -753,7 +791,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
       auto& output_alias_indices = output_alias_indices_entry.get();
 
-      allocated_outputs = allocOutputs(expr_eval, output_alias_indices);
+      allocated_outputs = allocOutputs(inputs, expr_eval, output_alias_indices);
 
       for (const auto& entry : alias_indices) {
         TORCH_INTERNAL_ASSERT(
@@ -826,14 +864,17 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
               << "Inputs:" << std::endl;
     for (const auto& input : inputs) {
       if (input.isTensor()) {
-        std::cout << input.toTensor().scalar_type() << " "
-                  << input.toTensor().sizes() << std::endl;
+        const auto& input_tensor = input.toTensor();
+        std::cout << "  " << input_tensor.scalar_type() << " "
+                  << input.toTensor().sizes()
+                  << " (strides = " << input.toTensor().strides() << ")"
+                  << std::endl;
       }
     }
     std::cout << "Outputs:" << std::endl;
     for (const auto& output : allocated_outputs) {
       std::cout << "  " << output.scalar_type() << " " << output.sizes()
-                << std::endl;
+                << " (strides = " << output.strides() << ")" << std::endl;
     }
     std::cout << "Reduction and semaphore buffers:" << std::endl;
     for (const auto& buffer : global_buffers.buffers) {
