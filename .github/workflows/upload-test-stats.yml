@@ -25,6 +25,7 @@ jobs:
       - run: |
           pip install requests==2.26
           pip install rockset==0.8.3
+          pip install six==1.16.0
 
       - name: Upload test stats
         env:
