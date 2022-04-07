@@ -19,7 +19,8 @@ retry conda install -y \
   ninja \
   typing_extensions \
   dataclasses \
-  pip
+  pip \
+  zipfile
 
 # The torch.hub tests make requests to GitHub.
 #
