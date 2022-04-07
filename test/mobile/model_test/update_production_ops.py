@@ -32,8 +32,4 @@ traced_operators = {x: traced_operators[x] for x in traced_operators if x.split(
 
 out_path = "test/mobile/model_test/model_ops.yaml"
 with open(out_path, "w") as f:
-    yaml.safe_dump({
-        "root_operators": root_operators,
-        "traced_operators": traced_operators,
-        # "kernel_metadata": kernel_metadata
-        }, f)
+    yaml.safe_dump({"root_operators": root_operators}, f)
