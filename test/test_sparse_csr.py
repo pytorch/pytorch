@@ -160,6 +160,10 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Cannot access storage of SparseCsrTensorImpl"):
             a.storage()
 
+    def test_csr_double_to_sparse_csr(self):
+        a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
+        a.to_sparse_csr().to_sparse_csr()
+
     def test_csr_is_contiguous(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
 
