@@ -9,6 +9,12 @@ from torch.package._mangling import (
     get_mangle_prefix,
     is_mangled,
 )
+from torch.package.package_exporter_no_torch import (
+    PackageExporter as PackageExporterNoTorch,
+)
+from torch.package.package_importer_no_torch import (
+    PackageImporter as PackageImporterNoTorch,
+)
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -19,6 +25,11 @@ except ImportError:
 
 
 class TestMangling(PackageTestCase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporter
+        self.PackageExporter = PackageExporter
+
     def test_unique_manglers(self):
         """
         Each mangler instance should generate a unique mangled name for a given input.
@@ -83,11 +94,11 @@ class TestMangling(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = BytesIO()
-        with PackageExporter(f1) as pe:
+        with self.PackageExporter(f1) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
         f1.seek(0)
-        importer1 = PackageImporter(f1)
+        importer1 = self.PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
         f1.seek(0)
         importer2 = PackageImporter(f1)
@@ -106,6 +117,13 @@ class TestMangling(PackageTestCase):
         self.assertEqual(a.demangle(a_mangled), "foo.bar")
         # Since `b` did not mangle this string, demangling should leave it alone.
         self.assertEqual(b.demangle(a_mangled), a_mangled)
+
+
+class TestManglingNoTorch(TestMangling):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporterNoTorch
+        self.PackageExporter = PackageExporterNoTorch
 
 
 if __name__ == "__main__":
