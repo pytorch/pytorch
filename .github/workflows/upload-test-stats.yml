@@ -8,6 +8,7 @@ on:
 
 jobs:
   upload-test-stats:
+    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-18.04
 
     steps:
@@ -21,7 +22,9 @@ jobs:
 
       - uses: actions/setup-python@v3
 
-      - run: pip install requests==2.26
+      - run: |
+          pip install requests==2.26
+          pip install rockset==0.8.3
 
       - name: Upload test stats
         env:
