@@ -33,6 +33,7 @@ from .qconfig_utils import (
 )
 from ..quantization_mappings import DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
 from .backend_config.utils import get_quantized_reference_module_mapping
+from .backend_config import get_native_backend_config_dict
 from .graph_module import (
     QuantizedGraphModule,
     is_observed_module,
@@ -60,6 +61,7 @@ from torch.ao.quantization.quantize import (
 from .lower_to_fbgemm import lower_to_fbgemm
 
 # these are tuples so that they can work with isinstance(module, tuple_of_classes)
+# TODO: get these mappings from backend_config_dict
 FUSED_MODULE_CLASSES = (
     torch.nn.intrinsic.LinearReLU,
     torch.nn.intrinsic.LinearBn1d,
@@ -77,6 +79,7 @@ FLOAT_WEIGHTED_MODULE_CLASSES = (
 
 QAT_MODULE_CLASSES = (
     torch.nn.qat.Linear,
+    torch.nn.qat.Conv1d,
     torch.nn.qat.Conv2d,
     torch.nn.qat.Conv3d,
     torch.nn.intrinsic.qat.LinearReLU,
@@ -727,9 +730,8 @@ def convert(
         "output_quantized_idxs", [])
 
     if backend_config_dict is None:
-        quantized_reference_module_mapping = copy.deepcopy(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS)
-    else:
-        quantized_reference_module_mapping = get_quantized_reference_module_mapping(backend_config_dict)
+        backend_config_dict = get_native_backend_config_dict()
+    quantized_reference_module_mapping = get_quantized_reference_module_mapping(backend_config_dict)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     weighted_module_classes = tuple(quantized_reference_module_mapping.keys())
     statically_quantized_custom_module_nodes: Set[Node] = set()
