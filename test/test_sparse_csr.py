@@ -1599,6 +1599,7 @@ class TestSparseCSR(TestCase):
             # TODO: Remove detach once we have autograd support for CSR input
             a = sample.args[0].to_sparse_csr().detach()
 
+            # This path tests the autograd path wrt dense inputs
             for addmm in [torch.addmm, torch.sparse.addmm]:
 
                 def fn(c, b):
@@ -1613,6 +1614,35 @@ class TestSparseCSR(TestCase):
                 c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
                 b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
                 self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+
+            # Now test the autograd path wrt sparse inputs
+            # TODO: torch.sparse.addmm backward is not implemented for CSR
+            for reverse in [True, False]:
+                c, b = sample.input, sample.args[1]
+                if reverse and a.shape != b.shape:
+                    continue
+                def fn(a):
+                    inputs = (c, b, a) if reverse else (c, a, b)
+                    output = torch.addmm(*inputs, **sample.kwargs)
+                    if sample.output_process_fn_grad is not None:
+                        return sample.output_process_fn_grad(output)
+                    return output
+
+                # gradcheck doesn't work for sparse CSR yet, compare against dense path
+                # Compute sparse result
+                a.requires_grad_(True)
+                output = fn(a)
+                covector = torch.randn_like(output)
+                output.backward(covector)
+                self.assertTrue(torch.is_tensor(a.grad))
+                self.assertTrue(a.grad.is_sparse_csr)
+
+                # Compute dense result and compare with sparse result
+                dense_a = a.detach().to_dense().requires_grad_(True)
+                dense_output = fn(dense_a)
+                dense_covector = covector.to_dense()
+                dense_output.backward(dense_covector)
+                self.assertEqual(a.grad, dense_a.grad)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMklSparse
