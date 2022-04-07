@@ -234,7 +234,7 @@ class GenLazyNativeFuncDefinition:
         meta_str += f"""
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
-        # Calculating which dimmensions are symbolic
+        # Calculating which dimensions are symbolic
         func_schema_str = "aten::" + str(func.func)
         meta_str += f"""
         if(symbolicShapeEnabled()){{
