@@ -87,9 +87,8 @@ def time_cpu(fn, inputs, test_runs):
     e = time.perf_counter()
     return (e - s) / test_runs
 
-
-# TODO add support for timing on CPU
 def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
+    torch.jit._state._python_cu.drop_all_functions()
     graph, _ = load_graph_and_inputs(ir)
     for _ in range(warmup_runs):
         graph(*inputs)
