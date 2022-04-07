@@ -559,7 +559,10 @@ std::vector<Expr*> groupExprPrintSorting(const std::vector<Expr*>& exprs) {
   std::unordered_set<Expr*> exprs_to_print_set(exprs.begin(), exprs.end());
   std::unordered_set<Expr*> exprs_visited;
   std::vector<Expr*> sorted_list;
-  while (sorted_list.size() != exprs_to_print.size()) {
+  while (!std::all_of(
+      exprs_to_print.begin(),
+      exprs_to_print.end(),
+      [&exprs_visited](auto expr) { return exprs_visited.count(expr); })) {
     bool expr_added_to_sorted_list = false;
     for (auto expr : exprs_to_print) {
       if (!exprs_visited.count(expr)) {
@@ -2622,7 +2625,8 @@ void SegmentCandidateFinder::findSegments() {
     while (!to_visit.empty()) {
       auto expr = to_visit.front();
       to_visit.pop_front();
-      if (expr->getExprType().value() != ExprType::UnaryOp) {
+      if (expr->getExprType().value() != ExprType::UnaryOp ||
+          expr->output(0)->isFusionOutput()) {
         continue;
       }
 
