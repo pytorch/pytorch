@@ -1,0 +1,34 @@
+name: Upload test stats
+
+on:
+  workflow_run:
+    workflows: [pull, trunk, periodic]
+    types:
+      - completed
+
+jobs:
+  upload-test-stats:
+    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-18.04
+
+    steps:
+      - name: Print workflow information
+        env:
+          TRIGGERING_WORKFLOW: ${{ toJSON(github.event.workflow_run) }}
+        run: echo "${TRIGGERING_WORKFLOW}"
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - uses: actions/setup-python@v3
+
+      - run: |
+          pip install requests==2.26
+          pip install rockset==0.8.3
+          pip install boto3==1.19.12
+          pip install six==1.16.0
+
+      - name: Upload test stats
+        env:
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python tools/stats/upload_test_stats.py --workflow-run-id "${WORKFLOW_RUN_ID}"

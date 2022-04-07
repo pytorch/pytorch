@@ -809,7 +809,7 @@ c10::IValue StaticModule::operator()(
 
 BlockRunner::BlockRunner(
     const StaticModule& sm,
-    std::vector<IValue>& values,
+    IValue* values,
     Block* block,
     bool is_root_block)
     : static_module_(sm),
@@ -823,9 +823,8 @@ BlockRunner::BlockRunner(
           is_root_block_ && sm.opts().manage_output_tensors),
       values_(values) {
   nodes_.reserve(block_info_.nodes().size());
-  IValue* values_data = values_.data();
   for (auto& pre_pnode : block_info_.nodes()) {
-    nodes_.emplace_back(pre_pnode, values_data);
+    nodes_.emplace_back(pre_pnode, values_);
   }
 
   for (auto index : block_info_.block_output_indices()) {
@@ -844,7 +843,7 @@ BlockRunner::BlockRunner(
     block_runners->reserve(num_blocks);
 
     for (auto* b : blocks) {
-      block_runners->emplace_back(sm, values, b);
+      block_runners->emplace_back(sm, values_, b);
     }
     pnode.set_block_runners(std::move(block_runners));
   }
@@ -2003,11 +2002,11 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
   }
 }
 
-StaticRuntime::StaticRuntime(const StaticModule& sm) {
-  values_.resize(sm.value_buffer_size());
-  std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
+StaticRuntime::StaticRuntime(const StaticModule& sm)
+    : values_(sm.value_buffer_size()) {
+  std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
   block_ = std::make_unique<BlockRunner>(
-      sm, values_, sm.root_block(), /*is_root_block*/ true);
+      sm, values_.data(), sm.root_block(), /*is_root_block*/ true);
   ;
 }
 
