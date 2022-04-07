@@ -3434,7 +3434,9 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, output_shape)
 
-        has_inferred_dimension = any([dim == -1 for dim in output_shape])
+        # TODO: revert disabled aten::view
+        # has_inferred_dimension = any([dim == -1 for dim in output_shape])
+        has_inferred_dimension = True
         if has_inferred_dimension:
             # prohibit fusing when view_shape contains an inferred dimension
             self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
@@ -3621,8 +3623,11 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x)
-        self.assertGraphContains(graph, FUSION_GUARD)
-        self.assertGraphContains(graph, 'prim::view_copy', True)
+        # TODO: revert disabled aten::view
+        # self.assertGraphContains(graph, FUSION_GUARD)
+        # self.assertGraphContains(graph, 'prim::view_copy', True)
+        self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
+        self.assertGraphContainsExactly(graph, 'prim::view_copy', 0, True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -4106,7 +4111,9 @@ class TestCudaFuser(JitTestCase):
                 jit_o = t_jit(x, w)
             o = t(x, w)
             self.assertEqual(jit_o, o)
-            self.assertGraphContainsExactly(t_jit.graph_for(x, w), FUSION_GUARD, 2, consider_subgraphs=True)
+            # TODO: revert disabled aten::view
+            # self.assertGraphContainsExactly(t_jit.graph_for(x, w), FUSION_GUARD, 2, consider_subgraphs=True)
+            self.assertGraphContainsExactly(t_jit.graph_for(x, w), FUSION_GUARD, 0, consider_subgraphs=True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
