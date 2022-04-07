@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, cast
 import random
 import torch
 import time
@@ -32,6 +32,10 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     stride = inp_type.strides()
     device = inp_type.device()
     dtype = inp_type.dtype()
+    assert size is not None
+    assert stride is not None
+    assert device is not None
+    assert dtype is not None
     return torch.empty_strided(size=size, stride=stride, device=device, dtype=dtype)
 
 def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
@@ -44,7 +48,8 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
         elif isinstance(inp.type(), torch._C.IntType):
             inputs.append(random.randint(1, 100))
         elif isinstance(inp.type(), torch._C.TensorType):
-            inputs.append(make_tensor_from_type(inp.type()))
+            tensorType = cast(torch._C.TensorType, inp.type())
+            inputs.append(make_tensor_from_type(tensorType))
         else:
             raise NotImplementedError(f"A default value is not implemented for type {inp.type()}")
 
