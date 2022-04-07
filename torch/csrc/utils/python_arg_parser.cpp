@@ -3,10 +3,13 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <ATen/ATen.h>
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/TracerMode.h>
 #include <c10/util/irange.h>
 
@@ -183,11 +186,19 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
   return args_;
 }
 
+// TODO: I'm not sure if I should call this __torch_function__ or
+// torch_function.  The former makes it easier to take an existing
+// Tensor-like __torch_function__ object and turn it into a mode;
+// but in general modes don't have to be Tensor-like (and we will
+// improperly accept mode objects as arguments when they shouldn't
+// be passed around in this way).
+const char* torch_function_mode_name = "__torch_function__";
+
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* kwargs, PyObject* torch_api, const std::string& module_name) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
-  return handle_torch_function_no_python_arg_parser({py::handle(self)}, args_.ptr(), kwargs, func_name.c_str(), torch_api_function.ptr(), module_name.c_str(), "__torch_function__");
+  return handle_torch_function_no_python_arg_parser({py::handle(self)}, args_.ptr(), kwargs, func_name.c_str(), torch_api_function.ptr(), module_name.c_str(), TorchFunctionName::TorchFunction);
 }
 
 // Note: [Overloaded args]
@@ -206,8 +217,28 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
 }
 
 // See Note: [Overloaded args] for what they hold
-auto handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
+auto handle_torch_function_no_python_arg_parser(
+    at::ArrayRef<py::handle> overloaded_args,
+    PyObject* args,
+    PyObject* kwargs,
+    const char* func_name,
+    PyObject* torch_api_function,
+    const char* module_name,
+    TorchFunctionName torch_function_name) -> PyObject* {
+  const char* torch_function_name_str = nullptr;
+  switch (torch_function_name) {
+    case TorchFunctionName::TorchFunction:
+      torch_function_name_str = "__torch_function__";
+      break;
+    case TorchFunctionName::TorchDispatch:
+      torch_function_name_str = "__torch_dispatch__";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(0, static_cast<int>(torch_function_name));
+  }
   // overloaded_args already all have unique types
+  // nb: modes don't go in the overloaded types list, as they are not
+  // necessarily types
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(overloaded_args.size());
   for (auto &arg : overloaded_args) {
@@ -215,21 +246,61 @@ auto handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloa
   }
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
-  for (auto &arg : overloaded_args) {
-    // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), torch_function_name);
-
-    // See https://github.com/pytorch/pytorch/issues/63767
-    if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg)) {
-      TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
-                 "will be an error in future, please define it as a classmethod.");
+  PyObject* mode_obj = nullptr;
+  if (torch_function_name == TorchFunctionName::TorchFunction) {
+    const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
+    if (maybe_mode) {
+      mode_obj = maybe_mode->ptr(getPyInterpreter());
+      TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+      TORCH_INTERNAL_ASSERT(args != nullptr);
+      // Disable mode on the inside; this makes for a more user-friendly
+      // experience if you try to, e.g., print your tensors.
+      torch::overrides::no_torch_function_mode g;
+      // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
+      // because the nullptr terminates the argument list ick ick ick.
+      if (kwargs == nullptr) {
+        ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+            mode_obj, torch_function_mode_name, "OOO", torch_api_function, py_types.ptr(), args));
+      } else {
+        ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+            mode_obj,
+            torch_function_mode_name,
+            "OOOO",
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs));
+      }
+      if (ret.ptr() == nullptr) {
+        throw python_error();
+      }
     }
+  }
+  if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
+    for (auto& arg : overloaded_args) {
+      // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
+      py::object torch_function =
+          PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
 
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function, py_types.ptr(), args, kwargs, NULL));
-    if (ret.ptr() != Py_NotImplemented) {
-      // Return the reference to the result. This also covers the case where ret
-      // is NULL and __torch_function__ raised an exception, which we throw below
-      break;
+      // See https://github.com/pytorch/pytorch/issues/63767
+      if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg)) {
+        TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
+                   "will be an error in future, please define it as a classmethod.");
+      }
+
+      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+          torch_function.ptr(),
+          torch_api_function,
+          py_types.ptr(),
+          args,
+          kwargs,
+          NULL));
+      if (ret.ptr() != Py_NotImplemented) {
+        // Return the reference to the result. This also covers the case where
+        // ret is NULL and __torch_function__/__torch_dispatch raised an
+        // exception, which we throw below
+        break;
+      }
     }
   }
   if (ret.ptr() == nullptr) {
@@ -242,15 +313,24 @@ auto handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloa
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
     ss << "no implementation found for '" << module_name << "." << func_name
-       << "' on types that implement " << torch_function_name << ": [";
+       << "' on types that implement " << torch_function_name_str << ": [";
     for (auto &arg : overloaded_args) {
-      ss << PyObject_Repr(get_type_of_overloaded_arg(arg.ptr()));
+      ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
       if (!arg.is(overloaded_args.back())) {
         ss << ", ";
       }
-      else {
-        ss << "]";
-      }
+    }
+    ss << "]";
+    if (mode_obj) {
+      // Note [Paranoid check mode is same]
+      // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      // If a user forcibly changes the mode in a non-lexical way
+      // in the inner context, the mode could be invalid here.  So just be
+      // a bit safe, it doesn't cost us anything since this is error reporting
+      const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
+      TORCH_INTERNAL_ASSERT(mode_obj == maybe_mode->ptr(getPyInterpreter()));
+      ss << " nor was it found on the currently active mode "
+         << py::repr(mode_obj);
     }
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
@@ -388,7 +468,7 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
     return true;
   }
 
-  if (check_has_torch_function(obj)) {
+  if (check_has_torch_function(obj, /*ignore_mode*/ true)) {
     // tensor subclasses and unrelated objects with __torch_function__
     append_overloaded_tensor(overloaded_args, obj);
     return true;
@@ -943,7 +1023,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
   }
 
   int i = 0;
-  if (self != nullptr && check_has_torch_function(self)) {
+  if (self != nullptr && check_has_torch_function(self, /*ignore_mode*/ true)) {
     append_overloaded_tensor(&this->overloaded_args, self);
   }
   for (auto& param : params) {
