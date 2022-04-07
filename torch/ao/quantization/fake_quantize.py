@@ -333,14 +333,14 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             self.is_symmetric_quant,
         )
 
-default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
-                                            dtype=torch.quint8, qscheme=torch.per_tensor_affine)
+default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=127,
+                                            dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
 """
 Default fake_quant for activations.
 """
 
 default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
-                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
+                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 """
 Default fake_quant for weights.
 Observer is memoryless since averaging_constant is 1.
@@ -360,6 +360,7 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                quant_max=127,
                                                                dtype=torch.qint8,
                                                                qscheme=torch.per_channel_symmetric,
+                                                               reduce_range=False,
                                                                ch_axis=0)
 """
 Default fake_quant for per-channel weights.
@@ -385,9 +386,10 @@ default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=MovingAverag
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,
-                                                      quant_max=255,
+                                                      quant_max=127,
                                                       dtype=torch.quint8,
-                                                      qscheme=torch.per_tensor_affine)
+                                                      qscheme=torch.per_tensor_affine,
+                                                      reduce_range=True)
 """
 Fake_quant for activations using a histogram..
 """
