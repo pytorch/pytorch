@@ -279,6 +279,9 @@ class FullyShardedDataParallel(nn.Module):
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
+        ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
+            parameters are ignored by this instance. (Default: ``None``)
+            
     """
 
     def __init__(
@@ -289,9 +292,27 @@ class FullyShardedDataParallel(nn.Module):
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
+        ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        # Save the ignored modules and their parameters, including the
+        # parameter names, which are needed to filter the model state dict
+        self._ignored_modules = self._check_ignored_modules(ignored_modules)
+        ignored_params = set(p for m in self._ignored_modules for p in m.parameters())
+        param_to_unflat_param_names = _get_param_to_unflat_param_names(module)
+        self._ignored_param_to_param_name = {}
+        for param in ignored_params:
+            unflat_param_names = param_to_unflat_param_names[param]
+            if len(unflat_param_names) != 1:
+                assert isinstance(param, FlatParameter), \
+                    "Only `FlatParameter`s should map to more than one " \
+                    "unflattened parameter name; check " \
+                    "`_get_param_to_unflat_param_names()`"
+                raise ValueError(
+                    "`ignored_modules` should not include FSDP modules"
+                )
+            self._ignored_param_to_param_name[param] = unflat_param_names[0]
         # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
@@ -305,6 +326,8 @@ class FullyShardedDataParallel(nn.Module):
                 module,
                 auto_wrap_policy=auto_wrap_policy,
                 wrapper_cls=FullyShardedDataParallel,
+                ignored_modules=self._ignored_modules,
+                ignored_params=ignored_params,
                 # Note that we have the recursive_wrap skip wrapping for
                 # the outermost (this) module otherwise it will result in a
                 # double-wrap causing issues.
@@ -340,8 +363,8 @@ class FullyShardedDataParallel(nn.Module):
         # sharding individual layers of a Module, with an outer wrapper to
         # shard any leftover parameters.
         params = []
-        for param_name, param in module.named_parameters():
-            if not isinstance(param, FlatParameter):
+        for param in module.parameters():
+            if param not in ignored_params and not isinstance(param, FlatParameter):
                 params.append(param)
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
@@ -359,7 +382,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # Make sure all parameters are sharded.
         for n, p in self.named_parameters():
-            if not isinstance(p, FlatParameter):
+            if p not in ignored_params and not isinstance(p, FlatParameter):
                 raise RuntimeError(
                     f"found unsharded parameter: {n} ; {p.size()} {p.__class__}"
                 )
@@ -418,6 +441,29 @@ class FullyShardedDataParallel(nn.Module):
                 "sharding_strategy only supports FULL_SHARD and SHARD_GRAD_OP right now."
             )
 
+    def _check_ignored_modules(
+        self,
+        _ignored_modules: Any,
+    ) -> Set[torch.nn.Module]:
+        """
+        Checks that ``_ignored_modules`` is an iterable of
+        ``torch.nn.Module`` s.
+        """
+        if _ignored_modules is None:
+            return set()
+        msg_prefix = "`ignored_modules` should be an iterable of " \
+            "`torch.nn.Module`s "
+        try:
+            ignored_modules = set(_ignored_modules)
+        except TypeError:
+            raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}")
+        for module in ignored_modules:
+            if not isinstance(module, torch.nn.Module):
+                raise TypeError(
+                    msg_prefix + f"but got an iterable with {type(module)}"
+                )
+        return ignored_modules
+
     @classmethod
     def _check_wrapped(cls, begin_module, check_fn, err_fn):
         for _, mod in begin_module.named_modules():
@@ -437,25 +483,28 @@ class FullyShardedDataParallel(nn.Module):
 
     @staticmethod
     def fsdp_modules(
-        module: nn.Module, root_only: bool = False
+        module: nn.Module,
+        root_only: bool = False,
     ) -> List["FullyShardedDataParallel"]:
         """
-        Helper function to return all nested FSDP instances, including self.
+        Returns all nested FSDP instances, possibly including ``module`` itself
+        and only including FSDP root modules if ``root_only=True``.
 
         Args:
-            module: the root module. This module does not have to be a FSDP module.
-            root_only: whether to return only root FSDP modules (default: False).
+            module (torch.nn.Module): Root module, which may or may not be an
+                ``FSDP`` module.
+            root_only (bool): Whether to return only FSDP root modules.
+                (Default: ``False``)
 
         Returns:
-            fsdp_modules: the FSDP modules that are nested in the input module.
+            List[FullyShardedDataParallel]: FSDP modules that are nested in
+            the input ``module``.
         """
-        fsdp_modules = []
-        for sub_module in module.modules():
-            if isinstance(sub_module, FullyShardedDataParallel):
-                if not root_only or sub_module.check_is_root():
-                    fsdp_modules.append(sub_module)
-
-        return fsdp_modules
+        return [
+            submodule for submodule in module.modules()
+            if isinstance(submodule, FullyShardedDataParallel) and
+            (not root_only or submodule.check_is_root())
+        ]
 
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
@@ -895,8 +944,14 @@ class FullyShardedDataParallel(nn.Module):
         "_fsdp_wrapped_module" prefix.
         """
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
-        for key in state_dict.keys():
-            # Due to recursive call of summon_full_params, avoid unnecessasry
+        ignored_param_names = set(self._ignored_param_to_param_name.values())
+        for key in state_dict:
+            # Do not need to clone ignored parameters since they are not
+            # sharded
+            clean_param_name = key.replace(FSDP_WRAPPED_MODULE + ".", "").replace(FPW_MODULE + ".", "")
+            if clean_param_name in ignored_param_names:
+                continue
+            # Due to recursive call of summon_full_params, avoid unnecessary
             # reclone of tensors in case they have already been cloned.
             if (
                 not getattr(state_dict[key], "_has_been_cloned", False)
@@ -1784,7 +1839,11 @@ class FullyShardedDataParallel(nn.Module):
             if isinstance(m, FullyShardedDataParallel):
                 _finalize_params(m)
                 m._pre_backward_hook_has_run = False
-                if any(p.requires_grad for p in m.parameters()):
+                if any(
+                    p not in self._ignored_param_to_param_name
+                    and p.requires_grad
+                    for p in m.parameters()
+                ):
                     # Check if the module has params and if any of them has
                     # the `requires_grad` field set. If `requires_grad=False` for
                     # all the params, the post_backward hook will not fire and the
@@ -2533,7 +2592,7 @@ def _get_param_to_param_name(
         if len(param_names) > 1:
             raise RuntimeError(
                 "Each parameter should only map to one parameter name but got "
-                f"{len(param_names)}"
+                f"{len(param_names)}: {param_names}"
             )
     param_to_param_name = {
         param: param_names[0]

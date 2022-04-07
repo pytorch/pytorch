@@ -415,6 +415,46 @@ class TestAutoWrap(TestCase):
         except FileNotFoundError:
             pass
 
+    def test_always_wrap_with_ignored_modules(self):
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        ignored_modules = [sequential[1], sequential[2][0]]
+        model = FSDP(
+            sequential,
+            process_group=self.process_group,
+            auto_wrap_policy=always_wrap_policy,
+            ignored_modules=ignored_modules,
+        )
+        # All non-ignored modules should be wrapped with FSDP
+        self.assertTrue(isinstance(model, FSDP))
+        self.assertTrue(isinstance(model.module[0], FSDP))
+        self.assertTrue(isinstance(model.module[1], nn.Linear))
+        self.assertTrue(isinstance(model.module[2], FSDP))
+        self.assertTrue(isinstance(model.module[2].module[0], nn.Linear))
+        self.assertTrue(isinstance(model.module[2].module[1], FSDP))
+
+    def test_auto_wrap_with_ignored_modules(self):
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        ignored_modules = [sequential[1], sequential[2][0]]
+        my_auto_wrap_policy = functools.partial(
+            default_auto_wrap_policy, min_num_params=40,
+        )
+        model = FSDP(
+            sequential,
+            process_group=self.process_group,
+            auto_wrap_policy=my_auto_wrap_policy,
+            ignored_modules=ignored_modules,
+        )
+        # Since the 2nd linear (`sequential[1]`) is ignored, the wrapping
+        # policy does not exceed the parameter threshold before the inner
+        # sequential (`sequential[2]`) anymore; hence, it flattens
+        # `sequential[0]` and `sequential[2][0]` into `model` and leaves
+        # `sequential[1]` and `sequential[2][1]` as-is since they are ignored
+        self.assertTrue(isinstance(model, FSDP))
+        self.assertTrue(isinstance(model.module[0], nn.Linear))
+        self.assertTrue(isinstance(model.module[1], nn.Linear))
+        self.assertTrue(isinstance(model.module[2], nn.Sequential))
+        self.assertTrue(isinstance(model.module[2][0], nn.Linear))
+        self.assertTrue(isinstance(model.module[2][1], nn.Linear))
 
 
 instantiate_parametrized_tests(TestFSDPWrap)
