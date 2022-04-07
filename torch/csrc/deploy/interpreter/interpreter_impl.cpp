@@ -253,7 +253,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   }
 
   Obj fromIValue(IValue value) override {
-    return wrap(torch::jit::toPyObject(value));
+    return wrap(torch::deploy::toPyObj<IValue>(value));
   }
   Obj createOrGetPackageImporterFromContainerFile(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
@@ -337,31 +337,31 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   Obj call(Obj obj, at::ArrayRef<IValue> args) override {
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
-      m_args[i] = torch::jit::toPyObject(args[i]);
+      m_args[i] = torch::deploy::toPyObj<IValue>(args[i]);
     }
     return wrap(call(unwrap(obj), m_args));
   }
 
   Obj callKwargs(
       Obj obj,
-      std::vector<at::IValue> args,
+      std::vector<IValue> args,
       std::unordered_map<std::string, c10::IValue> kwargs) override {
     py::tuple py_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
-      py_args[i] = torch::jit::toPyObject(args[i]);
+      py_args[i] = torch::deploy::toPyObj<IValue>(args[i]);
     }
 
     py::dict py_kwargs;
     for (auto kv : kwargs) {
       py_kwargs[py::cast(std::get<0>(kv))] =
-          torch::jit::toPyObject(std::get<1>(kv));
+          torch::deploy::toPyObj<IValue>(std::get<1>(kv));
     }
     return wrap(call(unwrap(obj), py_args, py_kwargs));
   }
 
   Obj callKwargs(Obj obj, std::unordered_map<std::string, c10::IValue> kwargs)
       override {
-    std::vector<at::IValue> args;
+    std::vector<IValue> args;
     return callKwargs(obj, args, kwargs);
   }
 
