@@ -75,6 +75,8 @@ def unpack_expanded_weight_or_tensor(maybe_expanded_weight, func=lambda x: x):
         raise RuntimeError("ExpandedWeights currently does not support a mixture of ExpandedWeight parameters "
                            "and normal Parameters. Please file and issue with pytorch/pytorch")
 
+
+
 def sum_over_all_but_batch_and_last_n(
     tensor: torch.Tensor, n_dims: int
 ) -> torch.Tensor:

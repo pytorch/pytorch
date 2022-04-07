@@ -1,12 +1,16 @@
 # Functions for synthesizing magic methods for JIT-compiled dataclasses
+import os
 from functools import partial
-from torch._jit_internal import is_optional
+from torch._jit_internal import is_optional, FAKE_FILENAME_PREFIX
 from torch._sources import ParsedDef, SourceContext
 from typing import Callable, Dict, List
 import ast
 import dataclasses
 import inspect
 import sys
+
+def _get_fake_filename(cls, method_name):
+    return os.path.join(FAKE_FILENAME_PREFIX, cls.__name__, method_name)
 
 
 def compose_fn(cls, name: str, body_lines: List[str], signature: str) -> ParsedDef:
@@ -23,18 +27,18 @@ def compose_fn(cls, name: str, body_lines: List[str], signature: str) -> ParsedD
             f"TorchScript failed to synthesize dataclass method '{name}' for class '{cls.__name__}'. "
             "Please file a bug report at <https://github.com/pytorch/pytorch/issues>"
         )
-
+    fake_filename = _get_fake_filename(cls, name)
     # Parse the function
     return ParsedDef(
         py_ast,
         ctx=SourceContext(
             source=decl,
-            filename=None,
+            filename=fake_filename,
             file_lineno=0,
             leading_whitespace_len=0
         ),
         source=decl,
-        filename=None,
+        filename=fake_filename,
         file_lineno=0
     )
 

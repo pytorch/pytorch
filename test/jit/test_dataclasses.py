@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# flake8: noqa
 
 from dataclasses import dataclass, field, InitVar
 from hypothesis import given, settings, strategies as st
@@ -7,13 +8,10 @@ from typing import List, Optional
 import sys
 import torch
 import unittest
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+from enum import Enum
 
 # Example jittable dataclass
+@torch.jit.script
 @dataclass(order=True)
 class Point:
     x: float
@@ -23,15 +21,55 @@ class Point:
     def __post_init__(self):
         self.norm = (torch.tensor(self.x) ** 2 + torch.tensor(self.y) ** 2) ** 0.5
 
+class MixupScheme(Enum):
+
+    INPUT = ["input"]
+
+    MANIFOLD = [
+        "input",
+        "before_fusion_projection",
+        "after_fusion_projection",
+        "after_classifier_projection",
+    ]
+
+
+@dataclass
+class MixupParams:
+    def __init__(self, alpha: float = 0.125, scheme: MixupScheme = MixupScheme.INPUT):
+        self.alpha = alpha
+        self.scheme = scheme
+
+class MixupScheme2(Enum):
+    A = 1
+    B = 2
+
+
+@dataclass
+class MixupParams2:
+    def __init__(self, alpha: float = 0.125, scheme: MixupScheme2 = MixupScheme2.A):
+        self.alpha = alpha
+        self.scheme = scheme
+
+@dataclass
+class MixupParams3:
+    def __init__(self, alpha: float = 0.125, scheme: MixupScheme2 = MixupScheme2.A):
+        self.alpha = alpha
+        self.scheme = scheme
+
 
 # Make sure the Meta internal tooling doesn't raise an overflow error
 NonHugeFloats = st.floats(min_value=-1e4, max_value=1e4, allow_nan=False)
 
 class TestDataclasses(JitTestCase):
+
+    @classmethod
+    def tearDownClass(cls):
+         torch._C._jit_clear_class_registry()
     # We only support InitVar in JIT dataclasses for Python 3.8+ because it would be very hard
     # to support without the `type` attribute on InitVar (see comment in _dataclass_impls.py).
     @unittest.skipIf(sys.version_info < (3, 8), "InitVar not supported in Python < 3.8")
     def test_init_vars(self):
+        @torch.jit.script
         @dataclass(order=True)
         class Point2:
             x: float
@@ -84,6 +122,7 @@ class TestDataclasses(JitTestCase):
             x: List[int] = field(default_factory=list)
 
         with self.assertRaises(NotImplementedError):
+            torch.jit.script(Foo)
             def fn():
                 foo = Foo()
                 return foo.x
@@ -93,6 +132,7 @@ class TestDataclasses(JitTestCase):
     # The user should be able to write their own __eq__ implementation
     # without us overriding it.
     def test_custom__eq__(self):
+        @torch.jit.script
         @dataclass
         class CustomEq:
             a: int
@@ -107,3 +147,19 @@ class TestDataclasses(JitTestCase):
             return pt1 == pt2
 
         self.checkScript(fn, [1, 2, 3])
+
+    def test_no_source(self):
+        with self.assertRaises(RuntimeError):
+            # uses list in Enum is not supported
+            torch.jit.script(MixupParams)
+
+        torch.jit.script(MixupParams2)  # don't throw
+
+
+    def test_use_unregistered_dataclass_raises(self):
+
+        def f(a: MixupParams3):
+            return 0
+
+        with self.assertRaises(OSError):
+            torch.jit.script(f)

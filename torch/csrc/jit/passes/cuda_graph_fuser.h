@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 
 // Register CudaFuseGraph in custom passes
-struct C10_EXPORT RegisterCudaFuseGraph
+struct TORCH_API RegisterCudaFuseGraph
     : public PassManager<RegisterCudaFuseGraph> {
   static bool registerPass(bool enabled) {
     bool old_flag = PassManager::isRegistered();

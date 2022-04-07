@@ -3555,6 +3555,22 @@ struct to_ir {
       case prim::dict: {
         return emitApplySpecialFormForDict(apply, type_hint);
       }
+      case aten::index: {
+        const SourceRange& loc = apply.range();
+        auto select = Select(apply.callee());
+        auto self = emitSugaredExpr(select.value(), 1)->asValue(loc, method);
+
+        auto inputs = apply.inputs();
+        if (inputs.size() != 1) {
+          throw ErrorReport(apply)
+              << "__getitem__ expected exactly 1 arguments, got "
+              << inputs.size();
+        }
+        auto input =
+            emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
+
+        return std::make_shared<SimpleValue>(emitIndex(loc, self, {input}));
+      }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }

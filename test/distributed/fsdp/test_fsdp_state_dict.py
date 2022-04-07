@@ -48,6 +48,12 @@ OUTER_SHAPE = [4, 5]
 
 _SUPPORTED_STATE_DICT_IMPLS = ["state_dict", "local_state_dict"]
 
+STATE_DICT_MAPPING = {
+    "state_dict": StateDictType.FULL_STATE_DICT,
+    "local_state_dict": StateDictType.LOCAL_STATE_DICT,
+    "sharded_state_dict": StateDictType.SHARDED_STATE_DICT,
+}
+
 
 class Model(Module):
     def __init__(self, wrap_fsdp):
@@ -116,15 +122,15 @@ class TestFSDPStateDict(FSDPTest):
             # zero the model to ensure parameters are different.
             _zero_model(model_new)
 
-            with model._summon_full_params(), model_new._summon_full_params():
+            with model.summon_full_params(), model_new.summon_full_params():
                 params = list(model.parameters())
                 params_new = list(model_new.parameters())
                 self.assertNotEqual(params, params_new)
 
             # Verify parameters are the same in the new model.
             model_new.load_state_dict(fsdp_state_dict)
-            with model_new._summon_full_params():
-                with model._summon_full_params():
+            with model_new.summon_full_params():
+                with model.summon_full_params():
                     params = list(model.parameters())
                     params_new = list(model_new.parameters())
                     self.assertEqual(params, params_new)
@@ -174,17 +180,27 @@ class TestFSDPStateDict(FSDPTest):
 
     @staticmethod
     def _state_dict(model: Module, state_dict_type: str):
-        return getattr(model, state_dict_type)()
+        try:
+            enum_val = STATE_DICT_MAPPING[state_dict_type]
+        except KeyError:
+            raise ValueError(f"No state_dict type for {state_dict_type}")
+
+        with FSDP.state_dict_type(model, enum_val):
+            return model.state_dict()
 
     @staticmethod
     def _load_state_dict(
         model: Module, state_dict_type: str, state_dict: Dict[str, Any]
     ):
-        getattr(model, f"load_{state_dict_type}")(state_dict)
+        try:
+            enum_val = STATE_DICT_MAPPING[state_dict_type]
+        except KeyError:
+            raise ValueError(f"No state_dict for {state_dict_type}")
 
-    def _dist_train(
-        self, wrap_fsdp: bool, state_dict_type: str = "", with_context: bool = False
-    ):
+        with FSDP.state_dict_type(model, enum_val):
+            return model.load_state_dict(state_dict)
+
+    def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
         # TODO: Move this test to common_fsdp.
         model = self._initialize_model(wrap_fsdp)
         optim = SGD(model.parameters(), lr=0.1)
@@ -199,19 +215,8 @@ class TestFSDPStateDict(FSDPTest):
         if wrap_fsdp:
             blank_model = FSDP(Model(True).cuda())
             _zero_model(blank_model)
-            if with_context:
-                state_dict_type = {
-                    "state_dict": StateDictType.FULL_STATE_DICT,
-                    "local_state_dict": StateDictType.LOCAL_STATE_DICT,
-                    "sharded_state_dict": StateDictType.SHARDED_STATE_DICT,
-                }[state_dict_type]
-                with model.state_dict_type(state_dict_type):
-                    state_dict = model.state_dict()
-                with blank_model.state_dict_type(state_dict_type):
-                    blank_model.load_state_dict(state_dict)
-            else:
-                state_dict = self._state_dict(model, state_dict_type)
-                self._load_state_dict(blank_model, state_dict_type, state_dict)
+            state_dict = self._state_dict(model, state_dict_type)
+            self._load_state_dict(blank_model, state_dict_type, state_dict)
             return get_full_params(blank_model)
         else:
             return list(model.parameters())
@@ -220,12 +225,8 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     def test_state_dict_save_load_flow(self, state_dict_type):
         fsdp_params = self._dist_train(wrap_fsdp=True, state_dict_type=state_dict_type)
-        fsdp_params_using_context = self._dist_train(
-            wrap_fsdp=True, state_dict_type=state_dict_type, with_context=True
-        )
         ddp_params = self._dist_train(wrap_fsdp=False)
         self.assertEqual(ddp_params, fsdp_params)
-        self.assertEqual(ddp_params, fsdp_params_using_context)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
@@ -255,7 +256,7 @@ class TestFSDPStateDict(FSDPTest):
             optim.step()
             optim.zero_grad()
 
-        with model._summon_full_params():
+        with model.summon_full_params():
             fsdp_params = deepcopy(list(model.parameters()))
 
         # get FSDP state_dict. Note that by default we return state_dict.

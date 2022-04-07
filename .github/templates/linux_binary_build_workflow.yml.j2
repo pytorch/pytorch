@@ -9,13 +9,17 @@ name: !{{ build_environment }}
 
 on:
   push:
+    {%- if branches == "nightly" %}
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    {%- endif %}
     branches:
-      - nightly
+      - !{{ branches }}
+    {%- if branches == "nightly" %}
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    {%- endif %}
 {%- for label in ciflow_config.labels | sort %}
   {%- if label != "ciflow/default" %}
       - '!{{ label }}/*'
@@ -127,9 +131,12 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            pushd pytorch && bash .github/scripts/install_nvidia_utils_linux.sh && \
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}" && popd
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
 {%- endif %}
       - name: Pull Docker image
         run: |
@@ -169,5 +176,7 @@ jobs:
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       !{{ common.teardown_ec2_linux("pytorch/") }}
+  {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
+  {%- endif %}
 {%- endfor %}

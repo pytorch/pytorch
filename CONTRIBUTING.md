@@ -512,7 +512,7 @@ missing file warnings but will still complete. For example, to work on `jit.rst`
 
 ```bash
 cd docs/source
-ls | grep rst | grep -v index | grep -v jit | xargs rm
+find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
 
 # Make your changes, build the docs, etc.
 

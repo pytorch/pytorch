@@ -174,7 +174,14 @@ def parse_args(*arg_descriptors):
         @wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
-            assert len(arg_descriptors) >= len(args)
+            FILE_BUG_MSG = "If you believe this is not due to custom symbolic implementation within your code or "\
+                "an external library, please file an issue at "\
+                "https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to report this bug."
+            assert len(arg_descriptors) >= len(args),\
+                f"A mismatch between the number of arguments ({len(args)}) and "\
+                f"their descriptors ({len(arg_descriptors)}) was found at symbolic function '{fn.__name__}'. "\
+                f"{FILE_BUG_MSG}"
+
             try:
                 sig = inspect.signature(fn)
                 arg_names = list(sig.parameters.keys())[1:]
@@ -185,9 +192,14 @@ def parse_args(*arg_descriptors):
             args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
                     for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
-            assert len(kwargs) <= 1
+            assert len(kwargs) <= 1,\
+                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single key/value entry. "\
+                f"{FILE_BUG_MSG}"
+
             if len(kwargs) == 1:
-                assert "_outputs" in kwargs
+                assert "_outputs" in kwargs,\
+                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'. "\
+                    f"{FILE_BUG_MSG}"
             return fn(g, *args, **kwargs)
 
         return wrapper
@@ -449,6 +461,8 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
+        if _try_get_scalar_type(k) != "Long":
+            k = g.op("Cast", k, to_i=torch.onnx.TensorProtoDataType.INT64)
     if _export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
@@ -745,11 +759,12 @@ def _scatter_helper(g, self, dim, index, src):
 
 def _repeat_interleave_split_helper(g, self, reps, dim):
     if _export_onnx_opset_version <= 12:
-        return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
+        split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
-        return split(g, self, repeats, dim, _outputs=reps)
+        split_out = split(g, self, repeats, dim, _outputs=reps)
+    return split_out if reps > 1 else [split_out]
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):
@@ -814,16 +829,21 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
-# When using reshape helper (opset_version >= 14), if reshape has -1,
-# allowzero cannot be set to 1
+# By default, when any value in the 'shape' input is equal to zero
+# the corresponding dimension value is copied from the input tensor dynamically.
+# allowzero=1 indicates that if any value in the 'shape' input is set to zero,
+# the zero value is honored, similar to NumPy.
+# allowzero=1 is only supported for opset version >= 14.
 def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if _export_onnx_opset_version <= 13:
+        if allowzero == 1:
+            raise _onnx_opset_unsupported("Reshape with allowzero=1",
+                                          _export_onnx_opset_version, 14)
         return g.op("Reshape", input, shape)
     else:
-        warnings.warn("allowzero=0 by default. In order to honor zero value in shape use allowzero=1")
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
@@ -938,6 +958,17 @@ def quantize_helper(g, tensor, scale, zero_point):
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     output = g.op("QuantizeLinear", tensor, scale, zero_point)
     return g.op("prim::TupleConstruct", output, scale, zero_point)
+
+def requantize_bias_helper(g, bias, input_scale, weight_scale):
+    # In PyTorch, bias is float and is quantized implicitly inside the quantized ATen op kernel.
+    # In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
+    # Since int32 is not supported by ONNX operator `QuantizeLinear`, quantization is exported using regular operators.
+    bias_scale = g.op("Mul", weight_scale, input_scale)
+    bias_zero_point = g.op("Constant", value_t=torch.tensor([0], dtype=torch.int))
+    q_bias = g.op("Cast",
+                  g.op("Div", bias, bias_scale),
+                  to_i=torch.onnx.TensorProtoDataType.INT32)
+    return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
 
 # ---------------------------------------------------------------------
 # ONNX operator version

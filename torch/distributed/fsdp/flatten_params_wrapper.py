@@ -95,8 +95,8 @@ class FlatParameter(nn.Parameter):
     Args:
         params (Sequence[nn.Parameter])
             The parameters to be flattend and concatened.
-        requres_grad (bool):
-            Set to Ture if gradients need to be computed for this parameter,
+        requires_grad (bool):
+            Set to True if gradients need to be computed for this parameter,
             False otherwise.
     """
 
@@ -105,7 +105,7 @@ class FlatParameter(nn.Parameter):
     ) -> "FlatParameter":
         """Make an object using the parent's __new__ function."""
 
-        # A empty of non-list input doesn't make sense.
+        # A empty or non-list input doesn't make sense.
         if not isinstance(params, (list, tuple)) or len(params) == 0:
             raise ValueError("An non-empty list or tuple argument is needed")
 
@@ -226,6 +226,18 @@ class FlatParameter(nn.Parameter):
         )
 
     @property
+    def _num_unflattened_params(self) -> int:
+        """Returns the number of unflattened parameters that comprise this
+        flattened parameter."""
+        assert hasattr(self, "_param_infos"), \
+            "`_param_infos` has not been set, meaning this `FlatParameter` " \
+            "has not been initialized yet"
+        num_unflat_params = len(self._param_infos)
+        assert num_unflat_params > 0, "`FlatParameter` corresponding to 0 " \
+            "unflattened parameters"
+        return num_unflat_params
+
+    @property
     def _param_names(self):
         return [".".join([m, n]) if m else n for (m, _, n) in self._param_infos]
 
@@ -238,9 +250,8 @@ class FlatParameter(nn.Parameter):
     ) -> ShardMetadata:
         """
         Return tuple of (names, shapes, numels) metadata for the sharded parameter
-        metada of this flat parameter.
+        metadata of this flat parameter.
         """
-        names = [".".join([m, n]) if m else n for (m, _, n) in self._param_infos]
         return ShardMetadata(
             self._param_names[self._offset_to_slice()],
             self._param_shapes[self._offset_to_slice()],
@@ -294,6 +305,7 @@ class FlattenParamsWrapper(nn.Module):
         self.flat_param = FlatParameter(params, params[0].requires_grad)
         self.flat_param._param_infos = param_infos
         self.flat_param._shared_param_infos = shared_param_infos
+
         # This attribute is used to remember the flat_param inside the unflatten_params()
         # context. With this attribute, FSDP can access the flat parameter metadata
         # even if flat_param is temporarily deleted.

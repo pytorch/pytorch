@@ -22,6 +22,7 @@ from torch._sources import get_source_lines_and_file, ParsedDef, parse_def, make
 from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
 from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
+from torch import _jit_internal
 import torch.jit.annotations
 
 _IS_ASTUNPARSE_INSTALLED = False
@@ -219,12 +220,14 @@ def get_jit_class_def(cls, self_name):
             for method in class_ast.body
             if isinstance(method, ast.FunctionDef) and method.name in DATACLASS_MAGIC_METHODS
         }
-
         for i, (name, _) in enumerate(methods):
             # Is this a magic method we can synthesize?
             synthesizer_fn = DATACLASS_MAGIC_METHODS.get(name)
             if synthesizer_fn and name not in overrides:
-                methods[i] = name, synthesizer_fn(cls)
+                parsed_def = synthesizer_fn(cls)
+                methods[i] = name, parsed_def
+                func = getattr(cls, name)
+                _jit_internal.loader.cache(func, parsed_def.source)
 
     method_defs = [
         get_jit_def(obj, name, self_name=self_name, is_classmethod=is_classmethod(obj))

@@ -228,9 +228,12 @@ struct TORCH_API StaticModuleOptions {
 /// @endcode
 ///
 class MemoryPlanner;
+class StaticNodeInfo;
 class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
+
+using SROperator = std::function<void(ProcessedNode*)>;
 
 // A `BlockInfo` instance stores all of the shared state that each
 // `BlockRunner` will need to access. Most of this information is
@@ -248,10 +251,10 @@ class BlockInfo {
       : input_idx_(input_idx), block_(block) {}
 
   void set_nodes(
-      std::vector<ProcessedNode> nodes,
+      std::vector<StaticNodeInfo> nodes,
       const FastMap<Node*, bool>& node_has_out_variant);
 
-  const std::vector<ProcessedNode>& nodes() const {
+  const std::vector<StaticNodeInfo>& nodes() const {
     return nodes_;
   }
 
@@ -325,7 +328,7 @@ class BlockInfo {
   }
 
  private:
-  std::vector<ProcessedNode> nodes_;
+  std::vector<StaticNodeInfo> nodes_;
 
   ValueGroup value_group_;
 
@@ -462,7 +465,7 @@ class TORCH_API StaticModule {
 
   // Recurses on sub-blocks and populates the array of ProcessedNodes
   // Returns (number of nodes processed, number of blocks processed)
-  size_t prepareProcessedNodes(
+  size_t prepareStaticNodeInfos(
       Block* block,
       const FastMap<const Value*, uint32_t>& value_to_index,
       const AliasDb& alias_db,
@@ -483,8 +486,9 @@ class TORCH_API StaticModule {
   std::vector<IValue> constants_;
   // The functions to be called by corresponding ProcessedNode.
   std::vector<ProcessedFunction> functions_{};
-  // The nodes we need to run
-  std::vector<ProcessedNode> nodes_;
+  // A list of pre-processed nodes from which ProcessedNode are created per
+  // StaticRuntime instance.
+  std::vector<StaticNodeInfo> nodes_;
   // Indices of graph outputs in the single values array.
   std::vector<uint16_t> output_indices_;
 
@@ -765,10 +769,42 @@ class TORCH_API ProcessedFunction {
   }
 
  private:
-  std::function<void(ProcessedNode*)> f_;
+  SROperator f_;
   Kind kind_{ProcessedFunction::Kind::kOutVariant};
   bool check_memory_overlap_{false};
   size_t num_outputs_{0};
+};
+
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class TORCH_API StaticNodeInfo {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  StaticNodeInfo(
+      Node* n,
+      ProcessedFunction* fn,
+      ProcessedNodeInputs inputs,
+      uint16_t outputs_offset);
+
+  Node* node() const {
+    return node_;
+  }
+
+  size_t num_outputs() const {
+    DCHECK(fn_ != nullptr);
+    return fn_->num_outputs();
+  }
+
+  bool has_out_variant() const {
+    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
+  }
+
+ private:
+  friend class ProcessedNode;
+
+  Node* node_;
+  const ProcessedFunction* fn_;
+  ProcessedNodeInputs inputs_;
+  uint16_t outputs_offset_;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -776,51 +812,24 @@ class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
-  // ProcessedNodes are created within StaticModule and then
-  // associated with a shared values array using set_values() when
-  // they are copied into a StaticRuntime. block_runners_ are also
-  // not initialized until StaticRuntime initialization; see
-  // BlockRunner's ctor.
-  ProcessedNode(
-      Node* n,
-      ProcessedFunction* fn,
-      ProcessedNodeInputs inputs,
-      uint16_t outputs_offset);
 
-  ProcessedNode(const ProcessedNode& other)
+  ProcessedNode(const StaticNodeInfo& other, IValue* values)
       : node_(other.node_),
         fn_(other.fn_),
         inputs_(other.inputs_),
         outputs_offset_(other.outputs_offset_),
-        overlap_detected_(other.overlap_detected_),
-        values_(other.values_),
-        // It doesn't really make sense to copy block runners,
-        // each processed node needs its own. This is OK to do
-        // since ProcessedNodes are copied from StaticModule right before
-        // the block runners are set up.
+        values_(values),
         // TODO(T105178680): For this task, we should move
-        // block runners out of ProcessedNode. Then, we don't have to deal
-        // with this caveat.
+        // block runners out of ProcessedNode.
         block_runners_(nullptr) {}
-
-  ProcessedNode& operator=(const ProcessedNode& other) {
-    if (&other == this) {
-      return *this;
-    }
-    node_ = other.node_;
-    fn_ = other.fn_;
-    inputs_ = other.inputs_;
-    outputs_offset_ = other.outputs_offset_;
-    overlap_detected_ = other.overlap_detected_;
-    values_ = other.values_;
-    block_runners_ = nullptr;
-    return *this;
-  }
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
   // one. Maybe c10::variant is throwing it off?
   ProcessedNode(ProcessedNode&&) = default;
+
+  ProcessedNode(const ProcessedNode&) = delete;
+  ProcessedNode& operator=(const ProcessedNode& other) = delete;
   ProcessedNode& operator=(ProcessedNode&&) = default;
 
   void run();

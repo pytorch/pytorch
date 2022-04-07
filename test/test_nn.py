@@ -22,6 +22,7 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf, nan
+import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,7 +35,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtypes, get_all_math_dtypes
+from torch.testing._internal.common_dtype import integral_types, floating_types_and, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, \
@@ -9576,6 +9577,29 @@ class TestNN(NNTestCase):
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
 
+    def test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad(self):
+        args = (
+            torch.randn(3, 2, 5),  # input
+            torch.randn(2),  # running_mean
+            torch.randn(2),  # running_var
+        )
+        kwargs = {'training': False, 'momentum': -1.2}
+        fn = partial(F.batch_norm, **kwargs)
+
+        for dual_indices in ((0,), (1,), (1, 2), (0, 1), (0, 1, 2),):
+            tangents = tuple(torch.rand_like(x) for x in args)
+
+            with fwAD.dual_level():
+                duals = [fwAD.make_dual(primal, tangent) if i in dual_indices else primal
+                         for i, (primal, tangent) in enumerate(zip(args, tangents))]
+                msg = "batch_norm is not differentiable wrt running_mean and running_var"
+                # 0 needs to have forward grad because otherwise we won't even run batch_norm_jvp
+                if (1 in dual_indices or 2 in dual_indices) and 0 in dual_indices:
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        fn(*duals)
+                else:
+                    fn(*duals)
+
     def test_batchnorm_buffer_update_when_stats_are_not_tracked(self):
         input_size = (32, 4)
         # Instantiate BN with buffers that are not None
@@ -11366,6 +11390,12 @@ class TestNN(NNTestCase):
         outd = loss_cpu(inputd, target)
         self.assertEqual(outf, outd, exact_dtype=False)
 
+    def test_cross_entropy_loss_zero_div(self):
+        # Test for issue #73165
+        input_1 = torch.rand([5, 0], dtype=torch.float32)
+        input_2 = torch.rand([5, 0], dtype=torch.float32)
+        torch.nn.CrossEntropyLoss()(input_1, input_2)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
@@ -12802,9 +12832,8 @@ class TestNNDeviceType(NNTestCase):
             (2, 6, 4, 2, 2): 4,
         }
         for shape, g in bad_shape_g.items():
-            gn = nn.GroupNorm(g, shape[1])
-            input = torch.empty(*shape, device=device, dtype=dtype).uniform_(0, 10)
-            self.assertRaises(RuntimeError, lambda: gn(input))
+            with self.assertRaises(ValueError):
+                gn = nn.GroupNorm(g, shape[1])
 
     def _test_GroupNorm_cuda_half(self):
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
@@ -13075,7 +13104,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_deterministic_cudnn(self, device, dtype):
         inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
@@ -13094,7 +13123,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_large_workspace(self, device, dtype):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
         # reasonable algorithm that does not run out of memory
@@ -13219,7 +13248,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to(device, dtype)
@@ -14407,6 +14436,20 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
             inp = torch.randn(1, 0, 50, 32, 32, device=device)
             mod(inp)
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_out_size(self, device):
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[0, 1])
+        inp = torch.rand([16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((16, 50, 0, 1), device=device))
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_out_size(self, device):
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[0, 1, 1])
+        inp = torch.rand([16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
 
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
@@ -17021,7 +17064,7 @@ class TestNNDeviceType(NNTestCase):
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtypes[1]))
             self.assertEqual(output, torch.zeros_like(output))
 
-    @skipCUDAIf(True, "cuda assert is not recovarable.")
+    @skipCUDAIf(True, "no out-of-bounds check on CUDA for perf.")
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
     @parametrize_test("padding_idx", [None, 0])
     @parametrize_test("mode", ["sum", "mean", "max"])
@@ -17559,7 +17602,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
@@ -17927,37 +17970,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -18122,7 +18165,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18136,7 +18179,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):

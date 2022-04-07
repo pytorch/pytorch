@@ -71,6 +71,11 @@ TEST(HashTest, Sanity) {
   auto b = std::vector<int32_t>({1, 1, 2, 3, 5, 8, 12});
   test_hash_repeatable_sensitive(a, b);
   test_hash_repeatable_sensitive(c10::ArrayRef<int32_t>(a), c10::ArrayRef<int32_t>(b));
+
+  // vector<bool> is a special case bc it is implemented as vector<bit>
+  auto bool_a = std::vector<bool>({true, false, false, true});
+  auto bool_b = std::vector<bool>({true, true, false, true});
+  test_hash_repeatable_sensitive(bool_a, bool_b);
 }
 
 } // namespace lazy

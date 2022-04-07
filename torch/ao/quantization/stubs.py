@@ -21,9 +21,15 @@ class QuantStub(nn.Module):
 class DeQuantStub(nn.Module):
     r"""Dequantize stub module, before calibration, this is same as identity,
     this will be swapped as `nnq.DeQuantize` in `convert`.
+
+    Args:
+        qconfig: quantization configuration for the tensor,
+            if qconfig is not provided, we will get qconfig from parent modules
     """
-    def __init__(self):
+    def __init__(self, qconfig=None):
         super(DeQuantStub, self).__init__()
+        if qconfig:
+            self.qconfig = qconfig
 
     def forward(self, x):
         return x
@@ -48,7 +54,7 @@ class QuantWrapper(nn.Module):
         super(QuantWrapper, self).__init__()
         qconfig = module.qconfig if hasattr(module, 'qconfig') else None
         self.add_module('quant', QuantStub(qconfig))
-        self.add_module('dequant', DeQuantStub())
+        self.add_module('dequant', DeQuantStub(qconfig))
         self.add_module('module', module)
         self.train(module.training)
 

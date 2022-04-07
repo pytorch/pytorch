@@ -3,7 +3,8 @@ import warnings
 from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn
 

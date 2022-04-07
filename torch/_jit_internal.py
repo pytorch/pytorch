@@ -18,6 +18,7 @@ import builtins
 import typing
 import io
 import pickle
+import threading
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -44,6 +45,24 @@ except ImportError:
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
+
+
+FAKE_FILENAME_PREFIX = '__torch_jit_dataclass'
+
+
+class SourceLoader:
+
+    def __init__(self):
+        self.content = {}
+
+    def cache(self, fn, source):
+        self.content[fn] = source
+
+    def get_source(self, fn):
+        return self.content.get(fn)
+
+
+loader = SourceLoader()
 
 
 def createResolutionCallbackFromEnv(lookup_base):
@@ -326,10 +345,9 @@ def get_type_hint_captures(fn):
     # that were used to annotate the types, since inspect.signature() will only return the class object that
     # the annotation refers to, not the string name. If we can't get the source, simply return an empty dict.
     # This may happen in cases where the function is synthesized dynamically at runtime.
-    try:
+    src = loader.get_source(fn)
+    if src is None:
         src = inspect.getsource(fn)
-    except OSError:
-        return {}
 
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
@@ -1257,6 +1275,8 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
         if isinstance(obj, torch.cuda.Event):
+            return ""
+        if isinstance(obj, threading.Thread):
             return ""
         return None
 

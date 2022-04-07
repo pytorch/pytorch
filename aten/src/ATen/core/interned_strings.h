@@ -303,6 +303,7 @@ namespace c10 {
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \
+  _(attr, module)                    \
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \

@@ -880,9 +880,6 @@ Tensor & index_select_out_cpu_dim1_(
 
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
             dst_floats[i] = src_floats[idx];
           }
         }
@@ -892,10 +889,6 @@ Tensor & index_select_out_cpu_dim1_(
         for (const auto batch : c10::irange(outer_dims_product)) {
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
-
             auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
             auto dst = out + batch * gathered_batch_bytesize + i * block_bytesize;
             memcpy(dst, src, block_bytesize);

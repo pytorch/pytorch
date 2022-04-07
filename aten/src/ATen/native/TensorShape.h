@@ -30,4 +30,28 @@ inline void check_cat_no_zero_dim(at::ArrayRef<Tensor> tensors) {
   }
 }
 
+inline int64_t get_num_splits(const Tensor& self, int64_t split_size, int64_t dim) {
+  TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
+  TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
+  int64_t dim_size = self.size(dim);
+  TORCH_CHECK(split_size > 0 || dim_size == 0,
+           "split_size can only be 0 if dimension size is 0, "
+           "but got dimension size of ", dim_size);
+  // if split_size is 0 and dimension size is 0, there is 1 split.
+  int64_t num_splits = 1;
+  if (split_size != 0) {
+    // ensuring num_splits is at least 1 makes consistent the case where split_size > dim_size
+    // (returns a single split).  We might want to error here, but keep it for BC.
+    num_splits = std::max<int64_t>((dim_size + split_size - 1) / split_size, 1);
+  }
+  return num_splits;
+}
+
+///
+/// For more information, see
+/// https://pytorch.org/docs/master/generated/torch.Tensor.unfold.html#torch.Tensor.unfold
+///
+
+Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step);
+
 }} // namespace at::native
