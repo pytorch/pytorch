@@ -4260,7 +4260,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 m = prepare_fx(m, qconfig_dict)
                 for name, mod in m.named_modules():
                     if is_activation_post_process(mod) and mod.dtype == torch.quint8:
-                        if backend == "fbgemm" and func == get_default_qconfig_dict:
+                        if backend == "fbgemm":
                             self.assertEqual(mod.quant_min, 0)
                             self.assertEqual(mod.quant_max, 127)
                         else:

@@ -1273,7 +1273,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
             if qengine == "fbgemm":
                 self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
-                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 255)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 127)
                 self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
                                  MovingAveragePerChannelMinMaxObserver)
             else:
