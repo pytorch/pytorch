@@ -44,6 +44,8 @@ jobs:
       # Use a pytorch/pytorch reference instead of a reference to the local
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
+      - run: echo ${{ github.job }}
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
