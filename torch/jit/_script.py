@@ -44,6 +44,7 @@ from torch.jit._monkeytype_config import (
     JitTypeTraceStore
 )
 from torch._classes import classes
+from torch.package._zip_file_torchscript import TorchScriptPackageZipFileWriter, TorchScriptPackageZipFileReader
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -342,15 +343,21 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
     Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
-    if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
+
+    if not isinstance(importer.zip_reader, TorchScriptPackageZipFileReader):
+        raise RuntimeError(
+            f"Loading ScriptObjects from a PackageImporter must be done using a TorchScriptPackageZipFileReader"
+            f"not an object of type {type(importer.zip_reader)}"
+        )
+    if importer.zip_reader.is_directory():
         raise RuntimeError(
             "Loading ScriptObjects from a PackageImporter created from a "
-            "directory is not supported. Use a package archive file instead."
+            f"directory is not supported. Use a package archive file instead. is of type {type(importer.zip_reader)}"
         )
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
         cu,
-        importer.zip_reader,
+        importer.zip_reader.zip_reader,  # type: ignore[arg-type]
         importer.storage_context,
         validate_map_location(importer.last_map_location),
         script_module_id,
@@ -535,8 +542,10 @@ if _enabled:
             Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
             Pickler's ``persistent_load`` function.
             """
+            assert isinstance(exporter.zip_file, TorchScriptPackageZipFileWriter)
+            script_module_serializer = exporter.zip_file.script_module_serializer
             script_module_id = exporter.get_unique_id()
-            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
+            script_module_serializer.serialize(self._c, int(script_module_id))
             return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
