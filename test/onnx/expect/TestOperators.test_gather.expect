@@ -1,114 +1,22 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::OneHot_2"
-    name: "Constant_0"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 2
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    output: "onnx::Gather_3"
-    name: "Constant_1"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::Shape_0"
-    output: "onnx::Gather_4"
-    name: "Shape_2"
-    op_type: "Shape"
-  }
-  node {
-    input: "onnx::Gather_4"
-    input: "onnx::Gather_3"
-    output: "onnx::OneHot_5"
-    name: "Gather_3"
-    op_type: "Gather"
-    attribute {
-      name: "axis"
-      i: 0
-      type: INT
-    }
-  }
-  node {
-    input: "onnx::OneHot_1"
-    input: "onnx::OneHot_5"
-    input: "onnx::OneHot_2"
-    output: "onnx::Cast_6"
-    name: "OneHot_4"
-    op_type: "OneHot"
+    input: "onnx::GatherElements_0"
+    input: "onnx::GatherElements_1"
+    output: "2"
+    name: "GatherElements_0"
+    op_type: "GatherElements"
     attribute {
       name: "axis"
       i: 1
-      type: INT
-    }
-  }
-  node {
-    input: "onnx::Cast_6"
-    output: "onnx::Mul_7"
-    name: "Cast_5"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 1
-      type: INT
-    }
-  }
-  node {
-    input: "onnx::Shape_0"
-    output: "onnx::Mul_8"
-    name: "Unsqueeze_6"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 2
-      type: INTS
-    }
-  }
-  node {
-    input: "onnx::Mul_8"
-    input: "onnx::Mul_7"
-    output: "onnx::ReduceSum_9"
-    name: "Mul_7"
-    op_type: "Mul"
-  }
-  node {
-    input: "onnx::ReduceSum_9"
-    output: "10"
-    name: "ReduceSum_8"
-    op_type: "ReduceSum"
-    attribute {
-      name: "axes"
-      ints: 1
-      type: INTS
-    }
-    attribute {
-      name: "keepdims"
-      i: 0
       type: INT
     }
   }
   name: "torch_jit"
   input {
-    name: "onnx::Shape_0"
+    name: "onnx::GatherElements_0"
     type {
       tensor_type {
         elem_type: 1
@@ -127,7 +35,7 @@ graph {
     }
   }
   input {
-    name: "onnx::OneHot_1"
+    name: "onnx::GatherElements_1"
     type {
       tensor_type {
         elem_type: 7
@@ -146,7 +54,7 @@ graph {
     }
   }
   output {
-    name: "10"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
@@ -166,5 +74,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }
