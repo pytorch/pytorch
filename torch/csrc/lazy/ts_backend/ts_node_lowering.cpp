@@ -370,6 +370,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
   TSOpVector LowerDiagonalViewUpdate(const DiagonalViewUpdate* node) {
     // Since we promise the backends that we never generate any inplace update IR,
     // therefore we clone the target first and then update the clone instead.
+    // Because the clone is transient and will never be aliased, it's safe
+    // to use copy_ on it.
     auto* destination = GenerateClone(loctx()->GetOutputOp(node->operand(0)));
 
     // Replay the diagonal.
@@ -380,7 +382,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     arguments.emplace_back(node->dim2());
     auto diag = LowerBuiltin(at::aten::diagonal, arguments);
 
-    // Update the replayed the diagonal with the input.
+    // Update the replayed diagonal view with the input.
     GenerateCopy(diag.front(), loctx()->GetOutputOp(node->operand(1)));
 
     // Destination's diag view should be updated.
