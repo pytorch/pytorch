@@ -3547,42 +3547,30 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyReluModule(), x)
 
     def test_clip_int(self):
-        """Clip <= opset 11 does not support non-floats (e.g. ints)
-        We enable such non-float types to avoid generating wrong ONNX file
-        and enhance the compatibility of pytorch.onnx.
-        """
         class MyClipInt(torch.nn.Module):
             def forward(self, x):
                 return torch.clamp(x, 0, 1)
         self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int64))
 
     def test_relu_int(self):
-        """ReLU <= opset 13 is float only; but use casting for compatibility
-        """
         class MyReLUInt(torch.nn.Module):
             def forward(self, x):
                 return torch.relu(x)
         self.run_test(MyReLUInt(), torch.randn(3, 3).to(torch.int32))
 
     def test_pad_int(self):
-        """Pad <= opset 10 is float only; but use casting for compatibility
-        """
         class MyPadInt(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.pad(x, (1, 1))
         self.run_test(MyPadInt(), torch.randn(3, 3).to(torch.int32))
 
     def test_min_int(self):
-        """Min <= opset 11 is float only; but use casting for compatibility
-        """
         class MyMinInt(torch.nn.Module):
             def forward(self, x):
                 return torch.min(x, x + 1)
         self.run_test(MyMinInt(), torch.randn(3, 3).to(torch.int32))
 
     def test_max_int(self):
-        """Max <= opset 11 is float only; but use casting for compatibility
-        """
         class MyMaxnInt(torch.nn.Module):
             def forward(self, x):
                 return torch.max(x, x + 1)
