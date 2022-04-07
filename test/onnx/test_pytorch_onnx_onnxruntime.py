@@ -10550,14 +10550,14 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.quantized.Linear(4, 8)
         # Set fixed weight to avoid flaky test.
         weight = torch.quantize_per_tensor(
-            torch.arange(32).view(8, 4).to(torch.float),
+            torch.arange(32, dtype=torch.float).view(8, 4),
             0.5, 0, torch.qint8)
         # Set non-zero bias.
-        bias = torch.arange(8).to(torch.float)
+        bias = torch.arange(8, dtype=torch.float)
         model.set_weight_bias(weight, bias)
         # Set fixed input to avoid flaky test.
         input = torch.randn(4, 4)
-        input = torch.arange(16).view(4, 4).to(torch.float) - 8
+        input = torch.arange(16, dtype=torch.float).view(4, 4) - 8
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         # Currently, we need convert the model to ScriptModule before export.
         # The reason is that PackedParams contains int (not tensor).
