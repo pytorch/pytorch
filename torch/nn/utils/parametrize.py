@@ -648,7 +648,7 @@ def type_before_parametrizations(module: Module) -> type:
     r"""Returns the module type before parametrizations were applied and if not,
     then it returns the module type.
 
-     Args:
+    Args:
         module (nn.Module): module to get type of
     """
     if is_parametrized(module):
@@ -656,19 +656,25 @@ def type_before_parametrizations(module: Module) -> type:
     else:
         return type(module)
 
-def transfer_parametrizations_and_params(from_module: Module, to_module: Module) -> Module:
+def transfer_parametrizations_and_params(from_module: Module, to_module: Module, tensor_name: Optional[str] = None) -> Module:
     r"""Transfers parametrizations and the parameters they parametrize from from_module
-    to to_module.
+    to to_module. If tensor_name is specified, only transfers the specified parameter, otherwise
+    transfers all parametrized parameters.
 
-     Args:
+    Args:
         from_module (nn.Module): module to transfer from
         to_module (nn.Module): module to transfer to
+        tensor_name (str, optional): parameter to transfer
+
+    Returns:
+        Module: to_module
     """
     if is_parametrized(from_module):
         assert isinstance(from_module.parametrizations, ModuleDict)
-        for parameter_name in from_module.parametrizations:
+        parameter_list = from_module.parametrizations if tensor_name is None else [tensor_name]
+
+        for parameter_name in parameter_list:
             setattr(to_module, parameter_name, from_module.parametrizations[parameter_name].original)
             for param_func in from_module.parametrizations[parameter_name]:
                 register_parametrization(to_module, parameter_name, param_func)
-
     return to_module

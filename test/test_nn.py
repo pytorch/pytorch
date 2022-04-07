@@ -3254,6 +3254,35 @@ class TestNN(NNTestCase):
         self.assertEqual(model.weight, to_model.weight)
         self.assertEqual(model.parametrizations.weight.original, to_model.parametrizations.weight.original)
 
+    def test_transfer_parametrizations_and_params_single_param(self):
+        r"""Test that all parametrizations and their associated parameters are transfered."""
+        class AddOne(nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2.0 * x
+
+        class MinusOne(nn.Module):
+            def forward(self, x):
+                return x - 1.0
+
+        model = nn.Linear(5,5, bias=True)
+        parametrize.register_parametrization(model, "weight", AddOne())
+        parametrize.register_parametrization(model, "weight", Double())
+        parametrize.register_parametrization(model, "weight", MinusOne())
+        parametrize.register_parametrization(model, "bias", AddOne())
+        parametrize.register_parametrization(model, "bias", Double())
+        parametrize.register_parametrization(model, "bias", MinusOne())
+
+        to_model = nn.qat.Linear(5,5, bias=True, qconfig = torch.ao.quantization.get_default_qconfig())
+        parametrize.transfer_parametrizations_and_params(model, to_model, "weight")
+
+        self.assertEqual(model.weight, to_model.weight)
+        self.assertEqual(model.parametrizations.weight.original, to_model.parametrizations.weight.original)
+        self.assertTrue("bias" not in to_model.parametrizations)
+
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_validate_pruning_amount_init(self):
