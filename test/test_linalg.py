@@ -3700,6 +3700,9 @@ class TestLinalg(TestCase):
             result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
             self.assertEqual(result, 2)  # there are 2 singular values above max(0.81, 1.5*0.81)
 
+    # CUDA 11.6 issue failure https://github.com/pytorch/pytorch/issues/75391
+    @skipCUDAIf(torch.version.cuda is not None
+                and torch.version.cuda.split(".") == ["11", "6"], "There's a bug in CUDA 11.6")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
