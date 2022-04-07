@@ -997,7 +997,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_gather_noncontiguous_input(self):
-        self._test_gather_basics(lambda t: t.clone().expand(2))
+        # Take a column of 2D tensor, such that memory is not dense
+        self._test_gather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1128,7 +1129,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_allgather_noncontiguous_input(self):
-        self._test_allgather_basics(lambda t: t.clone().expand(2))
+        # Take a column of 2D tensor, such that memory is not dense
+        self._test_allgather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
