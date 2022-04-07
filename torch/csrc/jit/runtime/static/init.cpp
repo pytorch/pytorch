@@ -87,7 +87,7 @@ void initStaticModuleBindings(PyObject* module) {
             std::vector<c10::IValue> arg_ivalues{args.begin(), args.end()};
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
-            return self.runtime().benchmarkIndividualOps(
+            return self.runtime().benchmark_individual_ops(
                 {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
           });
   m.def(

@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <stdexcept>
 
 #include "deep_wide_pt.h"
@@ -1308,13 +1307,39 @@ TEST(StaticRuntime, FullLike) {
 
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 4, 2});
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   std::vector<IValue> args{
-      a, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      a,
+      4,
+      at::ScalarType::Int,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args1{
+      a,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   std::vector<IValue> args2{
-      b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      b,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   testStaticRuntime(full_like_script, args);
+  testStaticRuntime(
+      full_like_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_like_script, args, args2);
 }
 
@@ -1497,7 +1522,7 @@ TEST(StaticRuntime, LeakyReLU) {
   std::vector<c10::IValue> input_tensors({inputs});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().checkForMemoryLeak();
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -2023,6 +2048,27 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
 
   testStaticRuntime(
       quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
+TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
+  const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        %ret = aten::clone(%output, %bias)
+        return (%output)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_relu_dynamic_fp16_script,
       {input, weight},
       {input_2, weight_2});
 }
@@ -2594,13 +2640,13 @@ TEST(StaticRuntime, ModelCrashOnFirstRun) {
   EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
 
   // The run didn't finish, we didn't allocate the memory planner
-  EXPECT_EQ(runtime.getMemoryPlanner(), nullptr);
-  runtime.checkForMemoryLeak();
+  EXPECT_EQ(runtime.get_memory_planner(), nullptr);
+  runtime.check_for_memory_leak();
 
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
   compareResultsWithJIT(runtime, graph, args_no_crash);
-  EXPECT_NE(runtime.getMemoryPlanner(), nullptr);
+  EXPECT_NE(runtime.get_memory_planner(), nullptr);
 }
 
 TEST(StaticRuntime, ModelCrashOnSecondRun) {
@@ -2620,11 +2666,11 @@ TEST(StaticRuntime, ModelCrashOnSecondRun) {
   std::vector<IValue> args_crash{at::randn({1}), true};
   std::vector<IValue> args_no_crash{at::randn({1}), false};
   runtime(args_no_crash, {});
-  EXPECT_NE(runtime.getMemoryPlanner(), nullptr);
-  runtime.checkForMemoryLeak();
+  EXPECT_NE(runtime.get_memory_planner(), nullptr);
+  runtime.check_for_memory_leak();
 
   EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
-  runtime.checkForMemoryLeak();
+  runtime.check_for_memory_leak();
 
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
@@ -2690,7 +2736,7 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   // Static Runtime.
   torch::jit::StaticModule smodule(g);
   auto actual = smodule(args, {}).toTensor();
-  smodule.runtime().checkForMemoryLeak();
+  smodule.runtime().check_for_memory_leak();
 
   EXPECT_TRUE(expected.equal(actual));
   EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
@@ -3102,72 +3148,4 @@ TEST(StaticRuntime, MoveCtor) {
   torch::jit::StaticRuntime new_runtime(std::move(runtime));
   auto actual = new_runtime(args);
   compareResults(expected, actual);
-}
-
-namespace {
-void testClone(MemoryPlannerAlgorithm algorithm) {
-  auto mod = getDeepAndWideSciptModel();
-  std::vector<IValue> args{
-      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
-  auto smod = StaticModule(
-      mod,
-      /*is_frozen=*/false,
-      StaticModuleOptions{
-          .enable_out_variant = true,
-          .optimize_memory = true,
-          .memory_planner_algorithm = algorithm});
-
-  auto& runtime = smod.runtime();
-  auto cloned_runtime = runtime.clone();
-  compareResults(runtime(args), cloned_runtime(args));
-  auto cloned_from_warm_runtime = runtime.clone();
-  compareResults(runtime(args), cloned_from_warm_runtime(args));
-}
-} // namespace
-
-TEST(StaticRuntime, CloneWithRegularMemoryPlanner) {
-  testClone(MemoryPlannerAlgorithm::kStandardResizing);
-}
-
-TEST(StaticRuntime, CloneWithPrecomputedOffsets) {
-  testClone(MemoryPlannerAlgorithm::kPrecomputedOffsets);
-}
-
-TEST(StaticRuntime, MemoryPlannerFallback) {
-  auto mod = getDeepAndWideSciptModel();
-  std::vector<IValue> args1{
-      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
-  std::vector<IValue> args2{
-      at::randn({8, 1, 32}), at::randn({8, 1, 32}), at::randn({8, 50})};
-
-  auto smod = StaticModule(
-      mod,
-      /*is_frozen=*/false,
-      StaticModuleOptions{
-          .enable_out_variant = true,
-          .optimize_memory = true,
-          .memory_planner_algorithm =
-              MemoryPlannerAlgorithm::kPrecomputedOffsets,
-          .max_allowed_reallocs = 1});
-  auto& runtime = smod.runtime();
-  // First run, profiling.
-  runtime(args1);
-
-  const auto* first_memory_planner = runtime.getMemoryPlanner();
-  EXPECT_NE(first_memory_planner, nullptr);
-  EXPECT_NE(
-      dynamic_cast<const PrecomputedOffsetsMemoryPlanner*>(
-          first_memory_planner),
-      nullptr);
-
-  // Second run, triggers reallocations
-  runtime(args2);
-
-  // Run again to reset the memory planner
-  runtime(args1);
-  const auto* second_memory_planner = runtime.getMemoryPlanner();
-  EXPECT_NE(second_memory_planner, nullptr);
-  EXPECT_NE(
-      dynamic_cast<const StandardMemoryPlanner*>(second_memory_planner),
-      nullptr);
 }

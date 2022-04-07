@@ -106,8 +106,8 @@ TEST(StaticModule, ValueGroup) {
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
-  auto* root_block = sm.rootBlock();
-  const auto& value_group = sm.blockInfo(root_block).valueGroup();
+  auto* root_block = sm.root_block();
+  const auto& value_group = sm.block_info(root_block).value_group();
 
   std::vector<const Value*> expected_input_aliases{
       graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
@@ -139,11 +139,11 @@ TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
-  auto* root_block = sm.rootBlock();
-  const auto& block_info = sm.blockInfo(root_block);
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(block_info.nodeIsOptimizableContainerType(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -161,11 +161,11 @@ TEST(StaticModule, IsOptimizableContainerType_WrongType) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
-  auto* root_block = sm.rootBlock();
-  const auto& block_info = sm.blockInfo(root_block);
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(block_info.nodeIsOptimizableContainerType(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -180,14 +180,14 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
     )JIT";
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
-  auto* root_block = sm.rootBlock();
-  const auto& block_info = sm.blockInfo(root_block);
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
     if (n->kind() == c10::prim::ListConstruct) {
-      EXPECT_TRUE(block_info.nodeIsOptimizableContainerType(n));
+      EXPECT_TRUE(block_info.node_is_optimizable_container_type(n));
     } else {
-      EXPECT_FALSE(block_info.nodeIsOptimizableContainerType(n));
+      EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
     }
   }
 }
@@ -224,7 +224,7 @@ TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
     EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
     EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
 
-    replaceWithCopy(graph);
+    ReplaceWithCopy(graph);
 
     // aten::reshape -> static_runtime::reshape_copy
     EXPECT_FALSE(graphHasOp(graph, "aten::reshape"));
@@ -261,7 +261,7 @@ TEST(
     EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
     EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
 
-    replaceWithCopy(graph);
+    ReplaceWithCopy(graph);
 
     // No Replacement
     EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
@@ -438,7 +438,7 @@ TEST(StaticRuntime, LongModel) {
   std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().checkForMemoryLeak();
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -456,7 +456,7 @@ TEST(StaticRuntime, TrivialModel) {
   std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().checkForMemoryLeak();
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -481,7 +481,7 @@ TEST(StaticRuntime, DeepWide) {
       auto outputs = smod(input_tensors, {}).toTupleRef().elements();
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
-      smod.runtime().checkForMemoryLeak();
+      smod.runtime().check_for_memory_leak();
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
@@ -506,7 +506,7 @@ TEST(StaticRuntime, KWargsAPI_1) {
 
         // run static runtime
         c10::IValue output_ivalue = smod(inputs, {});
-        smod.runtime().checkForMemoryLeak();
+        smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
@@ -550,7 +550,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
 
         // run static runtime
         c10::IValue output_ivalue = smod(std::vector<IValue>{}, kwargs);
-        smod.runtime().checkForMemoryLeak();
+        smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
@@ -629,8 +629,12 @@ TEST(StaticRuntime, CleanUpMemory) {
             auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
             ASSERT_TRUE(outputs.size() > 0);
             auto output_2 = outputs[0].toTensor();
-            runtime.checkForMemoryLeak();
+            runtime.check_for_memory_leak();
             EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            if (manage_output_tensors) {
+              runtime.deallocateOutputTensors();
+              runtime.checkOutputTensorMemoryLeaks();
+            }
           }
         }
       }
@@ -681,21 +685,36 @@ TEST(
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
+    // Do not manage intput value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
+    // Do not manage direct output value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
     IValue element = tuple.toTupleRef().elements()[0];
-    runtime.checkForMemoryLeak();
+    // Tensor to be managed, but not yet from the profile run.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
   }
   // Second run that manages output tensors.
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
-    runtime.checkForMemoryLeak();
-    // Destruct tuple at the end of the scope, exercising the
-    // deallocation code.
+    // Do not manage intput value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
+    // Do not manage direct output value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
+    IValue element = tuple.toTupleRef().elements()[0];
+    // Tensor to be managed, but not yet from the profile run.
+    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
   }
 }
 
-TEST(StaticRuntime, ManageOutputTensorsManyIters) {
+TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
@@ -713,9 +732,122 @@ TEST(StaticRuntime, ManageOutputTensorsManyIters) {
     auto wide = torch::randn({batch_size, num_features});
     std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
     runtime(input_tensors, {});
-    // Destruct the output tensors, exercising the deallocation code
-    runtime.checkForMemoryLeak();
+    runtime.check_for_memory_leak();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
   }
+}
+
+TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  torch::jit::Module mod = getDeepAndWideSciptModel();
+
+  torch::jit::StaticModuleOptions opts{
+      /*enable_out_variant=*/true,
+      /*optimize_memory=*/true,
+      /*manage_output_tensors=*/true};
+  torch::jit::StaticModule smod(mod, false, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  int batch_size = 8;
+  auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+  auto user_emb = torch::randn({batch_size, 1, embedding_size});
+  auto wide = torch::randn({batch_size, num_features});
+  std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
+  // Profile run.
+  runtime(input_tensors, {});
+  runtime.deallocateOutputTensors();
+  // Run again to allocate output Tensors without deallocating them.
+  runtime(input_tensors, {});
+  // Memory leak checking fails.
+  EXPECT_THROW(runtime.checkOutputTensorMemoryLeaks(), std::exception);
+  // Calling the runtime without deallocation fails too.
+  EXPECT_THROW(runtime(input_tensors, {}), std::exception);
+  // After deallocation, everything works fine.
+  runtime.deallocateOutputTensors();
+  runtime.checkOutputTensorMemoryLeaks();
+  runtime(input_tensors, {});
+}
+
+TEST(StaticRuntime, DisableManageOutputTensors) {
+  const std::string test_graph = R"IR(
+    graph(%0 : Tensor):
+      # With manage_output_tensor enabled, this tensor is managed.
+      %1 : Tensor = aten::abs(%0)
+      # The output container object is never managed.
+      %2 : (Tensor) = prim::TupleConstruct(%1)
+      return (%2)
+  )IR";
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(test_graph, g.get());
+  torch::jit::StaticModuleOptions opts{
+      /*enable_out_variant=*/true,
+      /*optimize_memory=*/true,
+      /*manage_output_tensors=*/true};
+  auto a = at::randn({2, 2});
+  std::vector<at::IValue> args{a};
+  torch::jit::StaticModule smod(g, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  // Profile run.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Second run that manages output tensors.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+
+  // Reset the runtime and start profiling again.
+  runtime.disableManageOutputTensors();
+
+  IValue copied_output_tensor;
+  IValue original_output_tensor;
+  // New profile run.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    copied_output_tensor = element.deepcopy();
+    original_output_tensor = element;
+    tuple = IValue();
+    // No-op since manage_output_tensor is disabled now.
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Ensure that `original_output_tensor` is no longer managed: even after
+  // calling `runtime.deallocateOutputTensors();` `original_output_tensor` still
+  // contains a valid value.
+  EXPECT_TRUE(
+      original_output_tensor.toTensor().equal(copied_output_tensor.toTensor()));
+
+  // Ensure that the second optimized run does not manage the output tensor
+  // either.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    copied_output_tensor = element.deepcopy();
+    original_output_tensor = element;
+    tuple = IValue();
+    // No-op since manage_output_tensor is disabled now.
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Ensure that `original_output_tensor` is no longer managed: even after
+  // calling `runtime.deallocateOutputTensors();` `original_output_tensor` still
+  // contains a valid value.
+  EXPECT_TRUE(
+      original_output_tensor.toTensor().equal(copied_output_tensor.toTensor()));
 }
 
 TEST(StaticRuntime, FusionPass) {
@@ -778,10 +910,10 @@ TEST(
   StaticNodeInfo static_node_info(
       sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   ProcessedNode pnode(static_node_info, values.data());
-  EXPECT_TRUE(pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+  EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 
-  pnode.output(0) = values[0];
-  EXPECT_FALSE(pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+  pnode.Output(0) = values[0];
+  EXPECT_FALSE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 }
 
 TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
@@ -799,11 +931,11 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
       sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   ProcessedNode pnode(static_node_info, values.data());
 
-  ASSERT_EQ(&pnode.output(0), &values[1]);
-  EXPECT_TRUE(pnode.verifyNoMemoryOverlap());
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.output(0) = values[0];
-  EXPECT_TRUE(pnode.verifyNoMemoryOverlap());
+  pnode.Output(0) = values[0];
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 }
 
 TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
@@ -828,7 +960,8 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
     ProcessedNode list_unpack_pnode(
         list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
-    EXPECT_TRUE(list_unpack_pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+    EXPECT_TRUE(
+        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
   }
   {
     std::array<IValue, 3> values = {
@@ -842,10 +975,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
     ProcessedNode list_unpack_pnode(
         list_unpack_static_node_info, values.data());
     auto b = at::randn({2, 3});
-    list_unpack_pnode.output(0) = b;
-    list_unpack_pnode.output(1) = b;
+    list_unpack_pnode.Output(0) = b;
+    list_unpack_pnode.Output(1) = b;
     EXPECT_FALSE(
-        list_unpack_pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
   }
 }
 
@@ -1170,92 +1303,6 @@ void checkStorageGroups(
   EXPECT_GE(num_reused, min_reused_tensors);
 }
 
-struct MemoryPlannerTestingData {
-  MemoryPlannerTestingData(
-      const std::string& src,
-      FastMap<std::string, at::Tensor>& managed_tensor_name_to_tensor) {
-    graph = std::make_shared<Graph>();
-    std::unordered_map<std::string, Value*> vmap;
-    parseIR(src, graph.get(), vmap);
-
-    for (auto& key_value : managed_tensor_name_to_tensor) {
-      const auto& tensor_name = key_value.first;
-      auto* tensor_value = vmap.at(tensor_name);
-      managed_tensor_values.insert(tensor_value);
-      tensor_value_to_tensor.emplace(tensor_value, &key_value.second);
-    }
-
-    AliasDb alias_db(graph);
-    ranges =
-        ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
-  }
-
-  std::shared_ptr<Graph> graph;
-  FastSet<const Value*> managed_tensor_values;
-  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
-  ManagedTensorRanges ranges;
-};
-
-std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>
-constructManagedTensors(const MemoryPlannerTestingData& data) {
-  std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor> result;
-  result.reserve(data.managed_tensor_values.size());
-
-  for (const auto* tensor_value : data.managed_tensor_values) {
-    auto* tensor = data.tensor_value_to_tensor.at(tensor_value);
-    result.emplace_back(
-        tensor,
-        tensor_value,
-        /*storage_impl=*/nullptr,
-        /*size=*/tensor->nbytes(),
-        /*offset=*/0);
-  }
-
-  return result;
-}
-
-bool tensorsAreDisjoint(
-    const PrecomputedOffsetsMemoryPlanner::ManagedTensor& a,
-    const PrecomputedOffsetsMemoryPlanner::ManagedTensor& b) {
-  auto a_start = a.offset;
-  auto a_end = a.offset + a.size;
-
-  auto b_start = b.offset;
-  auto b_end = b.offset + b.size;
-
-  return b_end <= a_start || a_end <= b_start;
-}
-
-void checkOffsetsAreValid(
-    const std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
-        managed_tensors,
-    const ManagedTensorRanges& ranges) {
-  for (const auto i : c10::irange(managed_tensors.size() - 1)) {
-    for (const auto j : c10::irange(i + 1, managed_tensors.size())) {
-      auto& a = managed_tensors[i];
-      auto& b = managed_tensors[j];
-
-      if (ranges.lifetimesOverlap(a.value, b.value)) {
-        EXPECT_TRUE(tensorsAreDisjoint(a, b));
-      }
-    }
-  }
-}
-
-void testOffsetAssignmentAlgorithm(
-    const std::string& src,
-    FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
-    const std::function<size_t(
-        std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&,
-        const ManagedTensorRanges&)>& strategy) {
-  MemoryPlannerTestingData data(src, managed_tensor_name_to_tensor);
-  ASSERT_EQ(
-      data.managed_tensor_values.size(), data.tensor_value_to_tensor.size());
-  auto managed_tensors = constructManagedTensors(data);
-  strategy(managed_tensors, data.ranges);
-  checkOffsetsAreValid(managed_tensors, data.ranges);
-}
-
 // A convenience function for testing assignStorageToManagedTensors. It
 // takes in an IR graph as well as a map from managed tensor name to tensor
 // value. It constructs all of the necessary data structures, invokes
@@ -1265,13 +1312,30 @@ void testAssignStorageToManagedTensors(
     const std::string& src,
     FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
     size_t min_reused_tensors) {
-  MemoryPlannerTestingData data(src, managed_tensor_name_to_tensor);
-  ASSERT_EQ(
-      data.managed_tensor_values.size(), data.tensor_value_to_tensor.size());
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  FastSet<const Value*> managed_tensor_values;
+  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+
+  for (auto& key_value : managed_tensor_name_to_tensor) {
+    const auto& tensor_name = key_value.first;
+    auto vmap_it = vmap.find(tensor_name);
+    ASSERT_TRUE(vmap_it != vmap.end());
+    managed_tensor_values.insert(vmap_it->second);
+    tensor_value_to_tensor.emplace(vmap_it->second, &key_value.second);
+  }
+  ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
+
+  AliasDb alias_db(graph);
+  auto ranges =
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
   auto groups = assignStorageToManagedTensors(
-      data.graph->block()->nodes(), data.ranges, data.tensor_value_to_tensor);
+      graph->block()->nodes(), ranges, tensor_value_to_tensor);
+
   checkStorageGroups(
-      groups, data.ranges, data.tensor_value_to_tensor, min_reused_tensors);
+      groups, ranges, tensor_value_to_tensor, min_reused_tensors);
 }
 
 } // namespace
@@ -1318,73 +1382,6 @@ TEST(AssignStorageToManagedTensors, Aliases) {
   const size_t min_reused_tensors = 1;
   testAssignStorageToManagedTensors(
       src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
-}
-
-TEST(AssignOffsetsNaive, NoAliases) {
-  const auto src = R"IR(
-    graph(%a : Tensor):
-      %b : Tensor = aten::mul(%a, %a)
-      %c : Tensor = aten::mul(%b, %b)
-      %d : Tensor = aten::mul(%c, %c)
-      %e : Tensor = aten::mul(%b, %d)
-      %output : Tensor = aten::mul(%e, %e)
-      return (%output)
-  )IR";
-  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
-      {"b", at::randn({1})},
-      {"c", at::randn({1})},
-      {"d", at::randn({1})},
-      {"e", at::randn({1})}};
-  testOffsetAssignmentAlgorithm(
-      src,
-      std::move(managed_tensor_name_to_tensor),
-      [](std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
-             managed_tensors,
-         const ManagedTensorRanges&) {
-        return assignOffsetsNaive(managed_tensors);
-      });
-}
-
-TEST(AssignOffsetsOptimized, NoAliases) {
-  const auto src = R"IR(
-    graph(%a : Tensor):
-      %b : Tensor = aten::mul(%a, %a)
-      %c : Tensor = aten::mul(%b, %b)
-      %d : Tensor = aten::mul(%c, %c)
-      %e : Tensor = aten::mul(%b, %d)
-      %output : Tensor = aten::mul(%e, %e)
-      return (%output)
-  )IR";
-  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
-      {"b", at::randn({1})},
-      {"c", at::randn({32})},
-      {"d", at::randn({128})},
-      {"e", at::randn({64})}};
-  testOffsetAssignmentAlgorithm(
-      src, std::move(managed_tensor_name_to_tensor), assignOffsetsOptimized);
-}
-
-TEST(AssignOffsetsOptimized, Aliases) {
-  const auto src = R"IR(
-    graph(%a : Tensor):
-      %b : Tensor = aten::mul(%a, %a)
-      %c : Tensor = aten::mul(%b, %b)
-      %d : Tensor = aten::mul(%c, %c)
-      %c_size : int[] = aten::size(%c)
-      %c_alias : Tensor = aten::view(%c, %c_size)
-      %e : Tensor = aten::mul(%b, %d)
-      %f : Tensor = aten::mul(%c_alias, %c_alias)
-      %output : Tensor = aten::mul(%e, %f)
-      return (%output)
-  )IR";
-  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
-      {"b", at::randn({1})},
-      {"c", at::randn({128})},
-      {"d", at::randn({64})},
-      {"e", at::randn({4})},
-      {"f", at::randn({2})}};
-  testOffsetAssignmentAlgorithm(
-      src, std::move(managed_tensor_name_to_tensor), assignOffsetsOptimized);
 }
 
 namespace {
@@ -1482,7 +1479,7 @@ TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  createOwnedRefsForSpecialIValues(*graph);
+  CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
 
@@ -1499,7 +1496,7 @@ TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  createOwnedRefsForSpecialIValues(*graph);
+  CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
 
@@ -1520,7 +1517,7 @@ TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  forceNonEmptyOutputs(*graph);
+  ForceNonEmptyOutputs(*graph);
 
   for (auto* node : graph->nodes()) {
     if (node->blocks().empty()) {
@@ -1546,7 +1543,7 @@ TEST(EliminateExtraPermuteOps, FusesCorrectly) {
   auto graph = mod.get_method("forward").graph();
   // turn the ListConstruct(%constant) into proper constant lists
   ConstantPropagation(graph);
-  eliminateExtraPermuteOps(graph);
+  EliminateExtraPermuteOps(graph);
 
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
   auto* sum = getNodeWithKind(graph, "aten::sum");
@@ -1569,7 +1566,7 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
   auto graph = mod.get_method("forward").graph();
   // turn the ListConstruct(%constant) into proper constant lists
   ConstantPropagation(graph);
-  eliminateExtraPermuteOps(graph);
+  EliminateExtraPermuteOps(graph);
 
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
@@ -1587,7 +1584,7 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
   auto graph = mod.get_method("forward").graph();
   // turn the ListConstruct(%constant) into proper constant lists
   ConstantPropagation(graph);
-  eliminateExtraPermuteOps(graph);
+  EliminateExtraPermuteOps(graph);
 
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
@@ -1604,7 +1601,7 @@ TEST(UseSplitAndSqueeze, Fusion) {
       return (%c, %d)
   )IR";
   auto graph = getGraphFromIR(src);
-  useSplitAndSqueeze(graph);
+  UseSplitAndSqueeze(graph);
   EXPECT_TRUE(
       hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));

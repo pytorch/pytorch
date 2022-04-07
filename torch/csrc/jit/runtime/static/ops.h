@@ -54,7 +54,7 @@ C10_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
   C10_REGISTER_CLASS(                                              \
       SRNativeOperatorRegistry, name, SRNativeOperatorFunctor_##id);
 
-inline at::Tensor createEmptyFrom(const at::Tensor& t) {
+inline at::Tensor create_empty_from(const at::Tensor& t) {
   return at::detail::empty_cpu(
       {0},
       c10::typeMetaToScalarType(t.dtype()),
@@ -64,7 +64,9 @@ inline at::Tensor createEmptyFrom(const at::Tensor& t) {
       c10::nullopt);
 }
 
-inline at::Tensor createEmptyFrom(at::IntArrayRef sizes, const at::Tensor& t) {
+inline at::Tensor create_empty_from(
+    at::IntArrayRef sizes,
+    const at::Tensor& t) {
   return at::detail::empty_cpu(
       sizes,
       c10::typeMetaToScalarType(t.dtype()),
@@ -79,12 +81,14 @@ inline at::Tensor create_empty(c10::ScalarType dtype) {
       {0}, dtype, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
 }
 
-inline at::Tensor createEmptyFrom(const at::Tensor& t, c10::ScalarType dtype) {
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype) {
   return at::detail::empty_cpu(
       {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
 }
 
-inline at::Tensor createEmptyFrom(const at::Tensor& t, c10::Layout layout) {
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Layout layout) {
   return at::detail::empty_cpu(
       {0},
       c10::typeMetaToScalarType(t.dtype()),
@@ -94,7 +98,7 @@ inline at::Tensor createEmptyFrom(const at::Tensor& t, c10::Layout layout) {
       c10::nullopt);
 }
 
-inline at::Tensor createEmptyFrom(const at::Tensor& t, c10::Device device) {
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Device device) {
   return at::detail::empty_cpu(
       {0},
       c10::typeMetaToScalarType(t.dtype()),
@@ -104,7 +108,7 @@ inline at::Tensor createEmptyFrom(const at::Tensor& t, c10::Device device) {
       c10::nullopt);
 }
 
-inline at::Tensor createEmptyFrom(
+inline at::Tensor create_empty_from(
     const at::Tensor& t,
     c10::MemoryFormat memory_format) {
   return at::detail::empty_cpu(
@@ -116,7 +120,7 @@ inline at::Tensor createEmptyFrom(
       memory_format);
 }
 
-inline at::Tensor createEmptyFrom(
+inline at::Tensor create_empty_from(
     const at::Tensor& t,
     c10::ScalarType dtype,
     c10::MemoryFormat memory_format) {
@@ -160,7 +164,7 @@ inline std::string PrintNode(const Node* node) {
   return ss.str();
 }
 
-inline void logAndDumpSchema(const Node* node) {
+inline void LogAndDumpSchema(const Node* node) {
   VLOG(1) << "Found schema mismatch";
   node->schema().dump();
 }
