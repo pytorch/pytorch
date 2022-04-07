@@ -1161,11 +1161,12 @@ c10::optional<std::vector<at::SymbolicShape>> get_cached_shape_function(
     const std::vector<SSAInput>& arg_vec) {
   if (!shapeCache) {
     shapeCache = std::make_unique<ShapeCache>(kShapeCacheSize);
+    return c10::nullopt;
   }
   auto ss_map = std::unordered_map<int64_t, int64_t>();
   auto cache_key = get_cache_key(schema, arg_vec, ss_map);
   auto cached_ret_vec = shapeCache->Get(cache_key);
-  if (!cached_ret_vec) {
+  if (cached_ret_vec == nullptr) {
     return c10::nullopt;
   }
   // Decanonicalize the return values

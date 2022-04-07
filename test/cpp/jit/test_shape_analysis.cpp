@@ -372,6 +372,7 @@ TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   c10::optional<int64_t> sym_dim = c10::nullopt;
   c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
   c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
+  c10::SymbolicShape ss3 = c10::SymbolicShape({sym_dim, sym_dim});
 
   auto res = calculateSymbolicShapesOnOp(schema, {ss1, const_size_1});
   assertShapeEqual(res, {sym_dim, 56});
@@ -393,9 +394,17 @@ TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   EXPECT_EQ(get_shape_cache_size(), 1);
 
   // Different concrete shape should be cached separately
-  res = calculateSymbolicShapesOnOp(schema, {ss1, const_size_2});
+  res = calculateSymbolicShapesOnOp(schema, {ss1, const_size_3});
   assertShapeEqual(res, {sym_dim, 20});
   EXPECT_EQ(get_shape_cache_size(), 2);
+
+  res = calculateSymbolicShapesOnOp(schema, {ss3, const_size_3});
+  assertShapeEqual(res, {sym_dim, 20});
+  EXPECT_EQ(get_shape_cache_size(), 3);
+
+  res = calculateSymbolicShapesOnOp(schema, {ss3, ss3});
+  assertShapeEqual(res, {sym_dim, sym_dim});
+  EXPECT_EQ(get_shape_cache_size(), 4);
 }
 
 } // namespace jit
