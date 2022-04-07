@@ -617,7 +617,6 @@ class TestCudaFuser(JitTestCase):
             self._unary_test_helper(op, dtype, False)  # test special numbers
             self._unary_test_helper(op, dtype, True)  # test random data
 
-    @unittest.skipIf(True, "See issues 73395 and 75029")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -3326,32 +3325,6 @@ class TestCudaFuser(JitTestCase):
             graph = jitted.graph_for(x, y)
             self.assertGraphContains(graph, FUSION_GROUP, True)
 
-    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(True, "See 75029")
-    def test_linear_1d_weight_mismatch_bias_dtype(self):
-        def t(x: torch.Tensor, w: torch.Tensor, b: torch.Tensor):
-            o = torch.nn.functional.linear(x, w, b)
-            return o.relu()
-
-        device = "cuda"
-        jitted = torch.jit.script(t)
-        x = torch.randn(2, 5, 5, dtype=torch.half, device=device)
-        w = torch.randn(5, dtype=torch.half, device=device)
-        b = torch.randn(5, dtype=torch.float32, device=device)
-
-        for i in range(3):
-            jit_o = jitted(x, w, b)
-        jit_o = jitted(x, w, b)
-        o = t(x, w, b)
-        self.assertEqual(o, jit_o)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o.size(), jit_o.size())
-        graph = jitted.graph_for(x, w, b)
-        self.assertGraphContains(graph, FUSION_GROUP, True)
-        self.assertGraphContains(graph, 'aten::matmul', True)
-
     def _run_fwd_helper(self, func, ops, *args):
         jitted = torch.jit.script(func)
         for i in range(3):
@@ -4073,7 +4046,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(True, "See 75029")
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     def test_int_tensor_input(self):
         x = torch.randn(4, 2, device="cuda").to(dtype=torch.int)
 
