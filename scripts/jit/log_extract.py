@@ -1,6 +1,8 @@
-from typing import List, Tuple, Callable, Optional
 import argparse
-from torch.utils.jit.log_extract import extract_ir
+import functools
+import traceback
+from torch.utils.jit.log_extract import extract_ir, load_graph_and_inputs, run_baseline_no_fusion, run_nnc, run_nvfuser
+from typing import List, Tuple, Callable, Optional
 
 '''
 Usage:

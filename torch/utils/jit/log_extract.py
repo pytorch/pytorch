@@ -1,11 +1,8 @@
 from contextlib import contextmanager
-from typing import Any, List, Tuple, Callable, Optional
-import argparse
+from typing import Any, List, Tuple
 import random
 import torch
-import traceback
 import time
-import functools
 from torch.utils.benchmark import Timer
 
 def extract_ir(filename: str) -> List[str]:
@@ -65,7 +62,7 @@ def time_cpu(fn, inputs, test_runs):
     for _ in range(test_runs):
         fn(*inputs)
     e = time.perf_counter()
-    return (e - s) / test_runs
+    return (e - s) / test_runs * 1000  # time in ms
 
 def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
     graph, _ = load_graph_and_inputs(ir)
