@@ -1810,10 +1810,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     }
   }
 
-  return std::make_tuple(
-    output_mask[0] ? backend_grad_input : Tensor(),
-    output_mask[1] ? backend_grad_weight : Tensor(),
-    output_mask[2] ? backend_grad_bias : Tensor());
+  return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
 }
 
 }} // at::native
