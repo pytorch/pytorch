@@ -451,9 +451,9 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.silu,
         F.mish,
         operator.add,
-        # TODO(future PR): implement shadowing for binary ops and
-        # uncomment below
-        # operator.mul,
+        torch.add,
+        operator.mul,
+        torch.mul,
         torch.sum,
     ])
 
