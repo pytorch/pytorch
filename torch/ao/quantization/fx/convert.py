@@ -92,7 +92,9 @@ QAT_MODULE_CLASSES = (
     torch.nn.intrinsic.qat.ConvReLU2d,
     torch.nn.intrinsic.qat.ConvBn3d,
     torch.nn.intrinsic.qat.ConvBnReLU3d,
-    torch.nn.intrinsic.qat.ConvReLU3d
+    torch.nn.intrinsic.qat.ConvReLU3d,
+    torch.nn.qat.Embedding,
+    torch.nn.qat.EmbeddingBag,
 )
 
 WEIGHT_ONLY_MODULE_CLASSES = (

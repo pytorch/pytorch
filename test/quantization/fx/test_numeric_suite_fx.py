@@ -815,12 +815,10 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         for extract_weights_fun in (extract_weights, _extract_weights_impl):
             # test both m vs mp and mp vs mq
             for m1, m2 in ((m, mp), (mp, mq)):
-                print("m1 m2:", m1, m2)
                 results = extract_weights_fun('a', m1, 'b', m2)
                 self.assertTrue(
                     len(results) == results_len,
                     f"expected len {results_len}, got len {len(results)}")
-                print("results:", results)
                 self.assert_ns_compare_dict_valid(results)
                 extend_logger_results_with_comparison(
                     results, 'a', 'b', compute_sqnr, 'sqnr')
