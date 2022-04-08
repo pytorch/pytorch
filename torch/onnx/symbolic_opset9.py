@@ -751,7 +751,7 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     opset_before = kwargs.pop("opset_before", None)
     target_float_t = kwargs.pop("target_float_t", "Float")
 
-    operands = list(args)
+    inputs = list(args)
     origin_dtype = operands[0].type().scalarType()
 
     require_cast = not sym_help._is_fp(operands[0]) and \
