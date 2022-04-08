@@ -10,13 +10,17 @@ namespace native {
 
 DEFINE_DISPATCH(max_pool1d_stub);
 
-Tensor _max_pool1d_cpu_forward(
+namespace {
+
+Tensor max_pool1d_impl(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  NoNamesGuard guard;
+
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
@@ -78,8 +82,13 @@ Tensor _max_pool1d_cpu_forward(
     output.squeeze_(0);
   }
 
+  guard.reset();
+  namedinference::propagate_names(output, self);
+
   return output;
 }
+
+} // namespace
 
 Tensor max_pool1d(
     const Tensor& self,
@@ -93,19 +102,14 @@ Tensor max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
+      self._fw_grad(/*level */ 0).defined() ||
       !self.device().is_cpu()) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }
-
-  Tensor result = [&]() {
-    NoNamesGuard guard;
-    return at::_max_pool1d_cpu_forward(
-        self, kernel_size, stride, padding, dilation, ceil_mode);
-  }();
-  namedinference::propagate_names(result, self);
-  return result;
+  return max_pool1d_impl(
+      self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
 } // namespace native

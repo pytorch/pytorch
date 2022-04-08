@@ -98,5 +98,11 @@ TORCH_API Module load(
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
 
+TORCH_API Module jitModuleFromSourceAndConstants(
+    const IValue& ivalue,
+    const ExtraFilesMap& source,
+    const std::vector<IValue>& constants,
+    int32_t version);
+
 } // namespace jit
 } // namespace torch

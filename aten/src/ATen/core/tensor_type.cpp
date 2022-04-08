@@ -3,6 +3,40 @@
 
 namespace c10 {
 
+namespace {
+
+// The idea is to only mark possible overlap across dimensions. We want to
+// return false for expanded tensors and permuted tensors, for which dimensional
+// collapsing is safe.
+bool possible_cross_dimension_overlap(c10::IntArrayRef sizes, c10::IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+  std::vector<size_t> stride_indices(n_dim);
+  std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
+
+  // sort indices going with ascending strides
+  for (int i = 1; i < n_dim; i++) {
+    auto c = i;
+    for (int j = i - 1; j >= 0; j--) {
+      if (strides[stride_indices[j]] > strides[stride_indices[c]]) {
+        std::swap(stride_indices[j], stride_indices[c]);
+        c = j;
+      }
+    }
+  }
+
+  for (const auto i : c10::irange(1, n_dim)) {
+    if (i != 0) {
+      // we are being conservative on checking for memory overlap
+      if (sizes[stride_indices[i]] != 1 && strides[stride_indices[i]] < sizes[stride_indices[i-1]] * strides[stride_indices[i-1]]) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}
+
 const TensorTypePtr& TensorType::get() {
   static auto value = TensorType::create(
       {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
@@ -115,6 +149,10 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     bool tensor_contiguity) {
   int n_dim = static_cast<int>(sizes.size());
   std::vector<size_t> stride_indices(n_dim);
+  // default has_overlap to false as we only compute overlap when:
+  // 1. input sizes/strides fails format check;
+  // 2. tensor_contiguity are not set.
+  bool has_overlap = false;
 
   // Sorting strides in ascending order
   // Example:
@@ -140,7 +178,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     // case 1.b. short cut contiguous
     std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
   } else {
-    std::iota(stride_indices.begin(), stride_indices.end(), 0);
+    std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
     // case 2.
     //
     // For broadcasted dimension where stride is 0, we have to stick to
@@ -173,21 +211,35 @@ VaryingShape<Stride> TensorType::computeStrideProps(
         }
       }
     }
+    // conveniently is_contiguous_strides/is_contiguous_strides only returns
+    // true when there's no memory overlap, so we only re-compute has_overlap
+    // in the last branch when both returns false
+    if (!tensor_contiguity) {
+      // trust tensor_contiguity and only computes overlap when it is not set
+      has_overlap = possible_cross_dimension_overlap(sizes, strides);
+    }
   }
   std::vector<Stride> stride_properties;
+
+
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
     if (!contiguous_) {
-      // innermost stride expected to be 1
-      // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
-      // BROADCASTED
-      if (i == 0) {
-        contiguous_ = strides[stride_indices[i]] == 1;
+      if (!has_overlap) {
+        // innermost stride expected to be 1
+        // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
+        // BROADCASTED
+        if (i == 0) {
+          contiguous_ = strides[stride_indices[i]] == 1;
+        } else {
+          contiguous_ = strides[stride_indices[i]] == 1 ||
+              (strides[stride_indices[i]] != 0 &&
+               strides[stride_indices[i]] ==
+                   strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+        }
       } else {
-        contiguous_ = strides[stride_indices[i]] == 1 ||
-            (strides[stride_indices[i]] != 0 &&
-             strides[stride_indices[i]] ==
-                 strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+        // leaving this assign statement for readability;
+        contiguous_ = false;
       }
     }
     stride_properties.emplace_back(stride_indices[i], contiguous_, strides[stride_indices[i]]);

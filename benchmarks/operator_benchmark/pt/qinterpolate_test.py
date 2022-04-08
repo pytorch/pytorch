@@ -44,7 +44,7 @@ class QInterpolateBenchmark(op_bench.TorchBenchmarkBase):
                                                  zero_point=zero_point,
                                                  dtype=dtype)
         if not contig:
-            permute_dims = list(range(q_input.ndim))[::-1]
+            permute_dims = list(range(self.q_input.ndim))[::-1]
             self.q_input = self.q_input.permute(permute_dims)
 
         self.inputs = {

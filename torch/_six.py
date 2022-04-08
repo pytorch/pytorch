@@ -19,12 +19,10 @@
 # SOFTWARE.
 
 import math
-import sys
 
 inf = math.inf
 nan = math.nan
 string_classes = (str, bytes)
-PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
 def with_metaclass(meta: type, *bases) -> type:
     """Create a base class with a metaclass."""

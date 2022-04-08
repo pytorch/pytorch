@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type_base.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -42,15 +43,18 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
@@ -1379,6 +1383,29 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
+TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
+  static const size_t LENGTH = 5;
+  auto a = at::randn({10}, at::kCPU);
+  c10::SymInt si(LENGTH);
+  auto b = a.narrow_copy(0, 0, si);
+  auto c = a.narrow(0, 0, LENGTH);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, NarrowCopy) {
+  static const size_t LENGTH = 5;
+  auto a = at::randn({10}, at::kCPU);
+  auto b = a.narrow_copy(0, 0, LENGTH);
+  auto c = a.narrow(0, 0, LENGTH);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, AddSymbolicInt) {
+  c10::SymInt a(5);
+  c10::SymInt b(3);
+  ASSERT_TRUE((a + b).expect_int() == 8);
+}
+
 TEST(FallbackGraphsTest, Basic) {
   static const auto nestGraphIntoFallbackGraph =
       [](const std::shared_ptr<Graph>& graph) {
@@ -1990,6 +2017,66 @@ TEST(ProfilerTest, Basic) {
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
   checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
+}
+
+TEST(ProfilerTest, OptionalProfiling) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%inp : Tensor,
+      %weight : Tensor,
+      %bias : Tensor?):
+  %1 : Tensor = aten::linear(%inp, %weight, %bias)
+  return (%1))IR",
+      &*graph,
+      vmap);
+
+  auto pr = ProfilingRecord::instrumentGraph(graph);
+  pr->profiling_count_ = 2;
+
+  auto input = torch::randn({1, 2});
+  auto weight = torch::randn({2, 2});
+  auto bias = torch::randn({1, 2});
+
+  auto stack = createStack({input, weight, bias});
+  Code cd(pr->profiled_graph_, "");
+  InterpreterState is{cd};
+  is.run(stack);
+
+  testing::FileCheck()
+      .check_count("Tensor? = prim::profile[profiled_type", 1, true)
+      ->run(*pr->profiled_graph_);
+
+  // make sure we recorded the shape
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  std::vector<int64_t> bias_expected_shape = {1, 2};
+  auto profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(0, profiled_bias->i(attr::seen_none));
+
+  auto none_bias = c10::IValue();
+
+  stack.clear();
+  stack.emplace_back(input);
+  stack.emplace_back(weight);
+  stack.emplace_back(none_bias);
+  is = InterpreterState{cd};
+  is.run(stack);
+
+  // make sure we recorded that "None" was seen.
+  begin = pr->profiled_graph_->block()->nodes().begin();
+  end = pr->profiled_graph_->block()->nodes().end();
+  linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(1, profiled_bias->i(attr::seen_none));
 }
 
 TEST(CallStackTest, Basic) {
@@ -2807,6 +2894,33 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check_not("aten::relu_")->run(*graph);
 }
 
+TEST(TestRegisterShapeOp, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph():
+  %2 : int = prim::Constant[value=5]()
+  %3: int[] = prim::ListConstruct(%2, %2)
+  return (%3))IR",
+      &*graph,
+      vmap);
+
+  auto g2 = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %2 : Tensor = prim::MakeTestTensor()
+  return (%2))IR",
+      &*g2,
+      vmap);
+
+  const FunctionSchema& schema = g2->nodes().begin()->schema();
+  torch::jit::RegisterShapeComputeGraphForSchema(schema, graph);
+  PropagateShapesOnGraph(g2);
+  testing::FileCheck().check("5, 5")->run(*g2);
+}
+
 TEST(TestFunctionalToInplaceActivation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -2822,6 +2936,74 @@ graph(%x.1 : Tensor):
   FunctionalToInplaceActivation(graph);
   testing::FileCheck().check("aten::relu_")->run(*graph);
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
+}
+
+TEST(TestFunctionExecutor, SimpleExecutorTest) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph);
+  {
+    auto func = torch::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+  {
+    auto func = torch::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = func->getDebugState().graph;
+    testing::FileCheck()
+        .check_not("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+}
+
+TEST(TestFunctionExecutor, RunDecompositionTest) {
+  GraphFunction* func;
+  std::once_flag flag1;
+  for (bool unbiased : {true, false}) {
+    std::call_once(flag1, [&]() {
+      // NB: take reference to schema here, `auto schema =` will not work
+      auto& schema = getOperatorForLiteral(
+                         "aten::var(Tensor self, bool unbiased=True) -> Tensor")
+                         ->schema();
+      auto maybe_func = GetDecompositionFunction(schema);
+      TORCH_INTERNAL_ASSERT(maybe_func);
+      func = *maybe_func;
+    });
+    auto input = at::rand({4, 4});
+    Stack stack = {input, unbiased};
+    func->run(stack);
+    at::Tensor out = pop(stack).toTensor();
+    ASSERT_TRUE(at::allclose(out, input.var(unbiased)));
+  }
+}
+
+TEST(TestShapeGraphLinting, Basic) {
+  auto schemas = RegisteredShapeComputeSchemas();
+  for (const auto& schema : schemas) {
+    auto g = shapeComputeGraphForSchema(*schema);
+    TORCH_INTERNAL_ASSERT(g);
+    LintShapeComputeGraph(schema, *g);
+  }
 }
 
 // TODO: move to test_kernel when global settings are explicit
@@ -2865,11 +3047,13 @@ TEST_F(Composed, ComposedOp) {
   auto ref1 = a * (a * b);
   auto ref2 = a * ref1;
   WithCPUFuser g(true);
-  bool dynamic_enabled = tensorExprFuserEnabled();
   bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
-  setTensorExprDynamicShapeFusionEnabled(true);
-  FuseTensorExprs(graph, /*min_group_size*/ 2, /*add_composed_op*/ true);
+  FuseTensorExprs(
+      graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
@@ -2892,7 +3076,6 @@ TEST_F(Composed, ComposedOp) {
   // to the second output. inp_2 is on the top corresponds to first output
   ASSERT_TRUE(at::allclose(inp_1, ref2));
   ASSERT_TRUE(at::allclose(inp_2, ref1));
-  setTensorExprDynamicShapeFusionEnabled(dynamic_enabled);
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
 }

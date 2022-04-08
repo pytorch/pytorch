@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Dropout_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -16,7 +16,7 @@ graph {
     }
   }
   node {
-    output: "2"
+    output: "onnx::Dropout_2"
     name: "Constant_1"
     op_type: "Constant"
     attribute {
@@ -30,15 +30,15 @@ graph {
   }
   node {
     input: "x"
-    input: "1"
-    input: "2"
-    output: "3"
+    input: "onnx::Dropout_1"
+    input: "onnx::Dropout_2"
+    output: "onnx::ReduceMax_3"
     output: "4"
     name: "Dropout_2"
     op_type: "Dropout"
   }
   node {
-    input: "3"
+    input: "onnx::ReduceMax_3"
     output: "5"
     name: "ReduceMax_3"
     op_type: "ReduceMax"
@@ -48,7 +48,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {
