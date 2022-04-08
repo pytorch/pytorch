@@ -68,7 +68,6 @@ void setLinearParams(
   params->memory_format = input.suggest_memory_format();
   for (int i = 0; i < params->input_dim; ++i) {
     params->input_size[i] = input.sizes()[i];
-    params->weight_size[i] = weight.sizes()[i];
   }
   for (int i = 0; i < 2; ++i) {
     params->weight_size[i] = weight.sizes()[i];
