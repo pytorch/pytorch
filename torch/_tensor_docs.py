@@ -3980,9 +3980,11 @@ Args:
 
 add_docstr_all('chalf',
                r"""
- chalf(memory_format=torch.preserve_format) -> Tensor
- ``self.chalf()`` is equivalent to ``self.to(torch.complex32)``. See :func:`to`.
- Args:
+chalf(memory_format=torch.preserve_format) -> Tensor
+
+``self.chalf()`` is equivalent to ``self.to(torch.complex32)``. See :func:`to`.
+
+Args:
      {memory_format}
  """.format(**common_args))
 
