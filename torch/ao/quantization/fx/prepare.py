@@ -148,8 +148,6 @@ def is_input_arg_dtype_supported_by_backend(
             input_activation_dtype = dtype_config.get("input_dtype", None)
             # TODO: change this after the is_dynamic refactor is landed
             compute_dtype = node_name_to_target_dtype[node.name].get("input_activation_compute_dtype", None)
-            # print("compute dtype:", compute_dtype)
-            # print("input activation dtype:", input_activation_dtype)
             return input_activation_dtype is None or \
                 compute_dtype == input_activation_dtype
         else:
@@ -158,8 +156,6 @@ def is_input_arg_dtype_supported_by_backend(
                 node_name_to_target_dtype[node.name]["input_activation_dtype"] == input_activation_dtype
     elif is_weight:
         weight_dtype = dtype_config.get("weight_dtype", None)
-        # print("weight dtype:", node_name_to_target_dtype[node.name].get("weight_dtype", None))
-        # print("expected weight dtype:", weight_dtype)
         return weight_dtype is None or node_name_to_target_dtype[node.name]["weight_dtype"] == weight_dtype
     else:  # bias
         bias_dtype = dtype_config.get("bias_dtype", None)
@@ -174,8 +170,6 @@ def is_output_dtype_supported_by_backend(
     is supported by the backend or not
     """
     output_dtype = dtype_config.get("output_dtype", None)
-    # print("expected output dtype", output_dtype)
-    # print("out type:", node_name_to_target_dtype[node.name].get("output_activation_dtype"))
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
