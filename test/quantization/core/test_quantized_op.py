@@ -3521,7 +3521,7 @@ class TestQuantizedLinear(TestCase):
     @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
-    TODO: check with yang regarding CUDNN flags
+    # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
