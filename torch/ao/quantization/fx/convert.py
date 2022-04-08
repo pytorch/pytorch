@@ -31,7 +31,6 @@ from .qconfig_utils import (
     compare_prepare_convert_qconfig_dict,
     update_qconfig_for_fusion,
 )
-from ..quantization_mappings import DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
 from .backend_config.utils import get_quantized_reference_module_mapping
 from .backend_config import get_native_backend_config_dict
 from .graph_module import (
