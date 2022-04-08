@@ -164,7 +164,7 @@ class DataLoader(Generic[T_co]):
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Union[Sampler, Iterable, None] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
                  batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
@@ -228,9 +228,9 @@ class DataLoader(Generic[T_co]):
             # option. If this turns out to be useful in future, we can re-enable
             # this, and support custom samplers that specify the assignments to
             # specific workers.
-            if isinstance(dataset, IterDataPipe):
+            if isinstance(dataset, IterDataPipe) and shuffle is not None:
                 dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
-            elif shuffle is not False:
+            elif shuffle is not None:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
