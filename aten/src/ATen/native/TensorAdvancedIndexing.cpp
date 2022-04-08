@@ -1347,7 +1347,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  bool include_self,
  const Tensor& out) {
   // See issue https://github.com/pytorch/pytorch/issues/74770
-  TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.");
+  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
                                          scatter_reduce_two_stub,
