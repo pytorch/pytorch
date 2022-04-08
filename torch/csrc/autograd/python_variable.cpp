@@ -899,6 +899,16 @@ PyObject *THPVariable_is_cuda(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_ipu");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_ipu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1128,6 +1138,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
+  {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
@@ -1807,15 +1818,15 @@ void concrete_dispatch_fn(
     kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
   }
 
-  auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(
-    overloaded_args,
-    args.ptr(),
-    kwargs.ptr(),
-    func_name,
-    torch_api_function_overload.ptr(),
-    module_name_str.c_str(),
-    "__torch_dispatch__"
-  ));
+  auto out = py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          func_name,
+          torch_api_function_overload.ptr(),
+          module_name_str.c_str(),
+          TorchFunctionName::TorchDispatch));
 
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
@@ -1847,15 +1858,20 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
 
   py::dict kwargs;
 
-  auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(
-    overloaded_args,
-    args.ptr(),
-    kwargs.ptr(),
-    "detach",
-    py::module::import("torch").attr("ops").attr("aten").attr("detach").attr("default").ptr(),
-    "torch.ops.aten",
-    "__torch_dispatch__"
-  ));
+  auto out = py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          "detach",
+          py::module::import("torch")
+              .attr("ops")
+              .attr("aten")
+              .attr("detach")
+              .attr("default")
+              .ptr(),
+          "torch.ops.aten",
+          TorchFunctionName::TorchDispatch));
 
   TORCH_CHECK(THPVariable_Check(out.ptr()), "detach returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
   const Tensor& res_t = THPVariable_Unpack(out.ptr());
