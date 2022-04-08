@@ -37,30 +37,16 @@ REQUEST_HEADERS = {
     "Accept": "application/vnd.github.v3+json",
     "Authorization": "token " + GITHUB_TOKEN,
 }
-JOBS_PER_PAGE = 100
 
-jobs = []
-page = 1
-while True:
-    response = requests.get(
-        # No f-strings because our CI needs to be able to run on older Python versions
-        PYTORCH_REPO
-        + "/actions/runs/"
-        + args.workflow_run_id
-        + "/jobs?per_page="
-        + str(JOBS_PER_PAGE)
-        + "&page="
-        + str(page),
-        headers=REQUEST_HEADERS,
-    )
-    json = response.json()
-    page_jobs = json["jobs"]
-    jobs.extend(page_jobs)
-    if len(page_jobs) < JOBS_PER_PAGE:
-        break
+response = requests.get(
+    f"{PYTORCH_REPO}/actions/runs/{args.workflow_run_id}/jobs?per_page=100",
+    headers=REQUEST_HEADERS,
+)
 
-    page += 1
-
+jobs = response.json()["jobs"]
+while "next" in response.links.keys():
+    response = requests.get(response.links["next"]["url"], headers=REQUEST_HEADERS)
+    jobs.extend(response.json()["jobs"])
 
 for job in jobs:
     if job["runner_name"] == args.runner_name:
