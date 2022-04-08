@@ -230,7 +230,7 @@ class DataLoader(Generic[T_co]):
             # specific workers.
             if isinstance(dataset, IterDataPipe) and shuffle is not None:
                 dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
-            elif shuffle is not None:
+            elif shuffle:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))

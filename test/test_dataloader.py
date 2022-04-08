@@ -1448,7 +1448,7 @@ except RuntimeError as e:
 
         dataset = TestMultiEpochDataset(batch_size * num_workers)
         dataloader = self._get_data_loader(dataset, batch_size=batch_size,
-                                           num_workers=num_workers)
+                                           shuffle=False, num_workers=num_workers)
 
         for ind in range(num_epochs):
             for batch_idx, sample in enumerate(dataloader):
