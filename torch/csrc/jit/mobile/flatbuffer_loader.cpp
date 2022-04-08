@@ -227,6 +227,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   }
 
   std::unordered_set<std::string> unsupported_op_names;
+  const int64_t model_version = 0x6L;
   for (const auto* op : *method->operators()) {
     c10::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
@@ -234,7 +235,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
 
     auto op_found = function->append_operator(
-        op->name()->str(), op->overload_name()->str(), num_args);
+        op->name()->str(), op->overload_name()->str(), num_args, model_version);
 
     if (!op_found) {
       unsupported_op_names.emplace(

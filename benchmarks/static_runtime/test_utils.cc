@@ -146,13 +146,11 @@ void compareTensorLists(
   }
 }
 
-} // namespace
-
 void compareResults(
     const IValue& expect,
     const IValue& actual,
-    const bool use_allclose,
-    const bool use_equalnan) {
+    const bool use_allclose = false,
+    const bool use_equalnan = false) {
   if (expect.isTensor()) {
     VLOG(2) << "expect " << expect.toTensor() << std::endl;
     VLOG(2) << "output " << actual.toTensor() << std::endl;
@@ -199,6 +197,8 @@ void compareResults(
     EXPECT_TRUE(expect == actual);
   }
 }
+
+} // namespace
 
 at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {

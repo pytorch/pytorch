@@ -53,12 +53,6 @@ void compareResultsWithJIT(
     const bool use_allclose = false,
     const bool use_equalnan = false);
 
-void compareResults(
-    const IValue& expect,
-    const IValue& actual,
-    const bool use_allclose = false,
-    const bool use_equalnan = false);
-
 } // namespace test
 } // namespace jit
 } // namespace torch

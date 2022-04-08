@@ -1,32 +1,16 @@
-ir_version: 7
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "x"
-    input: ""
-    input: "onnx::Resize_6"
-    output: "5"
-    name: "Resize_0"
-    op_type: "Resize"
-    attribute {
-      name: "coordinate_transformation_mode"
-      s: "asymmetric"
-      type: STRING
-    }
-    attribute {
-      name: "cubic_coeff_a"
-      f: -0.75
-      type: FLOAT
-    }
+    input: "onnx::Upsample_5"
+    output: "4"
+    name: "Upsample_0"
+    op_type: "Upsample"
     attribute {
       name: "mode"
       s: "nearest"
-      type: STRING
-    }
-    attribute {
-      name: "nearest_mode"
-      s: "floor"
       type: STRING
     }
   }
@@ -34,7 +18,7 @@ graph {
   initializer {
     dims: 4
     data_type: 1
-    name: "onnx::Resize_6"
+    name: "onnx::Upsample_5"
     raw_data: "\000\000\200?\000\000\200?\000\000\000@\000\000\000@"
   }
   input {
@@ -60,22 +44,22 @@ graph {
     }
   }
   output {
-    name: "5"
+    name: "4"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_param: "Resize5_dim_0"
+            dim_value: 1
           }
           dim {
-            dim_param: "Resize5_dim_1"
+            dim_value: 2
           }
           dim {
-            dim_param: "Resize5_dim_2"
+            dim_value: 6
           }
           dim {
-            dim_param: "Resize5_dim_3"
+            dim_value: 8
           }
         }
       }
@@ -83,5 +67,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 9
 }

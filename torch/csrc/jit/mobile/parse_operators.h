@@ -16,6 +16,7 @@ namespace mobile {
 
 TORCH_API void parseOperators(
     c10::ivalue::TupleElements&& ops_list,
+    const int64_t& model_version,
     const uint64_t& module_load_options,
     mobile::Function* function);
 } // namespace mobile

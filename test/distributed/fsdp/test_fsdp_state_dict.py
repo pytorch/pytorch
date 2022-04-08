@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from contextlib import suppress
 from copy import deepcopy
 from functools import partial
 from typing import Any, Dict
@@ -291,10 +290,9 @@ class TestFSDPStateDict(FSDPTest):
     def test_state_dict_skip_module(self, double_nest):
         torch.cuda.set_device(self.rank)
 
-        def _create_module(wrap_fsdp=True):
+        def _create_module():
             LINEAR_SKIP = "linear_skip"
-            ctx = enable_wrap(wrapper_cls=FSDP) if wrap_fsdp else suppress()
-            with ctx:
+            with enable_wrap(wrapper_cls=FSDP):
                 module = SkipModel(double_nest=double_nest)
                 # Full name of linear_skip param tensors in SkipModel, as would be
                 # stored in checkpoint.
@@ -326,29 +324,11 @@ class TestFSDPStateDict(FSDPTest):
             # by FSDP.state_dict(). Have a check once this is implemented in
             # FSDP.state_dict().
 
-        # Check that it can be loaded into FSDP.
+
         new_fsdp, _ = _create_module()
-        _zero_model(new_fsdp)
-        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
-            self.assertNotEqual(p1, p2)
         new_fsdp.load_state_dict(deepcopy(state_dict))
         for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertEqual(p1, p2)
-
-        # Test that the checkpoint can be loaded into a local model.
-        local, _ = _create_module(wrap_fsdp=False)
-        for param in local.parameters():
-            with torch.no_grad():
-                param.zero_()
-
-        with fsdp.summon_full_params():
-            for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
-                self.assertNotEqual(p1, p2)
-
-        local.load_state_dict(deepcopy(state_dict))
-        with fsdp.summon_full_params():
-            for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
-                self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)
