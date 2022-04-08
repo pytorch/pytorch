@@ -6,6 +6,7 @@ from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing import FileCheck
 from torch import jit
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
+import unittest
 import os
 import sys
 import torch
@@ -45,6 +46,24 @@ class TestMisc(JitTestCase):
 
         self.assertEqual(out, out_script)
         self.assertEqual(captured, captured_script)
+
+    @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
+    def test_dataclass_error(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class NormalizationInfo(object):
+            mean: float = 0.0
+
+            def compute(self, total_rows):
+                return self.mean
+
+        def fn():
+            return NormalizationInfo(1, 2, 3, 4, 5)
+
+        with self.assertRaisesRegex(OSError, "could not get source code"):
+            torch.jit.script(fn)
+
 
     def test_kwarg_support(self):
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
@@ -208,6 +227,83 @@ class TestMisc(JitTestCase):
         scripted_M_mod.sub = torch.jit.script(FooMod())
         self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_list_literal_infer(self):
+        def expects_intlist(x: List[int]):
+            x.append(3)
+            return x
+
+        def foo():
+            return expects_intlist([])
+
+        self.checkScript(foo, ())
+
+        def annotated_list_fail():
+            return expects_intlist(torch.jit.annotate([], List[Tensor]))
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(annotated_list_fail)
+
+        def non_temporary_fail():
+            a = []
+            return expects_intlist(a)
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(non_temporary_fail)
+
+
+        @torch.jit.script
+        def test_return():
+            return []
+
+        FileCheck().check("Tensor[] = prim::ListConstruct").run(test_return.graph)
+
+    def test_legacy_tensor_constructor(self):
+        # testing PyObject overload
+        def test_all_dtypes():
+            return (
+                torch.BoolTensor([2]),
+                torch.LongTensor([3]),
+                torch.ByteTensor([4]),
+                torch.CharTensor([5]),
+                torch.DoubleTensor([6]),
+                torch.FloatTensor([7]),
+                torch.IntTensor([8]),
+                torch.ShortTensor([1]),
+                torch.HalfTensor([1]),
+            )
+
+        self.checkScript(test_all_dtypes, ())
+
+        # now test empty overload
+        def empty_overload():
+            return torch.LongTensor(2, 3, 4)
+
+        eager = empty_overload()
+        jit = torch.jit.script(empty_overload)()
+        eager[:] = 1
+        jit[:] = 1
+        self.assertEqual(eager, jit)
+
+        def no_inputs():
+            return torch.DoubleTensor()
+
+        self.checkScript(no_inputs, ())
+
+        # bad schema
+        def multiple_args():
+            return torch.LongTensor(1, [2])
+
+        with self.assertRaisesRegex(RuntimeError, "multiple positional arguments that were not all integers"):
+            torch.jit.script(multiple_args)
+
+        # kwarg bad schema
+        def bad_kwarg():
+            return torch.LongTensor(hello="1")
+
+        with self.assertRaisesRegex(RuntimeError, "hello"):
+            torch.jit.script(bad_kwarg)
+
 
     def test_broadcasting_list(self):
         """

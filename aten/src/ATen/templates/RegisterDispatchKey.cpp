@@ -62,11 +62,11 @@ ${dispatch_helpers}
 
 ${dispatch_anonymous_definitions}
 
-TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {
-  ${dispatch_registrations}
-}
+${static_init_dispatch_registrations}
 
 } // anonymous namespace
+
+${deferred_dispatch_registrations}
 
 namespace ${dispatch_namespace} {
 
