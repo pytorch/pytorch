@@ -1,22 +1,22 @@
 # Owner(s): ["oncall: jit"]
 
-from typing import NamedTuple, Optional
 import io
 import os
 import pathlib
 import sys
+import unittest
+from typing import NamedTuple, Optional
 
+import torch
 from torch import Tensor
 from torch.testing._internal.common_utils import TemporaryFileName
-import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import (JitTestCase,
-                                               clear_class_registry)
+from torch.testing._internal.jit_utils import JitTestCase, clear_class_registry
 
-ENABLE_FLATBUFFER = os.environ.get('ENABLE_FLATBUFFER', '0') == '1'
+ENABLE_FLATBUFFER = os.environ.get("ENABLE_FLATBUFFER", "0") == "1"
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -25,12 +25,14 @@ if __name__ == "__main__":
         "instead."
     )
 
+
 class TestSaveLoad(JitTestCase):
     def test_different_modules(self):
         """
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super(Foo, self).__init__()
@@ -66,7 +68,8 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
@@ -91,6 +94,7 @@ class TestSaveLoad(JitTestCase):
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
+
         def lol(x):
             return x
 
@@ -120,7 +124,8 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
@@ -145,6 +150,7 @@ class TestSaveLoad(JitTestCase):
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
+
         @torch.jit.interface
         class MyInterface(object):
             def bar(self, x: Tensor) -> Tensor:
@@ -206,7 +212,8 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
@@ -263,7 +270,6 @@ class TestSaveLoad(JitTestCase):
 
                 return x, MyCoolNamedTuple(a=5)
 
-
         first_script_module = torch.jit.script(Foo())
         first_saved_module = io.BytesIO()
         torch.jit.save(first_script_module, first_saved_module)
@@ -312,7 +318,8 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
@@ -342,44 +349,44 @@ class TestSaveLoad(JitTestCase):
         value = b"bar\x00\xffbaz"
 
         expected_extra_files = {}
-        expected_extra_files['foo'] = value
+        expected_extra_files["foo"] = value
         # verify that str to bytes conversion also works
-        expected_extra_files['foo2'] = "bar"
+        expected_extra_files["foo2"] = "bar"
         m = MyMod()
 
         # Save to file.
         with TemporaryFileName() as fname:
             m.save(fname, _extra_files=expected_extra_files)
             # values don't matter
-            extra_files = {'foo': '', 'foo2': None}
+            extra_files = {"foo": "", "foo2": None}
             torch.jit.load(fname, _extra_files=extra_files)
-            self.assertEqual(value, extra_files['foo'])
+            self.assertEqual(value, extra_files["foo"])
             # results come back always as bytes
-            self.assertEqual(b"bar", extra_files['foo2'])
+            self.assertEqual(b"bar", extra_files["foo2"])
 
             # Use torch.jit API
             torch.jit.save(m, fname, _extra_files=expected_extra_files)
-            extra_files['foo'] = ''
+            extra_files["foo"] = ""
             torch.jit.load(fname, _extra_files=extra_files)
-            self.assertEqual(value, extra_files['foo'])
+            self.assertEqual(value, extra_files["foo"])
 
         # Save to buffer.
         buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
-        extra_files = {'foo': ''}
+        extra_files = {"foo": ""}
         torch.jit.load(buffer, _extra_files=extra_files)
-        self.assertEqual(value, extra_files['foo'])
+        self.assertEqual(value, extra_files["foo"])
 
         # Use torch.jit API
         buffer = io.BytesIO()
         torch.jit.save(m, buffer, _extra_files=expected_extra_files)
         buffer.seek(0)
-        extra_files = {'foo': ''}
+        extra_files = {"foo": ""}
         torch.jit.load(buffer, _extra_files=extra_files)
-        self.assertEqual(value, extra_files['foo'])
+        self.assertEqual(value, extra_files["foo"])
 
         # Non-existent file 'bar'
         with self.assertRaises(RuntimeError):
-            extra_files['bar'] = ''
+            extra_files["bar"] = ""
             torch.jit.load(buffer, _extra_files=extra_files)
 
     def test_save_load_using_pathlib(self):
@@ -396,7 +403,7 @@ class TestSaveLoad(JitTestCase):
             m.save(path)
             m2 = torch.jit.load(path)
 
-        x = torch.tensor([1., 2., 3., 4.])
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0])
         self.assertTrue(torch.equal(m(x), m2(x)))
 
     def test_save_nonexit_file(self):
@@ -457,7 +464,9 @@ class TestSaveLoad(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.add_module("submodule_a", Submodule())
-                self.register_parameter("parameter_a", torch.nn.Parameter(torch.randn(4)))
+                self.register_parameter(
+                    "parameter_a", torch.nn.Parameter(torch.randn(4))
+                )
                 self.register_buffer("buffer", torch.randn(4))
                 self.t = torch.rand(4)  # not buffer
 
@@ -468,7 +477,9 @@ class TestSaveLoad(JitTestCase):
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
 
         # Check submodules.
-        self.assertEqual(len(list(m.named_modules())), len(list(m_loaded.named_modules())))
+        self.assertEqual(
+            len(list(m.named_modules())), len(list(m_loaded.named_modules()))
+        )
         for m_s, loaded_s in zip(m.named_modules(), m_loaded.named_modules()):
             m_name, _ = m_s
             loaded_name, _ = loaded_s
@@ -480,7 +491,9 @@ class TestSaveLoad(JitTestCase):
             self.assertEqual(m_p, loaded_p)
 
         # Check buffers.
-        self.assertEqual(len(list(m.named_buffers())), len(list(m_loaded.named_buffers())))
+        self.assertEqual(
+            len(list(m.named_buffers())), len(list(m_loaded.named_buffers()))
+        )
         for m_b, loaded_b in zip(m.named_buffers(), m_loaded.named_buffers()):
             m_name, m_buffer = m_b
             loaded_name, loaded_buffer = loaded_b
@@ -492,6 +505,7 @@ class TestSaveLoad(JitTestCase):
         Check that parameters, buffers, and submodules are the same after loading
         for a module with parameters and buffers that are meta tensors
         """
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super(Foo, self).__init__()
@@ -507,8 +521,13 @@ class TestSaveLoad(JitTestCase):
         m = Foo()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
         # Check submodules.
-        self.assertEqual(len(list(m.named_modules())), len(list(m_loaded.named_modules())))
-        self.assertEqual(set(name for name, _ in m.named_modules()), set(name for name, _ in m_loaded.named_modules()))
+        self.assertEqual(
+            len(list(m.named_modules())), len(list(m_loaded.named_modules()))
+        )
+        self.assertEqual(
+            set(name for name, _ in m.named_modules()),
+            set(name for name, _ in m_loaded.named_modules()),
+        )
         # Check parameters.
         m_params = dict(m.named_parameters())
         m_loaded_params = dict(m_loaded.named_parameters())
@@ -520,38 +539,36 @@ class TestSaveLoad(JitTestCase):
         self.assertEqual(len(m_buffers), len(m_loaded_buffers))
         self.assertEqual(m_buffers, m_loaded_buffers)
         # Check params and buffers that are/are not meta tensors
-        self.assertTrue(m_params['foo.weight'].is_meta)
-        self.assertTrue(m_loaded_params['foo.weight'].is_meta)
-        self.assertTrue(m_params['foo.bias'].is_meta)
-        self.assertTrue(m_loaded_params['foo.bias'].is_meta)
-        self.assertFalse(m_params['bar.weight'].is_meta)
-        self.assertFalse(m_loaded_params['bar.weight'].is_meta)
-        self.assertFalse(m_params['bar.bias'].is_meta)
-        self.assertFalse(m_loaded_params['bar.bias'].is_meta)
-        self.assertTrue(m_buffers['buffer'].is_meta)
-        self.assertTrue(m_loaded_buffers['buffer'].is_meta)
+        self.assertTrue(m_params["foo.weight"].is_meta)
+        self.assertTrue(m_loaded_params["foo.weight"].is_meta)
+        self.assertTrue(m_params["foo.bias"].is_meta)
+        self.assertTrue(m_loaded_params["foo.bias"].is_meta)
+        self.assertFalse(m_params["bar.weight"].is_meta)
+        self.assertFalse(m_loaded_params["bar.weight"].is_meta)
+        self.assertFalse(m_params["bar.bias"].is_meta)
+        self.assertFalse(m_loaded_params["bar.bias"].is_meta)
+        self.assertTrue(m_buffers["buffer"].is_meta)
+        self.assertTrue(m_loaded_buffers["buffer"].is_meta)
 
 
 def script_module_to_buffer(script_module):
-    module_buffer = io.BytesIO()
-    if ENABLE_FLATBUFFER:
-        module_buffer = io.BytesIO(
-            script_module._save_to_buffer_for_lite_interpreter(
-                _use_flatbuffer=True
-            )
-        )
-    else:
-        torch.jit.save_jit_module_to_flatbuffer(script_module, module_buffer)
+    module_buffer = io.BytesIO(
+        script_module._save_to_buffer_for_lite_interpreter(_use_flatbuffer=True)
+    )
     module_buffer.seek(0)
     return module_buffer
 
 
+@unittest.skipIf(
+    not ENABLE_FLATBUFFER, "Need to enable flatbuffer to run the below tests"
+)
 class TestSaveLoadFlatbuffer(JitTestCase):
     def test_different_modules(self):
         """
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super(Foo, self).__init__()
@@ -583,14 +600,19 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_module("second", torch.jit.jit_module_from_flatbuffer(second_saved_module))
-                self.add_module("first", torch.jit.jit_module_from_flatbuffer(first_saved_module))
+                self.add_module(
+                    "second", torch.jit.load(second_saved_module)
+                )
+                self.add_module(
+                    "first", torch.jit.load(first_saved_module)
+                )
 
             def forward(self, x):
                 x = self.first(x)
@@ -599,13 +621,14 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         sm = torch.jit.script(ContainsBoth())
         contains_both = script_module_to_buffer(sm)
-        sm = torch.jit.jit_module_from_flatbuffer(contains_both)
+        sm = torch.jit.load(contains_both)
 
     def test_different_functions(self):
         """
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
+
         def lol(x):
             return x
 
@@ -630,14 +653,19 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_module("second", torch.jit.jit_module_from_flatbuffer(second_saved_module))
-                self.add_module("first", torch.jit.jit_module_from_flatbuffer(first_saved_module))
+                self.add_module(
+                    "second", torch.jit.load(second_saved_module)
+                )
+                self.add_module(
+                    "first", torch.jit.load(first_saved_module)
+                )
 
             def forward(self, x):
                 x = self.first(x)
@@ -646,13 +674,14 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         sm = torch.jit.script(ContainsBoth())
         contains_both = script_module_to_buffer(sm)
-        sm = torch.jit.jit_module_from_flatbuffer(contains_both)
+        sm = torch.jit.load(contains_both)
 
     def test_different_interfaces(self):
         """
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
+
         @torch.jit.interface
         class MyInterface(object):
             def bar(self, x: Tensor) -> Tensor:
@@ -709,14 +738,19 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_module("second", torch.jit.jit_module_from_flatbuffer(second_saved_module))
-                self.add_module("first", torch.jit.jit_module_from_flatbuffer(first_saved_module))
+                self.add_module(
+                    "second", torch.jit.load(second_saved_module)
+                )
+                self.add_module(
+                    "first", torch.jit.load(first_saved_module)
+                )
 
             def forward(self, x):
                 x = self.first(x)
@@ -725,7 +759,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         sm = torch.jit.script(ContainsBoth())
         contains_both = script_module_to_buffer(sm)
-        sm = torch.jit.jit_module_from_flatbuffer(contains_both)
+        sm = torch.jit.load(contains_both)
 
     def test_many_collisions(self):
         class MyCoolNamedTuple(NamedTuple):
@@ -763,7 +797,6 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 x = self.interface.bar(x)
 
                 return x, MyCoolNamedTuple(a=5)
-
 
         first_script_module = torch.jit.script(Foo())
         first_saved_module = script_module_to_buffer(first_script_module)
@@ -809,14 +842,19 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         clear_class_registry()
 
         self.assertEqual(
-            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+            first_script_module._c.qualified_name,
+            second_script_module._c.qualified_name,
         )
 
         class ContainsBoth(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_module("second", torch.jit.jit_module_from_flatbuffer(second_saved_module))
-                self.add_module("first", torch.jit.jit_module_from_flatbuffer(first_saved_module))
+                self.add_module(
+                    "second", torch.jit.load(second_saved_module)
+                )
+                self.add_module(
+                    "first", torch.jit.load(first_saved_module)
+                )
 
             def forward(self, x):
                 x, named_tuple_1 = self.first(x)
@@ -825,7 +863,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         sm = torch.jit.script(ContainsBoth())
         contains_both = script_module_to_buffer(sm)
-        sm = torch.jit.jit_module_from_flatbuffer(contains_both)
+        sm = torch.jit.load(contains_both)
 
     def test_save_load_using_pathlib(self):
         class MyMod(torch.jit.ScriptModule):
@@ -839,9 +877,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
             torch.jit.save_jit_module_to_flatbuffer(m, path)
-            m2 = torch.jit.jit_module_from_flatbuffer(path)
+            m2 = torch.jit.load(path)
 
-        x = torch.tensor([1., 2., 3., 4.])
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0])
         self.assertTrue(torch.equal(m(x), m2(x)))
 
     def test_save_namedtuple_input_only(self):
@@ -893,7 +931,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.add_module("submodule_a", Submodule())
-                self.register_parameter("parameter_a", torch.nn.Parameter(torch.randn(4)))
+                self.register_parameter(
+                    "parameter_a", torch.nn.Parameter(torch.randn(4))
+                )
                 self.register_buffer("buffer", torch.randn(4))
                 self.t = torch.rand(4)  # not buffer
 
@@ -904,7 +944,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
 
         # Check submodules.
-        self.assertEqual(len(list(m.named_modules())), len(list(m_loaded.named_modules())))
+        self.assertEqual(
+            len(list(m.named_modules())), len(list(m_loaded.named_modules()))
+        )
         for m_s, loaded_s in zip(m.named_modules(), m_loaded.named_modules()):
             m_name, _ = m_s
             loaded_name, _ = loaded_s
@@ -916,7 +958,9 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             self.assertEqual(m_p, loaded_p)
 
         # Check buffers.
-        self.assertEqual(len(list(m.named_buffers())), len(list(m_loaded.named_buffers())))
+        self.assertEqual(
+            len(list(m.named_buffers())), len(list(m_loaded.named_buffers()))
+        )
         for m_b, loaded_b in zip(m.named_buffers(), m_loaded.named_buffers()):
             m_name, m_buffer = m_b
             loaded_name, loaded_buffer = loaded_b
