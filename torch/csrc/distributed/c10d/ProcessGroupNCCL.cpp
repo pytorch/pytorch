@@ -2447,7 +2447,7 @@ bool ProcessGroupNCCL::isUCCAvailable() const {
   return (uccPG_ != nullptr);
 #else
   return false;
-#ifdef USE_NCCL_WITH_UCC
+#endif
 }
 
 } // namespace c10d
