@@ -674,19 +674,19 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 #endif
 
-  // Re-dispatch
+  // See NOTE [grad and vjp interaction with no_grad]
+  optional<c10::AutoGradMode> grad_guard;
   if (cur_key == DispatchKey::Autograd && prev_grad_mode.has_value() && *prev_grad_mode == false) {
-    // See NOTE [grad and vjp interaction with no_grad]
-    c10::AutoGradMode guard(*prev_grad_mode);
-    op.callBoxed(stack);
+    grad_guard.emplace(*prev_grad_mode);
   }
-  else if (cur_key == DispatchKey::Autograd &&
-           prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
-    c10::AutoFwGradMode guard(*prev_fwd_grad_mode);
-    op.callBoxed(stack);
-  } else {
-    op.callBoxed(stack);
+  optional<c10::AutoFwGradMode> fw_grad_guard;
+  if (cur_key == DispatchKey::Autograd &&
+      prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
+    fw_grad_guard.emplace(*prev_fwd_grad_mode);
   }
+
+  // Re-dispatch
+  op.callBoxed(stack);
 
   // Step 4, 5, 6
   auto ret_size = op.schema().returns().size();
