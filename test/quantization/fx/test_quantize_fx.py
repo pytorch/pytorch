@@ -4524,6 +4524,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
+    # TODO: maybe remove this support
     def test_linear_static_fp16(self):
         class FuncLinear(torch.nn.Module):
             def __init__(self, use_bias, has_relu, f_relu):
