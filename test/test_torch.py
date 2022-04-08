@@ -3332,8 +3332,6 @@ else:
 
     # FIXME: find a test suite for the masked scatter operator
     #   test_scatter_gather_ops or test_masked_ops?
-    # refer https://github.com/pytorch/pytorch/issues/60190
-    @skipIfRocm
     @onlyCUDA
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
