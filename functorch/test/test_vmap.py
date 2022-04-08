@@ -3814,7 +3814,7 @@ class TestRandomness(TestCase):
             lambda t, _: t.random_(**kwargs),
             lambda t, _: t.random_(100, **kwargs),
             lambda t, _: t.random_(-5, 100, **kwargs),
-            # lambda t, _: t.normal_(**kwargs),  TODO(samdow): fix normal_ with -1 bdim
+            lambda t, _: t.normal_(**kwargs),
             lambda t, _: t.bernoulli_(**kwargs),
             lambda t, _: t.cauchy_(**kwargs),
             lambda t, _: t.exponential_(**kwargs),
@@ -3851,7 +3851,7 @@ class TestRandomness(TestCase):
                 self.assertEqual(vmap_result, expected)
             else:
                 if batched_input != "none":
-                    passed_expected = passed_expected[0]
+                    passed_expected = passed_expected[0].clone()  # bug in pytorch, normal_ on views doesn't work
                 expected = op(passed_expected, always_batched)
                 self._assert_all_slices_equal(vmap_result)
                 for i in range(B0):
@@ -3923,8 +3923,7 @@ class TestRandomness(TestCase):
         kwargs = {'generator': generator} if use_generator else {}
         ops = [
             lambda t, o, _: torch.normal(t, o, **kwargs),
-            # TODO(samdow): fix binomial
-            # lambda t, o, _: torch.binomial(t, (o - 0.5), **kwargs),
+            lambda t, o, _: torch.binomial(t, (o - 0.5), **kwargs),
         ]
 
         B0 = 4

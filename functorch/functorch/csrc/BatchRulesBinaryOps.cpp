@@ -292,14 +292,18 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(out, out_bdim);
 }
 
+Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
+  return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #define BINARY_RANDOM_POINTWISE(op) \
-  m.impl(#op, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN(op)));
-#define BINARY_RANDOM_POINTWISE2(op, overload) \
-  m.impl(#op"."#overload, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
+    m.impl(#op, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN(op)));
+  #define BINARY_RANDOM_POINTWISE2(op, overload) \
+    m.impl(#op"."#overload, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
 
   BINARY_RANDOM_POINTWISE2(normal, Tensor_Tensor);
-  BINARY_RANDOM_POINTWISE(binomial);
+  m.impl("binomial", BINARY_RANDOM_POINTWISE_BATCH_RULE(at::functorch::binomial_wrapper));
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
