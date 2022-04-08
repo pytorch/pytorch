@@ -61,13 +61,12 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
   auto layer_norm_results = layer_norm_backward(
       grad_out, input, {1}, mean, rstd, weight, bias, {true, true, true});
 
-  if (dtype == DataType::Half) {
+  if (dtype != DataType::Float) {
     layer_norm_results.grad_input =
-        castOp(DataType::Half, layer_norm_results.grad_input);
-    layer_norm_results.grad_bias =
-        castOp(DataType::Half, layer_norm_results.grad_bias);
+        castOp(dtype, layer_norm_results.grad_input);
+    layer_norm_results.grad_bias = castOp(dtype, layer_norm_results.grad_bias);
     layer_norm_results.grad_weight =
-        castOp(DataType::Half, layer_norm_results.grad_weight);
+        castOp(dtype, layer_norm_results.grad_weight);
   }
 
   fusion->addOutput(layer_norm_results.grad_input);
