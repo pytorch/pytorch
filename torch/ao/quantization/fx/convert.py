@@ -32,7 +32,6 @@ from .qconfig_utils import (
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
 )
-from ..quantization_mappings import DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
 from .backend_config.utils import (
     get_root_module_to_quantized_reference_module,
     get_pattern_to_dtype_configs,
@@ -58,7 +57,6 @@ from .quantization_patterns import (
     QuantizeHandler,
 )
 from .quantization_types import Pattern
-from ..quant_type import QuantType
 
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
