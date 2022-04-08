@@ -477,7 +477,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, need dtype inference support")
     def test_nodes_with_equal_types_get_matched(self):
         class M(nn.Module):
             def __init__(self):
@@ -524,13 +523,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
             conv_name_0:
                 ((nn.Conv2d, torch.ao.quantization.MinMaxObserver), (nn.Conv2d, nn.Conv2d)),
             mul_name_0: ((torch.mul, torch.ao.quantization.MinMaxObserver), (toq.mul, toq.mul)),
-            relu_name_0: ((F.relu, torch.ao.quantization.MinMaxObserver), (F.relu, F.relu)),
+            relu_name_0: ((F.relu, torch.ao.quantization.FixedQParamsObserver), (F.relu, F.relu)),
             sigmoid_name_0:
-                ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
+                ((torch.sigmoid, torch.ao.quantization.FixedQParamsObserver), (torch.sigmoid, torch.sigmoid)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, need dtype inference support")
     def test_methods(self):
         """
         Verify that graph matching works on methods
@@ -551,7 +549,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             base_name_to_sets_of_related_ops, torch.sigmoid) + '_0'
         expected_types = {
             sigmoid_name_0:
-                (('sigmoid', 'sigmoid'), ('sigmoid', 'sigmoid')),
+                (('sigmoid', torch.ao.quantization.FixedQParamsObserver), ('sigmoid', torch.ao.quantization.FixedQParamsObserver)),
         }
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1p, m2p)
@@ -1122,8 +1120,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             prepare_fn=prepare_fn, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-                   "dtype inference is supported")
     def test_add_shadow_loggers_mod_ptq(self):
         self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_fx)
 
@@ -1149,8 +1145,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-                   "dtype inference is supported")
     def test_add_shadow_loggers_meth_ptq(self):
         """
         Verify that add_loggers works on methods
@@ -1163,7 +1157,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),),
-            results_len=1)
+            # For now, sigmoid is not supported for shadowing because the dtype
+            # inference for it is not implemented yet. So, this is just testing
+            # that shadowing models with method calls does not crash.
+            results_len=0)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
@@ -1724,8 +1721,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-                   "dtype inference is supported")
     def test_layer_names(self):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
