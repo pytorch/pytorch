@@ -48,6 +48,8 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/WrapDimUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
@@ -589,6 +591,27 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
     target_size[idx] = padded_size[idx] * repeats[idx];
   }
   return {Shape(self.scalar_type(), target_size)};
+}
+
+std::vector<Shape> compute_shape_select_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, int64_t index) {
+  auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::select_scatter(self_meta, src_meta, dim, index);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_diagonal_scatter(const at::Tensor & self, const at::Tensor & src, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::diagonal_scatter(self_meta, src_meta, offset, dim1, dim2);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_slice_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+  auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::slice_scatter(self_meta, src_meta, dim, start, end, step);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
 // Restore unused-parameters warnings
