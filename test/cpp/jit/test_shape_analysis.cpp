@@ -454,5 +454,30 @@ TEST(ShapeAnalysisTest, ShapeCacheMultipleFns) {
   EXPECT_EQ(get_shape_cache_size(), 5);
 }
 
+TEST(ShapeAnalysisTest, TestShapeMultipleReturns) {
+  clear_shape_cache();
+
+  auto max_dim_op = getSchema(
+      "aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+  c10::IValue const_int = 1;
+  c10::IValue false_ival = false;
+
+  c10::optional<int64_t> sym_dim = c10::nullopt;
+  c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
+  c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
+
+  auto res =
+      calculateSymbolicShapesOnOp(max_dim_op, {ss1, const_int, false_ival});
+  c10::SymbolicShape expected_res = c10::SymbolicShape({sym_dim});
+  assertShapeEqual(res->at(0), expected_res);
+  // res0 and res1 should share the same symbolic symbol
+  EXPECT_EQ(res->at(0), res->at(1));
+
+  // Also test that the shape cache also returns consistent result shapes
+  res = calculateSymbolicShapesOnOp(max_dim_op, {ss2, const_int, false_ival});
+  assertShapeEqual(res->at(0), expected_res);
+  EXPECT_EQ(res->at(0), res->at(1));
+  EXPECT_EQ(get_shape_cache_size(), 1);
+}
 } // namespace jit
 } // namespace torch
