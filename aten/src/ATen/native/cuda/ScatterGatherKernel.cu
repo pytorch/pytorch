@@ -120,7 +120,7 @@ struct _cuda_scatter_gather_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
-    const int64_t numel,
+    int64_t numel,
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
