@@ -553,6 +553,7 @@
 
 - name: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
   input: "GradMode::is_enabled() ? infinitely_differentiable_native_dropout_backward(grad, result1, (!train.has_value() || !train.value() ? 1 : (p == 1 ? 0.0 : 1.0 / (1.0 - p)))) : native_dropout_backward(grad, result1, (!train.has_value() || !train.value() ? 1 : (p == 1 ? 0.0 : 1.0 / (1.0 - p))))"
+  result0: "(!train.has_value() || train.value()) ? (p == 1 ? 0.0 : 1.0 / (1.0 - p)) * input_t * result1 : input_t"
 
 - name: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
