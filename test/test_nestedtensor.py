@@ -189,7 +189,6 @@ class TestNestedTensor(TestCase):
         for func in (torch.nn.functional.relu, torch.nn.functional.relu_, torch.nn.functional.gelu, torch._C._nn.gelu_):
             t = torch.tensor([-1, 0, 1], dtype=torch.float)
             nt = nested_tensor([t])
-            print(func)
             nested_result = func(nt)
             self.assertTrue(nested_result.is_nested)
             self.assertEqual(func(t), nested_result.unbind()[0])
