@@ -6,6 +6,7 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
@@ -90,6 +91,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return ComplexType::get();
       case Tag::Int:
         return IntType::get();
+      case Tag::SymInt:
+        return c10::SymIntType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -297,6 +300,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
+    case Tag::SymInt:
+      return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -347,6 +352,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
+      return c10::get_hash(v.payload.u.as_int);
+    case Tag::SymInt:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
@@ -403,6 +410,39 @@ bool IValue::is(const IValue& rhs) const {
   return lhs == rhs;
 }
 
+template <typename T>
+inline bool IValue::isListOf() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  if (!isList()) {
+    return false;
+  }
+  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  if (ty->kind() == T::Kind) {
+    return true;
+  }
+  return *ty == *TypeFactory::get<T>();
+}
+
+bool IValue::isDoubleList() const {
+  return isListOf<c10::FloatType>();
+}
+
+bool IValue::isComplexDoubleList() const {
+  return isListOf<c10::ComplexType>();
+}
+
+bool IValue::isTensorList() const {
+  return isListOf<c10::TensorType>();
+}
+
+bool IValue::isIntList() const {
+  return isListOf<c10::IntType>();
+}
+
+bool IValue::isBoolList() const {
+  return isListOf<c10::BoolType>();
+}
+
 namespace {
 
 using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
@@ -430,10 +470,10 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  auto list_elem_type = the_list.type()->expectRef<ListType>().getElementType();
+  auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
-    out << "annotate(" << the_list.type()->annotation_str() << ", ";
+    out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
@@ -474,7 +514,7 @@ std::ostream& printMaybeAnnotatedDict(
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
-    out << "annotate(" << the_dict.type()->annotation_str() << ",";
+    out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
     return printDict(out, the_dict.toGenericDict(), formatter);
@@ -533,6 +573,8 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::Int:
       return out << v.toInt();
+    case IValue::Tag::SymInt:
+      return out << v.toSymInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -719,6 +761,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
+    case IValue::Tag::SymInt:
+      return out << v.toSymInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -852,6 +896,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::None:
     case IValue::Tag::Double:
     case IValue::Tag::Int:
+    case IValue::Tag::SymInt:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {
@@ -925,7 +970,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
-    if (slots_[i].type() == c10::CapsuleType::get()) {
+    if (*slots_[i].type() == *c10::TypeFactory::get<CapsuleType>()) {
       // If we've gotten here, it means that we have *not* copied this
       // class via __getstate__ and __setstate__. That fact and the
       // fact that we have a Capsule attribute mean that this is a

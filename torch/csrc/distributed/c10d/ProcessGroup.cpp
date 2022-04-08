@@ -2,6 +2,7 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
+#include <fmt/format.h>
 
 namespace c10d {
 
@@ -44,7 +45,7 @@ std::string opTypeToString(OpType opType) {
     case OpType::_REDUCE_SCATTER_BASE:
       return "_REDUCE_SCATTER_BASE";
     default:
-      TORCH_INTERNAL_ASSERT("Unknown op type!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
   return "UNKNOWN";
 }
@@ -174,10 +175,14 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
 }
 
 ProcessGroup::ProcessGroup(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(parseDistDebugLevel()) {
+    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 
 ProcessGroup::~ProcessGroup() {}
+
+void ProcessGroup::init() {
+  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
+}
 
 } // namespace c10d

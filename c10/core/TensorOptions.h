@@ -643,6 +643,9 @@ inline DispatchKey computeDispatchKey(
           }
           return DispatchKey::CUDA;
         }
+        case DeviceType::IPU: {
+          return DispatchKey::IPU;
+        }
         case DeviceType::XPU: {
           if (isQIntType(dtype_)) {
             return DispatchKey::QuantizedXPU;
@@ -780,6 +783,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::Meta;
 
     // stuff that people are actively developing
+    case DispatchKey::IPU:
+    case DispatchKey::AutogradIPU:
+      return DeviceType::IPU;
     case DispatchKey::XPU:
     case DispatchKey::SparseXPU:
     case DispatchKey::QuantizedXPU:
@@ -807,5 +813,15 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
       .layout(dispatchKeyToLayout(dispatch_key))
       .device(dispatchKeyToDeviceType(dispatch_key));
 }
+
+namespace detail {
+inline bool backend_supports_empty_operator(const TensorOptions options) {
+  // Quantized backends don't support at::empty().
+  // They have separate operators like at::empty_quantized() that take in
+  // extra information about how to quantize the tensor.
+  return !isQIntType(typeMetaToScalarType(options.dtype()));
+}
+
+} // namespace detail
 
 } // namespace c10

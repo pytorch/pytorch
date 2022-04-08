@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -xeuo pipefail
 
 PYTORCH_DOCKER_TAG=$(git describe --tags --always)-devel
-CUDA_VERSION=11.1
+CUDA_VERSION=11.3.1
 
 # Build PyTorch nightly docker
 make -f docker.Makefile \
@@ -25,18 +25,20 @@ docker tag ghcr.io/pytorch/pytorch-nightly:${PYTORCH_DOCKER_TAG} \
 docker tag ghcr.io/pytorch/pytorch-nightly:${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION} \
        ghcr.io/pytorch/pytorch-nightly:latest
 
-# Push the nightly docker to GitHub Container Registry
-echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
-make -f docker.Makefile \
-     DOCKER_REGISTRY=ghcr.io \
-     DOCKER_ORG=pytorch \
-     DOCKER_IMAGE=pytorch-nightly \
-     DOCKER_TAG=${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION} \
-     devel-push
+if [[ ${WITH_PUSH:-} == "true" ]]; then
+    # Push the nightly docker to GitHub Container Registry
+    echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+    make -f docker.Makefile \
+         DOCKER_REGISTRY=ghcr.io \
+         DOCKER_ORG=pytorch \
+         DOCKER_IMAGE=pytorch-nightly \
+         DOCKER_TAG=${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION} \
+         devel-push
 
-make -f docker.Makefile \
-     DOCKER_REGISTRY=ghcr.io \
-     DOCKER_ORG=pytorch \
-     DOCKER_IMAGE=pytorch-nightly \
-     DOCKER_TAG=latest \
-     devel-push
+    make -f docker.Makefile \
+         DOCKER_REGISTRY=ghcr.io \
+         DOCKER_ORG=pytorch \
+         DOCKER_IMAGE=pytorch-nightly \
+         DOCKER_TAG=latest \
+         devel-push
+fi

@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/ones.h>
+#endif
 
 namespace at {
 namespace native {
@@ -147,7 +157,6 @@ template <typename scalar_t, typename index_t>
 static inline scalar_t interpolate_aa_single_dim_zero_strides(
     char* src,
     char** data,
-    int64_t i,
     const index_t ids_stride) {
   const index_t ids_min = *(index_t*)&data[0][0];
   const index_t ids_size = *(index_t*)&data[1][0];
@@ -259,7 +268,7 @@ struct CheckAlmostAllZeroStrides {
 
 template <int non_zero_stride_dim, typename scalar_t, typename index_t, int interp_size>
 struct CheckAlmostAllZeroStrides<0, non_zero_stride_dim, scalar_t, index_t, interp_size> {
-  static inline bool eval(const int64_t* strides) {
+  static inline bool eval(const int64_t* /*strides*/) {
     return true;
   }
 };
@@ -293,7 +302,7 @@ static inline void basic_loop_aa_single_dim_zero_strides(
   for (const auto i : c10::irange(n)) {
     *(scalar_t*)&dst[i * strides[0]] =
         interpolate_aa_single_dim_zero_strides<scalar_t, index_t>(
-            src + i * strides[1], &data[2], i, ids_stride);
+            src + i * strides[1], &data[2], ids_stride);
   }
 }
 
@@ -675,7 +684,7 @@ struct HelperInterpBase {
   template <typename scalar_t, typename aa_filter_fn_t>
   static inline std::vector<Tensor> _compute_indices_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
-    int64_t reshape_dim, bool align_corners, scalar_t scale,
+    int64_t reshape_dim, scalar_t scale,
     int interp_size, aa_filter_fn_t aa_filter_fn
   ) {
 
@@ -851,7 +860,7 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
 
-        for (int64_t i=0; i<output_size; i++) {
+        for (const auto i : c10::irange(output_size)) {
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
               scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
@@ -956,7 +965,6 @@ struct HelperInterpLinear : public HelperInterpBase {
             stride,
             ndims,
             reshape_dim,
-            align_corners,
             scale,
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>);
@@ -1068,7 +1076,6 @@ struct HelperInterpCubic : public HelperInterpBase {
             stride,
             ndims,
             reshape_dim,
-            align_corners,
             scale,
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>);

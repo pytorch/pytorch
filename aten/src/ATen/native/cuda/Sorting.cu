@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
@@ -55,10 +56,10 @@ __global__ void gatherKthValue(
   radixSelect<
       scalar_t,
       typename TopKTypeConfig<scalar_t>::RadixType,
-      index_t,
-      false>(
+      index_t>(
       inputSliceStart,
       k,
+      false,
       inputSliceSize,
       inputWithinSliceStride,
       smem,
@@ -146,10 +147,10 @@ __global__ void gatherMedian(
   radixSelect<
       scalar_t,
       typename TopKTypeConfig<scalar_t>::RadixType,
-      index_t,
-      false>(
+      index_t>(
       inputSliceStart,
       k + 1,
+      false,
       inputSliceSize,
       inputWithinSliceStride,
       smem,
@@ -182,13 +183,14 @@ struct KthValueLauncher {
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
+    (void)collapse_indices_dim; // Suppress unused variable warning
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
       AT_ERROR("slices are too many");
     }
 
     dim3 block(std::min(
-        round_up(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        round_up(slice_size, (int64_t)at::cuda::warp_size()), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherKthValue<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         self_info,
@@ -219,6 +221,7 @@ struct MedianLauncher {
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
+    (void)collapse_values_dim; // Suppress unused variable warning
     (void)collapse_indices_dim; // Suppress unused variable warning
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
@@ -226,7 +229,7 @@ struct MedianLauncher {
     }
 
     dim3 block(std::min(
-        round_up(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        round_up(slice_size, (int64_t)at::cuda::warp_size()), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherMedian<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         values_info,

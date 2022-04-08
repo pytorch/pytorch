@@ -116,6 +116,62 @@ namespace torch { namespace autograd { namespace profiler {
 //  - save profiling events into the profiling state
 //
 
+namespace {
+using torch::profiler::impl::ProfilerThreadLocalStateBase;
+using torch::profiler::impl::ActiveProfilerType;
+
+struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit ProfilerLegacyThreadLocalState(const torch::profiler::impl::ProfilerConfig& config)
+      : ProfilerThreadLocalStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
+  ~ProfilerLegacyThreadLocalState() override = default;
+
+  static ProfilerLegacyThreadLocalState* getTLS() {
+    auto tls = ProfilerThreadLocalStateBase::getTLS();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        tls == nullptr ||
+        tls->profilerType() == ActiveProfilerType::LEGACY);
+    return static_cast<ProfilerLegacyThreadLocalState*>(tls);
+  }
+
+  thread_event_lists consolidate();
+
+  void mark(std::string name, bool include_cuda = true);
+
+  void setOrAddRemoteProfiledEvents(
+      std::vector<LegacyEvent>&& remoteProfiledEvents);
+
+  void pushRange(
+      const at::RecordFunction& fn,
+      const bool record_cuda,
+      std::vector<std::vector<int64_t>>&& shapes = {});
+
+  void popRange(const at::RecordFunction& fn, const bool record_cuda);
+
+  void reportMemoryUsage(
+      void* /* unused */,
+      int64_t alloc_size,
+      int64_t /* total_allocated, unused for legacy */,
+      int64_t /* total_reserved, unused for legacy */,
+      c10::Device device) override;
+
+  ActiveProfilerType profilerType() override {
+    return ActiveProfilerType::LEGACY;
+  }
+
+ protected:
+  RangeEventList& getEventList(int64_t thread_id = -1);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::mutex state_mutex_;
+  std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
+      // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+      event_lists_map_;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
+};
+
 thread_event_lists ProfilerLegacyThreadLocalState::consolidate() {
   std::lock_guard<std::mutex> g(state_mutex_);
   thread_event_lists result;
@@ -262,8 +318,6 @@ RangeEventList& ProfilerLegacyThreadLocalState::getEventList(int64_t thread_id) 
   return *list_ptr;
 }
 
-namespace {
-
 enum EventIValueIdx {
   KIND = 0,
   NAME,
@@ -298,17 +352,12 @@ const std::unordered_set<std::string> disable_cuda_profiling = {
   "aten::size"
 };
 
-ProfilerLegacyThreadLocalState* getProfilerTLSState() {
-  return static_cast<ProfilerLegacyThreadLocalState*>(
-      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-}
-
 void pushProfilingCallbacksLegacy() {
-  auto state_ptr = getProfilerTLSState();
-  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
+  auto registration_state_ptr = ProfilerLegacyThreadLocalState::getTLS();
+  TORCH_INTERNAL_ASSERT(registration_state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-        auto state_ptr = getProfilerTLSState();
+        auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
         if (!state_ptr || state_ptr->config().state == torch::profiler::impl::ProfilerState::Disabled) {
           return nullptr;
         }
@@ -328,7 +377,7 @@ void pushProfilingCallbacksLegacy() {
         return nullptr;
       },
       [](const at::RecordFunction& fn, at::ObserverContext*) {
-        auto state_ptr = getProfilerTLSState();
+        auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
         if (!state_ptr || state_ptr->config().state == torch::profiler::impl::ProfilerState::Disabled) {
           return;
         }
@@ -339,9 +388,9 @@ void pushProfilingCallbacksLegacy() {
         }
         state_ptr->popRange(fn, record_cuda);
       })
-    .needsInputs(state_ptr->config().report_input_shapes)
+    .needsInputs(registration_state_ptr->config().report_input_shapes)
     .needsIds(true));
-  state_ptr->setCallbackHandle(handle);
+  registration_state_ptr->setCallbackHandle(handle);
 }
 
 } // namespace
@@ -352,7 +401,7 @@ void enableProfilerLegacy(const torch::profiler::impl::ProfilerConfig& new_confi
 
   TORCH_CHECK(new_config.state != torch::profiler::impl::ProfilerState::KINETO);
 
-  auto state_ptr = getProfilerTLSState();
+  auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
   auto state = std::make_shared<ProfilerLegacyThreadLocalState>(new_config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
@@ -391,7 +440,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
 }
 
 void addEventList(std::vector<LegacyEvent>&& profiledEvents) {
-  auto state_ptr = getProfilerTLSState();
+  auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
   TORCH_CHECK(state_ptr, "Profiler must be enabled.");
   state_ptr->setOrAddRemoteProfiledEvents(std::move(profiledEvents));
 }

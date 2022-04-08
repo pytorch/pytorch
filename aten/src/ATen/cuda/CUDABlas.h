@@ -70,6 +70,24 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+template <typename Dtype>
+void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<Dtype> alpha_val,
+    const Dtype* mat1_ptr,
+    int64_t mat1_ld,
+    const Dtype* mat2_ptr,
+    int64_t mat2_ld,
+    const Dtype* bias,
+    Dtype* result_ptr,
+    int64_t result_ld);
+#endif
+
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,    \
       const Dtype *a, int64_t lda, int64_t stridea,                                           \
@@ -107,13 +125,13 @@ inline void trsm(CUDABLAS_TRSM_ARGTYPES(Dtype)) {
 }
 
 template <>
-void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float));
+TORCH_CUDA_CU_API void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float));
 template <>
-void trsm<double>(CUDABLAS_TRSM_ARGTYPES(double));
+TORCH_CUDA_CU_API void trsm<double>(CUDABLAS_TRSM_ARGTYPES(double));
 template <>
-void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>));
 template <>
-void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>));
 
 #define CUDABLAS_TRSM_BATCHED_ARGTYPES(Dtype)                          \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
@@ -130,13 +148,13 @@ inline void trsmBatched(CUDABLAS_TRSM_BATCHED_ARGTYPES(Dtype)) {
 }
 
 template <>
-void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float));
+TORCH_CUDA_CU_API void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float));
 template <>
-void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double));
+TORCH_CUDA_CU_API void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double));
 template <>
-void trsmBatched<c10::complex<float>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void trsmBatched<c10::complex<float>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>));
 template <>
-void trsmBatched<c10::complex<double>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void trsmBatched<c10::complex<double>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>));
 
 /* LEVEL 2 BLAS FUNCTIONS */
 
@@ -214,13 +232,13 @@ void getrsBatched(CUDABLAS_GETRS_ARGTYPES(Dtype)) {
     typeid(Dtype).name());
 }
 template<>
-void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float));
+TORCH_CUDA_CU_API void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float));
 template<>
-void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double));
+TORCH_CUDA_CU_API void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double));
 template<>
-void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<float>));
 template<>
-void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<double>));
 
 #define CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)                   \
   cublasHandle_t handle, int m, int n, Dtype **A_array, int lda, \
@@ -234,14 +252,14 @@ void geqrfBatched(CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)) {
       typeid(Dtype).name());
 }
 template <>
-void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float));
+TORCH_CUDA_CU_API void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float));
 template <>
-void geqrfBatched<double>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(double));
+TORCH_CUDA_CU_API void geqrfBatched<double>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(double));
 template <>
-void geqrfBatched<c10::complex<double>>(
+TORCH_CUDA_CU_API void geqrfBatched<c10::complex<double>>(
     CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>));
 template <>
-void geqrfBatched<c10::complex<float>>(
+TORCH_CUDA_CU_API void geqrfBatched<c10::complex<float>>(
     CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>));
 
 #define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
@@ -252,13 +270,13 @@ void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
   TORCH_CHECK(false, "at::cuda::blas::getrfBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
-void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
+TORCH_CUDA_CU_API void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
 template<>
-void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
+TORCH_CUDA_CU_API void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
 template<>
-void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<double>));
 template<>
-void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
 
 #define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
   int n, Dtype** dA_array, int ldda, int* ipiv_array, Dtype** dC_array, int lddc, int* info_array, int batchsize
@@ -268,13 +286,13 @@ void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
   TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
-void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
+TORCH_CUDA_CU_API void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
 template<>
-void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
+TORCH_CUDA_CU_API void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
 template<>
-void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<double>));
 template<>
-void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<float>));
 
 #define CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)  \
   cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, Dtype** dA_array, int ldda, Dtype** dC_array, int lddc, int* info, int *devInfoArray, int batchSize
@@ -285,13 +303,13 @@ void gelsBatched(CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)) {
 }
 
 template<>
-void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double));
+TORCH_CUDA_CU_API void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double));
 template<>
-void gelsBatched<float>(CUDABLAS_GELS_BATCHED_ARGTYPES(float));
+TORCH_CUDA_CU_API void gelsBatched<float>(CUDABLAS_GELS_BATCHED_ARGTYPES(float));
 template<>
-void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>));
 template<>
-void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
 
 #endif // CUDART_VERSION
 

@@ -4,9 +4,17 @@
 namespace at {
 namespace detail {
 
-TORCH_API void check_size_nonnegative(IntArrayRef size);
+inline void check_size_nonnegative(IntArrayRef size) {
+  for (auto x: size) {
+    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
+  }
+}
+
+TORCH_API size_t computeStorageNbytesContiguous(
+    IntArrayRef sizes, size_t itemsize, size_t storage_offset=0);
 TORCH_API size_t computeStorageNbytes(
-    IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
+    IntArrayRef sizes, IntArrayRef strides,
+    size_t itemsize, size_t storage_offset=0);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,

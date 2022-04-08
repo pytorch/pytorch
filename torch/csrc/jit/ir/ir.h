@@ -1485,6 +1485,9 @@ inline Value::Value(Node* node_, size_t offset_)
 
 inline Value* Value::setType(TypePtr type) {
   AT_ASSERT(type);
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    type = dyn->fallback();
+  }
   type_ = std::move(type);
   for (Use& use : uses_) {
     use.user->op_ = nullptr;
@@ -1517,17 +1520,17 @@ struct ProfileOp : public Node {
     callback_ = std::move(callback);
   }
 
-  bool hasRun() const {
-    return has_run_;
+  bool hasSeenTensor() const {
+    return has_seen_tensor_;
   }
 
-  void setHasRun(bool has_run) {
-    has_run_ = has_run;
+  void setHasSeenTensor(bool has_seen_tensor) {
+    has_seen_tensor_ = has_seen_tensor;
   }
 
  private:
   std::function<void(std::vector<IValue>&)> callback_;
-  bool has_run_ = false;
+  bool has_seen_tensor_ = false;
 };
 
 struct TORCH_API ProfileIValueOp : public Node {
@@ -1621,9 +1624,10 @@ TORCH_API std::vector<Node*> findAllNodes(
     Symbol kind,
     bool recurse);
 
-struct OperatorSet {
+struct TORCH_API OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
   std::vector<std::shared_ptr<Operator>> getOps() const;
+  void insert(std::initializer_list<const char*> sig_literals);
 
  private:
   friend struct Node;

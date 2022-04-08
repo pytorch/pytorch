@@ -72,7 +72,7 @@ TORCH_META_FUNC(_upsample_nearest_exact2d_backward) (
       grad_output.dim() == 4,
       "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
 
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],
         "Expected grad_output to have the same shape as output;",
@@ -134,7 +134,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_nearest2d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
@@ -144,7 +144,7 @@ Tensor upsample_nearest2d(
 
 Tensor _upsample_nearest_exact2d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
@@ -154,7 +154,7 @@ Tensor _upsample_nearest_exact2d(
 
 Tensor upsample_nearest2d_backward(
     const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);
@@ -165,7 +165,7 @@ Tensor upsample_nearest2d_backward(
 
 Tensor _upsample_nearest_exact2d_backward(
     const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);

@@ -709,12 +709,6 @@ bool is_relu_module(
       match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
 }
 
-bool is_functional_linear(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  return is_functional(match, vmap, "linear", "linear");
-}
-
 bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
