@@ -390,6 +390,7 @@ def _get_conv_configs():
             "dtype_configs": dtype_configs,
             "root_module": convs.root,
             "fuser_method": reverse3(fuse_conv_bn_relu),
+            "fused_module": convs.fused_conv_bn_relu,
         })
         # TODO: we can add fusion for torch.relu as well
 
