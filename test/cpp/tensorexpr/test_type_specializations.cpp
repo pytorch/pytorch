@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 
 // Test that tensor type specializations are availabie in
 // the custom passes
