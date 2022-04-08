@@ -5572,6 +5572,65 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(AssertionError, msg):
             mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
 
+    def test_multihead_attn_fast_path_invalid_shape(self):
+        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
+
+        # Batched (3D) query cases
+        query = torch.randn(3, 3, 3)
+        key = torch.randn(3, 3, 3)
+        value = torch.randn(3, 3, 3)
+
+        msg = "expected 3-D `key`, got 2-D tensor"
+        # 3D query, 2D key and 3D value
+        with self.assertRaisesRegex(RuntimeError, msg):
+            mha(query, torch.randn(3, 3), use_fast_path=True)
+
+        msg = "expected 3-D `value`, got 2-D tensor"
+        # 3D query, 3D key and 2D value
+        with self.assertRaisesRegex(RuntimeError, msg):
+            mha(query, key, torch.randn(3, 3), use_fast_path=True)
+
+        msg = "expected `key_padding_mask` to be `None` or 2-D but found 1-D tensor instead"
+        # 3D query, 3D key, 3D value and 1D key_padding_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, key_padding_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
+        # 3D query, 3D key, 3D value and 1D attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        # Unbatched (2D) query cases
+        # NOTE: error messages are the same as regular path because the fast path doesn't support 2D.
+        query = torch.randn(3, 3)
+        key = torch.randn(3, 3)
+        value = torch.randn(3, 3)
+
+        msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
+        # 2D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, torch.randn(3, 3, 3), value)
+
+        msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
+        # 2D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, torch.randn(3, 3, 3))
+
+        msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
+        # 2D query, 2D key, 2D value and 1D key_padding_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, key_padding_mask=torch.tensor([[False, True, True] * 2], dtype=torch.bool))
+
+        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
+        # 2D query, 2D key, 2D value and 1D attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        msg = r"Expected `attn_mask` shape to be \(3, 3, 3\)"
+        # 2D query, 2D key, 2D value and 3D incorrect attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
@@ -12660,17 +12719,19 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_module_empty_input(self, module, inp, check_size=True):
+    def _test_module_empty_input(self, module, inp, check_size=True, inference=False):
         inp.requires_grad_(True)
         out = module(inp)
         gO = torch.rand_like(out)
-        out.backward(gO)
+        if not inference:
+            out.backward(gO)
         if check_size:
             self.assertEqual(out.size(), inp.size())
-        for p in module.parameters():
-            if p.requires_grad:
-                self.assertEqual(p.grad, torch.zeros_like(p.grad))
-        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        if not inference:
+            for p in module.parameters():
+                if p.requires_grad:
+                    self.assertEqual(p.grad, torch.zeros_like(p.grad))
+            self.assertEqual(inp.grad, torch.zeros_like(inp))
 
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
@@ -14117,11 +14178,17 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerEncoderLayer_empty(self, device):
-        for batch_first, input_shape in [(True, (0, 10, 512)),
-                                         (False, (10, 0, 512))]:
-            input = torch.rand(*input_shape, device=device)
-            encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
-            self._test_module_empty_input(encoder_layer, input, check_size=False)
+        for training in (True, False):
+            for batch_first, input_shape in [(True, (0, 10, 512)),
+                                             (False, (10, 0, 512))]:
+                input = torch.rand(*input_shape, device=device)
+                encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
+                if not training:
+                    encoder_layer = encoder_layer.eval()
+                    with torch.inference_mode():
+                        self._test_module_empty_input(encoder_layer, input, check_size=False, inference=True)
+                else:
+                    self._test_module_empty_input(encoder_layer, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
@@ -17499,6 +17566,27 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_multihead_attention_dtype_batch_first(self, device, dtype):
+        embed_dim = 128
+        num_heads = 8
+        sl = 10
+        bs = 8
+        # With batch_first=True, we have the possibility of hitting
+        # the native fast path if we call .eval(). Test both paths.
+        for training in (True, False):
+            model = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda().to(dtype)
+            if not training:
+                model = model.eval()
+            q = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype)
+            k = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype)
+            v = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype)
+            # fast path currently doesn't support weights
+            out = model(q, k, v, need_weights=False)
+            self.assertEqual(q.size(), out[0].size())
+            self.assertEqual(dtype, out[0].dtype)
+
     @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     def test_Conv2d_naive_groups(self, device, dtype):
@@ -19477,12 +19565,19 @@ class TestNNDeviceType(NNTestCase):
             atol = 1e-3
             rtol = 1e-2
 
-        for batch_first in (False, True):
+        def _test(training, batch_first):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
             model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                batch_first=batch_first, device=device, dtype=dtype)
+
+            use_fast_path = False
+            if not training:
+                assert dropout == 0
+                model = model.eval()
+                if batch_first:
+                    use_fast_path = True
 
             # set constant weights of the model
             for idx, p in enumerate(model.parameters()):
@@ -19494,12 +19589,13 @@ class TestNNDeviceType(NNTestCase):
 
             # deterministic input
             encoder_input = torch.tensor([[[20., 30., 40., 50.]]], device=device, dtype=dtype)
-            result = model(encoder_input)
+            result = model(encoder_input, use_fast_path=use_fast_path)
             ref_output = torch.tensor([[[2.258703, 0.127985, -0.697881, 0.170862]]], device=device, dtype=dtype)
             self.assertEqual(result.shape, ref_output.shape)
             torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
             # 0 values are NOT masked. This shouldn't mask anything.
             mask = torch.tensor([[0]], device=device) == 1
+            # TODO: enable fast path for calls with a mask!
             result = model(encoder_input, src_key_padding_mask=mask)
             self.assertEqual(result.shape, ref_output.shape)
             torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
@@ -19513,7 +19609,7 @@ class TestNNDeviceType(NNTestCase):
             # deterministic input
             encoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
                                                   [[5., 6., 7., 8.]]], device=device, dtype=dtype))
-            result = model(encoder_input)
+            result = model(encoder_input, use_fast_path=use_fast_path)
             ref_output = perm_fn(torch.tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
                                                [[2.272644, 0.119035, -0.691669, 0.153486]]], device=device, dtype=dtype))
             self.assertEqual(result.shape, ref_output.shape)
@@ -19541,7 +19637,7 @@ class TestNNDeviceType(NNTestCase):
                                                    [0.8645, 0.3513, 0.3064, 0.0767]],
                                                   [[0.8117, 0.2366, 0.4838, 0.7881],
                                                    [0.3718, 0.4945, 0.9511, 0.0864]]], device=device, dtype=dtype))
-            result = model(encoder_input)
+            result = model(encoder_input, use_fast_path=use_fast_path)
             ref_output = perm_fn(torch.tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
                                                 [2.427987, 0.021213, -0.602496, -0.084103]],
                                                [[2.424689, 0.019155, -0.604793, -0.085672],
@@ -19575,6 +19671,9 @@ class TestNNDeviceType(NNTestCase):
                                                 [2.4242, 0.024653, -0.605266, -0.074959]]], device=device, dtype=dtype))
             self.assertEqual(result.shape, ref_output.shape)
             torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
+        for batch_first in (True, False):
+            for training in (True, False):
+                _test(batch_first=batch_first, training=training)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
@@ -19592,12 +19691,18 @@ class TestNNDeviceType(NNTestCase):
             atol = 1e-3
             rtol = 1e-2
 
-        for activation, batch_first in product(('gelu', F.gelu, nn.GELU()), (True, False)):
+        def _test(activation, batch_first, training):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
             model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                activation, batch_first=batch_first, device=device, dtype=dtype)
+            use_fast_path = False
+            if not training:
+                assert dropout == 0
+                model = model.eval()
+                if batch_first:
+                    use_fast_path = activation == "gelu" or activation is F.gelu
 
             # set constant weights of the model
             for idx, p in enumerate(model.parameters()):
@@ -19609,14 +19714,14 @@ class TestNNDeviceType(NNTestCase):
 
             # deterministic input
             encoder_input = torch.tensor([[[20., 30., 40., 50.]]], device=device, dtype=dtype)
-            result = model(encoder_input)
+            result = model(encoder_input, use_fast_path=use_fast_path)
             ref_output = torch.tensor([[[2.249815, 0.131006, -0.702199, 0.177868]]], device=device, dtype=dtype)
             torch.testing.assert_close(result, ref_output, rtol=rtol, atol=atol)
 
             # deterministic input
             encoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
                                                   [[5., 6., 7., 8.]]], device=device, dtype=dtype))
-            result = model(encoder_input)
+            result = model(encoder_input, use_fast_path=use_fast_path)
             ref_output = perm_fn(torch.tensor([[[2.264103, 0.121417, -0.696012, 0.159724]],
                                                [[2.264103, 0.121417, -0.696012, 0.159724]]], device=device, dtype=dtype))
             torch.testing.assert_close(result, ref_output, rtol=rtol, atol=atol)
@@ -19632,7 +19737,7 @@ class TestNNDeviceType(NNTestCase):
                                                   [0.8645, 0.3513, 0.3064, 0.0767]],
                                                   [[0.8117, 0.2366, 0.4838, 0.7881],
                                                   [0.3718, 0.4945, 0.9511, 0.0864]]], device=device, dtype=dtype))
-            result = model(encoder_input)
+            result = model(encoder_input, use_fast_path=use_fast_path)
             ref_output = perm_fn(torch.tensor([[[2.42163188, 0.03227153, -0.60714219, -0.05908082],
                                                 [2.42151276, 0.03302179, -0.60722523, -0.05762651]],
                                                [[2.41926761, 0.02974034, -0.60879519, -0.0621269],
@@ -19644,6 +19749,8 @@ class TestNNDeviceType(NNTestCase):
                                                [[2.41383916, 0.02686345, -0.61256377, -0.06380707],
                                                 [2.42000277, 0.03800944, -0.60824798, -0.04754947]]], device=device, dtype=dtype))
             torch.testing.assert_close(result, ref_output, rtol=rtol, atol=atol)
+        for activation, batch_first, training in product(('gelu', F.gelu, nn.GELU()), (True, False), (True, False)):
+            _test(activation=activation, batch_first=batch_first, training=training)
 
 
 class TestModuleGlobalHooks(TestCase):

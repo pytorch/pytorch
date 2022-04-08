@@ -896,6 +896,22 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
+    forward() will use a special optimized implementation if all of the following
+    conditions are met:
+    - batch_first is True and the input is batched
+    - training is disabled (using .eval())
+    - kdim and vdim are equal to embed_dim
+    - at most one of key_padding_mask and attn_mask is used
+    - need_weights is False
+    - the use_fast_path argument to forward() is not set to False
+    - neither key_padding_mask nor attn_mask is passed (this restriction will be loosened)
+
+    If the optimized implementation is in use, a NestedTensor can be
+    passed to more represent padding more efficiently than using a
+    padding mask. In this case, a NestedTensor will be returned, and
+    an additional speedup proportional to the fraction of the input
+    that is padding can be expected.
+
     Args:
         embed_dim: Total dimension of the model.
         num_heads: Number of parallel attention heads. Note that ``embed_dim`` will be split
@@ -914,6 +930,7 @@ class MultiheadAttention(Module):
 
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+
     """
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
@@ -986,7 +1003,8 @@ class MultiheadAttention(Module):
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True, attn_mask: Optional[Tensor] = None,
-                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
+                average_attn_weights: bool = True, *,
+                use_fast_path: Optional[bool] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
@@ -1021,6 +1039,9 @@ class MultiheadAttention(Module):
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
+        use_fast_path: Whether to use the native fast path. If None (default), use it if possible. If False,
+            never use it. (For example, you might use False if you find a bug in the fast path.) If True, raise
+            an exception if it cannot be used.
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1037,6 +1058,34 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
+        # TODO: unblock mask support for fast path and update the docstring accordingly
+        if ((use_fast_path is None or use_fast_path) and is_batched and not need_weights and not self.training and
+            self.batch_first and self._qkv_same_embed_dim and key_padding_mask is None and attn_mask is None):
+            tensor_args = (
+                query,
+                key,
+                value,
+                self.in_proj_weight,
+                self.in_proj_bias,
+                self.out_proj.weight,
+                self.out_proj.bias,
+            )
+            def is_cpu_or_cuda(x):
+                return x.is_cuda or 'cpu' in str(x.device)
+            if not torch.overrides.has_torch_function(tensor_args) and all(is_cpu_or_cuda(x) for x in tensor_args):
+                output = torch.ops.nativetransformers._native_multi_head_attention(
+                    query,
+                    key,
+                    value,
+                    self.embed_dim,
+                    self.num_heads,
+                    self.in_proj_weight,
+                    self.in_proj_bias,
+                    self.out_proj.weight,
+                    self.out_proj.bias,
+                    key_padding_mask if key_padding_mask is not None else attn_mask)
+                return (output, None)
+        assert not use_fast_path, "user explicitly requested fast path, but was not eligible"
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
             if key is value:

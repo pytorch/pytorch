@@ -4629,6 +4629,12 @@
 
 - func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
 
+# Fused implementation detail for transformers. Adds in-projection bias to QKV and divides Q by sqrt(D/num_heads).
+- func: _transform_bias_rescale_qkv(Tensor qkv, Tensor qkv_bias, int num_heads) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: transform_bias_rescale_qkv_cpu
+    CUDA: transform_bias_rescale_qkv_cuda
+
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   dispatch:
     CPU: nested_from_padded_generic
