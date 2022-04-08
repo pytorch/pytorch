@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, sparse_csr_unary_ufuncs, )
+    (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, CUDA11OrLater
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
@@ -1479,7 +1479,9 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             if sample.input.ndim != 2:
                 continue
-
+            # Reductions on sparse CSR require keepdim=True
+            if isinstance(op, ReductionOpInfo):
+                continue
             expected = op(sample.input)
             assert torch.is_tensor(expected)
             output = op(sample.input.to_sparse_csr())
