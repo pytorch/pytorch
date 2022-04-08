@@ -69,6 +69,11 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 
 namespace tensorexpr {
 
+OperatorSet& getCustomOperatorSet() {
+  static OperatorSet _g_custom_operator_set{};
+  return _g_custom_operator_set;
+}
+
 static const OperatorSet& supported_non_eltwise_set() {
   // clang-format off
   static const OperatorSet supported_non_eltwise_set{
@@ -101,6 +106,7 @@ bool isSupported(Node* node) {
   if (get_tensorexpr_elementwise_set().contains(node) ||
       node->isMemberOf(supported_non_eltwise_set()) ||
       node->isMemberOf(supported_misc_set) ||
+      node->isMemberOf(getCustomOperatorSet()) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -1094,6 +1100,7 @@ class TensorExprFuser {
       // aten::cat, though it does not have a shape function.
       REQ(node->kind() == prim::ListConstruct ||
           node->kind() == prim::TensorExprGroup ||
+          node->isMemberOf(tensorexpr::getCustomOperatorSet()) ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 

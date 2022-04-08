@@ -6,6 +6,7 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/library.h>
 #include <sstream>
 #include <unordered_map>
@@ -107,8 +108,8 @@ static std::unordered_map<std::string, ::torch::lazy::Counter*>
     _eager_fallback_counters;
 
 bool force_eager_fallback(c10::Symbol op) {
-  static char* force_str = std::getenv("LTC_FORCE_FALLBACK");
-  if (force_str != nullptr) {
+  auto force_str = getLTCForceFallback();
+  if (!force_str.empty()) {
     static auto force_sym = c10::Symbol::fromQualString(std::string(force_str));
     if (op == force_sym) {
       return true;
