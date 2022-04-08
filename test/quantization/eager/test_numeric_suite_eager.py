@@ -371,7 +371,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs(float_model, q_model, data)
-            expected_act_compare_dict_keys = {"conv.stats", "quant.stats"}
+            expected_act_compare_dict_keys = {"conv", "quant"}
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
@@ -394,7 +394,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs(float_model, q_model, data)
-            expected_act_compare_dict_keys = {"fc1.quant.stats", "fc1.module.stats"}
+            expected_act_compare_dict_keys = {"fc1.quant", "fc1.module"}
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
@@ -426,11 +426,11 @@ class TestNumericSuiteEager(QuantizationTestCase):
         act_compare_dict = compare_model_outputs(model, q_model, self.img_data_2d[0][0])
         self.assertEqual(len(act_compare_dict), 5)
         expected_act_compare_dict_keys = {
-            "mycat.stats",
-            "myadd.stats",
-            "mymul.stats",
-            "myadd_relu.stats",
-            "quant.stats",
+            "mycat",
+            "myadd",
+            "mymul",
+            "myadd_relu",
+            "quant",
         }
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
         for k, v in act_compare_dict.items():
@@ -447,7 +447,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs(float_model, q_model, data)
-            expected_act_compare_dict_keys = {"fc1.stats"}
+            expected_act_compare_dict_keys = {"fc1"}
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
@@ -476,7 +476,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             act_compare_dict = compare_model_outputs(
                 float_model, q_model, input, hidden
             )
-            expected_act_compare_dict_keys = {"lstm.stats"}
+            expected_act_compare_dict_keys = {"lstm"}
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
