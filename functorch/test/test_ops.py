@@ -375,13 +375,6 @@ class TestOperators(TestCase):
         skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
         skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
 
-        # See https://github.com/pytorch/pytorch/issues/69034
-        # RuntimeError: expected scalar type double but found float
-        xfail('minimum'),
-        xfail('min', 'binary'),
-        xfail('maximum'),
-        xfail('max', 'binary'),
-
         # The following don't have a forward-mode AD formula in PyTorch core
         # (check derivatives.yaml).
         xfail('var_mean'),
@@ -675,14 +668,6 @@ class TestOperators(TestCase):
         # https://gist.github.com/zou3519/c42d032c0111c6b65235583d391bf7a3
         xfail('nn.functional.linear'),
 
-        # These are issues that should be fixed in core. See repro in core:
-        # https://github.com/pytorch/functorch/pull/232#discussion_r751405155
-        # RuntimeError: expected scalar type double but found float
-        xfail('minimum'),
-        xfail('min', 'binary'),
-        xfail('maximum'),
-        xfail('max', 'binary'),
-
         # Apprently these support forward AD, but we get "Trying to use forward AD..."
         # These are cases where OpInfo has supports_forward_ad=True, but disables
         # the test
@@ -770,7 +755,6 @@ class TestOperators(TestCase):
         xfail('linalg.inv'),
         xfail('linalg.tensorinv'),
         xfail('linalg.matrix_power'),
-        xfail('maximum'),
         xfail('linalg.householder_product'),
         xfail('tensor_split'),
         xfail('quantile'),
@@ -779,13 +763,10 @@ class TestOperators(TestCase):
         xfail('linalg.eigvalsh'),
         xfail('fill_'),
         xfail('linalg.cholesky'),
-        xfail('max', 'binary'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('min', 'binary'),
         xfail('std_mean'),
         xfail('double', 'channels_last'),
         xfail('block_diag'),
-        xfail('minimum'),
         xfail('scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
@@ -1148,10 +1129,6 @@ class TestOperators(TestCase):
         xfail('lu', ''),
         xfail('lu_solve', ''),
         xfail('lu_unpack', ''),
-        xfail('max', 'binary'),
-        xfail('maximum', ''),
-        xfail('min', 'binary'),
-        xfail('minimum', ''),
         xfail('nanmean', ''),
         xfail('nansum', ''),
         xfail('nn.functional.batch_norm', ''),
@@ -1173,7 +1150,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),
         xfail('nn.functional.instance_norm', ''),
         xfail('nn.functional.layer_norm', ''),
-        xfail('nn.functional.leaky_relu', ''),
         xfail('nn.functional.logsigmoid', ''),
         xfail('nn.functional.mse_loss', ''),
         xfail('nn.functional.nll_loss', ''),
