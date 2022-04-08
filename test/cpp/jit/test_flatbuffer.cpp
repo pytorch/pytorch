@@ -23,6 +23,7 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
 // Tests go in torch::jit
@@ -136,6 +137,22 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
     AT_ASSERT(resd2 == refd);
   }
 }
+
+#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+TEST(FlatbufferTest, FlatbufferBackPortTest) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, true);
+
+  std::stringstream oss;
+  bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
+  ASSERT_TRUE(backPortSuccess);
+}
+#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
 
 TEST(FlatbufferTest, ExtraFiles) {
   const auto script = R"JIT(
