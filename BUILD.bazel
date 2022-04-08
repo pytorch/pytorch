@@ -96,16 +96,6 @@ generate_aten(
 )
 
 py_library(
-    name = "tools_autograd",
-    srcs = glob(["tools/autograd/*.py"]),
-    data = glob([
-        "tools/autograd/*.yaml",
-        "tools/autograd/templates/*",
-    ]),
-    deps = ["//tools/codegen"],
-)
-
-py_library(
     name = "tools_jit",
     srcs = glob(["tools/jit/*.py"]),
     data = glob(["tools/jit/templates/*"]),
@@ -115,8 +105,8 @@ py_binary(
     name = "generate_code",
     srcs = ["tools/setup_helpers/generate_code.py"],
     deps = [
-        ":tools_autograd",
         ":tools_jit",
+        "//tools/autograd",
     ],
 )
 
@@ -179,7 +169,7 @@ genrule(
         "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src --gen_lazy_ts_backend",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --gen_lazy_ts_backend",
     tools = [":generate_code"],
 )
 

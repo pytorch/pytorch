@@ -7,9 +7,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 
-from ._common import (
-    narrow_tensor,
-)
+from torch.distributed._shard._utils import narrow_tensor
 
 def register_math_op(op):
     @sharded_op_impl(op)
@@ -46,9 +44,9 @@ def register_math_op(op):
             assert isinstance(rhs, ShardedTensor)
             st_size = rhs.size()
             st_meta = rhs.local_shards()[0].metadata
-            if st_size != rhs.size():
+            if st_size != lhs.size():
                 # try to broadcast replicated tensor
-                lhs.expand(st_size)
+                lhs = lhs.expand(st_size)
 
             replica_part = narrow_tensor(lhs, st_meta)
             res = op(replica_part, rhs.local_tensor())
@@ -63,9 +61,9 @@ def register_math_op(op):
             assert isinstance(lhs, ShardedTensor)
             st_size = lhs.size()
             st_meta = lhs.local_shards()[0].metadata
-            if st_size != lhs.size():
+            if st_size != rhs.size():
                 # try to broadcast replicated tensor
-                rhs.expand(st_size)
+                rhs = rhs.expand(st_size)
 
             replica_part = narrow_tensor(rhs, st_meta)
             res = op(lhs.local_tensor(), replica_part)
