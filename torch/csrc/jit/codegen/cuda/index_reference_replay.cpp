@@ -40,7 +40,7 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
   // reduction. All we care about are the transformations, and trying to make
   // sure we track correctly a replaying with consistent reduction/broadcast
   // domains is challenging and unnecessary.
-  auto copied_id = IrBuilder::create<IterDomain>(
+  auto copied_id = SimplifyingIrBuilder::create<IterDomain>(
       id->container(), id->start(), id->extent(), id->getParallelType());
   replayed_ids_.emplace_back(copied_id);
   return copied_id;
@@ -59,13 +59,13 @@ void IndexReferenceReplay::handle(Split* split) {
   // Don't produce the same values multiple times
   auto ref_outer = concreteToRefId(toConcrete(split->outer()));
   auto ref_inner = concreteToRefId(toConcrete(split->inner()));
-  if (ref_id_produced_.find(ref_outer) != ref_id_consumed_.end() ||
-      ref_id_produced_.find(ref_inner) != ref_id_consumed_.end()) {
+  if (ref_id_produced_.find(ref_outer) != ref_id_produced_.end() ||
+      ref_id_produced_.find(ref_inner) != ref_id_produced_.end()) {
     return;
   }
 
   // Replay the provided split operation and add it to the reference DAG
-  IrBuilder::create<Split>(
+  SimplifyingIrBuilder::create<Split>(
       split->container(),
       ref_outer,
       ref_inner,
@@ -92,12 +92,13 @@ void IndexReferenceReplay::handle(Merge* merge) {
 
   // Don't produce the same values multiple times
   auto ref_out = concreteToRefId(toConcrete(merge->out()));
-  if (ref_id_produced_.find(ref_out) != ref_id_consumed_.end()) {
+  if (ref_id_produced_.find(ref_out) != ref_id_produced_.end()) {
     return;
   }
 
   // Replay the provided merge operation and add it to the reference DAG
-  IrBuilder::create<Merge>(merge->container(), ref_out, ref_outer, ref_inner);
+  SimplifyingIrBuilder::create<Merge>(
+      merge->container(), ref_out, ref_outer, ref_inner);
 
   // Mark producers and consumers
   ref_id_consumed_.emplace(ref_outer);
@@ -218,7 +219,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
           loops_replayed_domain.begin(),
           loops_replayed_domain.end(),
           [](IterDomain* id) { return id->definition() != nullptr; })) {
-    auto domain = IrBuilder::create<TensorDomain>(
+    auto domain = SimplifyingIrBuilder::create<TensorDomain>(
         // If there was no replay only return a domain with a root domain.
         loops_replayed_domain);
     return domain;
@@ -253,7 +254,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
 
     // Create and return the reference.
-    auto domain = IrBuilder::create<TensorDomain>(
+    auto domain = SimplifyingIrBuilder::create<TensorDomain>(
         std::vector<IterDomain*>(
             root_domain_ids.begin(), root_domain_ids.end()),
         loops_replayed_domain);
@@ -276,17 +277,23 @@ IndexCompute getReferenceIndexing(
     auto loop = loop_structure[loop_i];
     auto ind = loop->index();
 
-    initial_index_map[ref_axis] = ind;
-    if (loop->vectorize()) {
-      initial_index_map[ref_axis] = GpuLower::current()->kernel()->zeroVal();
-    } else if (double_buffer_loop == loop) {
+    // If the loop is trivial, only the start value is used
+    if (loop->isTrivial()) {
+      initial_index_map[ref_axis] = loop->start();
+    } else {
+      initial_index_map[ref_axis] = ind;
+    }
+
+    if (double_buffer_loop == loop) {
+      TORCH_INTERNAL_ASSERT(
+          !loop->isTrivial(), "The double buffer loop must be materialized");
       // This version of getReferenceIndexing is only used for
       // indexing global tensors. When indexing global producers, the
       // index for a double buffered loop needs to be incremented. The
       // parameter double_buffer_loop should be nullptr when indexing
       // global consumers tensors.
-      initial_index_map[ref_axis] =
-          IrBuilder::addExpr(ind, GpuLower::current()->kernel()->oneVal());
+      initial_index_map[ref_axis] = SimplifyingIrBuilder::addExpr(
+          initial_index_map[ref_axis], GpuLower::current()->kernel()->oneVal());
     }
 
     if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
@@ -297,7 +304,7 @@ IndexCompute getReferenceIndexing(
   // Add magic zero to a fairly inner most index
   if (magic_zero_loop >= 0) {
     auto ref_id = reference_tensor->axis(magic_zero_loop);
-    initial_index_map[ref_id] = IrBuilder::addExpr(
+    initial_index_map[ref_id] = SimplifyingIrBuilder::addExpr(
         initial_index_map[ref_id], FusionGuard::getCurFusion()->magicZeroVal());
   }
 
