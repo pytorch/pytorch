@@ -722,11 +722,11 @@ class ShardedTensor(object):
             raise ValueError('mask size must match with the size of the sharded tensor.')
         current_rank = dist.get_rank(self._process_group)  # type: ignore[attr-defined]
         rank_idx = None
-        for idx, placement in enumerate(self._sharding_spec.placements):
+        for idx, placement in enumerate(self._sharding_spec.placements):  # type: ignore[attr-defined]
             if placement.rank() == current_rank:  # type: ignore[index]
                 rank_idx = idx  # type: ignore[attr-defined]
-        shard_metadata = self._metadata.shards_metadata[rank_idx]
-        sharding_dim = self._sharding_spec.dim
+        shard_metadata = self._metadata.shards_metadata[rank_idx]  # type: ignore[index]
+        sharding_dim = self._sharding_spec.dim  # type: ignore[attr-defined]
         local_mask = mask.narrow(
             sharding_dim,
             shard_metadata.shard_offsets[sharding_dim],
