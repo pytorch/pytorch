@@ -3202,6 +3202,7 @@ class TestNN(NNTestCase):
             B = to_model.weight
             self.assertEqual(id(A), id(B))
 
+            # test that the results are distinct objects for each module
             self.assertNotEqual(id(A), id(X))
 
     def test_parametrization_same_training_mode(self):
