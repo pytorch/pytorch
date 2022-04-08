@@ -279,8 +279,10 @@ class EnumerableShardingSpec(ShardingSpec):
 def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     """
     Infer the sharding spec from the metadata of each shard of a ShardedTensor.
-    If the tensor is sharded only on one dimension, we then assume it's a ChunkShardingSpec.
-    Otherwise, we assume it's enum sharded.
+    If the tensor is sharded only on one dimension, we can then verify whether it's
+    a ChunkShardingSpec or not. The way to verify it is to first get the total length
+    and perform a chunk sharding with the given placements to see if we can have the
+    same chunk size as the given shards_metadata. If not, we assume it's enum sharded.
 
     Args:
         shards_metadata (List[ShardMetadata]): List of Metadata of local shards.
@@ -326,19 +328,16 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
             dim=chunk_sharding_dim,
             placements=placements,
         )
-        shard_sizes = [
-            x[chunk_sharding_dim]
-            for _, x in sorted(zip(chunk_offset_list, shard_size_list))
-        ]
-        if len(shard_sizes) == 1 or (
-            len(set(shard_sizes[:-1])) == 1 and shard_sizes[0] >= shard_sizes[-1]
-        ):
-            return chunk_spec
-        # Corner case when length = 5 and chunks = 4, local size is [2, 2, 1, 0]
-        if (
-            len(set(shard_sizes[:-2])) == 1
-            and shard_sizes[0] >= shard_sizes[-2]
-            and shard_sizes[-2] >= shard_sizes[-1]
-        ):
+        shard_sizes = sorted([x[chunk_sharding_dim] for x in shard_size_list])
+        shard_total_length = sum(shard_sizes)
+        chunks = len(placements)
+        split_size = get_split_size(shard_total_length, chunks)
+        chunk_shard_sizes = sorted(
+            [
+                get_chunked_dim_size(shard_total_length, split_size, idx)
+                for idx in range(len(placements))
+            ]
+        )
+        if shard_sizes == chunk_shard_sizes:
             return chunk_spec
     return EnumerableShardingSpec(shards_metadata)

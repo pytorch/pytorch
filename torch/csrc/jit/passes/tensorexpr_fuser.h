@@ -62,12 +62,16 @@ TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 namespace tensorexpr {
 TORCH_API bool isSupported(Node* node);
 
-// These functions are used in test_profiler.py to make sure
-// that tensor type specializations are available in the
-// CustomPasses.
-TORCH_API void addTensorTypeSpecializationDetectionPass();
-TORCH_API void removeTensorTypeSpecializationDetectionPass();
-TORCH_API bool passDetectedSpecializedTensors();
+/// Get the modifiable custom operator set object.
+///
+/// For static shapes, if a custom operator has been added to the custom
+/// operator set, it will be pulled into the NNC fusion group. But it doesn't
+/// work with dynamic shapes unless explicitly register the shape function via
+/// `torch::jit::RegisterShapeComputeGraphForSchema` for the custom operator.
+///
+/// @return Reference of the custome operator set
+///
+TORCH_API OperatorSet& getCustomOperatorSet();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
