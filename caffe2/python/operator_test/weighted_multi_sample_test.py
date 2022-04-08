@@ -19,7 +19,7 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
         data_len=st.integers(min_value=0, max_value=10000),
         **hu.gcs_cpu_only
     )
-    def test_weighted_multi_sample(self, num_samples, data_len, gc, dc):
+    def test_weighted_multi_sample(self, num_samples, data_len, gc, dc) -> None:
         weights = np.zeros((data_len))
         expected_indices = []
         if data_len > 0:

@@ -12,7 +12,7 @@ class AttentionType:
     Regular, Recurrent, Dot, SoftCoverage = tuple(range(4))
 
 
-def s(scope, name):
+def s(scope, name) -> str:
     # We have to manually scope due to our internal/external blob
     # relationships.
     return "{}/{}".format(str(scope), str(name))

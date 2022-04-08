@@ -14,7 +14,7 @@ import hypothesis.strategies as st
 
 class TestBatchBucketize(serial.SerializedTestCase):
     @serial.given(**hu.gcs_cpu_only)
-    def test_batch_bucketize_example(self, gc, dc):
+    def test_batch_bucketize_example(self, gc, dc) -> None:
         op = core.CreateOperator('BatchBucketize',
                                  ["FEATURE", "INDICES", "BOUNDARIES", "LENGTHS"],
                                  ["O"])
@@ -46,7 +46,7 @@ class TestBatchBucketize(serial.SerializedTestCase):
             min_value=5),
         seed=st.integers(min_value=2, max_value=1000),
         **hu.gcs_cpu_only)
-    def test_batch_bucketize(self, x, seed, gc, dc):
+    def test_batch_bucketize(self, x, seed, gc, dc) -> None:
         op = core.CreateOperator('BatchBucketize',
                                  ["FEATURE", "INDICES", "BOUNDARIES", "LENGTHS"],
                                  ['O'])

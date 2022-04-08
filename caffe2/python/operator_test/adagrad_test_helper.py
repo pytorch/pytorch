@@ -11,13 +11,13 @@ def ref_adagrad(
     grad,
     lr,
     epsilon,
-    using_fp16=False,
-    output_effective_lr=False,
-    output_effective_lr_and_update=False,
-    decay=1.0,
-    row_wise=False,
-    weight_decay=0.0,
-    counter_halflife=-1,
+    using_fp16: bool=False,
+    output_effective_lr: bool=False,
+    output_effective_lr_and_update: bool=False,
+    decay: float=1.0,
+    row_wise: bool=False,
+    weight_decay: float=0.0,
+    counter_halflife: int=-1,
     count=None,  # only used when counter_halflife != -1
 ):
     mom_in_f32 = mom_in
@@ -41,6 +41,7 @@ def ref_adagrad(
         if using_fp16:
             return (
                 param_out.astype(np.float16),
+                # pyre-fixme[16]: `float` has no attribute `astype`.
                 mom_out.astype(np.float16),
                 effective_lr.astype(np.float16),
                 grad_adj.astype(np.float16),
@@ -81,10 +82,10 @@ def adagrad_sparse_test_helper(
     ref_adagrad,
     gc,
     dc,
-    row_wise=False,
-    weight_decay=0.0,
-    counter_halflife=-1,
-):
+    row_wise: bool=False,
+    weight_decay: float=0.0,
+    counter_halflife: int=-1,
+) -> None:
     param, momentum, grad = inputs
     if row_wise:
         # For row-wise adagrad, only take the first element of each row

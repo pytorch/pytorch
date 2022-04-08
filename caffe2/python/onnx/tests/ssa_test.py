@@ -18,7 +18,7 @@ from caffe2.python.onnx.tests.test_utils import TestCase
 
 
 class TestFrontendSSAConversion(TestCase):
-    def test_ssa(self):
+    def test_ssa(self) -> None:
         X = np.random.randn(4, 2).astype(np.float32)
         W = np.random.randn(3, 2).astype(np.float32)
         b = np.random.randn(3).astype(np.float32)
@@ -75,6 +75,7 @@ class TestFrontendSSAConversion(TestCase):
             init_net=init_net,
             inputs=[X])
 
+        # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
         value_info = {'X': (TensorProto.FLOAT, X.shape)}
         c2_onnx.Caffe2Frontend._ssa_rewrite(
             net,
@@ -106,7 +107,7 @@ class TestFrontendSSAConversion(TestCase):
         self.assertSameOutputs(ssa_output, orig_output)
         self.assertSameOutputs(ssa_output, [np_result])
 
-    def test_idempotence(self):
+    def test_idempotence(self) -> None:
         net = caffe2_pb2.NetDef()
         net.name = 'test-idempotence'
         net.external_input[:] = ['W', 'X', 'b', 's']
@@ -125,6 +126,7 @@ class TestFrontendSSAConversion(TestCase):
         ])
         net.external_output[:] = ['Z']
 
+        # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
         value_info = {'X': (TensorProto.FLOAT, [4, 2])}
         net_copy = copy.deepcopy(net)
         c2_onnx.Caffe2Frontend._ssa_rewrite(

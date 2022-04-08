@@ -8,7 +8,7 @@
 from caffe2.python.control_ops_util import add_if_op, add_while_op
 
 
-def cond(model, cond_blob, external_blobs, then_model, else_model=None):
+def cond(model, cond_blob, external_blobs, then_model, else_model=None) -> None:
     """Condition"""
     add_if_op(
         model.net,
@@ -18,7 +18,7 @@ def cond(model, cond_blob, external_blobs, then_model, else_model=None):
         else_model.net if else_model else None)
 
 
-def loop(model, cond_blob, external_blobs, loop_model, cond_model=None):
+def loop(model, cond_blob, external_blobs, loop_model, cond_model=None) -> None:
     """Loop"""
     add_while_op(
         model.net,

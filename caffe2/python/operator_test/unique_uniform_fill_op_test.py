@@ -29,7 +29,7 @@ class TestUniqueUniformFillOp(hu.HypothesisTestCase):
         s=st.integers(10, 500),
         **hu.gcs_cpu_only
     )
-    def test_unique_uniform_int_fill(self, r, avoid, dtypes, s, gc, dc):
+    def test_unique_uniform_int_fill(self, r, avoid, dtypes, s, gc, dc) -> None:
         net = core.Net("net")
         workspace.FeedBlob("X", np.array([s], dtype=np.int64))
         workspace.FeedBlob("AVOID", np.array(avoid, dtype=dtypes[0]))

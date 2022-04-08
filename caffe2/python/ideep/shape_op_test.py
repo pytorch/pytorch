@@ -20,7 +20,7 @@ class ShapeTest(hu.HypothesisTestCase):
            w=st.integers(1, 128),
            **mu.gcs)
     @settings(max_examples=10, deadline=None)
-    def test_shape(self, n, c, h, w, gc, dc):
+    def test_shape(self, n, c, h, w, gc, dc) -> None:
         op0 = core.CreateOperator(
             "Shape",
             ["X0"],
@@ -54,7 +54,7 @@ class ShapeTest(hu.HypothesisTestCase):
            axes=st.lists(st.integers(0, 3), min_size=1, max_size=3),
            **mu.gcs)
     @settings(max_examples=10, deadline=None)
-    def test_shape_with_axes(self, n, c, h, w, axes, gc, dc):
+    def test_shape_with_axes(self, n, c, h, w, axes, gc, dc) -> None:
         axes = list(set(axes)).sort()
         op0 = core.CreateOperator(
             "Shape",

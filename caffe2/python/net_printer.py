@@ -80,7 +80,7 @@ class Analyzer(Visitor):
 
 
 @Analyzer.register(OperatorDef)
-def analyze_op(analyzer, op):
+def analyze_op(analyzer, op) -> None:
     for x in op.input:
         analyzer.need_blob(x)
     for x in op.output:
@@ -88,13 +88,13 @@ def analyze_op(analyzer, op):
 
 
 @Analyzer.register(Net)
-def analyze_net(analyzer, net):
+def analyze_net(analyzer, net) -> None:
     for x in net.Proto().op:
         analyzer(x)
 
 
 @Analyzer.register(ExecutionStep)
-def analyze_step(analyzer, step):
+def analyze_step(analyzer, step) -> None:
     proto = step.Proto()
     with analyzer.set_workspace(do_copy=proto.create_workspace):
         if proto.report_net:
@@ -119,7 +119,7 @@ def analyze_step(analyzer, step):
 
 
 @Analyzer.register(Task)
-def analyze_task(analyzer, task):
+def analyze_task(analyzer, task) -> None:
     # check that our plan protobuf is not too large (limit of 64Mb)
     step = task.get_step()
     plan = Plan(task.node)
@@ -135,19 +135,19 @@ def analyze_task(analyzer, task):
 
 
 @Analyzer.register(TaskGroup)
-def analyze_task_group(analyzer, tg):
+def analyze_task_group(analyzer, tg) -> None:
     for task in tg.tasks_by_node().tasks():
         with analyzer.set_workspace(node=task.node):
             analyzer(task)
 
 
 @Analyzer.register(Job)
-def analyze_job(analyzer, job):
+def analyze_job(analyzer, job) -> None:
     analyzer(job.init_group)
     analyzer(job.epoch_group)
 
 
-def analyze(obj):
+def analyze(obj) -> None:
     """
     Given a Job, visits all the execution steps making sure that:
       - no undefined blobs will be found during execution
@@ -192,7 +192,7 @@ class Printer(Visitor, Text):
         self.c2_net_name = None
 
 
-def _sanitize_str(s):
+def _sanitize_str(s) -> str:
     if isinstance(s, text_type):
         sanitized = s
     elif isinstance(s, binary_type):
@@ -233,21 +233,21 @@ def commonprefix(m):
     return s1
 
 
-def format_value(val):
+def format_value(val) -> str:
     if isinstance(val, list):
         return '[%s]' % ', '.join("'%s'" % str(v) for v in val)
     else:
         return str(val)
 
 
-def factor_prefix(vals, do_it):
+def factor_prefix(vals, do_it) -> str:
     vals = [format_value(v) for v in vals]
     prefix = commonprefix(vals) if len(vals) > 1 and do_it else ''
     joined = ', '.join(v[len(prefix):] for v in vals)
     return '%s[%s]' % (prefix, joined) if prefix else joined
 
 
-def call(op, inputs=None, outputs=None, factor_prefixes=False):
+def call(op, inputs=None, outputs=None, factor_prefixes: bool=False) -> str:
     if not inputs:
         inputs = ''
     else:
@@ -276,7 +276,7 @@ def format_device_option(dev_opt):
 
 
 @Printer.register(OperatorDef)
-def print_op(text, op):
+def print_op(text, op) -> None:
     args = [(a.name, _arg_val(a)) for a in op.arg]
     dev_opt_txt = format_device_option(op.device_option)
     if dev_opt_txt:
@@ -299,7 +299,7 @@ def print_op(text, op):
 
 
 @Printer.register(NetDef)
-def print_net_def(text, net_def):
+def print_net_def(text, net_def) -> None:
     if text.c2_syntax:
         text.add(call('core.Net', ["'%s'" % net_def.name], [net_def.name]))
         text.c2_net_name = net_def.name
@@ -312,7 +312,7 @@ def print_net_def(text, net_def):
 
 
 @Printer.register(Net)
-def print_net(text, net):
+def print_net(text, net) -> None:
     text(net.Proto())
 
 
@@ -336,7 +336,7 @@ def _get_step_context(step):
 
 
 @Printer.register(ExecutionStep)
-def print_step(text, step):
+def print_step(text, step) -> None:
     proto = step.Proto()
     step_ctx, do_substep = _get_step_context(step)
     with text.context(step_ctx):
@@ -365,13 +365,13 @@ def print_step(text, step):
                     text.add(call('yield stop_if', [proto.should_stop_blob]))
 
 
-def _print_task_output(x):
+def _print_task_output(x) -> str:
     assert isinstance(x, TaskOutput)
     return 'Output[' + ', '.join(str(x) for x in x.names) + ']'
 
 
 @Printer.register(Task)
-def print_task(text, task):
+def print_task(text, task) -> None:
     outs = ', '.join(_print_task_output(o) for o in task.outputs())
     context = [('node', task.node), ('name', task.name), ('outputs', outs)]
     with text.context(call('Task', context)):
@@ -379,14 +379,14 @@ def print_task(text, task):
 
 
 @Printer.register(TaskGroup)
-def print_task_group(text, tg, header=None):
+def print_task_group(text, tg, header=None) -> None:
     with text.context(header or call('TaskGroup')):
         for task in tg.tasks_by_node().tasks():
             text(task)
 
 
 @Printer.register(Job)
-def print_job(text, job):
+def print_job(text, job) -> None:
     text(job.init_group, 'Job.current().init_group')
     text(job.epoch_group, 'Job.current().epoch_group')
     with text.context('Job.current().stop_conditions'):

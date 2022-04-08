@@ -9,7 +9,7 @@ import unittest
 
 
 class DoOpTest(TestCase):
-    def test_operator(self):
+    def test_operator(self) -> None:
         def make_net():
             subnet = core.Net('subnet')
             subnet.Add(["X", "Y"], "Z")
@@ -37,7 +37,7 @@ class DoOpTest(TestCase):
         outer_Z_val = workspace.FetchBlob("outer_Z")
         self.assertTrue(np.all(outer_Z_val == np.asarray([4, 6])))
 
-    def test_reuse_workspace(self):
+    def test_reuse_workspace(self) -> None:
         def make_net():
             param_init_subnet = core.Net('param_init_subnet')
             param_init_subnet.ConstantFill([], "X", shape=[1], value=1)

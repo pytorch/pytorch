@@ -18,7 +18,7 @@ the methods are provided in each respective docstring.
 """
 
 
-def init_tt_cores(inp_sizes, out_sizes, tt_ranks, seed=1234):
+def init_tt_cores(inp_sizes, out_sizes, tt_ranks, seed: int=1234) -> float:
     """
     Initialize randomized orthogonalized TT-cores.
 
@@ -237,5 +237,5 @@ def tt_svd(W, sizes, tt_ranks):
 
 # TODO(Surya) Write a method to convert an entire network where all fully
 # connected layers are replaced by an TT layer.
-def fc_net_to_tt_net(net):
+def fc_net_to_tt_net(net) -> None:
     pass

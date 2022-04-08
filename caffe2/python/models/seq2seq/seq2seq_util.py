@@ -216,7 +216,7 @@ def build_embeddings(
     return embeddings
 
 
-def get_layer_scope(scope, layer_type, i):
+def get_layer_scope(scope, layer_type, i) -> str:
     prefix = (scope + '/' if scope else '') + layer_type
     return '{}/layer{}'.format(prefix, i)
 
@@ -231,8 +231,8 @@ def build_embedding_encoder(
     embeddings,
     embedding_size,
     use_attention,
-    num_gpus=0,
-    forward_only=False,
+    num_gpus: int=0,
+    forward_only: bool=False,
     scope=None,
 ):
     with core.NameScope(scope or ''):
@@ -305,6 +305,7 @@ def build_embedding_encoder(
         final_encoder_hidden_states.append(final_layer_hidden_state)
         final_encoder_cell_states.append(final_layer_cell_state)
 
+    # pyre-fixme[61]: `layer_outputs` is undefined, or not always defined.
     encoder_outputs = layer_outputs
     weighted_encoder_outputs = None
 
@@ -532,7 +533,7 @@ def build_embedding_decoder(
     embedding_size,
     attention_type,
     forward_only,
-    num_gpus=0,
+    num_gpus: int=0,
     scope=None,
 ):
     with core.NameScope(scope or ''):

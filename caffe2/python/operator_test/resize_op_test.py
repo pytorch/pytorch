@@ -24,7 +24,7 @@ class TestResize(hu.HypothesisTestCase):
     @settings(max_examples=10, deadline=None)
     def test_nearest(self, height_scale, width_scale, height, width,
                      num_channels, batch_size, seed, order,
-                     gc, dc):
+                     gc, dc) -> None:
 
         assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         # NHWC currently only supported for CPU. Ignore other devices.
@@ -80,7 +80,7 @@ class TestResize(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            **hu.gcs)
     def test_nearest_grad(self, height_scale, width_scale, height, width,
-                          num_channels, batch_size, seed, order, gc, dc):
+                          num_channels, batch_size, seed, order, gc, dc) -> None:
 
         assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         # NHWC currently only supported for CPU. Ignore other devices.
@@ -141,7 +141,7 @@ class TestResize(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_nearest_onnx(self, height_scale, width_scale, height, width,
                           num_channels, batch_size, seed, order,
-                          gc, dc):
+                          gc, dc) -> None:
 
         assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         # NHWC currently only supported for CPU. Ignore other devices.
@@ -198,7 +198,7 @@ class TestResize(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            **hu.gcs)
     def test_nearest_onnx_grad(self, height_scale, width_scale, height, width,
-                               num_channels, batch_size, seed, order, gc, dc):
+                               num_channels, batch_size, seed, order, gc, dc) -> None:
 
         assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         # NHWC currently only supported for CPU. Ignore other devices.

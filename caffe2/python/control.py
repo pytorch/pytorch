@@ -26,7 +26,7 @@ _current_idx = 1
 _used_step_names = set()
 
 
-def _get_next_step_name(control_name, base_name):
+def _get_next_step_name(control_name, base_name) -> str:
     global _current_idx, _used_step_names
     concat_name = '%s/%s' % (base_name, control_name)
     next_name = concat_name
@@ -56,7 +56,7 @@ def _MakeList(input):
     return output
 
 
-def _IsNets(nets_or_steps):
+def _IsNets(nets_or_steps) -> bool:
     if isinstance(nets_or_steps, list):
         return all(isinstance(n, core.Net) for n in nets_or_steps)
     else:

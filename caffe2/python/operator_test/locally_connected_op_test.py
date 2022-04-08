@@ -25,7 +25,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_lc_2d(
-            self, N, C, H, W, M, kernel, op_name, order, use_bias, gc, dc):
+            self, N, C, H, W, M, kernel, op_name, order, use_bias, gc, dc) -> None:
         if H < kernel:
             kernel = H
         if W < kernel:
@@ -105,7 +105,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=None)
     # Increased timeout from 1 second to 5 for ROCM
-    def test_lc_1d(self, N, C, size, M, kernel, op_name, use_bias, gc, dc):
+    def test_lc_1d(self, N, C, size, M, kernel, op_name, use_bias, gc, dc) -> None:
         if size < kernel:
             kernel = size
 
@@ -164,7 +164,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            use_bias=st.booleans(),
            **hu.gcs)
     @settings(deadline=None)
-    def test_lc_3d(self, N, C, T, H, W, M, kernel, op_name, use_bias, gc, dc):
+    def test_lc_3d(self, N, C, T, H, W, M, kernel, op_name, use_bias, gc, dc) -> None:
         if T < kernel:
             kernel = T
         if H < kernel:

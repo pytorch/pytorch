@@ -36,7 +36,7 @@ def OnCPU():
     return device_option
 
 
-def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
+def Allreduce(net, blobs, reduced_affix: str="_reduced", gpu_indices=None):
     """The general Allreduce interface that reroutes the function calls.
     CPUs and AMD GPUs are not supported because
     GetGpuPeerAccessPattern is called to get gpu peer access pattern.

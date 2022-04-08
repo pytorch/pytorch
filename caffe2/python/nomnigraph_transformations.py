@@ -6,7 +6,7 @@ import caffe2.python.nomnigraph as ng
 from caffe2.python import core, utils
 
 
-def transpose_network(nn):
+def transpose_network(nn) -> None:
     """
     Convert all Convolutions operators which are in the NCHW order
     to NHWC order and also transform their inputs and outputs so that the
@@ -36,6 +36,7 @@ def transpose_network(nn):
             # weights need to be transformed
             for idx in range(2):
                 new_inp = nn.createUniqueDataNode(inputs[idx].name)
+                # pyre-fixme[19]: Expected 0 positional arguments.
                 transp = dfg.createNode(ng.NeuralNetOperator("NCHW2NHWC"))
                 nn.createEdge(inputs[idx], transp)
                 nn.createEdge(transp, new_inp)
@@ -43,6 +44,7 @@ def transpose_network(nn):
                 inputs[idx] = new_inp
             for idx in range(len(outputs)):
                 new_outp = nn.createUniqueDataNode(outputs[idx].name)
+                # pyre-fixme[19]: Expected 0 positional arguments.
                 transp = dfg.createNode(ng.NeuralNetOperator("NHWC2NCHW"))
                 nn.createEdge(transp, outputs[idx])
                 nn.createEdge(new_outp, transp)

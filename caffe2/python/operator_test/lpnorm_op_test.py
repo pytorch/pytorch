@@ -11,7 +11,7 @@ import hypothesis.strategies as st
 
 
 class LpnormTest(hu.HypothesisTestCase):
-    def _test_Lp_Norm(self, inputs, gc, dc):
+    def _test_Lp_Norm(self, inputs, gc, dc) -> None:
         X = inputs[0]
         # avoid kinks by moving away from 0
         X += 0.02 * np.sign(X)
@@ -74,10 +74,10 @@ class LpnormTest(hu.HypothesisTestCase):
                              dtype=np.float32),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_Lp_Norm(self, inputs, gc, dc):
+    def test_Lp_Norm(self, inputs, gc, dc) -> None:
         self._test_Lp_Norm(inputs, gc, dc)
 
-    def test_Lp_Norm_empty(self):
+    def test_Lp_Norm_empty(self) -> None:
         self._test_Lp_Norm([np.array([], dtype=np.float32)], hu.cpu_do, [hu.cpu_do])
         self.assertEqual(self.ws.blobs["l1_norm"].fetch()[0], 0.0)
         self.assertEqual(self.ws.blobs["l2_norm"].fetch()[0], 0.0)
@@ -89,7 +89,7 @@ class LpnormTest(hu.HypothesisTestCase):
         p=st.integers(1, 2),
         average=st.integers(0, 1)
     )
-    def test_lpnorm_shape_inference(self, x, p, average):
+    def test_lpnorm_shape_inference(self, x, p, average) -> None:
         workspace.FeedBlob('x', x)
 
         net = core.Net("lpnorm_test")

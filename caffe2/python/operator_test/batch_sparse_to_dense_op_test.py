@@ -22,7 +22,7 @@ class TestBatchSparseToDense(serial.SerializedTestCase):
     @settings(deadline=None)
     def test_batch_sparse_to_dense(
         self, batch_size, dense_last_dim, default_value, gc, dc
-    ):
+    ) -> None:
         L = np.random.randint(1, dense_last_dim + 1, size=(batch_size))
         num_data = L.sum()
         # The following logic ensure that indices in each batch will not be duplicated
@@ -79,7 +79,7 @@ class TestBatchSparseToDense(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=None)
-    def test_batch_dense_to_sparse(self, batch_size, dense_last_dim, gc, dc):
+    def test_batch_dense_to_sparse(self, batch_size, dense_last_dim, gc, dc) -> None:
         L = np.random.randint(1, dense_last_dim + 1, size=(batch_size))
         # The following logic ensure that indices in each batch will not be duplicated
         I = np.array([]).astype(np.int32)

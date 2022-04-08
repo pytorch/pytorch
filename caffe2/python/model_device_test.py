@@ -106,7 +106,7 @@ class TestMiniAlexNet(test_util.TestCase):
         model.AddGradientOperators([loss])
         return model
 
-    def _testMiniAlexNet(self, order):
+    def _testMiniAlexNet(self, order) -> None:
         # First, we get all the random initialization of parameters.
         model = self._MiniAlexNetNoDropout(order)
         workspace.ResetWorkspace()
@@ -138,7 +138,7 @@ class TestMiniAlexNet(test_util.TestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support,
                      "No GPU support. Skipping test.")
-    def testMiniAlexNetNCHW(self):
+    def testMiniAlexNetNCHW(self) -> None:
         self._testMiniAlexNet("NCHW")
 
     # No Group convolution support for NHWC right now

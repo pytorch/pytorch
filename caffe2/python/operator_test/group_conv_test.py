@@ -33,7 +33,7 @@ class TestGroupConvolution(hu.HypothesisTestCase):
     def test_group_convolution(
             self, stride, pad, kernel, size, group,
             input_channels_per_group, output_channels_per_group, batch_size,
-            order, engine, use_bias, gc, dc):
+            order, engine, use_bias, gc, dc) -> None:
         assume(size >= kernel)
 
         if hiputl.run_in_hip(gc, dc):

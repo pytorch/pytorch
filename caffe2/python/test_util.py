@@ -22,25 +22,25 @@ def rand_array(*dims):
     return np.array(np.random.rand(*dims) - 0.5).astype(np.float32)
 
 
-def randBlob(name, type, *dims, **kwargs):
+def randBlob(name, type, *dims, **kwargs) -> None:
     offset = kwargs['offset'] if 'offset' in kwargs else 0.0
     workspace.FeedBlob(name, np.random.rand(*dims).astype(type) + offset)
 
 
-def randBlobFloat32(name, *dims, **kwargs):
+def randBlobFloat32(name, *dims, **kwargs) -> None:
     randBlob(name, np.float32, *dims, **kwargs)
 
 
-def randBlobsFloat32(names, *dims, **kwargs):
+def randBlobsFloat32(names, *dims, **kwargs) -> None:
     for name in names:
         randBlobFloat32(name, *dims, **kwargs)
 
 
-def numOps(net):
+def numOps(net) -> int:
     return len(net.Proto().op)
 
 
-def str_compare(a, b, encoding="utf8"):
+def str_compare(a: str, b: str, encoding: str="utf8") -> bool:
     if isinstance(a, bytes):
         a = a.decode(encoding)
     if isinstance(b, bytes):
@@ -69,7 +69,7 @@ def caffe2_flaky(test_method):
     return test_method
 
 
-def is_flaky_test_mode():
+def is_flaky_test_mode() -> bool:
     return os.getenv('CAFFE2_RUN_FLAKY_TESTS', '0') == '1'
 
 

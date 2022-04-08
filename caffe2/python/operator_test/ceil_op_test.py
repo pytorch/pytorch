@@ -19,7 +19,7 @@ class TestCeil(serial.SerializedTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_ceil(self, X, gc, dc, engine):
+    def test_ceil(self, X, gc, dc, engine) -> None:
         op = core.CreateOperator("Ceil", ["X"], ["Y"], engine=engine)
 
         def ceil_ref(X):

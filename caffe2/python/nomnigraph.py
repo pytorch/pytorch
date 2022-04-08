@@ -107,7 +107,7 @@ class NNModule(object):
                 yield m
 
 
-def render(s):
+def render(s) -> None:
     s = str(s)
     cmd_exists = lambda x: any(
         os.access(os.path.join(path, x), os.X_OK)
@@ -116,6 +116,7 @@ def render(s):
     if cmd_exists("graph-easy"):
         p = Popen("graph-easy", stdin=PIPE)
         try:
+            # pyre-fixme[16]: Optional type has no attribute `write`.
             p.stdin.write(s.encode("utf-8"))
         except IOError as e:
             if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
@@ -124,6 +125,7 @@ def render(s):
                 # Raise any other error.
                 raise
 
+        # pyre-fixme[16]: Optional type has no attribute `close`.
         p.stdin.close()
         p.wait()
     else:

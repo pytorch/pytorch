@@ -9,7 +9,7 @@ from hypothesis import given, settings
 import unittest
 
 
-def has_blob(proto, needle):
+def has_blob(proto, needle) -> bool:
     for op in proto.op:
         for inp in op.input:
             if inp == needle:
@@ -20,7 +20,7 @@ def has_blob(proto, needle):
     return False
 
 
-def count_blobs(proto):
+def count_blobs(proto) -> int:
     blobs = set()
     for op in proto.op:
         blobs = blobs.union(set(op.input)).union(set(op.output))
@@ -34,7 +34,7 @@ class MemongerTest(hu.HypothesisTestCase):
            do=st.sampled_from(hu.device_options),
            algo=st.sampled_from(memonger.AssignmentAlgorithm))
     @settings(max_examples=5, deadline=None)
-    def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
+    def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo) -> None:
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
         fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
@@ -87,7 +87,7 @@ class MemongerTest(hu.HypothesisTestCase):
            batch_size=st.integers(min_value=1, max_value=10),
            do=st.sampled_from(hu.device_options))
     @settings(max_examples=5, deadline=None)
-    def test_fast_memonger(self, input_dim, output_dim, batch_size, do):
+    def test_fast_memonger(self, input_dim, output_dim, batch_size, do) -> None:
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
         fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
@@ -123,7 +123,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         self.assertLess(count_blobs(optimized_net), count_blobs(m.Proto()))
 
-    def test_fast_memonger_unique_outputs(self):
+    def test_fast_memonger_unique_outputs(self) -> None:
         m = model_helper.ModelHelper()
         fc = []
         for i in range(2):
@@ -150,7 +150,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=1, max_value=4),
            output_dim=st.integers(min_value=1, max_value=4),
            batch_size=st.integers(min_value=1, max_value=4))
-    def test_gradient_optim(self, input_dim, output_dim, batch_size):
+    def test_gradient_optim(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
             fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -219,7 +219,7 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(grad, optimized_grad)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
-    def test_memonger_mix_cpu_gpu(self):
+    def test_memonger_mix_cpu_gpu(self) -> None:
         '''
         Check that memonger does not make blobs cross CPU/GPU boundary
         '''
@@ -270,7 +270,7 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
     @settings(deadline=1000)
-    def test_gradient_optim_tree(self, input_dim, output_dim, batch_size):
+    def test_gradient_optim_tree(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
             fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -328,7 +328,7 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
     @settings(deadline=1000)
-    def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size):
+    def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -385,7 +385,7 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
     @settings(deadline=10000)
-    def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size):
+    def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         m.net.Proto().type = "dag"
         m.net.Proto().num_workers = 4
@@ -454,7 +454,7 @@ class MemongerTest(hu.HypothesisTestCase):
     # This test reproduces scenario where dag traversal for finding
     # shared blobs was not always starting from ops with in degree of 0
     @settings(deadline=10000)
-    def test_forward_optim_tree_dag_traversal(self):
+    def test_forward_optim_tree_dag_traversal(self) -> None:
         input_dim = 4
         output_dim = 4
         batch_size = 4
@@ -498,7 +498,7 @@ class MemongerTest(hu.HypothesisTestCase):
         self.assertLess(blobs_after, blobs_before)
 
     # This is specifically to verify the op schema check being done in memonger
-    def test_forward_optim_tree_enforce_inplace_op_invalid(self):
+    def test_forward_optim_tree_enforce_inplace_op_invalid(self) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -515,7 +515,7 @@ class MemongerTest(hu.HypothesisTestCase):
     # Here inplace op is specifically a root op to repro the scenario where dag
     # memonger could treat all the output blobs as shareable blobs and fails
     # assertion of input blob with the same name not allowed to share
-    def test_forward_optim_tree_enforce_inplace_op_valid_and_as_head(self):
+    def test_forward_optim_tree_enforce_inplace_op_valid_and_as_head(self) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -534,7 +534,7 @@ class MemongerTest(hu.HypothesisTestCase):
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
 
-    def test_rnn(self):
+    def test_rnn(self) -> None:
         from caffe2.python import rnn_cell
         T = 5
         model = model_helper.ModelHelper()
@@ -591,7 +591,7 @@ class MemongerTest(hu.HypothesisTestCase):
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
 
-    def test_compute_interference_graph_inplace_ops(self):
+    def test_compute_interference_graph_inplace_ops(self) -> None:
         m = model_helper.ModelHelper()
         m.Copy("b1", "b1")
         m.Copy("b1", "b1")
@@ -599,7 +599,7 @@ class MemongerTest(hu.HypothesisTestCase):
         g = memonger.compute_interference_graph(m.net.Proto().op)
         self.assertEqual(list(g.edges()), [(0, 1), (0, 2), (1, 2)])
 
-    def test_topological_sort_longest_path(self):
+    def test_topological_sort_longest_path(self) -> None:
         m = model_helper.ModelHelper()
         # 0
         m.Copy("conv0_w_comp", "conv0_w")
@@ -621,7 +621,7 @@ class MemongerTest(hu.HypothesisTestCase):
         orders_gt = [0, 1, 2, 3]
         self.assertEqual(orders_gt, list(orders))
 
-    def test_topological_sort_longest_path_multi_target(self):
+    def test_topological_sort_longest_path_multi_target(self) -> None:
         # two outputs: conv2 and data4
         m = model_helper.ModelHelper()
         # 0
@@ -648,7 +648,7 @@ class MemongerTest(hu.HypothesisTestCase):
         orders_gt = [0, 1, 2, 3, 4, 5]
         self.assertEqual(orders_gt, list(orders))
 
-    def test_topological_sort_longest_path_single_node(self):
+    def test_topological_sort_longest_path_single_node(self) -> None:
         # single node
         m = model_helper.ModelHelper()
         # 0
@@ -665,7 +665,7 @@ class MemongerTest(hu.HypothesisTestCase):
         orders_gt = [0]
         self.assertEqual(orders_gt, list(orders))
 
-    def test_compute_assignments_greedy(self):
+    def test_compute_assignments_greedy(self) -> None:
         LiveRange = memonger.LiveRange
         ranges_sorted = [
             ('b1', LiveRange(1, 3, 10)),
@@ -682,7 +682,7 @@ class MemongerTest(hu.HypothesisTestCase):
         self.assertEqual(memonger.get_memory_usage(best), 11)
         self.assertEqual(best, assignment_gt)
 
-    def test_compute_assignments_dp(self):
+    def test_compute_assignments_dp(self) -> None:
         LiveRange = memonger.LiveRange
         ranges_sorted = [
             ('b1', LiveRange(1, 3, 10)),
@@ -694,7 +694,7 @@ class MemongerTest(hu.HypothesisTestCase):
         best = memonger.compute_assignments_dp(ranges_sorted, None)
         self.assertEqual(memonger.get_memory_usage(best), 11)
 
-    def test_compute_assignments_dp1(self):
+    def test_compute_assignments_dp1(self) -> None:
         LiveRange = memonger.LiveRange
         ranges_sorted = [
             ('b1', LiveRange(1, 2, 10)),
@@ -708,7 +708,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
-    def test_verify_graph_equality(self, input_dim, output_dim, batch_size):
+    def test_verify_graph_equality(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -732,7 +732,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
-    def test_verify_graph_equality_harder(self, input_dim, output_dim, batch_size):
+    def test_verify_graph_equality_harder(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -760,7 +760,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
-    def test_verify_graph_inequality(self, input_dim, output_dim, batch_size):
+    def test_verify_graph_inequality(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -784,7 +784,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
-    def test_verify_graph_inequality_harder(self, input_dim, output_dim, batch_size):
+    def test_verify_graph_inequality_harder(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
@@ -809,7 +809,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         self.assertFalse(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
 
-    def test_release_blobs_when_used(self):
+    def test_release_blobs_when_used(self) -> None:
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "x", dim_in=2, dim_out=2)
         fc2 = brew.fc(m, fc1, "y", dim_in=2, dim_out=2)

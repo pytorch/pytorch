@@ -237,7 +237,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
 
 def run_test(
         size_tuple, means, stds, label_type, num_labels, is_test, scale_jitter_type,
-        color_jitter, color_lighting, dc, validator, output1=None, output2_size=None):
+        color_jitter, color_lighting, dc, validator, output1=None, output2_size=None) -> None:
     # TODO: Does not test on GPU and does not test use_gpu_transform
     # WARNING: Using ModelHelper automatically does NHWC to NCHW
     # transformation if needed.
@@ -320,7 +320,7 @@ def run_test(
 class TestImport(hu.HypothesisTestCase):
     def validate_image_and_label(
             self, expected_images, device_option, count_images, label_type,
-            is_test, scale_jitter_type, color_jitter, color_lighting):
+            is_test, scale_jitter_type, color_jitter, color_lighting) -> None:
         l = workspace.FetchBlob('label')
         result = workspace.FetchBlob('data').astype(np.int32)
         # If we don't use_gpu_transform, the output is in NHWC
@@ -370,7 +370,7 @@ class TestImport(hu.HypothesisTestCase):
     def test_imageinput(
             self, size_tuple, means, stds, label_type,
             num_labels, is_test, scale_jitter_type, color_jitter, color_lighting,
-            gc, dc):
+            gc, dc) -> None:
         def validator(expected_images, device_option, count_images):
             self.validate_image_and_label(
                 expected_images, device_option, count_images, label_type,
@@ -406,7 +406,7 @@ class TestImport(hu.HypothesisTestCase):
     def test_imageinput_with_additional_outputs(
             self, size_tuple, means, stds, label_type,
             num_labels, is_test, scale_jitter_type, color_jitter, color_lighting,
-            output1, output2_size, gc, dc):
+            output1, output2_size, gc, dc) -> None:
         def validator(expected_images, device_option, count_images):
             self.validate_image_and_label(
                 expected_images, device_option, count_images, label_type,

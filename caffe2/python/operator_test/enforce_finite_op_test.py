@@ -20,7 +20,7 @@ class TestEnforceFinite(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_enforce_finite(self, X, gc, dc):
+    def test_enforce_finite(self, X, gc, dc) -> None:
 
         def all_finite_value(X):
             if X.size <= 0:
@@ -44,7 +44,7 @@ class TestEnforceFinite(hu.HypothesisTestCase):
         ),
         **hu.gcs
     )
-    def test_enforce_finite_device_check(self, X, gc, dc):
+    def test_enforce_finite_device_check(self, X, gc, dc) -> None:
         op = core.CreateOperator(
             "EnforceFinite",
             ["X"],

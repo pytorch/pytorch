@@ -11,7 +11,7 @@ import numpy as np
 
 
 class TestControl(test_util.TestCase):
-    def test_disambiguate_grad_if_op_output(self):
+    def test_disambiguate_grad_if_op_output(self) -> None:
         workspace.FeedBlob("cond", np.array(True))
         workspace.FeedBlob("then_grad", np.array(1))
         workspace.FeedBlob("else_grad", np.array(2))

@@ -19,7 +19,7 @@ class TestWeightedSample(hu.HypothesisTestCase):
         weights_len=st.integers(min_value=0, max_value=128),
         **hu.gcs
     )
-    def test_weighted_sample(self, batch, weights_len, gc, dc):
+    def test_weighted_sample(self, batch, weights_len, gc, dc) -> None:
 
         weights = np.zeros((batch, weights_len))
         values = np.zeros((batch, weights_len))

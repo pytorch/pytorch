@@ -14,7 +14,7 @@ import unittest
 class TestGivenTensorByteStringToUInt8FillOps(hu.HypothesisTestCase):
     @given(X=hu.tensor(min_dim=1, max_dim=4, dtype=np.int32),
            **hu.gcs)
-    def test_given_tensor_byte_string_to_uint8_fill(self, X, gc, dc):
+    def test_given_tensor_byte_string_to_uint8_fill(self, X, gc, dc) -> None:
         X = X.astype(np.uint8)
         print('X: ', str(X))
         op = core.CreateOperator(
@@ -32,7 +32,7 @@ class TestGivenTensorByteStringToUInt8FillOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [], [0])
 
     @given(**hu.gcs)
-    def test_empty_given_tensor_byte_string_to_uint8_fill(self, gc, dc):
+    def test_empty_given_tensor_byte_string_to_uint8_fill(self, gc, dc) -> None:
         X = np.array([], dtype=np.uint8)
         print('X: ', str(X))
         op = core.CreateOperator(

@@ -32,7 +32,7 @@ class TestWeightScale(hu.HypothesisTestCase):
            upper_bound_iter=st.integers(min_value=5, max_value=100),
            scale=st.floats(min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    def test_weight_scale(self, inputs, ITER, stepsize, upper_bound_iter, scale, gc, dc):
+    def test_weight_scale(self, inputs, ITER, stepsize, upper_bound_iter, scale, gc, dc) -> None:
         ITER = np.array([ITER], dtype=np.int64)
         op = core.CreateOperator(
             "WeightScale", ["w", "iter"], ["nw"], stepsize=stepsize, upper_bound_iter=upper_bound_iter, scale=scale)

@@ -10,7 +10,7 @@ import hypothesis.strategies as st
 import numpy as np
 
 
-def entropy(p):
+def entropy(p: float) -> float:
     q = 1. - p
     return -p * np.log(p) - q * np.log(q)
 
@@ -27,7 +27,7 @@ def jsd_grad(go, o, pq_list):
 
 class TestJSDOps(serial.SerializedTestCase):
     @serial.given(n=st.integers(10, 100), **hu.gcs_cpu_only)
-    def test_bernoulli_jsd(self, n, gc, dc):
+    def test_bernoulli_jsd(self, n, gc, dc) -> None:
         p = np.random.rand(n).astype(np.float32)
         q = np.random.rand(n).astype(np.float32)
         op = core.CreateOperator("BernoulliJSD", ["p", "q"], ["l"])

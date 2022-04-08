@@ -33,7 +33,7 @@ def get_external_blob_names(net, lexical_scope):
     return input_names, output_names
 
 
-def add_if_op(if_net, cond_blob, lexical_scope, then_net, else_net=None):
+def add_if_op(if_net, cond_blob, lexical_scope, then_net, else_net=None) -> None:
     """
     A helper function to add an If op to the net.
     Automatically determines whether blobs in the then/else subnets are external
@@ -139,7 +139,7 @@ def add_if_op(if_net, cond_blob, lexical_scope, then_net, else_net=None):
 
 
 def add_while_op(
-        while_net, cond_blob, lexical_scope, loop_body_net, condition_body_net=None):
+        while_net, cond_blob, lexical_scope, loop_body_net, condition_body_net=None) -> None:
     """
     A helper function to add a While op to the net. Same rules for determining
     outer and inner blobs as for the 'If' operator apply for the 'While' operator

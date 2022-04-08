@@ -57,7 +57,7 @@ class DataType:
     REBATCHING_BUFFER = 15
 
 
-def _CheckDataType():
+def _CheckDataType() -> None:
     # Verify that the DataType values defined above match the ones defined in
     # the caffe2.proto file
     for name, value in caffe2_pb2.TensorProto.DataType.items():
@@ -79,7 +79,7 @@ def _GetRegisteredOperators():
 _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
 
-def RefreshRegisteredOperators(trigger_lazy=True):
+def RefreshRegisteredOperators(trigger_lazy: bool=True) -> None:
     if trigger_lazy:
         TriggerLazyImport()
     global _REGISTERED_OPERATORS
@@ -89,7 +89,7 @@ def RefreshRegisteredOperators(trigger_lazy=True):
 _GLOBAL_INIT_ARGS = []
 
 
-def GlobalInit(args):
+def GlobalInit(args) -> None:
     TriggerLazyImport()
     _GLOBAL_INIT_ARGS.extend(args[1:])
     C.global_init(args)
@@ -108,13 +108,13 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
-def IsGPUDeviceType(device_type):
+def IsGPUDeviceType(device_type) -> bool:
     return device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}
 
 
 def DeviceOption(
     device_type,
-    device_id=0,
+    device_id: int=0,
     random_seed=None,
     node_name=None,
     numa_node_id=None,
@@ -135,7 +135,7 @@ def DeviceOption(
     return option
 
 
-def device_option_equal(opt1, opt2, ignore_node_name=True, ignore_random_seed=True):
+def device_option_equal(opt1, opt2, ignore_node_name: bool=True, ignore_random_seed: bool=True):
     if not opt1 or not opt2:
         return opt1 == opt2
     if not ignore_node_name and opt1.node_name != opt2.node_name:
@@ -316,14 +316,14 @@ class BlobReference(object):
         )))
 
 
-def ScopedName(name):
+def ScopedName(name: str):
     """prefix the name with the current scope."""
     if isinstance(name, binary_type):
         name = name.decode('ascii')
     return scope.CurrentNameScope() + name
 
 
-def ScopedBlobReference(name, *args, **kwargs):
+def ScopedBlobReference(name, *args, **kwargs) -> BlobReference:
     """Returns a blob reference with scope prefixed."""
     return BlobReference(ScopedName(name), *args, **kwargs)
 
@@ -364,7 +364,7 @@ def CreateOperator(
     operator_type,
     inputs,
     outputs,
-    name='',
+    name: str='',
     control_input=None,
     device_option=None,
     arg=None,
@@ -399,6 +399,7 @@ def CreateOperator(
     if device_option is not None:
         operator.device_option.CopyFrom(device_option)
     elif scope.CurrentDeviceScope() is not None:
+        # pyre-fixme[6]: For 1st param expected `_M` but got `None`.
         operator.device_option.CopyFrom(scope.CurrentDeviceScope())
     if engine is not None:
         operator.engine = engine
@@ -424,7 +425,7 @@ def CreateOperator(
 
 
 def _RegisterPythonImpl(
-    f, grad_f=None, python_func_type=None, pass_workspace=False
+    f, grad_f=None, python_func_type=None, pass_workspace: bool=False
 ):
     if python_func_type:
         func = python_func_type(f)
@@ -436,8 +437,12 @@ def _RegisterPythonImpl(
         if isinstance(grad_f, tuple):
             grad_f = grad_f[0](*grad_f[1], **grad_f[2])
 
+    # pyre-fixme[16]: Module `_import_c_extension` has no attribute
+    #  `register_python_op`.
     token = C.register_python_op(f, pass_workspace, '')
     if grad_f:
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute
+        #  `register_python_gradient_op`.
         C.register_python_gradient_op(token, grad_f)
     return token
 
@@ -446,7 +451,7 @@ def CreatePythonOperator(
     f, inputs,
     outputs,
     grad_f=None,
-    pass_workspace=False,
+    pass_workspace: bool=False,
     python_func_type=None,
     *args,
     **kwargs
@@ -1296,7 +1301,7 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
     return sorted(used_op_ids)
 
 
-def recurrent_network_op_remap(op, prefix, blob_remap):
+def recurrent_network_op_remap(op, prefix, blob_remap) -> None:
     """
     Parameters
     ----------
@@ -1326,7 +1331,7 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
             remap_proto(argument, blob_remap)
 
 
-def control_op_remap(op, prefix, blob_remap):
+def control_op_remap(op, prefix, blob_remap) -> None:
     net_arg_names = []
     if op.type == "If" or op.type == "AsyncIf":
         net_arg_names = ['then_net', 'else_net']
@@ -1352,7 +1357,7 @@ DEFAULT_REMAP_FUNCS = {
 }
 
 
-def remap_proto(argument, blob_remap):
+def remap_proto(argument, blob_remap) -> None:
     subnet = Net(argument.n)
 
     cloned_sub_net = subnet.Clone(
@@ -1363,8 +1368,8 @@ def remap_proto(argument, blob_remap):
     argument.n.CopyFrom(cloned_sub_net.Proto())
 
 
-def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
-                       keep_schema=True):
+def clone_and_bind_net(net: "Net", name, prefix, blob_remap=None, inputs=None,
+                       keep_schema: bool=True):
     """
     Clone the given Net, binding its input schema to the given `inputs` record.
     Blob names defined by the net are prepended with the given `prefix`.
@@ -1425,14 +1430,14 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
     return cloned_net, blob_remap
 
 
-def _get_blob_ref(blob_name_or_ref):
+def _get_blob_ref(blob_name_or_ref) -> BlobReference:
     return (
         blob_name_or_ref if isinstance(input, BlobReference)
         else BlobReference(blob_name_or_ref)
     )
 
 
-def _recover_record_by_prefix(names, prefix=''):
+def _recover_record_by_prefix(names, prefix: str=''):
     """
     Tries to recover record by taking a subset of blob names with
     a given prefix name and interpreting them as schema column names
@@ -2380,7 +2385,7 @@ class Net(object):
         return self._ExtendOps(new_ops)
 
 
-def remap_input(op, blob_name_remapping):
+def remap_input(op, blob_name_remapping) -> None:
     new_list = [blob_name_remapping.get(b, b) for b in op.input]
     del op.input[:]
     op.input.extend(new_list)
@@ -2427,7 +2432,7 @@ def device_equal(src, dst):
     return src.device_type == dst.device_type and src.device_id == dst.device_id
 
 
-def update_placeholder_op_output(op, blob_to_device):
+def update_placeholder_op_output(op, blob_to_device) -> None:
     '''
     Placeholder ops (for e.g. Recv) always runs on CPU. So ensure their
     output blobs reside on CPU.
@@ -2658,7 +2663,7 @@ def output_to_list(op_output):
         if isinstance(op_output, BlobReference) else list(op_output))
 
 
-def _add_net_to_dict(net_dict, net):
+def _add_net_to_dict(net_dict, net) -> bool:
     name = get_net_name(net)
     if name in net_dict:
         assert net_dict[name] is None or net == net_dict[name], (
@@ -2861,7 +2866,7 @@ class ExecutionStep(object):
             run_every_ms=run_every_ms)
 
 
-def add_nets_in_order(step, net_list):
+def add_nets_in_order(step, net_list) -> None:
     proto = step.Proto()
     for substep in step.Substeps():
         add_nets_in_order(substep, net_list)
@@ -2976,8 +2981,8 @@ def execution_step(default_name,
                    should_stop_blob=None,
                    only_once=None,
                    num_concurrent_instances=None,
-                   create_workspace=False,
-                   run_every_ms=None):
+                   create_workspace: bool=False,
+                   run_every_ms=None) -> ExecutionStep:
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:

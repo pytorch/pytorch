@@ -26,7 +26,7 @@ import numpy as np
 
 
 class GetEntryFromBlobsTest(unittest.TestCase):
-    def test_get_entry_from_blobs(self):
+    def test_get_entry_from_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=10, dim_out=8)
@@ -53,7 +53,7 @@ class GetEntryFromBlobsTest(unittest.TestCase):
         self.assertEqual(fc1_w_entry[0], fc1_w[i1][i2])
         assert model.net.output_record() is None
 
-    def test_get_entry_from_blobs_modify_output_record(self):
+    def test_get_entry_from_blobs_modify_output_record(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=4)

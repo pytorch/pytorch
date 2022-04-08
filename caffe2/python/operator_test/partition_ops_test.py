@@ -32,7 +32,7 @@ class TestPartitionOps(TestCase):
             for pack in [False, True]
         ]
 
-    def testPartition(self):
+    def testPartition(self) -> None:
         for main_dims, parts, main_type, extra_ins, pack in self.test_configs():
             ins = ['in' + str(i) for i in range(1 + len(extra_ins))]
             outs = [
@@ -101,7 +101,7 @@ class TestPartitionOps(TestCase):
                     np.testing.assert_array_equal(expected, actual)
 
 
-    def testLengthsPartition(self):
+    def testLengthsPartition(self) -> None:
         for main_dims, parts, main_type, extra_ins, pack in self.test_configs():
             # For LengthsSharding only 1-D tensors supported as a first input
             if len(main_dims) > 1:

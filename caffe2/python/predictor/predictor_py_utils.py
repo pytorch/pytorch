@@ -134,7 +134,7 @@ def GetApplicationSpecificInfoDict(meta_net_def):
     return to_first_match_dict(meta_net_def.applicationSpecificInfo)
 
 
-def AddBlobs(meta_net_def, blob_name, blob_def):
+def AddBlobs(meta_net_def, blob_name, blob_def) -> None:
     blobs = _ProtoMapGet(meta_net_def.blobs, blob_name)
     if blobs is None:
         blobs = meta_net_def.blobs.add()
@@ -144,7 +144,7 @@ def AddBlobs(meta_net_def, blob_name, blob_def):
         blobs.append(blob)
 
 
-def ReplaceBlobs(meta_net_def, blob_name, blob_def):
+def ReplaceBlobs(meta_net_def, blob_name, blob_def) -> None:
     blobs = _ProtoMapGet(meta_net_def.blobs, blob_name)
     assert blobs is not None, "The blob_name:{} does not exist".format(blob_name)
     del blobs[:]
@@ -152,25 +152,25 @@ def ReplaceBlobs(meta_net_def, blob_name, blob_def):
         blobs.append(blob)
 
 
-def AddPlan(meta_net_def, plan_name, plan_def):
+def AddPlan(meta_net_def, plan_name, plan_def) -> None:
     meta_net_def.plans.add(key=plan_name, value=plan_def)
 
 
-def AddNet(meta_net_def, net_name, net_def):
+def AddNet(meta_net_def, net_name, net_def) -> None:
     meta_net_def.nets.add(key=net_name, value=net_def)
 
 
-def SetBlobsOrder(meta_net_def, blobs_order):
+def SetBlobsOrder(meta_net_def, blobs_order) -> None:
     for blob in blobs_order:
         meta_net_def.blobsOrder.append(blob)
 
 
-def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
+def SetPreLoadBlobs(meta_net_def, pre_load_blobs) -> None:
     for blob in pre_load_blobs:
         meta_net_def.preLoadBlobs.append(blob)
 
 
-def SetRequestOnlyEmbeddings(meta_net_def, request_only_embeddings):
+def SetRequestOnlyEmbeddings(meta_net_def, request_only_embeddings) -> None:
     for blob in request_only_embeddings:
         meta_net_def.requestOnlyEmbeddings.append(blob)
 
@@ -179,11 +179,11 @@ def GetBlobsOrder(meta_net_def):
     return meta_net_def.blobsOrder
 
 
-def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes):
+def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes) -> None:
     meta_net_def.tensorBoundShapes.CopyFrom(tensor_bound_shapes)
 
 
-def SetAOTConfig(meta_net_def, aot_config):
+def SetAOTConfig(meta_net_def, aot_config) -> None:
     meta_net_def.aotConfig.CopyFrom(aot_config)
 
 
@@ -194,7 +194,7 @@ def GetArgumentByName(net_def, arg_name):
     return None
 
 
-def AddModelIdArg(meta_net_def, net_def):
+def AddModelIdArg(meta_net_def, net_def) -> None:
     """Takes the model_id from the predict_net of meta_net_def (if it is
     populated) and adds it to the net_def passed in. This is intended to be
     called on init_nets, as their model_id is not populated by default, but

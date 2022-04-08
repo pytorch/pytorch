@@ -13,9 +13,11 @@ import caffe2.python._import_c_extension as C
 
 
 class TestCaffe2Basic(TestCase):
-    def test_dummy_name(self):
+    def test_dummy_name(self) -> None:
         g = C.DummyName()
+        # pyre-fixme[16]: `DummyName` has no attribute `reset`.
         g.reset()
+        # pyre-fixme[16]: `DummyName` has no attribute `new_dummy_name`.
         names_1 = [g.new_dummy_name() for _ in range(3)]
         g.reset()
         names_2 = [g.new_dummy_name() for _ in range(3)]

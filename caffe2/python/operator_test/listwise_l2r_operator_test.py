@@ -61,7 +61,7 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
         return loss, dy
 
     @given(n=st.integers(1, 20), k=st.integers(2, 5), m=st.integers(3, 5))
-    def test_lambda_rank_loss(self, n, k, m):
+    def test_lambda_rank_loss(self, n, k, m) -> None:
         y = np.random.rand(n * m).astype(np.float32)
         r = np.random.randint(k, size=n * m).astype(np.float32)
         # m sessions of length n

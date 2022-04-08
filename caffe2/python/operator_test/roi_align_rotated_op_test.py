@@ -31,7 +31,7 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         pooled_size=st.sampled_from([7, 14]),
         **hu.gcs
     )
-    def test_horizontal_rois(self, H, W, C, num_rois, pooled_size, gc, dc):
+    def test_horizontal_rois(self, H, W, C, num_rois, pooled_size, gc, dc) -> None:
         """
         Test that results match with RoIAlign when angle=0.
         """
@@ -90,7 +90,7 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
     )
     def test_simple_rotations(
         self, H, W, C, num_rois, pooled_size, angle, gc, dc
-    ):
+    ) -> None:
         """
         Test with right-angled rotations that don't need interpolation.
         """

@@ -29,7 +29,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_length_split_edge(self, gc, dc):
+    def test_length_split_edge(self, gc, dc) -> None:
         input_lengths = np.array([3, 4, 5]).astype(np.int32)
         n_split_ = np.array([5]).astype(np.int32)
         # Expected output:
@@ -54,7 +54,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_length_split_arg(self, gc, dc):
+    def test_length_split_arg(self, gc, dc) -> None:
         input_lengths = np.array([9, 4, 5]).astype(np.int32)
         n_split = 3
         # Expected output:
@@ -77,7 +77,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_length_split_override_arg(self, gc, dc):
+    def test_length_split_override_arg(self, gc, dc) -> None:
         input_lengths = np.array([9, 4, 5]).astype(np.int32)
         n_split_ignored = 2
         n_split_used = np.array([3]).astype(np.int32)
@@ -103,7 +103,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
     @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_length_split_even_divide(self, m, n_split, gc, dc):
+    def test_length_split_even_divide(self, m, n_split, gc, dc) -> None:
         # multiples of n_split
         input_lengths = np.random.randint(100, size=m).astype(np.int32) * n_split
         n_split_ = np.array([n_split]).astype(np.int32)
@@ -129,7 +129,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
     @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_length_split_random(self, m, n_split, gc, dc):
+    def test_length_split_random(self, m, n_split, gc, dc) -> None:
         input_lengths = np.random.randint(100, size=m).astype(np.int32)
         n_split_ = np.array([n_split]).astype(np.int32)
 

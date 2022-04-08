@@ -21,7 +21,7 @@ class OrderSwitchTest(hu.HypothesisTestCase):
            w=st.integers(1, 128),
            **mu.gcs)
     @settings(max_examples=10, deadline=None)
-    def test_nchw2nhwc(self, n, c, h, w, gc, dc):
+    def test_nchw2nhwc(self, n, c, h, w, gc, dc) -> None:
         op = core.CreateOperator(
             "NCHW2NHWC",
             ["X"],
@@ -37,7 +37,7 @@ class OrderSwitchTest(hu.HypothesisTestCase):
            w=st.integers(1, 128),
            **mu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_nhwc2nchw(self, n, c, h, w, gc, dc):
+    def test_nhwc2nchw(self, n, c, h, w, gc, dc) -> None:
         op0 = core.CreateOperator(
             "NCHW2NHWC",
             ["X"],
@@ -74,6 +74,7 @@ class OrderSwitchTest(hu.HypothesisTestCase):
             print(np.max(np.abs(Z1 - Z0)))
             self.assertTrue(False)
 
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace(old_ws_name)
 
 

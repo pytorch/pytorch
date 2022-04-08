@@ -21,7 +21,7 @@ class TestKeySplitOps(hu.HypothesisTestCase):
         ),
         **hu.gcs_cpu_only
     )
-    def test_key_split_op(self, X, gc, dc):
+    def test_key_split_op(self, X, gc, dc) -> None:
         categorical_limit = max(X) + 1
         workspace.ResetWorkspace()
         workspace.FeedBlob('X', X)

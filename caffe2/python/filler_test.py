@@ -6,7 +6,7 @@ from caffe2.python import core, test_util, workspace
 
 
 class TestFiller(test_util.TestCase):
-    def test_filler(self):
+    def test_filler(self) -> None:
         net = core.Net("test_filler")
         net.Concat(["X0", "X1", "X2"], ["concat_out", "split_info"])
         self.assertFalse(workspace.HasBlob("X0"))

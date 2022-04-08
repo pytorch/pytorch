@@ -17,7 +17,7 @@ class TestWeightedSumOp(hu.HypothesisTestCase):
     @given(n=st.integers(5, 8), m=st.integers(1, 1),
            d=st.integers(2, 4), grad_on_w=st.booleans(),
            **mu.gcs_ideep_only)
-    def test_weighted_sum(self, n, m, d, grad_on_w, gc, dc):
+    def test_weighted_sum(self, n, m, d, grad_on_w, gc, dc) -> None:
         input_names = []
         input_vars = []
         for i in range(m):

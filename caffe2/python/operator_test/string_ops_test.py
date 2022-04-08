@@ -21,7 +21,7 @@ def _string_lists(alphabet=None):
 class TestStringOps(serial.SerializedTestCase):
     @given(strings=_string_lists())
     @settings(deadline=10000)
-    def test_string_prefix(self, strings):
+    def test_string_prefix(self, strings) -> None:
         length = 3
         # although we are utf-8 encoding below to avoid python exceptions,
         # StringPrefix op deals with byte-length prefixes, which may produce
@@ -49,7 +49,7 @@ class TestStringOps(serial.SerializedTestCase):
 
     @given(strings=_string_lists())
     @settings(deadline=10000)
-    def test_string_suffix(self, strings):
+    def test_string_suffix(self, strings) -> None:
         length = 3
         strings = np.array(
             [a.encode('utf-8') for a in strings], dtype=np.object
@@ -73,7 +73,7 @@ class TestStringOps(serial.SerializedTestCase):
 
     @given(strings=st.text(alphabet=['a', 'b']))
     @settings(deadline=10000)
-    def test_string_starts_with(self, strings):
+    def test_string_starts_with(self, strings) -> None:
         prefix = 'a'
         strings = np.array(
             [str(a) for a in strings], dtype=np.object
@@ -97,7 +97,7 @@ class TestStringOps(serial.SerializedTestCase):
 
     @given(strings=st.text(alphabet=['a', 'b']))
     @settings(deadline=10000)
-    def test_string_ends_with(self, strings):
+    def test_string_ends_with(self, strings) -> None:
         suffix = 'a'
         strings = np.array(
             [str(a) for a in strings], dtype=np.object
@@ -121,7 +121,7 @@ class TestStringOps(serial.SerializedTestCase):
 
     @given(strings=st.text(alphabet=['a', 'b']))
     @settings(deadline=10000)
-    def test_string_equals(self, strings):
+    def test_string_equals(self, strings) -> None:
         text = ""
         if strings:
             text = strings[0]

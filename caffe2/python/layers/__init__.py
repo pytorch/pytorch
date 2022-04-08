@@ -9,7 +9,7 @@ import sys
 from . import layers
 
 
-def import_recursive(package):
+def import_recursive(package) -> None:
     """
     Takes a package and imports all modules underneath it
     """
@@ -23,7 +23,7 @@ def import_recursive(package):
             import_recursive(module)
 
 
-def find_subclasses_recursively(base_cls, sub_cls):
+def find_subclasses_recursively(base_cls, sub_cls) -> None:
     cur_sub_cls = base_cls.__subclasses__()
     sub_cls.update(cur_sub_cls)
     for cls in cur_sub_cls:

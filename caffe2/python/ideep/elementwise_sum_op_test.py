@@ -28,7 +28,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
                                  inputs,
                                  inplace,
                                  gc,
-                                 dc):
+                                 dc) -> None:
         op = core.CreateOperator(
             "Sum",
             ["X_{}".format(i) for i in range(inputs)],
@@ -52,7 +52,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
                                       inputs,
                                       inplace,
                                       gc,
-                                      dc):
+                                      dc) -> None:
         op = core.CreateOperator(
             "Sum",
             ["X_{}".format(i) for i in range(inputs)],
@@ -92,7 +92,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
                                  inputs,
                                  inplace,
                                  gc,
-                                 dc):
+                                 dc) -> None:
         sum_fp32 = core.CreateOperator(
             "Sum",
             ["X_{}".format(i) for i in range(inputs)],
@@ -184,6 +184,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace(old_ws_name)
 
 if __name__ == "__main__":

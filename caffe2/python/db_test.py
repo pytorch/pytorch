@@ -11,7 +11,7 @@ import unittest
 
 
 class TestDB(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         handle, self.file_name = tempfile.mkstemp()
         os.close(handle)
         self.data = [
@@ -22,8 +22,10 @@ class TestDB(unittest.TestCase):
             for i in range(1, 10)
         ]
 
-    def testSimple(self):
+    def testSimple(self) -> None:
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute `create_db`.
         db = workspace.C.create_db(
+            # pyre-fixme[16]: Module `_import_c_extension` has no attribute `Mode`.
             "minidb", self.file_name, workspace.C.Mode.write)
 
         for key, value in self.data:
@@ -33,7 +35,9 @@ class TestDB(unittest.TestCase):
 
         del db  # should close DB
 
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute `create_db`.
         db = workspace.C.create_db(
+            # pyre-fixme[16]: Module `_import_c_extension` has no attribute `Mode`.
             "minidb", self.file_name, workspace.C.Mode.read)
         cursor = db.new_cursor()
         data = []

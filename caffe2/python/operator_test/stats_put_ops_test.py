@@ -9,7 +9,7 @@ import numpy as np
 
 
 class TestPutOps(TestCase):
-    def test_default_value(self):
+    def test_default_value(self) -> None:
         magnitude_expand = int(1e12)
         stat_name = "stat".encode('ascii')
         sum_postfix = "/stat_value/sum".encode("ascii")
@@ -41,7 +41,7 @@ class TestPutOps(TestCase):
          default_value * magnitude_expand)
         self.assertEquals(stat_dict[stat_name + count_postfix], 1)
 
-    def test_clamp(self):
+    def test_clamp(self) -> None:
         put_value = 10
         magnitude_expand = int(1e18)
         stat_name = "stat".encode('ascii')
@@ -72,7 +72,7 @@ class TestPutOps(TestCase):
             9223372036854775807)
         self.assertEquals(stat_dict[stat_name + count_postfix], 1)
 
-    def test_clamp_with_out_of_bounds(self):
+    def test_clamp_with_out_of_bounds(self) -> None:
         put_value = float(1e20)
         magnitude_expand = 1000000000000
         stat_name = "stat".encode('ascii')
@@ -103,7 +103,7 @@ class TestPutOps(TestCase):
             9223372036854775807)
         self.assertEquals(stat_dict[stat_name + count_postfix], 1)
 
-    def test_avg_put_ops(self):
+    def test_avg_put_ops(self) -> None:
         put_value = 15.1111
         magnitude_expand = 10000
         stat_name = "a1".encode('ascii')
@@ -133,7 +133,7 @@ class TestPutOps(TestCase):
          put_value * magnitude_expand)
         self.assertEquals(stat_dict[stat_name + count_postfix], 1)
 
-    def test_increment_put_ops(self):
+    def test_increment_put_ops(self) -> None:
         put_value = 15.1111
         magnitude_expand = 10000
         stat_name = "i1".encode('ascii')
@@ -160,7 +160,7 @@ class TestPutOps(TestCase):
         self.assertEquals(stat_dict[stat_name + member_postfix],
          put_value * magnitude_expand)
 
-    def test_stddev_put_ops(self):
+    def test_stddev_put_ops(self) -> None:
         put_value = 15.1111
         magnitude_expand = 10000
         stat_name = "s1".encode('ascii')

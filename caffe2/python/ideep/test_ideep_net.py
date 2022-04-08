@@ -76,7 +76,7 @@ def GetArgumentParser():
     return parser
 
 
-def benchmark(args):
+def benchmark(args) -> None:
     print('Batch size: {}'.format(args.batch_size))
     mf = ModelDownloader()
     init_net, pred_net, value_info = mf.get_c2_model(args.model)

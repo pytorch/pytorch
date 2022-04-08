@@ -10,7 +10,7 @@ from caffe2.python.modeling.initializers import (
 
 
 class InitializerTest(unittest.TestCase):
-    def test_fc_initializer(self):
+    def test_fc_initializer(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=1, dim_out=1)
@@ -32,7 +32,7 @@ class InitializerTest(unittest.TestCase):
         )
 
     @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
-    def test_fc_fp16_initializer(self):
+    def test_fc_fp16_initializer(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=1, dim_out=1)
@@ -48,7 +48,7 @@ class InitializerTest(unittest.TestCase):
                       WeightInitializer=PseudoFP16Initializer
         )
 
-    def test_fc_external_initializer(self):
+    def test_fc_external_initializer(self) -> None:
         model = model_helper.ModelHelper(name="test", init_params=False)
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=1, dim_out=1)  # noqa

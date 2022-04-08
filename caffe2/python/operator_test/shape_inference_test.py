@@ -14,7 +14,7 @@ from caffe2.python import core, workspace, test_util, model_helper, brew, build
                  'Built with CAFFE2_NO_OPERATOR_SCHEMA')
 class TestShapeInference(test_util.TestCase):
 
-    def testShapeInferenceSimpleFC(self):
+    def testShapeInferenceSimpleFC(self) -> None:
         m = model_helper.ModelHelper(name="test_model")
 
         brew.fc(m, "data", "fc1", dim_in=96, dim_out=32)
@@ -34,7 +34,7 @@ class TestShapeInference(test_util.TestCase):
             self.assertEquals(shapes['fc2_b'], [55])
             self.assertEquals(shapes['fc2'], [b, 55])
 
-    def testFCAxis2(self):
+    def testFCAxis2(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.net.FC(["x", "w", "b"], ["y"], axis=2)
         workspace.FeedBlob("x", np.random.rand(4, 20, 36).astype(np.float32))
@@ -42,7 +42,7 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("b", np.random.rand(36,).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def testFCTransposed(self):
+    def testFCTransposed(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.net.FCTransposed(["x", "wt", "b"], ["y"])
         workspace.FeedBlob("x", np.random.rand(20, 36).astype(np.float32))
@@ -50,7 +50,7 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("b", np.random.rand(48,).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceSlice(self):
+    def testShapeInferenceSlice(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.net.Slice(["x"], ["y"], starts=[0, 0, 0, 0], ends=[-1, -1, -3, -1])
         workspace.FeedBlob("x", np.random.rand(64, 1, 255, 384).astype(np.float32))
@@ -66,7 +66,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model, ["y2"])
 
-    def testShapeInferenceDistances(self):
+    def testShapeInferenceDistances(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.net.L1Distance(["x1", "y1"], "dl1_D1")
         model.net.SquaredL2Distance(["x1", "y1"], "dl2_D1")
@@ -88,7 +88,7 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("z2", np.random.rand(10, 4).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceReduceBackFrontX(self):
+    def testShapeInferenceReduceBackFrontX(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.net.ReduceBackSum(["x"], ["x_back_sum"])
         model.net.ReduceBackMean(["x"], ["x_back_mean"])
@@ -100,14 +100,14 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("x", np.random.rand(10, 12, 18).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def testGather(self):
+    def testGather(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.net.Gather(["X", "idx"], "Y")
         workspace.FeedBlob("X", np.random.rand(100, 4, 5).astype(np.float32))
         workspace.FeedBlob("idx", np.array([[3, 18], [99, 4], [2, 5]]).astype(np.int32))
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceConvNet(self):
+    def testShapeInferenceConvNet(self) -> None:
         model = model_helper.ModelHelper(name="convtest")
         model.NHWC2NCHW("data", "data_nchw")
         brew.conv(model, "data_nchw", 'conv1', 3, 64,
@@ -181,7 +181,7 @@ class TestShapeInference(test_util.TestCase):
 
         return self.InferTensorRunAndCompare(model)
 
-    def testShapeInferencePad(self):
+    def testShapeInferencePad(self) -> None:
         model = model_helper.ModelHelper(name="padtest")
         model.PadImage("data", 'padded', pad_t=100, pad_l=37, pad_b=28,
                        pad_r=20, mode="constant", order="NCHW")
@@ -193,13 +193,13 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceTwoClass(self):
+    def testShapeInferenceTwoClass(self) -> None:
         model = model_helper.ModelHelper(name="twoclass")
         model.MakeTwoClass("v", "v2")
         workspace.FeedBlob("v", np.random.rand(32).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferencePadZero(self):
+    def testShapeInferencePadZero(self) -> None:
         model = model_helper.ModelHelper(name="padtest")
         model.PadImage("data", 'padded', pad=0, mode="constant",
                        order="NCHW")
@@ -211,7 +211,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceMatMul(self):
+    def testShapeInferenceMatMul(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
 
         model.MatMul(["x", "y"], "MatMul")
@@ -221,7 +221,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceSoftmaxWithLoss(self):
+    def testShapeInferenceSoftmaxWithLoss(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
 
         model.SoftmaxWithLoss(
@@ -292,7 +292,7 @@ class TestShapeInference(test_util.TestCase):
         )
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceIm2Col(self):
+    def testShapeInferenceIm2Col(self) -> None:
         # Test with NCHW
         model = model_helper.ModelHelper(name="test_model")
         model.Im2Col("X", "Y", pad=1, kernel=4, dilation=2, stride=2,
@@ -329,7 +329,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceTile(self):
+    def testShapeInferenceTile(self) -> None:
         m = model_helper.ModelHelper(name="test_model")
 
         workspace.FeedBlob(
@@ -343,7 +343,7 @@ class TestShapeInference(test_util.TestCase):
                 "tensor", "tiled_tensor_{}".format(i), tiles=5, axis=i)
         self.InferTensorRunAndCompare(m)
 
-    def testShapeInferenceFlatten(self):
+    def testShapeInferenceFlatten(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.FlattenToVec("X", "FlatVec")
         model.FlattenToVec("empty", "EmptyFlatVec")
@@ -375,14 +375,14 @@ class TestShapeInference(test_util.TestCase):
             workspace.FeedBlob("empty", empty)
             self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceReshape(self):
+    def testShapeInferenceReshape(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.Reshape("X", ["Reshaped", "Old_Shape"], shape=[8, 0, -1, 2])
         workspace.FeedBlob("X", np.random.rand(4, 26, 32).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceUnique(self):
+    def testShapeInferenceUnique(self) -> None:
         for n in [0, 1]:
             model = model_helper.ModelHelper(name="test_model")
             model.Unique("X", ["Y"])
@@ -390,7 +390,7 @@ class TestShapeInference(test_util.TestCase):
             workspace.FeedBlob("X", np.random.rand(n).astype(np.int64))
             self.InferTensorRunAndCompare(model)
 
-    def testLengthsSum(self):
+    def testLengthsSum(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.LengthsSum(["X", "length"], ["sum"])
         workspace.FeedBlob("X", np.random.rand(6, 32).astype(np.float32))
@@ -398,7 +398,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testLengthsPad(self):
+    def testLengthsPad(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
         model.LengthsPad(
             ["X", "length"],
@@ -411,7 +411,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testConcat(self):
+    def testConcat(self) -> None:
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
@@ -431,7 +431,7 @@ class TestShapeInference(test_util.TestCase):
         self.assertEqual(shapes['E'], [10, 23, 9, 10])
         self.assertEqual(shapes['G'], [10, 23, 9, 2, 10])
 
-    def testConcatInt32(self):
+    def testConcatInt32(self) -> None:
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
@@ -461,7 +461,7 @@ class TestShapeInference(test_util.TestCase):
         self.assertEqual(types['E'], core.DataType.INT32)
         self.assertEqual(types['G'], core.DataType.INT32)
 
-    def testSqueeze(self):
+    def testSqueeze(self) -> None:
         net = core.Net("sq")
         net.Squeeze(["data"], ["data_squeezed"], dims=[3, 1])
         (shapes, types) = workspace.InferShapesAndTypes(
@@ -470,7 +470,7 @@ class TestShapeInference(test_util.TestCase):
         )
         self.assertEqual(shapes['data_squeezed'], [64, 96, 4])
 
-    def testCast(self):
+    def testCast(self) -> None:
         model = model_helper.ModelHelper(name="test_model")
 
         types = [
@@ -497,7 +497,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-    def testShapeInferenceRoiPool(self):
+    def testShapeInferenceRoiPool(self) -> None:
         for is_test in [True, False]:
             model = model_helper.ModelHelper(name="test_model")
             outputs = ['Y'] if is_test else ['Y', 'argmaxes']
@@ -511,13 +511,13 @@ class TestShapeInference(test_util.TestCase):
                 np.random.rand(2, 5).astype(np.float32))
             self.InferTensorRunAndCompare(model)
 
-    def testShapeInferencePow(self):
+    def testShapeInferencePow(self) -> None:
         model = model_helper.ModelHelper(name="powtest")
         model.Pow("x", 'y', exponent=-1.0)
         workspace.FeedBlob('x', np.random.rand(1, 2, 3, 4).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def testInt8Conversion(self):
+    def testInt8Conversion(self) -> None:
         model = model_helper.ModelHelper(name="fp32_int8_conversion_test")
         model.FloatToFused8BitRowwiseQuantized('x', 'x_8bit')
         model.Fused8BitRowwiseQuantizedToFloat('x_8bit', 'x_recovered')
@@ -539,7 +539,7 @@ class TestShapeInference(test_util.TestCase):
         assert(np.allclose(x, x_recovered, atol=1e-2))
 
 
-    def testHalfInt8Conversion(self):
+    def testHalfInt8Conversion(self) -> None:
         model = model_helper.ModelHelper(name="fp16_int8_conversion_test")
         model.HalfFloatToFused8BitRowwiseQuantized('x', 'x_8bit')
         model.Fused8BitRowwiseQuantizedToHalfFloat('x_8bit', 'x_recovered')
@@ -561,7 +561,7 @@ class TestShapeInference(test_util.TestCase):
         assert(np.allclose(x, x_recovered, atol=1e-2))
 
 
-    def testLearningRateOp(self):
+    def testLearningRateOp(self) -> None:
         net = core.Net("lr_test")
         iteration = net.ConstantFill(
             [],
@@ -583,13 +583,13 @@ class TestShapeInference(test_util.TestCase):
         )
         self.assertEqual(shapes['weight_decay'], [1])
 
-    def testShapeOp(self):
+    def testShapeOp(self) -> None:
         model = model_helper.ModelHelper(name="shape_op_test")
         model.Shape('x', 'y')
         workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
-    def InferTensorRunAndCompare(self, model, expected_uninferred_blobs=None):
+    def InferTensorRunAndCompare(self, model, expected_uninferred_blobs=None) -> None:
         '''
         Runs shape inference, and then the model to check
         that the inferred shapes agree with the actual ones

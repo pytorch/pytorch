@@ -14,7 +14,7 @@ class TestUnsafeCoalesceOp(hu.HypothesisTestCase):
         shape=st.lists(st.integers(0, 5), min_size=1, max_size=3),
         **hu.gcs
     )
-    def test_unsafe_coalesce_op(self, n, shape, dc, gc):
+    def test_unsafe_coalesce_op(self, n, shape, dc, gc) -> None:
         workspace.ResetWorkspace()
         test_inputs = [(100 * np.random.random(shape)).astype(np.float32) for _ in range(n)]
         test_input_blobs = ["x_{}".format(i) for i in range(n)]
@@ -38,7 +38,7 @@ class TestUnsafeCoalesceOp(hu.HypothesisTestCase):
         seed=st.integers(0, 65535),
         **hu.gcs
     )
-    def test_unsafe_coalesce_op_blob_sharing(self, n, shape, seed, dc, gc):
+    def test_unsafe_coalesce_op_blob_sharing(self, n, shape, seed, dc, gc) -> None:
         workspace.ResetWorkspace()
         # Can make debugging of the test more predictable
         np.random.seed(seed)

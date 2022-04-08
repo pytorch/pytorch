@@ -28,7 +28,7 @@ def primefac(n):
 
 
 class TestReBatchingQueue(TestCase):
-    def test_rebatching_queue_single_enqueue_dequeue(self):
+    def test_rebatching_queue_single_enqueue_dequeue(self) -> None:
         net = core.Net('net')
 
         tensors = [
@@ -53,7 +53,7 @@ class TestReBatchingQueue(TestCase):
         for idx in range(3):
             self.assertEquals(workspace.FetchBlob(results[idx]), [1.0])
 
-    def test_rebatching_queue_multi_enqueue_dequeue(self):
+    def test_rebatching_queue_multi_enqueue_dequeue(self) -> None:
         net = core.Net('net')
         workspace.FeedBlob(
             "tensors", np.array([x for x in range(10)], np.int32)
@@ -77,7 +77,7 @@ class TestReBatchingQueue(TestCase):
             workspace.FetchBlob(results[1]), workspace.FetchBlob("tensors")[5:]
         )
 
-    def test_rebatching_queue_closes_properly(self):
+    def test_rebatching_queue_closes_properly(self) -> None:
         net = core.Net('net')
         workspace.FeedBlob(
             "tensors", np.array([x for x in range(10)], np.int32)
@@ -117,7 +117,7 @@ class TestReBatchingQueue(TestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunNetOnce(net)
 
-    def test_rebatching_queue_multiple_components(self):
+    def test_rebatching_queue_multiple_components(self) -> None:
         NUM_BLOBS = 4
         NUM_ELEMENTS = 10
 
@@ -176,7 +176,7 @@ class TestReBatchingQueue(TestCase):
     def test_rebatching_parallel_producer_consumer(
         self, num_producers, num_consumers, producer_input_size,
         producer_num_iterations, capacity
-    ):
+    ) -> None:
         ### Init ###
         total_inputs = producer_num_iterations * producer_input_size * num_producers
         inputs = []

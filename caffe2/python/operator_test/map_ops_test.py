@@ -15,7 +15,7 @@ import caffe2.python.hypothesis_test_util as hu
 
 class TestMap(hu.HypothesisTestCase):
 
-    def test_create_map(self):
+    def test_create_map(self) -> None:
         dtypes = [core.DataType.INT32, core.DataType.INT64]
         for key_dtype, value_dtype in itertools.product(dtypes, dtypes):
             op = core.CreateOperator(
@@ -28,7 +28,7 @@ class TestMap(hu.HypothesisTestCase):
             workspace.RunOperatorOnce(op)
             self.assertTrue(workspace.HasBlob('map'))
 
-    def test_map(self):
+    def test_map(self) -> None:
 
         def test_map_func(KEY_T, VALUE_T):
             model_file = os.path.join(tempfile.mkdtemp(), 'db')

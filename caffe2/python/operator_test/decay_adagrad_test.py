@@ -12,7 +12,7 @@ class TestDecayAdagrad(hu.HypothesisTestCase):
 
     @staticmethod
     def ref_decay_adagrad(param, mom1, mom2, grad, LR, ITER,
-                 beta1, beta2, epsilon, weight_decay, bias_correction_first, output_grad=False):
+                 beta1: int, beta2, epsilon, weight_decay, bias_correction_first, output_grad=False):
         t = ITER + 1
         mom1_out = (beta1 * mom1) + (1 - beta1) * grad
         mom2_out = mom2 + np.square(grad)
@@ -38,7 +38,7 @@ class TestDecayAdagrad(hu.HypothesisTestCase):
            weight_decay=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
-    def test_decay_adagrad(self, inputs, ITER, LR, beta1, beta2, epsilon, weight_decay, gc, dc):
+    def test_decay_adagrad(self, inputs, ITER, LR, beta1, beta2, epsilon, weight_decay, gc, dc) -> None:
         bias_correction_first = True
 
         param, mom1, mom2, grad = inputs

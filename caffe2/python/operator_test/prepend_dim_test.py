@@ -10,7 +10,7 @@ from caffe2.proto import caffe2_pb2
 
 
 class TestPrependDim(TestCase):
-    def _test_fwd_bwd(self):
+    def _test_fwd_bwd(self) -> None:
         old_shape = (128, 2, 4)
         new_shape = (8, 16, 2, 4)
         X = np.random.rand(*old_shape).astype(np.float32)
@@ -36,7 +36,7 @@ class TestPrependDim(TestCase):
         np.testing.assert_array_equal(X_grad.shape, X.shape)
         np.testing.assert_array_equal(Y_grad.shape, Y.shape)
 
-    def test_prepend_dim(self):
+    def test_prepend_dim(self) -> None:
         devices = [core.DeviceOption(caffe2_pb2.CPU, 0)]
         if workspace.NumGpuDevices() > 0:
             devices.append(core.DeviceOption(workspace.GpuDeviceType, 0))

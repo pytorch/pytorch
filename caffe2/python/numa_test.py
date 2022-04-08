@@ -40,7 +40,7 @@ def build_test_net(net_name):
 @unittest.skipIf(workspace.GetNumNUMANodes() < 2, "Not enough NUMA nodes")
 @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
 class NUMATest(TestCase):
-    def test_numa(self):
+    def test_numa(self) -> None:
         net = build_test_net("test_numa")
 
         workspace.RunNetOnce(net)

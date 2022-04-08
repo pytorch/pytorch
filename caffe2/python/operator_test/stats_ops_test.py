@@ -10,7 +10,7 @@ import numpy as np
 
 class TestCounterOps(TestCase):
 
-    def test_stats_ops(self):
+    def test_stats_ops(self) -> None:
         # The global StatRegistry isn't reset when the workspace is reset,
         #   so there may be existing stats from a previous test
         workspace.RunOperatorOnce(core.CreateOperator(

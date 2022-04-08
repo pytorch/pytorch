@@ -18,7 +18,7 @@ class TestIntegralImageOps(serial.SerializedTestCase):
            channels=st.integers(1, 8),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_integral_image_ops(self, batch_size, height, width, channels, gc, dc):
+    def test_integral_image_ops(self, batch_size, height, width, channels, gc, dc) -> None:
         N = batch_size
         C = channels
         H = height
@@ -55,7 +55,7 @@ class TestIntegralImageOps(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_integral_image_gradient_ops(self, batch_size, height, width,
-                                         channels, gc, dc):
+                                         channels, gc, dc) -> None:
         N = batch_size
         C = channels
         H = height

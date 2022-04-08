@@ -8,7 +8,7 @@ import time
 
 from caffe2.python import workspace, cnn, memonger, core
 
-def has_blob(proto, needle):
+def has_blob(proto, needle) -> bool:
     for op in proto.op:
         for inp in op.input:
             if inp == needle:
@@ -19,14 +19,14 @@ def has_blob(proto, needle):
     return False
 
 
-def count_blobs(proto):
+def count_blobs(proto) -> int:
     blobs = set()
     for op in proto.op:
         blobs = blobs.union(set(op.input)).union(set(op.output))
     return len(blobs)
 
 
-def count_shared_blobs(proto):
+def count_shared_blobs(proto) -> int:
     blobs = set()
     for op in proto.op:
         blobs = blobs.union(set(op.input)).union(set(op.output))
@@ -38,9 +38,9 @@ def test_shared_grads(
     create_model,
     conv_blob,
     last_out_blob,
-    data_blob='gpu_0/data',
-    label_blob='gpu_0/label',
-    num_labels=1000,
+    data_blob: str='gpu_0/data',
+    label_blob: str='gpu_0/label',
+    num_labels: int=1000,
 ):
     model = cnn.CNNModelHelper(
         order="NCHW",
@@ -107,8 +107,8 @@ def test_shared_grads(
 def test_forward_only(
     create_model,
     last_out_blob,
-    data_blob='gpu_0/data',
-    num_labels=1000,
+    data_blob: str='gpu_0/data',
+    num_labels: int=1000,
 ):
     model = cnn.CNNModelHelper(
         order="NCHW",
@@ -152,8 +152,8 @@ def test_forward_only(
 def test_forward_only_fast_simplenet(
     create_model,
     last_out_blob,
-    data_blob="gpu_0/data",
-    num_labels=1000,
+    data_blob: str="gpu_0/data",
+    num_labels: int=1000,
 ):
     model = cnn.CNNModelHelper(
         order="NCHW",

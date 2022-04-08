@@ -14,7 +14,7 @@ from caffe2.proto import hsm_pb2
 '''
 
 
-def create_node_with_words(words, name='node'):
+def create_node_with_words(words, name: str='node'):
     node = hsm_pb2.NodeProto()
     node.name = name
     for word in words:
@@ -22,7 +22,7 @@ def create_node_with_words(words, name='node'):
     return node
 
 
-def create_node_with_nodes(nodes, name='node'):
+def create_node_with_nodes(nodes, name: str='node'):
     node = hsm_pb2.NodeProto()
     node.name = name
     for child_node in nodes:

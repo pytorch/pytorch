@@ -19,7 +19,7 @@ class FcTest(hu.HypothesisTestCase):
     @given(n=st.integers(1, 5), m=st.integers(1, 5),
            k=st.integers(1, 5), **mu.gcs)
     @settings(deadline=1000)
-    def test_fc_2_dims(self, n, m, k, gc, dc):
+    def test_fc_2_dims(self, n, m, k, gc, dc) -> None:
         X = np.random.rand(m, k).astype(np.float32) - 0.5
         W = np.random.rand(n, k).astype(np.float32) - 0.5
         b = np.random.rand(n).astype(np.float32) - 0.5
@@ -42,7 +42,7 @@ class FcTest(hu.HypothesisTestCase):
            w=st.integers(1, 5),
            axis=st.integers(1, 3),
            **mu.gcs)
-    def test_fc_with_axis(self, n, m, c, h, w, axis, gc, dc):
+    def test_fc_with_axis(self, n, m, c, h, w, axis, gc, dc) -> None:
         X = np.random.rand(n, c, h, w).astype(np.float32) - 0.5
         k = reduce((lambda x, y: x * y), [n, c, h, w][axis - 4:])
         nn = reduce((lambda x, y: x * y), [n, c, h, w][:axis])
@@ -138,7 +138,7 @@ class FcTest(hu.HypothesisTestCase):
            axis_w=st.integers(1, 3),
            **mu.gcs)
     @settings(deadline=1000)
-    def test_fc_with_axis_w(self, n, o, i, h, w, axis_w, gc, dc):
+    def test_fc_with_axis_w(self, n, o, i, h, w, axis_w, gc, dc) -> None:
         W = np.random.rand(o, i, h, w).astype(np.float32) - 0.5
         k = reduce((lambda x, y: x * y), [o, i, h, w][axis_w - 4:])
         m = reduce((lambda x, y: x * y), [o, i, h, w][:axis_w])
@@ -229,7 +229,7 @@ class FcTest(hu.HypothesisTestCase):
     @given(n=st.integers(1, 5), m=st.integers(1, 5),
            k=st.integers(1, 5), **mu.gcs)
     @settings(deadline=10000)
-    def test_fc_4_dims_src(self, n, m, k, gc, dc):
+    def test_fc_4_dims_src(self, n, m, k, gc, dc) -> None:
         X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
         W = np.random.rand(n, k * m * m).astype(np.float32) - 0.5
         b = np.random.rand(n).astype(np.float32) - 0.5
@@ -248,7 +248,7 @@ class FcTest(hu.HypothesisTestCase):
     @given(n=st.integers(1, 5), m=st.integers(1, 5),
            k=st.integers(1, 5), **mu.gcs)
     @settings(deadline=10000)
-    def test_fc_4_dims(self, n, m, k, gc, dc):
+    def test_fc_4_dims(self, n, m, k, gc, dc) -> None:
         X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
         W = np.random.rand(n, k, m, m).astype(np.float32) - 0.5
         b = np.random.rand(n).astype(np.float32) - 0.5
@@ -266,7 +266,7 @@ class FcTest(hu.HypothesisTestCase):
 
     @given(n=st.integers(2, 5), m=st.integers(2, 5),
            k=st.integers(2, 5), **mu.gcs_cpu_ideep)
-    def test_int8_fc_4_dims(self, n, m, k, gc, dc):
+    def test_int8_fc_4_dims(self, n, m, k, gc, dc) -> None:
         X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
         w = np.random.rand(n, k, m, m).astype(np.float32) - 0.5
         b = np.random.rand(n).astype(np.float32) - 0.5
@@ -375,6 +375,7 @@ class FcTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace(old_ws_name)
 
 if __name__ == "__main__":

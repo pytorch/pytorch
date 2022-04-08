@@ -15,7 +15,7 @@ import numpy as np
 
 
 class TestLocalSession(TestCase):
-    def test_local_session(self):
+    def test_local_session(self) -> None:
         init_net = core.Net('init')
         src_values = Struct(
             ('uid', np.array([1, 2, 6])),

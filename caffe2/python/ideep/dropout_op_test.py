@@ -19,7 +19,7 @@ class DropoutTest(hu.HypothesisTestCase):
            in_place=st.booleans(),
            ratio=st.floats(0, 0.999),
            **mu.gcs)
-    def test_dropout_is_test(self, X, in_place, ratio, gc, dc):
+    def test_dropout_is_test(self, X, in_place, ratio, gc, dc) -> None:
         """Test with is_test=True for a deterministic reference impl."""
         op = core.CreateOperator('Dropout', ['X'],
                                  ['X' if in_place else 'Y'],
@@ -40,7 +40,7 @@ class DropoutTest(hu.HypothesisTestCase):
            output_mask=st.booleans(),
            **mu.gcs)
     @unittest.skipIf(True, "Skip duo to different rand seed.")
-    def test_dropout_ratio0(self, X, in_place, output_mask, gc, dc):
+    def test_dropout_ratio0(self, X, in_place, output_mask, gc, dc) -> None:
         """Test with ratio=0 for a deterministic reference impl."""
         is_test = not output_mask
         op = core.CreateOperator('Dropout', ['X'],

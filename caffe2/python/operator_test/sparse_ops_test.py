@@ -22,7 +22,7 @@ class TestScatterOps(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def testScatterWeightedSum(
-            self, num_args, first_dim, index_dim, extra_dims, ind_type, data_type, gc, dc):
+            self, num_args, first_dim, index_dim, extra_dims, ind_type, data_type, gc, dc) -> None:
         ins = ['data', 'w0', 'indices']
         for i in range(1, num_args + 1):
             ins.extend(['x' + str(i), 'w' + str(i)])
@@ -67,7 +67,7 @@ class TestScatterOps(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def testScatterAssign(
-            self, first_dim, index_dim, extra_dims, data_type, ind_type, gc, dc):
+            self, first_dim, index_dim, extra_dims, data_type, ind_type, gc, dc) -> None:
         op = core.CreateOperator('ScatterAssign',
                                  ['data', 'indices', 'slices'], ['data'])
         def ref(d, ind, x):

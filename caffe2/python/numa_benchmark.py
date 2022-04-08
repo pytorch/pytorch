@@ -8,7 +8,7 @@ import time
 
 SHAPE_LEN = 4096
 NUM_ITER = 1000
-GB = 1024 * 1024 * 1024
+GB: int = 1024 * 1024 * 1024
 NUM_REPLICAS = 48
 
 
@@ -33,7 +33,7 @@ def build_net(net_name, cross_socket):
     return init_net, net
 
 
-def main():
+def main() -> None:
     assert workspace.IsNUMAEnabled() and workspace.GetNumNUMANodes() >= 2
 
     single_init, single_net = build_net("single_net", False)

@@ -50,7 +50,7 @@ def local_copy_op(src, dest):
 
 
 class UploadToLocalFile(UploadTaskGroupBuilder):
-    def __init__(self, dest_dir):
+    def __init__(self, dest_dir) -> None:
         self.dest_dir = dest_dir
 
     def build(self, epoch, checkpoint_manager):
@@ -65,7 +65,7 @@ class UploadToLocalFile(UploadTaskGroupBuilder):
 
 
 class TestCheckpoint(TestCase):
-    def run_with(self, builder):
+    def run_with(self, builder) -> None:
         with Cluster():
             with Job() as job:
                 outputs = build_pipeline(node_id=0)
@@ -94,7 +94,7 @@ class TestCheckpoint(TestCase):
                 self.assertEquals(fetch_total(session),
                                   EXPECTED_TOTALS[epoch - 1])
 
-    def test_single_checkpoint(self):
+    def test_single_checkpoint(self) -> None:
         # test single node
         try:
             tmpdir = tempfile.mkdtemp()
@@ -123,7 +123,7 @@ class TestCheckpoint(TestCase):
         finally:
             shutil.rmtree(tmpdir)
 
-    def test_ckpt_name_and_load_model_from_ckpts(self):
+    def test_ckpt_name_and_load_model_from_ckpts(self) -> None:
         try:
             num_nodes = 3
             tmpdir = tempfile.mkdtemp()
@@ -189,6 +189,7 @@ class TestCheckpoint(TestCase):
                             session=session))
                     # Check that all the model blobs are loaded.
                     for blob_name in model_blob_names:
+                        # pyre-fixme[16]: `Workspace` has no attribute `has_blob`.
                         self.assertTrue(ws.has_blob(blob_name))
                         self.assertEquals(
                             ws.fetch_blob(blob_name),
@@ -200,7 +201,7 @@ class TestCheckpoint(TestCase):
         finally:
             shutil.rmtree(tmpdir)
 
-    def test_upload_checkpoint(self):
+    def test_upload_checkpoint(self) -> None:
         try:
             tmpdir = tempfile.mkdtemp()
             upload_dir = os.path.join(tmpdir, "upload")
@@ -238,7 +239,7 @@ class TestCheckpoint(TestCase):
         finally:
             shutil.rmtree(tmpdir)
 
-    def test_ckpt_save_failure(self):
+    def test_ckpt_save_failure(self) -> None:
         num_nodes = 3
         # The goal of this test is to ensure that the job runs
         # successfully even if saving a checkpoint fails.
@@ -262,7 +263,7 @@ class TestCheckpoint(TestCase):
             # Saving checkpoint failure should not cause job failure
             self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
-    def test_download_group_simple(self):
+    def test_download_group_simple(self) -> None:
         """
         A simple test that ensures we have download task group
         executed between epoch_group and exit_group.
@@ -305,7 +306,7 @@ class TestCheckpoint(TestCase):
         self.assertTrue(np.array_equal(expected_result,
                                        ws.fetch_blob("download_result")))
 
-    def test_reuse_checkpoint_manager(self):
+    def test_reuse_checkpoint_manager(self) -> None:
         """
         A simple test that ensures we can reuse a MultiNodeCheckpointManager
         object.

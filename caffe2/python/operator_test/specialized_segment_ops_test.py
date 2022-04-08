@@ -31,7 +31,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         empty_indices,
         gc,
         dc,
-    ):
+    ) -> None:
         if fptype != np.float32:
             assume(gc.device_type == caffe2_pb2.CPU)
             assume(not hiputl.run_in_hip(gc, dc))
@@ -49,6 +49,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         else:
             if fp16asint:
                 Tbl = (
+                    # pyre-fixme[16]: `float` has no attribute `round`.
                     (10.0 * np.random.rand(tblsize, blocksize))
                     .round()
                     .astype(np.float16)
@@ -108,7 +109,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_weightedsum_cpu(
         self, batchsize, fptype, fp16asint, blocksize, empty_indices, gc, dc
-    ):
+    ) -> None:
         if fptype != np.float32:
             assume(gc.device_type == caffe2_pb2.CPU)
             assume(not hiputl.run_in_hip(gc, dc))
@@ -123,6 +124,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         else:
             if fp16asint:
                 Tbl = (
+                    # pyre-fixme[16]: `float` has no attribute `round`.
                     (10.0 * np.random.rand(tblsize, blocksize))
                     .round()
                     .astype(np.float16)
@@ -173,7 +175,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_weightedsum_8BitsRowwiseOp_cpu(
         self, batchsize, blocksize, normalize_by_lengths, empty_indices, gc, dc
-    ):
+    ) -> None:
         if normalize_by_lengths:
             print(
                 "<test_sparse_lengths_weightedsum_SparseLengthsWeightedMean8BitsRowwise_cpu>"
@@ -240,7 +242,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_sum_8BitsRowwiseOp_cpu(
         self, batchsize, blocksize, normalize_by_lengths, empty_indices, gc, dc
-    ):
+    ) -> None:
         if normalize_by_lengths:
             print("<test_sparse_lengths_sum_SparseLengthsMean8BitsRowwise_cpu>")
         else:
@@ -299,7 +301,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_sparse_lengths_sum_8BitsRowwiseOp_cpu_invalid_index(
         self, batchsize, blocksize, normalize_by_lengths, gc, dc
-    ):
+    ) -> None:
 
         tblsize = 300
         Tbl = np.random.randint(7, size=(tblsize, blocksize), dtype=np.uint8)

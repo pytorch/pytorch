@@ -35,8 +35,8 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
     )
     @settings(deadline=10000)
     def test_sinusoid_embedding(
-        self, positions_vec, embedding_size, batch_size, alpha, amplitude, gc, dc
-    ):
+        self, positions_vec, embedding_size: float, batch_size, alpha, amplitude, gc, dc
+    ) -> None:
         positions = np.tile(positions_vec, [batch_size, 1]).transpose()
 
         op = core.CreateOperator(

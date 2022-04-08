@@ -19,7 +19,7 @@ class TestAdam(hu.HypothesisTestCase):
 
     @staticmethod
     def ref_adam(param, mom1, mom2, grad, LR, ITER,
-                 beta1, beta2, epsilon, output_grad=False):
+                 beta1: int, beta2: int, epsilon, output_grad=False):
         t = ITER + 1
         corrected_local_rate = np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
@@ -34,8 +34,8 @@ class TestAdam(hu.HypothesisTestCase):
             return param_out, mom1_out, mom2_out
 
     @staticmethod
-    def ref_smart_decay_adam(param, mom1, mom2, last_seen, grad, LR, ITER,
-                             beta1, beta2, epsilon):
+    def ref_smart_decay_adam(param, mom1, mom2, last_seen: int, grad, LR, ITER,
+                             beta1, beta2: int, epsilon):
 
         for name in ('param', 'mom1', 'mom2', 'last_seen', 'grad',
                      'LR', 'ITER', 'beta1', 'beta2', 'epsilon'):
@@ -66,7 +66,7 @@ class TestAdam(hu.HypothesisTestCase):
 
     @staticmethod
     def ref_row_wise_adam(param, mom1, mom2, grad, LR, ITER,
-                          beta1, beta2, epsilon, output_grad=False):
+                          beta1: int, beta2: int, epsilon, output_grad=False):
         t = ITER + 1
         corrected_local_rate = np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
@@ -90,7 +90,7 @@ class TestAdam(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+    def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         mom2 = np.abs(mom2)
         ITER = np.array([ITER], dtype=np.int64)
@@ -124,7 +124,7 @@ class TestAdam(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
-    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         mom2 = np.abs(mom2)
         ITER = np.array([ITER], dtype=np.int64)
@@ -160,7 +160,7 @@ class TestAdam(hu.HypothesisTestCase):
            data_strategy=st.data(),
            **hu.gcs)
     def test_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                         data_strategy, gc, dc):
+                         data_strategy, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         mom2 = np.absolute(mom2)
         ITER = np.array([ITER], dtype=np.int64)
@@ -227,7 +227,7 @@ class TestAdam(hu.HypothesisTestCase):
            data_strategy=st.data(),
            **hu.gcs)
     def test_smart_decay_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                                     data_strategy, gc, dc):
+                                     data_strategy, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         mom2 = np.absolute(mom2)
         _iter, _lr = ITER, LR  # Keep the scalar types for reference
@@ -306,7 +306,7 @@ class TestAdam(hu.HypothesisTestCase):
            data_strategy=st.data(),
            **hu.gcs)
     def test_sparse_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                                     data_strategy, gc, dc):
+                                     data_strategy, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         mom2 = np.absolute(mom2)
         ITER = np.array([ITER], dtype=np.int64)
@@ -376,7 +376,7 @@ class TestAdam(hu.HypothesisTestCase):
            data_strategy=st.data(),
            **hu.gcs)
     def test_row_wise_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                                  data_strategy, gc, dc):
+                                  data_strategy, gc, dc) -> None:
         param, mom1, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -458,7 +458,7 @@ class TestAdam(hu.HypothesisTestCase):
            data_strategy=st.data(),
            **hu.gcs)
     def test_row_wise_sparse_adam_output_grad(self, inputs, ITER, LR, beta1, beta2,
-                                              epsilon, data_strategy, gc, dc):
+                                              epsilon, data_strategy, gc, dc) -> None:
         param, mom1, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)

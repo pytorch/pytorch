@@ -16,7 +16,7 @@ class TestCrfDecode(TestCase):
 
     @given(num_tags=st.integers(2, 4), num_words=st.integers(2, 15))
     @settings(deadline=2000)
-    def test_crf_viterbi(self, num_tags, num_words):
+    def test_crf_viterbi(self, num_tags, num_words) -> None:
         model = CNNModelHelper(name='external')
         predictions = np.random.randn(num_words, num_tags).astype(np.float32)
         transitions = np.random.uniform(

@@ -10,7 +10,7 @@ from caffe2.python import core, utils, workspace
 from hypothesis import assume, given
 
 
-def _cudnn_supports(dilation=False, nhwc=False):
+def _cudnn_supports(dilation: bool=False, nhwc: bool=False) -> bool:
     """Return True if cuDNN supports this configuration."""
     v = workspace.GetCuDNNVersion()
     if dilation and v < 6000:
@@ -22,7 +22,7 @@ def _cudnn_supports(dilation=False, nhwc=False):
     return True
 
 
-def _conv_1d_output_size(size, kernel, pad, dilation, stride):
+def _conv_1d_output_size(size, kernel, pad, dilation, stride: int) -> int:
     return max(1, int((size + pad * 2 - (dilation * (kernel - 1) + 1)) / stride) + 1)
 
 
@@ -124,7 +124,7 @@ class TestConvolution(hu.HypothesisTestCase):
         deformable_group,
         gc,
         dc,
-    ):
+    ) -> None:
         dkernel = dilation * (kernel - 1) + 1
 
         if gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN":
@@ -238,7 +238,7 @@ class TestConvolution(hu.HypothesisTestCase):
         deformable_group,
         gc,
         dc,
-    ):
+    ) -> None:
         dkernel = dilation * (kernel - 1) + 1
 
         if gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN":
@@ -336,7 +336,7 @@ class TestConvolution(hu.HypothesisTestCase):
         deformable_group,
         gc,
         dc,
-    ):
+    ) -> None:
         dkernel = dilation * (kernel - 1) + 1
 
         if gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN":
@@ -451,7 +451,7 @@ class TestConvolution(hu.HypothesisTestCase):
         deformable_group,
         gc,
         dc,
-    ):
+    ) -> None:
         op = core.CreateOperator(
             "DeformConv",
             ["X", "o", "w", "b"] if use_bias else ["X", "o", "w"],
@@ -538,7 +538,7 @@ class TestConvolution(hu.HypothesisTestCase):
         deformable_group,
         gc,
         dc,
-    ):
+    ) -> None:
         dkernel = dilation * (kernel - 1) + 1
 
         if gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN":

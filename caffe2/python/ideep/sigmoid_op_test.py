@@ -17,7 +17,7 @@ class SigmoidTest(hu.HypothesisTestCase):
            inplace=st.booleans(),
            **hu.gcs)
     @settings(deadline=1000)
-    def test_sigmoid(self, X, inplace, gc, dc):
+    def test_sigmoid(self, X, inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],

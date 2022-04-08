@@ -15,7 +15,7 @@ class TestLars(hu.HypothesisTestCase):
     @given(offset=st.floats(min_value=0, max_value=100),
     lr_min=st.floats(min_value=1e-8, max_value=1e-6),
     **hu.gcs)
-    def test_lars(self, offset, lr_min, dc, gc):
+    def test_lars(self, offset, lr_min, dc, gc) -> None:
         X = np.random.rand(6, 7, 8, 9).astype(np.float32)
         dX = np.random.rand(6, 7, 8, 9).astype(np.float32)
         wd = np.array([1e-4]).astype(np.float32)

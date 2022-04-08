@@ -34,7 +34,7 @@ class TestAffineChannelOp(serial.SerializedTestCase):
             order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
             in_place=st.booleans(), **hu.gcs)
     def test_affine_channel_2d(
-            self, N, C, H, W, order, is_learnable, in_place, gc, dc):
+            self, N, C, H, W, order, is_learnable, in_place, gc, dc) -> None:
         op = core.CreateOperator(
             "AffineChannel",
             ["X", "scale", "bias"],
@@ -74,7 +74,7 @@ class TestAffineChannelOp(serial.SerializedTestCase):
            in_place=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
     def test_affine_channel_3d(
-            self, N, C, T, H, W, order, is_learnable, in_place, gc, dc):
+            self, N, C, T, H, W, order, is_learnable, in_place, gc, dc) -> None:
         op = core.CreateOperator(
             "AffineChannel",
             ["X", "scale", "bias"],

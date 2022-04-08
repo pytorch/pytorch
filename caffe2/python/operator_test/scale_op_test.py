@@ -19,7 +19,7 @@ class TestScaleOps(serial.SerializedTestCase):
                     scale=st.floats(0.0, 10.0),
                     num_tensors=st.integers(1, 10),
                     **hu.gcs)
-    def test_scale_ops(self, dim, scale, num_tensors, gc, dc):
+    def test_scale_ops(self, dim, scale, num_tensors, gc, dc) -> None:
         in_tensors = []
         in_tensor_ps = []
         out_tensors = []

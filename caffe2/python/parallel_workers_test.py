@@ -9,7 +9,7 @@ from caffe2.python import workspace, core
 import caffe2.python.parallel_workers as parallel_workers
 
 
-def create_queue():
+def create_queue() -> str:
     queue = 'queue'
 
     workspace.RunOperatorOnce(
@@ -56,7 +56,7 @@ def dequeue_value(queue):
 
 
 class ParallelWorkersTest(unittest.TestCase):
-    def testParallelWorkers(self):
+    def testParallelWorkers(self) -> None:
         workspace.ResetWorkspace()
 
         queue = create_queue()
@@ -72,7 +72,7 @@ class ParallelWorkersTest(unittest.TestCase):
 
         self.assertTrue(worker_coordinator.stop())
 
-    def testParallelWorkersInitFun(self):
+    def testParallelWorkersInitFun(self) -> None:
         workspace.ResetWorkspace()
 
         queue = create_queue()
@@ -98,7 +98,7 @@ class ParallelWorkersTest(unittest.TestCase):
         # A best effort attempt at a clean shutdown
         worker_coordinator.stop()
 
-    def testParallelWorkersShutdownFun(self):
+    def testParallelWorkersShutdownFun(self) -> None:
         workspace.ResetWorkspace()
 
         queue = create_queue()

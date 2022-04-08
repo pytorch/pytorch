@@ -15,7 +15,7 @@ class PythonOpTest(hu.HypothesisTestCase):
            n=st.integers(min_value=1, max_value=20),
            w=st.integers(min_value=1, max_value=20))
     @settings(deadline=10000)
-    def test_simple_python_op(self, x, n, w):
+    def test_simple_python_op(self, x, n, w) -> None:
         def g(input_, output):
             output[...] = input_
 

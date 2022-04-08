@@ -28,7 +28,7 @@ features2_exp = [[0],
 
 
 class TestEmptySampleOps(TestCase):
-    def test_emptysample(self):
+    def test_emptysample(self) -> None:
         for i in range(0, 3):
             PadEmptyTest = core.CreateOperator(
                 'PadEmptySamples',

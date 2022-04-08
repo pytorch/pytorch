@@ -66,10 +66,10 @@ else:
 
 class TestLRN(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [(6, 10), (3, 13), ]
 
-    def testLRN(self):
+    def testLRN(self) -> None:
         for input_size, depth in self.test_configs:
             op = core.CreateOperator("LRN",
                                      ["X"],
@@ -91,7 +91,7 @@ class TestLRN(test_util.TestCase):
 
 class TestFlatten(test_util.TestCase):
 
-    def testFlatten(self):
+    def testFlatten(self) -> None:
         op = core.CreateOperator("Flatten", ["X"], ["Y"])
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         res = device_checker.CheckSimple(op, [X], [0])
@@ -103,14 +103,14 @@ class TestFlatten(test_util.TestCase):
 
 class TestConcat(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # input_size, depth1, depth2, depth3, depth4
             (3, 2, 3, 4, 5),
             (4, 5, 4, 3, 2),
         ]
 
-    def testConcatNHWC(self):
+    def testConcatNHWC(self) -> None:
         for input_size, d1, d2, d3, d4 in self.test_configs:
             op = core.CreateOperator("Concat",
                                      ["X1", "X2", "X3", "X4"],
@@ -134,7 +134,7 @@ class TestConcat(test_util.TestCase):
                                                                     [0])
                     self.assertTrue(res)
 
-    def testConcatNCHW(self):
+    def testConcatNCHW(self) -> None:
         for input_size, d1, d2, d3, d4 in self.test_configs:
             op = core.CreateOperator("Concat",
                                      ["X1", "X2", "X3", "X4"],
@@ -161,7 +161,7 @@ class TestConcat(test_util.TestCase):
 
 class TestRelu(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # input size
             # (0, 1),
@@ -173,7 +173,7 @@ class TestRelu(test_util.TestCase):
             (2, 5, 5, 3),
         ]
 
-    def testRelu(self):
+    def testRelu(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Relu", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32)
@@ -189,7 +189,7 @@ class TestRelu(test_util.TestCase):
 
 class TestTanh(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # (0, 1),
             (1, 1),
@@ -197,7 +197,7 @@ class TestTanh(test_util.TestCase):
             (1, 2, 3, 4),
         ]
 
-    def testTanh(self):
+    def testTanh(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Tanh", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
@@ -210,7 +210,7 @@ class TestTanh(test_util.TestCase):
 
 class TestAbs(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             (1, 1),
             (2, 3),
@@ -218,7 +218,7 @@ class TestAbs(test_util.TestCase):
             (2, 3, 4, 5),
         ]
 
-    def testAbs(self):
+    def testAbs(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Abs", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32)
@@ -233,7 +233,7 @@ class TestAbs(test_util.TestCase):
 
 class TestExp(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # (0, 1),
             (1, 1),
@@ -241,7 +241,7 @@ class TestExp(test_util.TestCase):
             (1, 2, 3, 4),
         ]
 
-    def testExp(self):
+    def testExp(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Exp", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
@@ -253,7 +253,7 @@ class TestExp(test_util.TestCase):
 
 class TestCos(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             (1, 1),
             (2, 3),
@@ -261,7 +261,7 @@ class TestCos(test_util.TestCase):
             (2, 3, 4, 5),
         ]
 
-    def testCos(self):
+    def testCos(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Cos", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
@@ -273,7 +273,7 @@ class TestCos(test_util.TestCase):
 
 class TestSin(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             (1, 1),
             (2, 3),
@@ -281,7 +281,7 @@ class TestSin(test_util.TestCase):
             (2, 3, 4, 5),
         ]
 
-    def testSin(self):
+    def testSin(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Sin", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
@@ -293,7 +293,7 @@ class TestSin(test_util.TestCase):
 
 class TestSigmoid(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # (0, 1),
             (1, 1),
@@ -301,7 +301,7 @@ class TestSigmoid(test_util.TestCase):
             (1, 2, 3, 4),
         ]
 
-    def testSigmoid(self):
+    def testSigmoid(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("Sigmoid", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
@@ -314,13 +314,13 @@ class TestSigmoid(test_util.TestCase):
 
 class TestSum(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # ((0, 1), False),
             ((1, 2, 3, 4), True),
             ((1, 2, 3, 4), False)]
 
-    def testSum(self):
+    def testSum(self) -> None:
         for (input_size, in_place) in self.test_configs:
             op = core.CreateOperator("Sum", ["X1", "X2"],
                                      ["Y" if not in_place else "X1"])
@@ -339,7 +339,7 @@ class TestSum(test_util.TestCase):
 
 class TestMakeTwoClass(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.test_configs = [
             # input size
             # (0, 1),
@@ -349,7 +349,7 @@ class TestMakeTwoClass(test_util.TestCase):
             (2, 5),
         ]
 
-    def testMakeTwoClass(self):
+    def testMakeTwoClass(self) -> None:
         for input_size in self.test_configs:
             op = core.CreateOperator("MakeTwoClass", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32)
@@ -364,7 +364,7 @@ class TestMakeTwoClass(test_util.TestCase):
 
 
 class TestNetGradientChecker(test_util.TestCase):
-    def test_net_gradient_checker(self):
+    def test_net_gradient_checker(self) -> None:
         model = model_helper.ModelHelper(name="test")
         const = model.net.AddExternalInputs("const1", "const2")
         fc = brew.fc(model, dim_in=3, dim_out=4, blob_in="X", blob_out="Y", axis=0)
@@ -381,7 +381,7 @@ class TestNetGradientChecker(test_util.TestCase):
             input_to_check="X",
         )
 
-    def test_net_comparison(self):
+    def test_net_comparison(self) -> None:
         # (a + b) * (c + d) == a * c + a * d + b * c + b * d
         net1 = core.Net("net1")
         a, b, c, d = net1.AddExternalInputs("a", "b", "c", "d")
@@ -407,7 +407,7 @@ class TestNetGradientChecker(test_util.TestCase):
 
 
 class TestIf(test_util.TestCase):
-    def testIf(self):
+    def testIf(self) -> None:
         W_a_values = [2.0, 1.5]
         B_a_values = [0.5]
         W_b_values = [7.0, 3.5]
@@ -513,7 +513,7 @@ class TestIf(test_util.TestCase):
 
 class TestWhile(test_util.TestCase):
     @unittest.skip("Skip flaky test.")
-    def testWhile(self):
+    def testWhile(self) -> None:
         with NetBuilder(_use_control_ops=True) as nb:
             ops.Copy(ops.Const(0), "i")
             ops.Copy(ops.Const(1), "one")

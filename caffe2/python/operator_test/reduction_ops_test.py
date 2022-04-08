@@ -14,7 +14,7 @@ import numpy as np
 class TestReductionOps(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(5, 8), **hu.gcs)
-    def test_elementwise_sum(self, n, gc, dc):
+    def test_elementwise_sum(self, n, gc, dc) -> None:
         X = np.random.rand(n).astype(np.float32)
 
         def sum_op(X):
@@ -43,7 +43,7 @@ class TestReductionOps(serial.SerializedTestCase):
 
     @given(n=st.integers(5, 8), **hu.gcs)
     @settings(deadline=10000)
-    def test_elementwise_int_sum(self, n, gc, dc):
+    def test_elementwise_int_sum(self, n, gc, dc) -> None:
         X = np.random.rand(n).astype(np.int32)
 
         def sum_op(X):
@@ -66,7 +66,7 @@ class TestReductionOps(serial.SerializedTestCase):
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_elementwise_sqrsum(self, n, dtype, gc, dc):
+    def test_elementwise_sqrsum(self, n, dtype, gc, dc) -> None:
         if dtype == np.float16:
             # fp16 is only supported with CUDA/HIP
             assume(gc.device_type == workspace.GpuDeviceType)
@@ -94,7 +94,7 @@ class TestReductionOps(serial.SerializedTestCase):
         )
 
     @given(n=st.integers(5, 8), **hu.gcs)
-    def test_elementwise_avg(self, n, gc, dc):
+    def test_elementwise_avg(self, n, gc, dc) -> None:
         X = np.random.rand(n).astype(np.float32)
 
         def avg_op(X):
@@ -126,7 +126,7 @@ class TestReductionOps(serial.SerializedTestCase):
            m=st.integers(1, 3),
            n=st.integers(1, 4),
            **hu.gcs)
-    def test_rowwise_max(self, batch_size, m, n, gc, dc):
+    def test_rowwise_max(self, batch_size, m, n, gc, dc) -> None:
         X = np.random.rand(batch_size, m, n).astype(np.float32)
 
         def rowwise_max(X):
@@ -149,7 +149,7 @@ class TestReductionOps(serial.SerializedTestCase):
            m=st.integers(1, 3),
            n=st.integers(1, 4),
            **hu.gcs)
-    def test_columnwise_max(self, batch_size, m, n, gc, dc):
+    def test_columnwise_max(self, batch_size, m, n, gc, dc) -> None:
         X = np.random.rand(batch_size, m, n).astype(np.float32)
 
         def columnwise_max(X):

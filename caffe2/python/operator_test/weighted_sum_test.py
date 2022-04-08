@@ -21,7 +21,7 @@ class TestWeightedSumOp(serial.SerializedTestCase):
         **hu.gcs)
     @settings(deadline=10000)
     def test_weighted_sum(
-            self, n, m, d, in_place, engine, seed, gc, dc):
+            self, n, m, d, in_place, engine, seed, gc, dc) -> None:
         input_names = []
         input_vars = []
         np.random.seed(seed)
@@ -63,7 +63,7 @@ class TestWeightedSumOp(serial.SerializedTestCase):
            seed=st.integers(min_value=0, max_value=65535), **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_weighted_sum_grad(
-            self, n, m, d, grad_on_w, seed, gc, dc):
+            self, n, m, d, grad_on_w, seed, gc, dc) -> None:
         input_names = []
         input_vars = []
         np.random.seed(seed)

@@ -14,7 +14,7 @@ from hypothesis import given
 
 class TestRegularizerContext(LayersTestCase):
     @given(X=hu.arrays(dims=[2, 5]))
-    def test_regularizer_context(self, X):
+    def test_regularizer_context(self, X) -> None:
         weight_reg_out = L1Norm(0.2)
         bias_reg_out = L1Norm(0)
         regularizers = {"WEIGHT": weight_reg_out, "BIAS": bias_reg_out}
@@ -32,6 +32,7 @@ class TestRegularizerContext(LayersTestCase):
                 weight_reg == weight_reg_out
             ), "fail to get correct weight reg from context"
             assert bias_reg == bias_reg_out, "fail to get correct bias reg from context"
+            # pyre-fixme[16]: `TestRegularizerContext` has no attribute `model`.
             fc_output = self.model.FC(
                 input_record,
                 output_dims,
@@ -55,7 +56,7 @@ class TestRegularizerContext(LayersTestCase):
 
 class TestRegularizer(LayersTestCase):
     @given(X=hu.arrays(dims=[2, 5], elements=hu.floats(min_value=-1.0, max_value=1.0)))
-    def test_log_barrier(self, X):
+    def test_log_barrier(self, X) -> None:
         param = core.BlobReference("X")
         workspace.FeedBlob(param, X)
         train_init_net, train_net = self.get_training_nets()
@@ -91,7 +92,7 @@ class TestRegularizer(LayersTestCase):
         lb=hu.floats(min_value=-1.0, max_value=1.0),
         **hu.gcs_cpu_only
     )
-    def test_bounded_grad_proj(self, X, left_open, right_open, eps, ub, lb, gc, dc):
+    def test_bounded_grad_proj(self, X, left_open, right_open, eps, ub, lb, gc, dc) -> None:
         if ub - (eps if right_open else 0.) < lb + (eps if left_open else 0.):
             return
         param = core.BlobReference("X")
@@ -124,7 +125,7 @@ class TestRegularizer(LayersTestCase):
         input_num=st.integers(3, 30),
         reg_weight=st.integers(0, 10)
     )
-    def test_group_l1_norm(self, output_dim, input_num, reg_weight):
+    def test_group_l1_norm(self, output_dim, input_num, reg_weight) -> None:
         """
         1. create a weight blob
         2. create random group splits
@@ -171,7 +172,7 @@ class TestRegularizer(LayersTestCase):
         k=st.integers(5, 9),
         reg_weight=st.integers(0, 10)
     )
-    def test_l1_norm_trimmed(self, param_dim, k, reg_weight):
+    def test_l1_norm_trimmed(self, param_dim, k, reg_weight) -> None:
         weight = np.random.rand(param_dim).astype(np.float32)
         weight_blob = core.BlobReference("weight_blob")
         workspace.FeedBlob(weight_blob, weight)
@@ -193,7 +194,7 @@ class TestRegularizer(LayersTestCase):
         l1=st.integers(0, 10),
         l2=st.integers(0, 10)
     )
-    def test_elastic_l1_norm_trimmed(self, param_dim, k, l1, l2):
+    def test_elastic_l1_norm_trimmed(self, param_dim, k, l1, l2) -> None:
         weight = np.random.rand(param_dim).astype(np.float32)
         weight_blob = core.BlobReference("weight_blob")
         workspace.FeedBlob(weight_blob, weight)
@@ -216,7 +217,7 @@ class TestRegularizer(LayersTestCase):
         norm=st.floats(min_value=1.0, max_value=4.0),
         data_strategy=st.data(),
     )
-    def test_fp16_max_norm(self, row_dim, norm, data_strategy):
+    def test_fp16_max_norm(self, row_dim, norm, data_strategy) -> None:
         weight = np.random.rand(row_dim, 5).astype(np.float16)
         grad = np.random.rand(row_dim, 5).astype(np.float16)
 

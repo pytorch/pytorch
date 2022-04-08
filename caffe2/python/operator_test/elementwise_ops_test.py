@@ -15,7 +15,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
     @settings(deadline=10000)
-    def test_abs(self, X, gc, dc):
+    def test_abs(self, X, gc, dc) -> None:
         op = core.CreateOperator(
             "Abs",
             ["X"],
@@ -37,7 +37,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_exp(self, X, inplace, gc, dc):
+    def test_exp(self, X, inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "Exp",
             ["X"],
@@ -60,7 +60,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_log(self, n, m, gc, dc, seed):
+    def test_log(self, n, m, gc, dc, seed) -> None:
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32) + 1.0
 
@@ -88,7 +88,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 10), m=st.integers(4, 6),
            d=st.integers(2, 3), seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_powt(self, n, m, d, gc, dc, seed):
+    def test_powt(self, n, m, d, gc, dc, seed) -> None:
         np.random.seed(seed)
         X = np.random.rand(n, m, d).astype(np.float32) + 1.0
         Y = np.random.rand(n, m, d).astype(np.float32) + 2.0
@@ -119,7 +119,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_sqr(self, n, m, gc, dc, seed):
+    def test_sqr(self, n, m, gc, dc, seed) -> None:
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)
 
@@ -153,7 +153,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_sqrt(self, X, inplace, gc, dc):
+    def test_sqrt(self, X, inplace, gc, dc) -> None:
         def sqrt_op(X):
             return [np.sqrt(X)]
 
@@ -178,7 +178,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_softsign(self, X, inplace, gc, dc):
+    def test_softsign(self, X, inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "Softsign",
             ["X"],
@@ -205,7 +205,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(X=hu.tensor(elements=hu.floats(min_value=0.1, max_value=10.0), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_rsqrt(self, X, inplace, gc, dc):
+    def test_rsqrt(self, X, inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "Rsqrt",
             ["X"],
@@ -230,7 +230,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
     @settings(deadline=10000)
-    def test_cube(self, X, gc, dc):
+    def test_cube(self, X, gc, dc) -> None:
         op = core.CreateOperator(
             "Cube",
             ["X"],
@@ -258,7 +258,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), in_place=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_cbrt(self, X, in_place, gc, dc):
+    def test_cbrt(self, X, in_place, gc, dc) -> None:
         op = core.CreateOperator(
             "Cbrt",
             ["X"],
@@ -279,7 +279,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(X=hu.tensor(elements=hu.floats(min_value=1.0, max_value=10.0), dtype=np.float32),
            in_place=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_cbrt_grad(self, X, in_place, gc, dc):
+    def test_cbrt_grad(self, X, in_place, gc, dc) -> None:
         op = core.CreateOperator(
             "Cbrt",
             ["X"],
@@ -299,7 +299,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_swish(self, n, m, gc, dc, seed):
+    def test_swish(self, n, m, gc, dc, seed) -> None:
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)
 
@@ -327,7 +327,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_swish_gradient_inplace(self, n, m, gc, dc, seed):
+    def test_swish_gradient_inplace(self, n, m, gc, dc, seed) -> None:
         np.random.seed(seed)
 
         def swish(X):
@@ -367,7 +367,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         gc,
         dc,
         seed: int,
-    ):
+    ) -> None:
         broadcast = not inplace
         np.random.seed(seed)
 
@@ -426,7 +426,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         gc,
         dc,
         seed: int,
-    ):
+    ) -> None:
         broadcast = not inplace
         np.random.seed(seed)
 
@@ -473,7 +473,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         gc,
         dc,
         seed: int,
-    ):
+    ) -> None:
         broadcast = not inplace
         np.random.seed(seed)
 
@@ -531,7 +531,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         gc,
         dc,
         seed: int,
-    ):
+    ) -> None:
         broadcast = not inplace
         np.random.seed(seed)
 
@@ -577,7 +577,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     @settings(deadline=10000)
-    def test_sigmoid(self, X, inplace, engine, gc, dc):
+    def test_sigmoid(self, X, inplace, engine, gc, dc) -> None:
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],
@@ -601,7 +601,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     @settings(deadline=10000)
-    def test_tanh(self, X, inplace, engine, gc, dc):
+    def test_tanh(self, X, inplace, engine, gc, dc) -> None:
         op = core.CreateOperator(
             "Tanh",
             ["X"],
@@ -629,7 +629,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            engine=st.sampled_from([""]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_hard_sigmoid(self, X, inplace, alpha, beta, engine, gc, dc):
+    def test_hard_sigmoid(self, X, inplace, alpha, beta, engine, gc, dc) -> None:
         # Prevent alpha and beta from mutually being 0 to avoid a division
         # error when adjusting our inputs
         assume(alpha != 0.0 or beta != 0.0)
@@ -667,7 +667,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6), **hu.gcs)
     @settings(deadline=10000)
-    def test_eq(self, n, m, gc, dc):
+    def test_eq(self, n, m, gc, dc) -> None:
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.randint(2, size=(n, m))
         Y = np.random.randint(2, size=(n, m))
@@ -698,7 +698,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6), **hu.gcs)
     @settings(deadline=10000)
-    def test_eq_bcast(self, n, m, gc, dc):
+    def test_eq_bcast(self, n, m, gc, dc) -> None:
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.randint(2, size=(n, m))
         Y = np.random.randint(2, size=(m,))
@@ -733,7 +733,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertTrue(str(result_2) not in shapes)
 
     def _run_single_test(
-            self, op, ref, A, B, reverse_inputs, test_grad, gc, dc):
+            self, op, ref, A, B, reverse_inputs, test_grad, gc, dc) -> None:
         inputs = [A, B]
         self.assertReferenceChecks(
             device_option=gc,
@@ -768,7 +768,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
                     )
 
     def _test_binary_op(
-            self, op_name, np_ref, n, m, k, t, bias, test_grad, gc, dc):
+            self, op_name, np_ref, n, m, k, t, bias, test_grad, gc, dc) -> None:
         op = core.CreateOperator(
             op_name,
             ["A", "B"],
@@ -807,7 +807,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
     def _test_binary_op_in_place(
-            self, op_name, np_ref, n, m, bias, test_grad, in_place_2nd, gc, dc):
+            self, op_name, np_ref, n, m, bias, test_grad, in_place_2nd, gc, dc) -> None:
         def ref(A, B):
             return [np_ref(A, B)]
 
@@ -840,7 +840,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_add(self, n, m, k, t, gc, dc):
+    def test_add(self, n, m, k, t, gc, dc) -> None:
         self._test_binary_op("Add", np.add, n, m, k, t, -0.5, True, gc, dc)
         self._test_binary_op_in_place(
             "Add", np.add, n, m, -0.5, True, True, gc, dc)
@@ -848,7 +848,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_sub(self, n, m, k, t, gc, dc):
+    def test_sub(self, n, m, k, t, gc, dc) -> None:
         self._test_binary_op("Sub", np.subtract, n, m,
                              k, t, -0.5, True, gc, dc)
         self._test_binary_op_in_place(
@@ -857,14 +857,14 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_mul(self, n, m, k, t, gc, dc):
+    def test_mul(self, n, m, k, t, gc, dc) -> None:
         self._test_binary_op("Mul", np.multiply, n, m,
                              k, t, -0.5, True, gc, dc)
 
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_div(self, n, m, k, t, gc, dc):
+    def test_div(self, n, m, k, t, gc, dc) -> None:
         self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
         self._test_binary_op_in_place(
             "Div", np.divide, n, m, 1.0, True, False, gc, dc)
@@ -880,7 +880,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         allow_broadcast_fastpath: bool,
         gc,
         dc
-    ):
+    ) -> None:
         op = core.CreateOperator(
             "DivGradient",
             ["B", "C", "dC"],
@@ -910,7 +910,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1])
 
-    def _test_bitwise_binary_op(self, op_name, np_ref, n, m, k, t, gc, dc):
+    def _test_bitwise_binary_op(self, op_name, np_ref, n, m, k, t, gc, dc) -> None:
         op = core.CreateOperator(
             op_name,
             ["A", "B"],
@@ -951,28 +951,28 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
            t=st.integers(1, 5), **hu.gcs)
     @settings(deadline=10000)
-    def test_bitwise_and(self, n, m, k, t, gc, dc):
+    def test_bitwise_and(self, n, m, k, t, gc, dc) -> None:
         self._test_bitwise_binary_op(
             "BitwiseAnd", np.bitwise_and, n, m, k, t, gc, dc)
 
     @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
            t=st.integers(1, 5), **hu.gcs)
     @settings(deadline=10000)
-    def test_bitwise_or(self, n, m, k, t, gc, dc):
+    def test_bitwise_or(self, n, m, k, t, gc, dc) -> None:
         self._test_bitwise_binary_op(
             "BitwiseOr", np.bitwise_or, n, m, k, t, gc, dc)
 
     @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
            t=st.integers(1, 5), **hu.gcs)
     @settings(deadline=10000)
-    def test_bitwise_xor(self, n, m, k, t, gc, dc):
+    def test_bitwise_xor(self, n, m, k, t, gc, dc) -> None:
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
 
     @given(X=hu.tensor(elements=hu.floats(min_value=0.5, max_value=2), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_reciprocal(self, X, inplace, gc, dc):
+    def test_reciprocal(self, X, inplace, gc, dc) -> None:
         def reciprocal_op(X):
             return [np.reciprocal(X)]
 
@@ -996,7 +996,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.bool), **hu.gcs)
     @settings(deadline=10000)
-    def test_not(self, X, gc, dc):
+    def test_not(self, X, gc, dc) -> None:
         def not_op(X):
             return [np.logical_not(X)]
 
@@ -1017,7 +1017,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
     @settings(deadline=10000)
-    def test_log1p(self, X, gc, dc):
+    def test_log1p(self, X, gc, dc) -> None:
         op = core.CreateOperator(
             "Log1p",
             ["X"],

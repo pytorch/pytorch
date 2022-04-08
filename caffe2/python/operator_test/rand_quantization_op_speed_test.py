@@ -28,7 +28,7 @@ class TestSpeedFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_speed_of_rand_quantization(self, bitwidth_, random_, data_shape_, gc, dc):
+    def test_speed_of_rand_quantization(self, bitwidth_, random_, data_shape_, gc, dc) -> None:
         X1 = np.random.rand(data_shape_[0], data_shape_[1]).astype(np.float32)
         X2 = np.random.rand(data_shape_[0], data_shape_[1]).astype(np.float32)
 

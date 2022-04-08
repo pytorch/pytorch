@@ -28,8 +28,8 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
     )
     @settings(deadline=None, max_examples=30)
     def test_ctc_beam_search_decoder(
-        self, batch, max_time, alphabet_size, beam_width, num_candidates, gc, dc
-    ):
+        self, batch, max_time, alphabet_size, beam_width: int, num_candidates, gc, dc
+    ) -> None:
         if not beam_width:
             beam_width = DEFAULT_BEAM_WIDTH
             op_seq_len = core.CreateOperator('CTCBeamSearchDecoder',

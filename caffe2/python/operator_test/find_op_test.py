@@ -18,7 +18,7 @@ class TestFindOperator(serial.SerializedTestCase):
         idxsize=st.sampled_from([2, 4, 8, 1000, 5000]),
         **hu.gcs)
     @settings(deadline=10000)
-    def test_find(self, n, idxsize, gc, dc):
+    def test_find(self, n, idxsize, gc, dc) -> None:
         maxval = 10
 
         def findop(idx, X):

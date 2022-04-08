@@ -3,7 +3,7 @@ from caffe2.python import task
 
 
 class TestTask(unittest.TestCase):
-    def testRepr(self):
+    def testRepr(self) -> None:
         cases = [
             (task.Cluster(), "Cluster(nodes=[], node_kwargs={})"),
             (task.Node(), "Node(name=local, kwargs={})"),
@@ -18,7 +18,7 @@ class TestTask(unittest.TestCase):
         for obj, want in cases:
             self.assertEqual(obj.__repr__(), want)
 
-    def testEffectlessRepr(self):
+    def testEffectlessRepr(self) -> None:
         task_group = task.TaskGroup()
         _repr = task_group.__repr__()
         self.assertFalse(task_group._already_used)

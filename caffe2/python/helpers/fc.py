@@ -13,7 +13,7 @@ from caffe2.python.modeling.parameter_info import ParameterTags
 def _FC_or_packed_FC(
     model, op_call, blob_in, blob_out, dim_in, dim_out, weight_init=None,
         bias_init=None, WeightInitializer=None, BiasInitializer=None,
-        enable_tensor_core=False, float16_compute=False, **kwargs
+        enable_tensor_core: bool=False, float16_compute: bool=False, **kwargs
 ):
     WeightInitializer = initializers.update_initializer(
         WeightInitializer, weight_init, ("XavierFill", {})
@@ -64,7 +64,7 @@ def packed_fc(model, *args, **kwargs):
 
 def fc_decomp(
     model, blob_in, blob_out, dim_in, dim_out,
-    rank_approx=5, weight_init=None, bias_init=None,
+    rank_approx: int=5, weight_init=None, bias_init=None,
     WeightInitializer=None, BiasInitializer=None, **kwargs
 ):
     """FC_Decomp version
@@ -98,8 +98,8 @@ def fc_decomp(
 def fc_prune(
     model, blob_in, blob_out, dim_in, dim_out,
     weight_init=None, bias_init=None, mask_init=None,
-    threshold=0.00001, need_compress_rate=False,
-    comp_lb=0.05,
+    threshold: float=0.00001, need_compress_rate: bool=False,
+    comp_lb: float=0.05,
     **kwargs
 ):
     """FC_Prune version

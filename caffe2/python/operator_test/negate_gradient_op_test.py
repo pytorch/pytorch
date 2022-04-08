@@ -15,7 +15,7 @@ class TestNegateGradient(serial.SerializedTestCase):
 
     @given(X=hu.tensor(), inplace=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_forward(self, X, inplace, gc, dc):
+    def test_forward(self, X, inplace, gc, dc) -> None:
         def neg_grad_ref(X):
             return (X,)
 
@@ -25,7 +25,7 @@ class TestNegateGradient(serial.SerializedTestCase):
 
     @given(size=st.lists(st.integers(min_value=1, max_value=20),
                          min_size=1, max_size=5))
-    def test_grad(self, size):
+    def test_grad(self, size) -> None:
         X = np.random.random_sample(size)
         workspace.ResetWorkspace()
         workspace.FeedBlob("X", X.astype(np.float32))

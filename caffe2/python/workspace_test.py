@@ -17,32 +17,33 @@ from hypothesis import given, settings
 
 
 class TestWorkspace(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.net = core.Net("test-net")
         self.testblob_ref = self.net.ConstantFill(
             [], "testblob", shape=[1, 2, 3, 4], value=1.0
         )
         workspace.ResetWorkspace()
 
-    def testRootFolder(self):
+    def testRootFolder(self) -> None:
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.RootFolder(), ".")
         self.assertEqual(workspace.ResetWorkspace("/tmp/caffe-workspace-test"), True)
         self.assertEqual(workspace.RootFolder(), "/tmp/caffe-workspace-test")
 
-    def testWorkspaceHasBlobWithNonexistingName(self):
+    def testWorkspaceHasBlobWithNonexistingName(self) -> None:
         self.assertEqual(workspace.HasBlob("non-existing"), False)
 
-    def testRunOperatorOnce(self):
+    def testRunOperatorOnce(self) -> None:
         self.assertEqual(
             workspace.RunOperatorOnce(self.net.Proto().op[0].SerializeToString()), True
         )
         self.assertEqual(workspace.HasBlob("testblob"), True)
         blobs = workspace.Blobs()
         self.assertEqual(len(blobs), 1)
+        # pyre-fixme[6]: For 1st param expected `str` but got `int`.
         self.assertEqual(blobs[0], "testblob")
 
-    def testGetOperatorCost(self):
+    def testGetOperatorCost(self) -> None:
         op = core.CreateOperator(
             "Conv2D",
             ["X", "W"],
@@ -62,18 +63,19 @@ class TestWorkspace(unittest.TestCase):
         op_cost = workspace.GetOperatorCost(op.SerializeToString(), ["X", "W"])
         self.assertTupleEqual(
             op_cost,
+            # pyre-fixme[19]: Expected 1 positional argument.
             namedtuple("Cost", ["flops", "bytes_written", "bytes_read"])(
                 1152, 256, 4168
             ),
         )
 
-    def testRunNetOnce(self):
+    def testRunNetOnce(self) -> None:
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
-    def testCurrentWorkspaceWrapper(self):
+    def testCurrentWorkspaceWrapper(self) -> None:
         self.assertNotIn("testblob", workspace.C.Workspace.current.blobs)
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
@@ -83,13 +85,13 @@ class TestWorkspace(unittest.TestCase):
         workspace.ResetWorkspace()
         self.assertNotIn("testblob", workspace.C.Workspace.current.blobs)
 
-    def testRunPlan(self):
+    def testRunPlan(self) -> None:
         plan = core.Plan("test-plan")
         plan.AddStep(core.ExecutionStep("test-step", self.net))
         self.assertEqual(workspace.RunPlan(plan.Proto().SerializeToString()), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
-    def testRunPlanInBackground(self):
+    def testRunPlanInBackground(self) -> None:
         plan = core.Plan("test-plan")
         plan.AddStep(core.ExecutionStep("test-step", self.net))
         background_plan = workspace.RunPlanInBackground(plan)
@@ -98,12 +100,12 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(background_plan.is_succeeded(), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
-    def testConstructPlanFromSteps(self):
+    def testConstructPlanFromSteps(self) -> None:
         step = core.ExecutionStep("test-step-as-plan", self.net)
         self.assertEqual(workspace.RunPlan(step), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
-    def testResetWorkspace(self):
+    def testResetWorkspace(self) -> None:
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
@@ -111,12 +113,13 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.HasBlob("testblob"), False)
 
-    def testTensorAccess(self):
+    def testTensorAccess(self) -> None:
         ws = workspace.C.Workspace()
 
         """ test in-place modification """
         ws.create_blob("tensor").feed(np.array([1.1, 1.2, 1.3]))
         tensor = ws.blobs["tensor"].tensor()
+        # pyre-fixme[16]: `TensorCPU` has no attribute `data`.
         tensor.data[0] = 3.3
         val = np.array([3.3, 1.2, 1.3])
         np.testing.assert_array_equal(tensor.data, val)
@@ -139,6 +142,7 @@ class TestWorkspace(unittest.TestCase):
 
         """ feed (copy) data into tensor """
         val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=np.object)
+        # pyre-fixme[16]: `TensorCPU` has no attribute `feed`.
         tensor.feed(val)
         self.assertEquals(tensor.data[0, 0], b"abc")
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
@@ -151,13 +155,14 @@ class TestWorkspace(unittest.TestCase):
         """ fetch (copy) data from tensor """
         val = np.array([1.1, 1.2])
         tensor.feed(val)
+        # pyre-fixme[16]: `TensorCPU` has no attribute `fetch`.
         val2 = tensor.fetch()
         tensor.data[0] = 5.2
         val3 = tensor.fetch()
         np.testing.assert_array_equal(val, val2)
         self.assertEquals(val3[0], 5.2)
 
-    def testFetchFeedBlob(self):
+    def testFetchFeedBlob(self) -> None:
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
@@ -171,7 +176,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
         np.testing.assert_array_equal(fetched_again, 2.0)
 
-    def testFetchFeedBlobViaBlobReference(self):
+    def testFetchFeedBlobViaBlobReference(self) -> None:
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
@@ -185,7 +190,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
         np.testing.assert_array_equal(fetched_again, 2.0)
 
-    def testFetchFeedBlobTypes(self):
+    def testFetchFeedBlobTypes(self) -> None:
         for dtype in [
             np.float16,
             np.float32,
@@ -209,7 +214,7 @@ class TestWorkspace(unittest.TestCase):
             self.assertEqual(fetched_back.dtype, dtype)
             np.testing.assert_array_equal(fetched_back, data)
 
-    def testFetchFeedBlobBool(self):
+    def testFetchFeedBlobBool(self) -> None:
         """Special case for bool to ensure coverage of both true and false."""
         data = np.zeros((2, 3, 4)).astype(np.bool)
         data.flat[::2] = True
@@ -219,7 +224,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(fetched_back.dtype, np.bool)
         np.testing.assert_array_equal(fetched_back, data)
 
-    def testGetBlobSizeBytes(self):
+    def testGetBlobSizeBytes(self) -> None:
         for dtype in [
             np.float16,
             np.float32,
@@ -255,14 +260,14 @@ class TestWorkspace(unittest.TestCase):
             strs1_len - strs2_len,
         )
 
-    def testFetchFeedBlobZeroDim(self):
+    def testFetchFeedBlobZeroDim(self) -> None:
         data = np.empty(shape=(2, 0, 3), dtype=np.float32)
         self.assertEqual(workspace.FeedBlob("testblob_empty", data), True)
         fetched_back = workspace.FetchBlob("testblob_empty")
         self.assertEqual(fetched_back.shape, (2, 0, 3))
         self.assertEqual(fetched_back.dtype, np.float32)
 
-    def testFetchFeedLongStringTensor(self):
+    def testFetchFeedLongStringTensor(self) -> None:
         # long strings trigger array of object creation
         strs = np.array(
             [
@@ -278,7 +283,7 @@ class TestWorkspace(unittest.TestCase):
         for i in range(0, strs.shape[0]):
             self.assertEqual(strs[i], strs2[i])
 
-    def testFetchFeedShortStringTensor(self):
+    def testFetchFeedShortStringTensor(self) -> None:
         # small strings trigger NPY_STRING array
         strs = np.array([b"elem1", b"elem 2", b"element 3"])
         workspace.FeedBlob("my_str_tensor_2", strs)
@@ -287,14 +292,14 @@ class TestWorkspace(unittest.TestCase):
         for i in range(0, strs.shape[0]):
             self.assertEqual(strs[i], strs2[i])
 
-    def testFetchFeedPlainString(self):
+    def testFetchFeedPlainString(self) -> None:
         # this is actual string, not a tensor of strings
         s = b"Hello, world! I have special \0 symbols \1!"
         workspace.FeedBlob("my_plain_string", s)
         s2 = workspace.FetchBlob("my_plain_string")
         self.assertEqual(s, s2)
 
-    def testFetchBlobs(self):
+    def testFetchBlobs(self) -> None:
         s1 = b"test1"
         s2 = b"test2"
         workspace.FeedBlob("s1", s1)
@@ -303,7 +308,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertEquals(s1, fetch1)
         self.assertEquals(s2, fetch2)
 
-    def testFetchFeedViaBlobDict(self):
+    def testFetchFeedViaBlobDict(self) -> None:
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
@@ -323,7 +328,7 @@ class TestWorkspace(unittest.TestCase):
         for key in workspace.blobs:
             self.assertEqual(key, "testblob")
 
-    def testTorchInterop(self):
+    def testTorchInterop(self) -> None:
         workspace.RunOperatorOnce(
             core.CreateOperator(
                 "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10
@@ -350,11 +355,13 @@ class TestWorkspace(unittest.TestCase):
 
 
 class TestMultiWorkspaces(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace("default")
         workspace.ResetWorkspace()
 
-    def testCreateWorkspace(self):
+    def testCreateWorkspace(self) -> None:
+        # pyre-fixme[16]: `TestMultiWorkspaces` has no attribute `net`.
         self.net = core.Net("test-net")
         self.net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
         self.assertEqual(
@@ -363,11 +370,13 @@ class TestMultiWorkspaces(unittest.TestCase):
         self.assertEqual(workspace.HasBlob("testblob"), True)
         self.assertEqual(workspace.SwitchWorkspace("test", True), None)
         self.assertEqual(workspace.HasBlob("testblob"), False)
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         self.assertEqual(workspace.SwitchWorkspace("default"), None)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
         try:
             # The following should raise an error.
+            # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
             workspace.SwitchWorkspace("non-existing")
             # so this should never happen.
             self.assertEqual(True, False)
@@ -381,13 +390,13 @@ class TestMultiWorkspaces(unittest.TestCase):
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class TestWorkspaceGPU(test_util.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         workspace.ResetWorkspace()
         self.net = core.Net("test-net")
         self.net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
         self.net.RunAllOnGPU()
 
-    def testFetchBlobGPU(self):
+    def testFetchBlobGPU(self) -> None:
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
@@ -401,7 +410,7 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
         np.testing.assert_array_equal(fetched_again, 2.0)
 
-    def testGetGpuPeerAccessPattern(self):
+    def testGetGpuPeerAccessPattern(self) -> None:
         pattern = workspace.GetGpuPeerAccessPattern()
         self.assertEqual(type(pattern), np.ndarray)
         self.assertEqual(pattern.ndim, 2)
@@ -411,7 +420,7 @@ class TestWorkspaceGPU(test_util.TestCase):
     @unittest.skipIf(
         not workspace.has_cuda_support, "Tensor interop doesn't yet work on ROCm"
     )
-    def testTorchInterop(self):
+    def testTorchInterop(self) -> None:
         # CUDA has convenient mem stats, let's use them to make sure we didn't
         # leak memory
         initial_mem = torch.cuda.memory_allocated()
@@ -462,7 +471,7 @@ class TestWorkspaceGPU(test_util.TestCase):
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestWorkspaceIDEEP(test_util.TestCase):
-    def testFeedFetchBlobIDEEP(self):
+    def testFeedFetchBlobIDEEP(self) -> None:
         arr = np.random.randn(2, 3).astype(np.float32)
         workspace.FeedBlob("testblob_ideep", arr, core.DeviceOption(caffe2_pb2.IDEEP))
         fetched = workspace.FetchBlob("testblob_ideep")
@@ -470,13 +479,13 @@ class TestWorkspaceIDEEP(test_util.TestCase):
 
 
 class TestImmedibate(test_util.TestCase):
-    def testImmediateEnterExit(self):
+    def testImmediateEnterExit(self) -> None:
         workspace.StartImmediate(i_know=True)
         self.assertTrue(workspace.IsImmediate())
         workspace.StopImmediate()
         self.assertFalse(workspace.IsImmediate())
 
-    def testImmediateRunsCorrectly(self):
+    def testImmediateRunsCorrectly(self) -> None:
         workspace.StartImmediate(i_know=True)
         net = core.Net("test-net")
         net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
@@ -494,7 +503,7 @@ class TestImmedibate(test_util.TestCase):
         with self.assertRaises(RuntimeError):
             content = workspace.FetchImmediate("testblob")
 
-    def testImmediateRootFolder(self):
+    def testImmediateRootFolder(self) -> None:
         workspace.StartImmediate(i_know=True)
         # for testing we will look into the _immediate_root_folder variable
         # but in normal usage you should not access that.
@@ -509,15 +518,16 @@ class TestImmedibate(test_util.TestCase):
 
 
 class TestCppEnforceAsException(test_util.TestCase):
-    def testEnforce(self):
+    def testEnforce(self) -> None:
         op = core.CreateOperator("Relu", ["X"], ["Y"])
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
 
 class TestCWorkspace(htu.HypothesisTestCase):
-    def test_net_execution(self):
+    def test_net_execution(self) -> None:
         ws = workspace.C.Workspace()
+        # pyre-fixme[16]: `Workspace` has no attribute `nets`.
         self.assertEqual(ws.nets, {})
         self.assertEqual(ws.blobs, {})
         net = core.Net("test-net")
@@ -541,7 +551,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         )
 
     @given(name=st.text(), value=st.floats(min_value=-1, max_value=1.0))
-    def test_operator_run(self, name, value):
+    def test_operator_run(self, name: str, value) -> None:
         ws = workspace.C.Workspace()
         op = core.CreateOperator("ConstantFill", [], [name], shape=[1], value=value)
         ws.run(op)
@@ -555,12 +565,13 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net_name=st.text(),
         value=st.floats(min_value=-1, max_value=1.0),
     )
-    def test_net_run(self, blob_name, net_name, value):
+    def test_net_run(self, blob_name: str, net_name, value) -> None:
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
         net.ConstantFill([], [blob_name], shape=[1], value=value)
         ws.run(net)
         self.assertIn(blob_name, ws.blobs)
+        # pyre-fixme[16]: `Workspace` has no attribute `nets`.
         self.assertNotIn(net_name, ws.nets)
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4
@@ -572,7 +583,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         plan_name=st.text(),
         value=st.floats(min_value=-1, max_value=1.0),
     )
-    def test_plan_run(self, blob_name, plan_name, net_name, value):
+    def test_plan_run(self, blob_name: str, plan_name, net_name, value) -> None:
         ws = workspace.C.Workspace()
         plan = core.Plan(plan_name)
         net = core.Net(net_name)
@@ -582,6 +593,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
         ws.run(plan)
         self.assertIn(blob_name, ws.blobs)
+        # pyre-fixme[16]: `Workspace` has no attribute `nets`.
         self.assertIn(net.Name(), ws.nets)
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4
@@ -592,12 +604,13 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net_name=st.text(),
         value=st.floats(min_value=-1, max_value=1.0),
     )
-    def test_net_create(self, blob_name, net_name, value):
+    def test_net_create(self, blob_name: str, net_name, value) -> None:
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
         net.ConstantFill([], [blob_name], shape=[1], value=value)
         ws.create_net(net).run()
         self.assertIn(blob_name, ws.blobs)
+        # pyre-fixme[16]: `Workspace` has no attribute `nets`.
         self.assertIn(net.Name(), ws.nets)
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4
@@ -608,18 +621,20 @@ class TestCWorkspace(htu.HypothesisTestCase):
         value=htu.tensor(),
         device_option=st.sampled_from(htu.device_options),
     )
-    def test_array_serde(self, name, value, device_option):
+    def test_array_serde(self, name: str, value, device_option) -> None:
         ws = workspace.C.Workspace()
         ws.create_blob(name).feed(value, device_option=device_option)
         self.assertIn(name, ws.blobs)
         blob = ws.blobs[name]
         np.testing.assert_equal(value, ws.blobs[name].fetch())
         serde_blob = ws.create_blob("{}_serde".format(name))
+        # pyre-fixme[16]: `Blob` has no attribute `deserialize`.
+        # pyre-fixme[16]: `Blob` has no attribute `serialize`.
         serde_blob.deserialize(blob.serialize(name))
         np.testing.assert_equal(value, serde_blob.fetch())
 
     @given(name=st.text(), value=st.text())
-    def test_string_serde(self, name, value):
+    def test_string_serde(self, name: str, value) -> None:
         value = value.encode("ascii", "ignore")
         ws = workspace.C.Workspace()
         ws.create_blob(name).feed(value)
@@ -627,10 +642,12 @@ class TestCWorkspace(htu.HypothesisTestCase):
         blob = ws.blobs[name]
         self.assertEqual(value, ws.blobs[name].fetch())
         serde_blob = ws.create_blob("{}_serde".format(name))
+        # pyre-fixme[16]: `Blob` has no attribute `deserialize`.
+        # pyre-fixme[16]: `Blob` has no attribute `serialize`.
         serde_blob.deserialize(blob.serialize(name))
         self.assertEqual(value, serde_blob.fetch())
 
-    def test_exception(self):
+    def test_exception(self) -> None:
         ws = workspace.C.Workspace()
 
         with self.assertRaises(TypeError):
@@ -671,10 +688,11 @@ class TestPredictor(unittest.TestCase):
     #     self.assertEqual(outputs[0].shape, (1, 1000, 1, 1))
     #     self.assertAlmostEqual(outputs[0][0][0][0][0], 5.19026289e-05)
 
-    def test_predictor_memory_model(self):
+    def test_predictor_memory_model(self) -> None:
         workspace.ResetWorkspace()
         m = self._create_model()
         workspace.FeedBlob("data", np.zeros([4], dtype="float32"))
+        # pyre-fixme[16]: `TestPredictor` has no attribute `predictor`.
         self.predictor = workspace.Predictor(
             workspace.StringifyProto(m.param_init_net.Proto()),
             workspace.StringifyProto(m.net.Proto()),
@@ -693,7 +711,7 @@ class TestTransform(htu.HypothesisTestCase):
         output_dim=st.integers(min_value=1, max_value=10),
         batch_size=st.integers(min_value=1, max_value=10),
     )
-    def test_simple_transform(self, input_dim, output_dim, batch_size):
+    def test_simple_transform(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
         fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
@@ -722,7 +740,7 @@ class TestTransform(htu.HypothesisTestCase):
         batch_size=st.integers(min_value=1, max_value=10),
     )
     @settings(deadline=10000)
-    def test_registry_invalid(self, input_dim, output_dim, batch_size):
+    def test_registry_invalid(self, input_dim, output_dim, batch_size) -> None:
         m = model_helper.ModelHelper()
         brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
         with self.assertRaises(RuntimeError):
@@ -730,7 +748,7 @@ class TestTransform(htu.HypothesisTestCase):
 
     @given(value=st.floats(min_value=-1, max_value=1))
     @settings(deadline=10000)
-    def test_apply_transform_if_faster(self, value):
+    def test_apply_transform_if_faster(self, value) -> None:
 
         init_net = core.Net("init_net")
         init_net.ConstantFill([], ["data"], shape=[5, 5, 5, 5], value=value)
@@ -773,7 +791,7 @@ class TestTransform(htu.HypothesisTestCase):
 
 
 class MyModule(torch.jit.ScriptModule):
-    def __init__(self):
+    def __init__(self) -> None:
         super(MyModule, self).__init__()
         self.mult = torch.nn.Parameter(torch.tensor([[1, 2, 3, 4, 5.0]]))
 
@@ -799,16 +817,16 @@ class MyModule(torch.jit.ScriptModule):
     "Script module integration in Caffe2 is not enabled",
 )
 class TestScriptModule(test_util.TestCase):
-    def _createFeedModule(self):
+    def _createFeedModule(self) -> None:
         workspace.FeedBlob("m", MyModule())
 
-    def testCreation(self):
+    def testCreation(self) -> None:
         m = MyModule()
         workspace.FeedBlob("module", m)
         m2 = workspace.FetchBlob("module")
         self.assertTrue(m2 is not None)
 
-    def testForward(self):
+    def testForward(self) -> None:
         self._createFeedModule()
         val = np.random.rand(5, 5).astype(np.float32)
         param = np.array([[1, 2, 3, 4, 5]]).astype(np.float32)
@@ -820,7 +838,7 @@ class TestScriptModule(test_util.TestCase):
             workspace.FetchBlob("y"), np.matmul(param, val), decimal=5
         )
 
-    def testMultiInputOutput(self):
+    def testMultiInputOutput(self) -> None:
         self._createFeedModule()
         val = np.random.rand(5, 5).astype(np.float32)
         workspace.FeedBlob("w", val)
@@ -842,7 +860,7 @@ class TestScriptModule(test_util.TestCase):
         np.testing.assert_almost_equal(workspace.FetchBlob("y1"), val, decimal=5)
         np.testing.assert_almost_equal(workspace.FetchBlob("y2"), val + 1, decimal=5)
 
-    def testMultiTensorListInput(self):
+    def testMultiTensorListInput(self) -> None:
         self._createFeedModule()
         val = np.random.rand(5, 5).astype(np.float32)
         workspace.FeedBlob("w", val)
@@ -864,7 +882,7 @@ class TestScriptModule(test_util.TestCase):
             workspace.FetchBlob("y"), val + val2 + val3, decimal=5
         )
 
-    def testSerialization(self):
+    def testSerialization(self) -> None:
         tmpdir = tempfile.mkdtemp()
         try:
             self._createFeedModule()
@@ -917,7 +935,7 @@ class TestScriptModule(test_util.TestCase):
 
 
 class TestScriptModuleFromString(TestScriptModule):
-    def _createFeedModule(self):
+    def _createFeedModule(self) -> None:
         workspace.RunOperatorOnce(
             core.CreateOperator(
                 "ScriptModuleLoad",
@@ -927,7 +945,7 @@ class TestScriptModuleFromString(TestScriptModule):
             )
         )
 
-    def _get_modules_bytes(self, the_module):
+    def _get_modules_bytes(self, the_module) -> bytes:
         import io
 
         buffer = io.BytesIO()

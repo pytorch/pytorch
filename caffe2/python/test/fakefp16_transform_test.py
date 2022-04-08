@@ -7,7 +7,7 @@ from caffe2.python.fakefp16_transform_lib import fakeFp16FuseOps
 from caffe2.python import core
 
 class Transformer(unittest.TestCase):
-    def test_fuse(self):
+    def test_fuse(self) -> None:
         net_swish = core.Net("test_swish")
         net_swish_init = core.Net("test_swish_init")
 

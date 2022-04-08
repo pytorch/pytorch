@@ -35,7 +35,7 @@ class TestPooling(hu.HypothesisTestCase):
                                          input_channels,
                                          batch_size, order,
                                          op_type,
-                                         gc, dc):
+                                         gc, dc) -> None:
         assume(np.max([pad_t, pad_l, pad_b, pad_r]) < kernel)
 
         op = core.CreateOperator(
@@ -65,7 +65,7 @@ class TestPooling(hu.HypothesisTestCase):
                      "This is a test that reproduces a cudnn error. If you "
                      "want to run it, set env variable CAFFE2_DEBUG=1.")
     @given(**hu.gcs_cuda_only)
-    def test_pooling_big_batch(self, gc, dc):
+    def test_pooling_big_batch(self, gc, dc) -> None:
         op = core.CreateOperator(
             "AveragePool",
             ["X"],
@@ -92,7 +92,7 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_pooling_1d(self, stride, pad, kernel, size, input_channels,
-                        batch_size, order, op_type, gc, dc):
+                        batch_size, order, op_type, gc, dc) -> None:
         assume(pad < kernel)
         op = core.CreateOperator(
             op_type,
@@ -126,7 +126,7 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(deadline=None, max_examples=50)
     def test_pooling_3d(self, stride, pad, kernel, size, input_channels,
-                        batch_size, order, op_type, engine, gc, dc):
+                        batch_size, order, op_type, engine, gc, dc) -> None:
         assume(pad < kernel)
         assume(size + pad + pad >= kernel)
         # Currently MIOpen Pooling only supports pooling with NCHW order.
@@ -165,7 +165,7 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_global_pooling_3d(self, kernel, size, input_channels,
-                               batch_size, order, op_type, engine, gc, dc):
+                               batch_size, order, op_type, engine, gc, dc) -> None:
         # Currently MIOpen Pooling only supports pooling with NCHW order.
         if hiputl.run_in_hip(gc, dc) and (workspace.GetHIPVersion() < 303 or  order == "NHWC"):
             assume(engine != "CUDNN")
@@ -197,7 +197,7 @@ class TestPooling(hu.HypothesisTestCase):
            batch_size=st.integers(0, 3),
            **hu.gcs_gpu_only)
     def test_pooling_with_index(self, stride, pad, kernel, size,
-                                input_channels, batch_size, gc, dc):
+                                input_channels, batch_size, gc, dc) -> None:
         assume(pad < kernel)
         op = core.CreateOperator(
             "MaxPoolWithIndex",
@@ -223,7 +223,7 @@ class TestPooling(hu.HypothesisTestCase):
            op_type=st.sampled_from(["AveragePool", "AveragePool2D"]),
            **hu.gcs)
     @settings(max_examples=3, deadline=None)
-    def test_global_avg_pool_nchw(self, op_type, sz, batch_size, engine, gc, dc):
+    def test_global_avg_pool_nchw(self, op_type, sz, batch_size, engine, gc, dc) -> None:
         ''' Special test to stress the fast path of NCHW average pool '''
         op = core.CreateOperator(
             op_type,
@@ -248,7 +248,7 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(max_examples=3, deadline=None)
     def test_global_max_pool_nchw(self, op_type, sz,
-                                  batch_size, engine, gc, dc):
+                                  batch_size, engine, gc, dc) -> None:
         ''' Special test to stress the fast path of NCHW max pool '''
         # CuDNN 5 does not support deterministic max pooling.
         assume(workspace.GetCuDNNVersion() >= 6000 or engine != "CUDNN")
@@ -285,7 +285,7 @@ class TestPooling(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_pooling(self, stride, pad, kernel, size,
                      input_channels, batch_size,
-                     order, op_type, engine, gc, dc):
+                     order, op_type, engine, gc, dc) -> None:
         assume(pad < kernel)
         if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
             assume(order == "NCHW" and op_type != "LpPool")
@@ -318,7 +318,7 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_global_pooling(self, size, input_channels, batch_size,
-                            order, op_type, engine, gc, dc):
+                            order, op_type, engine, gc, dc) -> None:
         # CuDNN 5 does not support deterministic max pooling.
         assume(workspace.GetCuDNNVersion() >= 6000 or op_type != "MaxPool")
 
@@ -357,7 +357,7 @@ class TestPooling(hu.HypothesisTestCase):
     @settings(deadline=None, max_examples=50)
     def test_max_pool_grad(
             self, op_type, dim, N, C, D, H, W, kernel, stride, pad, order,
-            engine, gc, dc):
+            engine, gc, dc) -> None:
         assume(pad < kernel)
         assume(dim > 1 or engine == "")
         if hiputl.run_in_hip(gc, dc):
@@ -422,7 +422,7 @@ class TestPooling(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_avg_pool_count_include_pad(
             self, op_type, dim, N, C, D, H, W, kernel, stride, pad,
-            count_include_pad, order, engine, gc, dc):
+            count_include_pad, order, engine, gc, dc) -> None:
         assume(pad < kernel)
         if hiputl.run_in_hip(gc, dc):
             if dim != 2:

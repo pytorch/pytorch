@@ -10,7 +10,7 @@ import numpy as np
 
 import unittest
 
-def sigmoid(x):
+def sigmoid(x) -> float:
     return 1.0 / (1.0 + np.exp(-x))
 
 
@@ -22,20 +22,20 @@ def sigmoid_cross_entropy_with_logits_grad(x, z):
     return z - sigmoid(x)
 
 
-def sigmoid_cross_entropy_with_logits_with_log_D_trick(x, z):
+def sigmoid_cross_entropy_with_logits_with_log_D_trick(x, z: int):
     return -(2 * z - 1.) * np.log(sigmoid(x))
 
 
-def sigmoid_cross_entropy_with_logits_with_log_D_trick_grad(x, z):
+def sigmoid_cross_entropy_with_logits_with_log_D_trick_grad(x, z: int):
     return (2 * z - 1.) * (1 - sigmoid(x))
 
 
-def unjoined_sigmoid_cross_entropy(x, z):
+def unjoined_sigmoid_cross_entropy(x, z: float):
     return -z * x + (1. - z) * np.maximum(x, 0) \
         + (1. - z) * np.log(1 + np.exp(-np.abs(x)))
 
 
-def unjoined_sigmoid_cross_entropy_grad(x, z):
+def unjoined_sigmoid_cross_entropy_grad(x, z: float) -> float:
     return z - (1. - z) / (1. + np.exp(-x))
 
 
@@ -68,7 +68,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
     )
     def test_sigmoid_cross_entropy_with_logits(
         self, inputs, options, gc, dc
-    ):
+    ) -> None:
         logits, targets = inputs
         log_D_trick, unjoined_lr_loss = options
 
@@ -123,7 +123,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
     )
     def test_cross_entropy_and_unjoied_cross_entropy_relation(
         self, log_D_trick, gc, dc
-    ):
+    ) -> None:
         logits = np.array([1.4720, 0.3500, -0.6529, -1.1908, 0.8357,
                     -1.0774, -0.3395, -0.2469, 0.6708, -1.8332], dtype='f')
         targets = np.array([1., 1., 1., 1., 1., 1., 0., 0., 0., 0.], dtype='f')
@@ -218,7 +218,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
         ),
         **hu.gcs
     )
-    def test_weighted_sigmoid_cross_entropy_with_logits(self, inputs, gc, dc):
+    def test_weighted_sigmoid_cross_entropy_with_logits(self, inputs, gc, dc) -> None:
         logits, targets, weights = inputs
 
         def weighted_sigmoid_xentr_logit_ref(logits, targets, weights):
@@ -250,7 +250,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
     @given(n=st.integers(2, 10),
            b=st.integers(1, 5),
            **hu.gcs_cpu_only)
-    def test_soft_label_cross_entropy(self, n, b, gc, dc):
+    def test_soft_label_cross_entropy(self, n, b, gc, dc) -> None:
         # Initialize X and add 1e-2 for numerical stability
         X = np.random.rand(b, n).astype(np.float32)
         X = X + 1e-2

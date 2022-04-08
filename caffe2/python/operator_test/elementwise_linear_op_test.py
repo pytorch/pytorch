@@ -14,7 +14,7 @@ class TestElementwiseLinearOp(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(2, 100), d=st.integers(2, 10), **hu.gcs)
     # @given(n=st.integers(2, 50), d=st.integers(2, 50), **hu.gcs_cpu_only)
-    def test(self, n, d, gc, dc):
+    def test(self, n, d, gc, dc) -> None:
         X = np.random.rand(n, d).astype(np.float32)
         a = np.random.rand(d).astype(np.float32)
         b = np.random.rand(d).astype(np.float32)

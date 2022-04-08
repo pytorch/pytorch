@@ -98,7 +98,7 @@ def MLP(order, cudnn_ws):
     return model, d
 
 
-def AlexNet(order, cudnn_ws):
+def AlexNet(order, cudnn_ws: bool):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -191,7 +191,7 @@ def AlexNet(order, cudnn_ws):
     return model, 224
 
 
-def OverFeat(order, cudnn_ws):
+def OverFeat(order, cudnn_ws: bool):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -277,7 +277,7 @@ def OverFeat(order, cudnn_ws):
     return model, 231
 
 
-def VGGA(order, cudnn_ws):
+def VGGA(order, cudnn_ws: bool):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -475,7 +475,7 @@ def _InceptionModule(
     return output
 
 
-def Inception(order, cudnn_ws):
+def Inception(order, cudnn_ws: bool):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -563,7 +563,7 @@ def Inception(order, cudnn_ws):
     return model, 224
 
 
-def AddParameterUpdate(model):
+def AddParameterUpdate(model) -> None:
     """ Simple plain SGD update -- not tuned to actually train the models """
     ITER = brew.iter(model, "iter")
     LR = model.net.LearningRate(
@@ -574,7 +574,7 @@ def AddParameterUpdate(model):
         model.net.WeightedSum([param, ONE, param_grad, LR], param)
 
 
-def Benchmark(model_gen, arg):
+def Benchmark(model_gen, arg) -> None:
     model, input_size = model_gen(arg.order, arg.cudnn_ws)
     model.Proto().type = arg.net_type
     model.Proto().num_workers = arg.num_workers

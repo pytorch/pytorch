@@ -31,7 +31,7 @@ class TestC2LSTM(TestCase):
         has_biases,
         is_bidirectional,
         batch_first,
-    ):
+    ) -> None:
         net = core.Net("test_net")
         num_directions = 2 if is_bidirectional else 1
         py_lstm = nn.LSTM(

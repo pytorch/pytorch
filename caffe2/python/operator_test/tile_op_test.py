@@ -22,7 +22,7 @@ class TestTile(serial.SerializedTestCase):
            axis=st.integers(min_value=0, max_value=2),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_tile(self, M, K, N, tiles, axis, gc, dc):
+    def test_tile(self, M, K, N, tiles, axis, gc, dc) -> None:
         X = np.random.rand(M, K, N).astype(np.float32)
 
         op = core.CreateOperator(
@@ -50,7 +50,7 @@ class TestTile(serial.SerializedTestCase):
            N=st.integers(min_value=1, max_value=200),
            tiles=st.integers(min_value=50, max_value=100),
            **hu.gcs)
-    def test_tile_grad(self, M, N, tiles, gc, dc):
+    def test_tile_grad(self, M, N, tiles, gc, dc) -> None:
         X = np.random.rand(M, N).astype(np.float32)
         axis = 1
 
@@ -88,7 +88,7 @@ class TestTile(serial.SerializedTestCase):
            axis=st.integers(min_value=0, max_value=2),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_tilewinput(self, M, K, N, tiles, axis, gc, dc):
+    def test_tilewinput(self, M, K, N, tiles, axis, gc, dc) -> None:
         X = np.random.rand(M, K, N).astype(np.float32)
 
         tiles_arg = np.array([tiles], dtype=np.int32)

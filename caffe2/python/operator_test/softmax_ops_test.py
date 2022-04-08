@@ -19,7 +19,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
                   D=st.sampled_from([0, 4, 8, 64, 79, 256, 333]),
                   engine=st.sampled_from([None, 'CUDNN']),
                   **hu.gcs)
-    def test_softmax(self, n, D, engine, gc, dc):
+    def test_softmax(self, n, D, engine, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         X = np.random.rand(n, D).astype(np.float32)
@@ -62,7 +62,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
                   engine=st.sampled_from([None, 'CUDNN']),
                   **hu.gcs)
     @settings(deadline=10000)
-    def test_softmax_grad(self, n, D, engine, gc, dc):
+    def test_softmax_grad(self, n, D, engine, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         Y = np.random.rand(n, D).astype(np.float32)
@@ -94,7 +94,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
     @given(axis=st.integers(min_value=1, max_value=4),
            engine=st.sampled_from([None, 'CUDNN']),
            **hu.gcs)
-    def test_softmax_axis(self, axis, engine, gc, dc):
+    def test_softmax_axis(self, axis, engine, gc, dc) -> None:
         np.random.seed(1)
         X = np.random.randn(1, 2, 3, 2, 1).astype(np.float32)
         X = X + 1e-2
@@ -144,7 +144,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
     @given(n=st.integers(2, 10), D=st.integers(4, 16),
            only_loss=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_softmax_with_loss(self, n, D, gc, only_loss, dc):
+    def test_softmax_with_loss(self, n, D, gc, only_loss, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         np.random.seed(2603)
@@ -199,7 +199,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
     def test_softmax_with_loss_axis_2(
         self, n, D, only_loss, label_prob,
         gc, dc
-    ):
+    ) -> None:
         np.random.seed(2603)
         X = np.random.rand(n, n, D).astype(np.float32)
         X = X + 1e-2
@@ -258,7 +258,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs_gpu_only)
-    def test_softmax_with_loss_large(self, gc, dc):
+    def test_softmax_with_loss_large(self, gc, dc) -> None:
         np.random.seed(2603)
         for n in [32]:
             for D in [1000, 2000, 20000]:
@@ -302,7 +302,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
     @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
     @settings(deadline=None)
-    def test_softmax_with_loss_label_prob(self, n, D, gc, dc):
+    def test_softmax_with_loss_label_prob(self, n, D, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         np.random.seed(2603)
@@ -359,7 +359,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
         only_loss=st.booleans(),
         **hu.gcs)
     @settings(deadline=None)
-    def test_softmax_with_loss_weighted(self, n, D, only_loss, gc, dc):
+    def test_softmax_with_loss_weighted(self, n, D, only_loss, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         np.random.seed(2603)
@@ -408,7 +408,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
     @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
     @settings(deadline=None)
-    def test_softmax_with_loss_label_prob_weighted(self, n, D, gc, dc):
+    def test_softmax_with_loss_label_prob_weighted(self, n, D, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         X = np.random.rand(n, D).astype(np.float32)
@@ -464,7 +464,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
     @given(n=st.integers(2, 5), D=st.integers(2, 4),
            weighted=st.booleans(), **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_spatial_softmax_with_loss(self, n, D, weighted, gc, dc):
+    def test_spatial_softmax_with_loss(self, n, D, weighted: bool, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         W = 18
@@ -532,7 +532,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
     @given(n=st.integers(4, 5), D=st.integers(3, 4),
            weighted=st.booleans(), **hu.gcs)
-    def test_spatial_softmax_with_loss_allignore(self, n, D, weighted, gc, dc):
+    def test_spatial_softmax_with_loss_allignore(self, n, D, weighted: bool, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         W = 18
@@ -585,7 +585,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
     @given(n=st.integers(4, 5), D=st.integers(3, 4),
            weighted=st.booleans(), **hu.gcs)
-    def test_softmax_with_loss_zero_weight(self, n, D, weighted, gc, dc):
+    def test_softmax_with_loss_zero_weight(self, n, D, weighted, gc, dc) -> None:
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         np.random.seed(2603)
@@ -624,7 +624,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
         )
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    def test_compare_cpugpu(self):
+    def test_compare_cpugpu(self) -> None:
         '''
         Additional test that checks CPU and GPU returns same values
         with larger examples. This is mainly to test the more complex

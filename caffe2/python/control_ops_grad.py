@@ -690,7 +690,7 @@ def _prepare_gradient_if_op(
     return gradient_if_def
 
 
-def disambiguate_grad_if_op_output(grad_op, idx, new_grad_output):
+def disambiguate_grad_if_op_output(grad_op, idx, new_grad_output) -> None:
     then_net = _get_net_argument(grad_op, "then_net")
     old_grad_out_match = grad_op.output[idx]
     for op in then_net.op:

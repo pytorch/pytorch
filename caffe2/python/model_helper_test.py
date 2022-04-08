@@ -8,7 +8,7 @@ from caffe2.python import brew, model_helper
 
 
 class ModelHelperTest(unittest.TestCase):
-    def test_get_complete_net_type(self):
+    def test_get_complete_net_type(self) -> None:
         model = model_helper.ModelHelper("test_orig")
         brew.conv(
             model,
@@ -28,7 +28,7 @@ class ModelHelperTest(unittest.TestCase):
         self.assertTrue(model2.net.Proto().type, "async_scheduling")
         self.assertTrue(model2.param_init_net.Proto().type, "async_scheduling")
 
-    def test_get_complete_net(self):
+    def test_get_complete_net(self) -> None:
         model = model_helper.ModelHelper("test_orig")
         conv = brew.conv(
             model,

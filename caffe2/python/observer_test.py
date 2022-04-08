@@ -13,7 +13,7 @@ import caffe2.python.workspace as ws
 
 
 class TestObservers(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         core.GlobalInit(["python", "caffe2"])
         ws.ResetWorkspace()
         self.model = model_helper.ModelHelper()
@@ -27,7 +27,7 @@ class TestObservers(unittest.TestCase):
         ws.RunNetOnce(self.model.param_init_net)
         ws.CreateNet(self.model.net)
 
-    def testObserver(self):
+    def testObserver(self) -> None:
         ob = self.model.net.AddObserver("TimeObserver")
         ws.RunNet(self.model.net)
         print(ob.average_time())
@@ -40,7 +40,7 @@ class TestObservers(unittest.TestCase):
         forward_only=st.booleans()
     )
     @settings(deadline=1000)
-    def test_observer_rnn_executor(self, num_layers, forward_only):
+    def test_observer_rnn_executor(self, num_layers, forward_only) -> None:
         '''
         Test that the RNN executor produces same results as
         the non-executor (i.e running step nets as sequence of simple nets).
@@ -140,7 +140,7 @@ class TestObservers(unittest.TestCase):
         self.assertTrue(run_cnt[1] > run_cnt[0] and run_cnt[2] > run_cnt[1])
         self.assertEqual(run_cnt[1] - run_cnt[0], run_cnt[2] - run_cnt[1])
 
-    def enable_rnn_executor(self, net, value, forward_only):
+    def enable_rnn_executor(self, net, value, forward_only) -> None:
         num_found = 0
         for op in net.Proto().op:
             if op.type.startswith("RecurrentNetwork"):

@@ -30,7 +30,7 @@ import unittest
 import tempfile
 
 
-def make_source_dataset(ws, size=100, offset=0, name=None):
+def make_source_dataset(ws, size: int=100, offset: int=0, name=None):
     name = name or "src"
     src_init = core.Net("{}_init".format(name))
     with core.NameScope(name):
@@ -53,7 +53,7 @@ def make_destination_dataset(ws, schema, name=None):
 
 
 class TestReaderBuilder(ReaderBuilder):
-    def __init__(self, name, size, offset):
+    def __init__(self, name, size, offset) -> None:
         self._schema = schema.Struct(
             ('label', schema.Scalar()),
         )
@@ -76,7 +76,7 @@ class TestReaderBuilder(ReaderBuilder):
 
 class TestCompositeReader(TestCase):
     @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
-    def test_composite_reader(self):
+    def test_composite_reader(self) -> None:
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         num_srcs = 3
@@ -112,7 +112,7 @@ class TestCompositeReader(TestCase):
             npt.assert_array_equal(data[i], written_data, "i: {}".format(i))
 
     @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
-    def test_composite_reader_builder(self):
+    def test_composite_reader_builder(self) -> None:
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         num_srcs = 3
@@ -149,7 +149,7 @@ class TestCompositeReader(TestCase):
 
 
 class TestReaderWithLimit(TestCase):
-    def test_runtime_threads(self):
+    def test_runtime_threads(self) -> None:
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         src_ds = make_source_dataset(ws)
@@ -183,6 +183,7 @@ class TestReaderWithLimit(TestCase):
         with TaskGroup() as tg:
             pipe(src_ds.reader(), num_runtime_threads=8, processor=proc)
         session.run(tg)
+        # pyre-fixme[16]: `None` has no attribute `fetch`.
         self.assertEqual(totals[0].fetch(), 100)
         self.assertEqual(totals[1].fetch(), 100)
         self.assertEqual(totals[2].fetch(), 8)
@@ -214,7 +215,7 @@ class TestReaderWithLimit(TestCase):
     def _test_limit_reader_shared(self, reader_class, size, expected_read_len,
                                   expected_read_len_threshold,
                                   expected_finish, num_threads, read_delay,
-                                  **limiter_args):
+                                  **limiter_args) -> None:
         ws, session, src_ds, dst_ds = \
             self._test_limit_reader_init_shared(size)
 
@@ -247,7 +248,7 @@ class TestReaderWithLimit(TestCase):
         self.assertEqual(ws.blobs[str(reader.data_finished())].fetch(),
                          expected_finish)
 
-    def test_count_limit_reader_without_limit(self):
+    def test_count_limit_reader_without_limit(self) -> None:
         # No iter count specified, should read all records.
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
@@ -258,7 +259,7 @@ class TestReaderWithLimit(TestCase):
                                        read_delay=0,
                                        num_iter=None)
 
-    def test_count_limit_reader_with_zero_limit(self):
+    def test_count_limit_reader_with_zero_limit(self) -> None:
         # Zero iter count specified, should read 0 records.
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
@@ -269,7 +270,7 @@ class TestReaderWithLimit(TestCase):
                                        read_delay=0,
                                        num_iter=0)
 
-    def test_count_limit_reader_with_low_limit(self):
+    def test_count_limit_reader_with_low_limit(self) -> None:
         # Read with limit smaller than size of dataset
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
@@ -280,7 +281,7 @@ class TestReaderWithLimit(TestCase):
                                        read_delay=0,
                                        num_iter=10)
 
-    def test_count_limit_reader_with_high_limit(self):
+    def test_count_limit_reader_with_high_limit(self) -> None:
         # Read with limit larger than size of dataset
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
@@ -291,7 +292,7 @@ class TestReaderWithLimit(TestCase):
                                        read_delay=0,
                                        num_iter=110)
 
-    def test_time_limit_reader_without_limit(self):
+    def test_time_limit_reader_without_limit(self) -> None:
         # No duration specified, should read all records.
         self._test_limit_reader_shared(ReaderWithTimeLimit,
                                        size=100,
@@ -302,7 +303,7 @@ class TestReaderWithLimit(TestCase):
                                        read_delay=0.1,
                                        duration=0)
 
-    def test_time_limit_reader_with_short_limit(self):
+    def test_time_limit_reader_with_short_limit(self) -> None:
         # Read with insufficient time limit
         size = 50
         num_threads = 4
@@ -327,7 +328,7 @@ class TestReaderWithLimit(TestCase):
                                        read_delay=sleep_duration,
                                        duration=duration)
 
-    def test_time_limit_reader_with_long_limit(self):
+    def test_time_limit_reader_with_long_limit(self) -> None:
         # Read with ample time limit
         # NOTE: we don't use `expected_read_len_threshold` because the duration,
         # read_delay, and # threads should be more than sufficient
@@ -342,22 +343,22 @@ class TestReaderWithLimit(TestCase):
 
 
 class TestDBFileReader(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.temp_paths = []
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         # In case any test method fails, clean up temp paths.
         for path in self.temp_paths:
             self._delete_path(path)
 
     @staticmethod
-    def _delete_path(path):
+    def _delete_path(path) -> None:
         if os.path.isfile(path):
             os.remove(path)  # Remove file.
         elif os.path.isdir(path):
             shutil.rmtree(path)  # Remove dir recursively.
 
-    def _make_temp_path(self):
+    def _make_temp_path(self) -> str:
         # Make a temp path as db_path.
         with tempfile.NamedTemporaryFile() as f:
             temp_path = f.name
@@ -380,7 +381,7 @@ class TestDBFileReader(TestCase):
         return ws.blobs[str(dst_ds.content().label())].fetch()
 
     @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
-    def test_cached_reader(self):
+    def test_cached_reader(self) -> None:
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         db_path = self._make_temp_path()
@@ -420,7 +421,7 @@ class TestDBFileReader(TestCase):
         self._delete_path(db_path)
 
     @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
-    def test_db_file_reader(self):
+    def test_db_file_reader(self) -> None:
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         db_path = self._make_temp_path()

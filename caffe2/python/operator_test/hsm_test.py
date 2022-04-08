@@ -60,7 +60,7 @@ args_search.append(arg_search)
 
 
 class TestHsm(hu.HypothesisTestCase):
-    def test_hsm_search(self):
+    def test_hsm_search(self) -> None:
         samples = 10
         dim_in = 5
         X = np.random.rand(samples, dim_in).astype(np.float32) - 0.5
@@ -124,7 +124,7 @@ class TestHsm(hu.HypothesisTestCase):
                     self.assertAlmostEqual(
                         scores[i][j], p_scores[i][j], delta=0.001)
 
-    def test_hsm_run_once(self):
+    def test_hsm_run_once(self) -> None:
         workspace.GlobalInit(['caffe2'])
         workspace.FeedBlob("data",
                            np.random.randn(1000, 100).astype(np.float32))
@@ -142,7 +142,7 @@ class TestHsm(hu.HypothesisTestCase):
 
     # Test to check value of sum of squared losses in forward pass for given
     # input
-    def test_hsm_forward(self):
+    def test_hsm_forward(self) -> None:
         cpu_device_option = caffe2_pb2.DeviceOption()
         grad_checker = gradient_checker.GradientChecker(
             0.01, 0.05, cpu_device_option, "default")
@@ -179,7 +179,7 @@ class TestHsm(hu.HypothesisTestCase):
     # TODO : convert to both cpu and gpu test when ready.
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_hsm_gradient(self, gc, dc):
+    def test_hsm_gradient(self, gc, dc) -> None:
         samples = 10
         dim_in = 5
         X = np.random.rand(samples, dim_in).astype(np.float32) - 0.5
@@ -207,7 +207,7 @@ class TestHsm(hu.HypothesisTestCase):
         for i in range(3):
             self.assertGradientChecks(gc, op, [X, w, b, labels], i, [0])
 
-    def test_huffman_tree_hierarchy(self):
+    def test_huffman_tree_hierarchy(self) -> None:
         workspace.GlobalInit(['caffe2'])
         labelSet = list(range(0, 6))
         counts = [1, 2, 3, 4, 5, 6]

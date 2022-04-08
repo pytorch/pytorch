@@ -35,12 +35,12 @@ class TestTransformations(tu.TestCase):
         net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
         return net
 
-    def _add_nnpack(self, net):
+    def _add_nnpack(self, net) -> None:
         transformer.AddNNPACK(net)
         assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
 
     def _fuse_nnpack_convrelu(self, net, expected_result_num_ops,
-    expected_activation_arg=True):
+    expected_activation_arg: bool=True) -> None:
         self._add_nnpack(net)
         transformer.FuseNNPACKConvRelu(net)
         self.assertEquals(tu.numOps(net), expected_result_num_ops)
@@ -54,35 +54,35 @@ class TestTransformations(tu.TestCase):
         else:
             assert not has_activation_arg
 
-    def test_transformer_AddNNPACK(self):
+    def test_transformer_AddNNPACK(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["Y2"])
         self._add_nnpack(net)
 
-    def test_transformer_FuseNNPACKConvRelu(self):
+    def test_transformer_FuseNNPACKConvRelu(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["Y2"])
         self._fuse_nnpack_convrelu(net, 1)
 
-    def test_noFuseNNPACKConvRelu(self):
+    def test_noFuseNNPACKConvRelu(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["Y2"])
         net.Relu(["Y"], ["Y3"])
         self._fuse_nnpack_convrelu(net, 3, expected_activation_arg=False)
 
-    def test_transformer_FuseNNPACKConvReluNoInplace(self):
+    def test_transformer_FuseNNPACKConvReluNoInplace(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["X"])
         self._fuse_nnpack_convrelu(net, 1)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
 
-    def test_transformer_FuseNNPACKConvReluInplaceRelu(self):
+    def test_transformer_FuseNNPACKConvReluInplaceRelu(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["Y"])
         self._fuse_nnpack_convrelu(net, 1)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
 
-    def test_transformer_FuseNNPACKConvReluPingPongNaming(self):
+    def test_transformer_FuseNNPACKConvReluPingPongNaming(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["X"])
         net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
@@ -90,7 +90,7 @@ class TestTransformations(tu.TestCase):
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
 
-    def test_transformer_FuseNNPACKConvReluFollowedByMultipleInputOp(self):
+    def test_transformer_FuseNNPACKConvReluFollowedByMultipleInputOp(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["Y2"])
         net.Conv(["Y2", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
@@ -99,7 +99,7 @@ class TestTransformations(tu.TestCase):
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
 
-    def test_transformer_FuseNNPACKConvReluInplaceFollowedByMultipleInputOp(self):
+    def test_transformer_FuseNNPACKConvReluInplaceFollowedByMultipleInputOp(self) -> None:
         net = self._base_test_net()
         net.Relu(["Y"], ["Y"])
         net.Conv(["Y", "w", "b"], ["Y2"], stride=1, pad=0, kernel=3, order="NCHW")
@@ -115,7 +115,7 @@ class TestTransformations(tu.TestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         epsilon=st.floats(min_value=1e-5, max_value=1e-2),
     )
-    def test_transformer_FuseConvBN(self, size, input_channels, seed, order, epsilon):
+    def test_transformer_FuseConvBN(self, size, input_channels, seed, order, epsilon) -> None:
         workspace.ResetWorkspace()
         net = core.Net("net")
         c = input_channels
@@ -167,7 +167,7 @@ class TestTransformations(tu.TestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         epsilon=st.floats(min_value=1e-5, max_value=1e-2),
     )
-    def test_transformer_FuseConvBNNoConvBias(self, size, input_channels, seed, order, epsilon):
+    def test_transformer_FuseConvBNNoConvBias(self, size, input_channels, seed, order, epsilon) -> None:
         workspace.ResetWorkspace()
         net = core.Net("net")
         c = input_channels
@@ -218,7 +218,7 @@ class TestTransformations(tu.TestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         epsilon=st.floats(min_value=1e-5, max_value=1e-2),
     )
-    def test_transformer_FuseConvBNNoConvBiasDuplicatedName(self, size, input_channels, seed, order, epsilon):
+    def test_transformer_FuseConvBNNoConvBiasDuplicatedName(self, size, input_channels, seed, order, epsilon) -> None:
         workspace.ResetWorkspace()
         net = core.Net("net")
         c = input_channels
@@ -277,7 +277,7 @@ class TestTransformations(tu.TestCase):
     )
     def test_transformer_FuseConv3DBN(
         self, size, input_channels, kt, kh, kw, seed, epsilon
-    ):
+    ) -> None:
         workspace.ResetWorkspace()
         net = core.Net("net")
         c = input_channels
@@ -320,14 +320,14 @@ class TestTransformations(tu.TestCase):
             atol=1e-04
         )
 
-    def test_converterDontEnforceUnusedInputs(self):
+    def test_converterDontEnforceUnusedInputs(self) -> None:
         net = core.Net("net")
         net.Relu(["X"], ["Y"])
         net.Proto().external_input.extend(["fake"])
         # This should now work
         transformer.AddNNPACK(net)  # just testing the converter
 
-    def test_converterDontEnforceUnusedOutputs(self):
+    def test_converterDontEnforceUnusedOutputs(self) -> None:
         net = core.Net("net")
         net.Relu(["X"], ["Y"])
         net.Proto().external_output.extend(["fake"])

@@ -36,7 +36,7 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         N=st.integers(1, 5), C=st.integers(1, 10), H=st.integers(1, 12),
         W=st.integers(1, 12), order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     @settings(deadline=10000)
-    def test_channel_stats_2d(self, N, C, H, W, order, gc, dc):
+    def test_channel_stats_2d(self, N, C, H, W, order, gc, dc) -> None:
         op = core.CreateOperator(
             "ChannelStats",
             ["X"],
@@ -62,7 +62,7 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         H=st.integers(1, 6), W=st.integers(1, 6),
         order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     @settings(deadline=10000)
-    def test_channel_stats_3d(self, N, C, D, H, W, order, gc, dc):
+    def test_channel_stats_3d(self, N, C, D, H, W, order, gc, dc) -> None:
         op = core.CreateOperator(
             "ChannelStats",
             ["X"],

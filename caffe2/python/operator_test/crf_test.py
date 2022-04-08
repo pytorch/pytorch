@@ -16,7 +16,7 @@ class TestCRFOp(hu.HypothesisTestCase):
     @given(num_tags=st.integers(2, 4),
            num_words=st.integers(2, 15))
     @settings(deadline=10000)
-    def test_crf_with_loss_op(self, num_tags, num_words):
+    def test_crf_with_loss_op(self, num_tags, num_words) -> None:
         model = ModelHelper(name='external')
         embeddings_dim = 200
         embeddings = np.random.randn(num_words, embeddings_dim).astype(np.float32)
@@ -60,7 +60,7 @@ class TestCRFOp(hu.HypothesisTestCase):
     @given(num_tags=st.integers(1, 4),
            num_words=st.integers(2, 4))
     @settings(deadline=10000)
-    def test_crf_gradient(self, num_tags, num_words):
+    def test_crf_gradient(self, num_tags, num_words) -> None:
         base_model = ModelHelper(name='base_model')
         transitions = np.random.randn(
             num_tags + 2, num_tags + 2

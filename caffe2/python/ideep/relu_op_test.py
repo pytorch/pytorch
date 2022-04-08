@@ -18,7 +18,7 @@ class ReluTest(hu.HypothesisTestCase):
            inplace=st.booleans(),
            **mu.gcs)
     @settings(deadline=1000)
-    def test_relu(self, X, inplace, gc, dc):
+    def test_relu(self, X: float, inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "Relu",
             ["X"],
@@ -26,6 +26,8 @@ class ReluTest(hu.HypothesisTestCase):
         )
         # go away from the origin point to avoid kink problems
         X += 0.02 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.02
 
         self.assertDeviceChecks(dc, op, [X], [0])
@@ -38,7 +40,7 @@ class ReluTest(hu.HypothesisTestCase):
            inplace=st.booleans(),
            **mu.gcs_cpu_ideep)
     @settings(max_examples=10, deadline=None)
-    def test_int8_relu(self, size, input_channels, batch_size, inplace, gc, dc):
+    def test_int8_relu(self, size, input_channels, batch_size, inplace, gc, dc) -> None:
         relu_fp32 = core.CreateOperator(
             "Relu",
             ["X"],
@@ -123,6 +125,7 @@ class ReluTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace(old_ws_name)
 
 if __name__ == "__main__":

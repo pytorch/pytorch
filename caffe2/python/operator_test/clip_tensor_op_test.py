@@ -21,7 +21,7 @@ class TestClipTensorByScalingOp(serial.SerializedTestCase):
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_clip_tensor_by_scaling(self, n, d, threshold, additional_threshold,
-                                    use_additional_threshold, inplace, gc, dc):
+                                    use_additional_threshold, inplace, gc, dc) -> None:
 
         tensor = np.random.rand(n, d).astype(np.float32)
         val = np.array(np.linalg.norm(tensor))

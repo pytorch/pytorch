@@ -18,7 +18,7 @@ class TestMathOps(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            exponent=st.floats(min_value=2.0, max_value=3.0),
            **hu.gcs)
-    def test_elementwise_power(self, X, exponent, gc, dc):
+    def test_elementwise_power(self, X, exponent, gc, dc) -> None:
         # negative integer raised with non-integer exponent is domain error
         X = np.abs(X)
         def powf(X):
@@ -39,7 +39,7 @@ class TestMathOps(serial.SerializedTestCase):
            exponent=st.floats(min_value=-3.0, max_value=3.0),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_sign(self, X, exponent, gc, dc):
+    def test_sign(self, X, exponent, gc, dc) -> None:
         def signf(X):
             return [np.sign(X)]
 

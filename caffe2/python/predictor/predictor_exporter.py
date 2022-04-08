@@ -15,7 +15,7 @@ from builtins import bytes
 import collections
 
 
-def get_predictor_exporter_helper(submodelNetName):
+def get_predictor_exporter_helper(submodelNetName) -> "PredictorExportMeta":
     """ constracting stub for the PredictorExportMeta
         Only used to construct names to subfields,
         such as calling to predict_net_name
@@ -197,15 +197,15 @@ def get_meta_net_def(predictor_export_meta, ws=None, db_type=None):
     return meta_net_def
 
 
-def set_model_info(meta_net_def, project_str, model_class_str, version):
+def set_model_info(meta_net_def, project_str: str, model_class_str: str, version: str) -> None:
     assert isinstance(meta_net_def, metanet_pb2.MetaNetDef)
     meta_net_def.modelInfo.project = project_str
     meta_net_def.modelInfo.modelClass = model_class_str
     meta_net_def.modelInfo.version = version
 
 
-def save_to_db(db_type, db_destination, predictor_export_meta, use_ideep=False,
-               *args, **kwargs):
+def save_to_db(db_type, db_destination, predictor_export_meta, use_ideep: bool=False,
+               *args, **kwargs) -> None:
     meta_net_def = get_meta_net_def(predictor_export_meta, db_type=db_type)
     device_type = caffe2_pb2.IDEEP if use_ideep else caffe2_pb2.CPU
     with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):

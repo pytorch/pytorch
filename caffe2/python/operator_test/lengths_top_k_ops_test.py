@@ -15,7 +15,7 @@ class TestLengthsTopKOps(serial.SerializedTestCase):
     @serial.given(N=st.integers(min_value=0, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            **hu.gcs_cpu_only)
-    def test_lengths_top_k_op(self, N, K, gc, dc):
+    def test_lengths_top_k_op(self, N, K: int, gc, dc) -> None:
         lens = np.random.randint(low=1, high=2 * K + 1, size=N).astype(np.int32)
         X = []
         for i in lens:
@@ -46,7 +46,7 @@ class TestLengthsTopKOps(serial.SerializedTestCase):
     @given(N=st.integers(min_value=0, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            **hu.gcs_cpu_only)
-    def test_lengths_top_k_empty_op(self, N, K, gc, dc):
+    def test_lengths_top_k_empty_op(self, N, K, gc, dc) -> None:
         lens = np.zeros((N, ), dtype=np.int32)
         X = np.array([], dtype=np.float32)
         op = core.CreateOperator("LengthsTopK", ["X", "Y"], ["values", "indices"], k=K)

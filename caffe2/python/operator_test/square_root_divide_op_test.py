@@ -58,7 +58,7 @@ def grad(output_grad, ref_outputs, inputs):
 class TestSquareRootDivide(serial.SerializedTestCase):
     @serial.given(data_and_scale=_data_and_scale(),
            **hu.gcs_cpu_only)
-    def test_square_root_divide(self, data_and_scale, gc, dc):
+    def test_square_root_divide(self, data_and_scale, gc, dc) -> None:
         self.assertReferenceChecks(
             device_option=gc,
             op=core.CreateOperator("SquareRootDivide",

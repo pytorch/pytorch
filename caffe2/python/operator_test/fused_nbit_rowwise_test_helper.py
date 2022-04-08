@@ -6,7 +6,7 @@ import numpy as np
 # Note we explicitly cast variables to np.float32 in a couple of places to avoid
 # the default casting in Python often resuling in double precision and to make
 # sure we're doing the same numerics as C++ code.
-def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
+def param_search_greedy(x, bit_rate, n_bins: int=200, ratio: float=0.16):
     xmin, xmax = np.min(x), np.max(x)
     stepsize = (xmax - xmin) / np.float32(n_bins)
     min_bins = np.float32(n_bins) * (np.float32(1) - np.float32(ratio))
@@ -42,7 +42,7 @@ def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
     return xmin, xmax
 
 
-def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
+def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias: bool=True):
     # affine transform to put Xq in [0,2**bit_rate - 1]
     # Xq = (2 ** bit_rate - 1) * (Xq - xmin) / data_range
     if fp16_scale_bias:

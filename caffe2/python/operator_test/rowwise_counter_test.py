@@ -22,7 +22,7 @@ def update_counter_ref(prev_iter, update_counter, indices, curr_iter, counter_ha
 
 
 class TestRowWiseCounter(hu.HypothesisTestCase):
-    def test_rowwise_counter(self):
+    def test_rowwise_counter(self) -> None:
         h = 8 * 20
         n = 5
         curr_iter = np.array([100], dtype=np.int64)

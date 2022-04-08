@@ -16,7 +16,7 @@ from caffe2.python.model_helper import ModelHelper
 from hypothesis import assume, given, settings
 
 
-def _cudnn_supports(dilation=False, nhwc=False, backward=False):
+def _cudnn_supports(dilation: bool=False, nhwc: bool=False, backward: bool=False) -> bool:
     """Return True if cuDNN supports this configuration."""
     v = workspace.GetCuDNNVersion()
     if backward:
@@ -92,7 +92,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias,
         gc,
         dc,
-    ):
+    ) -> None:
         # TODO: Group conv in NHWC not implemented for GPU yet.
         assume(group == 1 or order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         if group != 1 and order == "NHWC":
@@ -183,7 +183,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias,
         gc,
         dc,
-    ):
+    ) -> None:
         X = (
             np.random.rand(batch_size, size, size, input_channels).astype(np.float32)
             - 0.5
@@ -267,7 +267,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad,
         gc,
         dc,
-    ):
+    ) -> None:
         # TODO: Group conv in NHWC not implemented for GPU yet.
         assume(
             group == 1
@@ -374,7 +374,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad,
         gc,
         dc,
-    ):
+    ) -> None:
         # TODO: Group conv in NHWC not implemented for GPU yet.
         # TODO: Group 1D conv in NCHW not implemented for GPU yet.
         assume(
@@ -467,7 +467,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad,
         gc,
         dc,
-    ):
+    ) -> None:
         if hiputl.run_in_hip(gc, dc):
             # currently miopen only supports 2d conv
             assume(engine != "CUDNN")  # CUDNN is aliased to MIOPEN for HIP
@@ -535,7 +535,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad,
         gc,
         dc,
-    ):
+    ) -> None:
         # TODO: 3D conv in NHWC not implemented for GPU yet.
         assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         if order == "NHWC":
@@ -591,7 +591,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad,
         gc,
         dc,
-    ):
+    ) -> None:
         input_channels = 1
         output_channels = 1
         n = 3
@@ -680,7 +680,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias,
         gc,
         dc,
-    ):
+    ) -> None:
         assume(size >= dilation * (kernel - 1) + 1)
 
         X = (
@@ -762,7 +762,7 @@ class TestConvolution(serial.SerializedTestCase):
         **hu.gcs_no_hip
     )
     @settings(deadline=None)
-    def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
+    def test_convolution_sync(self, net_type, num_workers, engine, gc, dc) -> None:
         m = ModelHelper(name="test_model")
         n = 1
         d = 2
@@ -854,7 +854,7 @@ class TestConvolution(serial.SerializedTestCase):
                 np.sum(np.square(output)), 1763719461732352.0, rtol=1e-5
             )
 
-    def test_use_cudnn_engine_interactions(self):
+    def test_use_cudnn_engine_interactions(self) -> None:
         """Make sure the use_cudnn and engine kwargs work as expected."""
         for model_default in [None, True, False]:
             arg_scope = {}
@@ -911,9 +911,9 @@ class TestConvolution(serial.SerializedTestCase):
         self,
         op_type,
         N,
-        G,
-        DX,
-        DY,
+        G: int,
+        DX: int,
+        DY: int,
         H,
         W,
         use_bias,
@@ -923,7 +923,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_wgrad,
         gc,
         dc,
-    ):
+    ) -> None:
         if hiputl.run_in_hip(gc, dc):
             assume(order == "NCHW")
         if order == "NHWC":

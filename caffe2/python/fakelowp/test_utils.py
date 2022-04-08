@@ -6,7 +6,7 @@
 import sys
 import numpy as np
 
-def print_test_debug_info(testname, items_dict):
+def print_test_debug_info(testname, items_dict) -> None:
     filename = "debug_operator_onnxifi_" + testname + ".txt"
     np.set_printoptions(threshold=sys.maxsize)
     with open(filename, 'w') as f:
@@ -15,7 +15,7 @@ def print_test_debug_info(testname, items_dict):
             f.write("{}\n".format(key))
             f.write("{}\n".format(value))
 
-def print_net(net):
+def print_net(net) -> None:
     for i in net.external_input:
         print("Input: {}".format(i))
     for i in net.external_output:
@@ -27,7 +27,7 @@ def print_net(net):
         for y in op.output:
             print("  output: {}".format(y))
 
-def _sigmoid(x):
+def _sigmoid(x) -> float:
     return 1. / (1. + np.exp(np.float64(-x)))
 
 def _tanh(x):
@@ -52,7 +52,7 @@ def _acc_func(opname, x):
     else:
         return x
 
-def _get_ulp16(x):
+def _get_ulp16(x) -> float:
     abs_x = np.abs(x)
     mask = (abs_x > 2.**(-14))
     abs_x = mask * abs_x + (1 - mask) * 2.**(-14)

@@ -25,7 +25,7 @@ class MKLConcatTest(hu.HypothesisTestCase):
     )
     def test_mkl_concat(
         self, batch_size, channel_splits, height, width, gc, dc
-    ):
+    ) -> None:
         Xs = [
             np.random.rand(batch_size, channel,
                            height, width).astype(np.float32)

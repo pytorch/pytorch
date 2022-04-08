@@ -184,7 +184,7 @@ def complex_resnet():
 class MKLRewriteTest(hu.HypothesisTestCase):
     @given(gen=st.sampled_from([simple_relu, simple_fc,
                                 simple_mlp, simple_cnn]))
-    def test_mkl_simple_rewrite(self, gen):
+    def test_mkl_simple_rewrite(self, gen) -> None:
         cpu_model, (shape,) = gen()
         cpu_model = deterministic_io(cpu_model)
         mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
@@ -199,7 +199,7 @@ class MKLRewriteTest(hu.HypothesisTestCase):
         np.testing.assert_allclose(run(cpu_model), run(mkl_model),
                                    atol=1e-4, rtol=1e-4)
 
-    def test_mkl_resnet_rewrite(self):
+    def test_mkl_resnet_rewrite(self) -> None:
         cpu_model, (shape,) = complex_resnet()
         cpu_model = deterministic_io(cpu_model)
         mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
@@ -214,7 +214,7 @@ class MKLRewriteTest(hu.HypothesisTestCase):
         np.testing.assert_allclose(run(cpu_model), run(mkl_model),
                                    atol=1e-4, rtol=1e-4)
 
-    def test_mkl_multi_output_rewrite(self):
+    def test_mkl_multi_output_rewrite(self) -> None:
         cpu_model, shapes = double_matmul()
         cpu_model = deterministic_io(cpu_model)
         mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
@@ -235,7 +235,7 @@ class MKLRewriteTest(hu.HypothesisTestCase):
         np.testing.assert_allclose(run(cpu_model), run(mkl_model),
                                    atol=1e-4, rtol=1e-4)
 
-    def test_mkl_alexnet_rewrite(self):
+    def test_mkl_alexnet_rewrite(self) -> None:
         cpu_model, (shape,) = alexnet()
         cpu_model = deterministic_io(cpu_model)
         mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)

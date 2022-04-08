@@ -10,7 +10,7 @@ from caffe2.python.task import Task, final_output, WorkspaceType
 import unittest
 
 
-def example_loop():
+def example_loop() -> None:
     with Task():
         total = ops.Const(0)
         total_large = ops.Const(0)
@@ -67,10 +67,10 @@ def example_job():
 
 
 class TestNetPrinter(unittest.TestCase):
-    def test_print(self):
+    def test_print(self) -> None:
         self.assertTrue(len(net_printer.to_string(example_job())) > 0)
 
-    def test_valid_job(self):
+    def test_valid_job(self) -> None:
         job = example_job()
         with job:
             with Task():
@@ -79,7 +79,7 @@ class TestNetPrinter(unittest.TestCase):
         # net_printer.analyze(example_job())
         print(net_printer.to_string(example_job()))
 
-    def test_undefined_blob(self):
+    def test_undefined_blob(self) -> None:
         job = example_job()
         with job:
             with Task():
@@ -88,7 +88,7 @@ class TestNetPrinter(unittest.TestCase):
             net_printer.analyze(job)
         self.assertEqual("Blob undefined: a", str(e.exception))
 
-    def test_multiple_definition(self):
+    def test_multiple_definition(self) -> None:
         job = example_job()
         with job:
             with Task(workspace_type=WorkspaceType.GLOBAL):

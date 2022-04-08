@@ -23,7 +23,7 @@ class TestMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         **hu.gcs
     )
-    def test_matmul(self, M, K, N, trans_a, trans_b, gc, dc):
+    def test_matmul(self, M, K, N, trans_a, trans_b, gc, dc) -> None:
         X = np.random.rand(M, K).astype(np.float32) - 0.5
         if trans_a:
             X = X.transpose()
@@ -63,7 +63,7 @@ class TestMatMul(serial.SerializedTestCase):
     @settings(deadline=10000)
     def test_matmul_axis(
         self, M, K, N, axis_a, axis_b, trans_a, trans_b, gc, dc
-    ):
+    ) -> None:
         X = np.random.rand(M, K).astype(np.float32) - 0.5
         if trans_a:
             X = X.transpose()
@@ -137,7 +137,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         dtype=st.sampled_from([np.float32, np.float16]),
         **hu.gcs
     )
-    def test_batch_matmul(self, C, M, K, N, trans_a, trans_b, dtype, gc, dc):
+    def test_batch_matmul(self, C, M, K, N, trans_a, trans_b, dtype, gc, dc) -> None:
         if dtype == np.float16:
             # fp16 is only supported with CUDA/HIP
             assume(core.IsGPUDeviceType(gc.device_type))
@@ -194,7 +194,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         dc,
         trans_a=None,
         trans_b=None,
-    ):
+    ) -> None:
         if trans_a is not None and trans_b is not None:
             op = core.CreateOperator(
                 'BatchMatMul', ['X', 'Y'], 'out', trans_a=trans_a, trans_b=trans_b, broadcast=1
@@ -225,7 +225,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_numpy_batch_matmul(self, C_1, C_2, M, K, N, trans_a, trans_b, gc, dc):
+    def test_numpy_batch_matmul(self, C_1: int, C_2: int, M, K, N, trans_a, trans_b, gc, dc) -> None:
         dtype = np.float32
         batch_dims = np.random.randint(
             low=0,
@@ -247,7 +247,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         K=st.integers(min_value=1, max_value=10),
         **hu.gcs
     )
-    def test_numpy_batch_matmul_1d(self, K, gc, dc):
+    def test_numpy_batch_matmul_1d(self, K, gc, dc) -> None:
         dtype = np.float32
         X = np.random.rand(K).astype(dtype) - 0.5
         # TODO: test trans_a and trans_b
@@ -261,7 +261,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         N=st.integers(min_value=1, max_value=10),
         **hu.gcs
     )
-    def test_numpy_batch_matmul_1d_2d(self, K, N, gc, dc):
+    def test_numpy_batch_matmul_1d_2d(self, K, N, gc, dc) -> None:
         dtype = np.float32
         X = np.random.rand(K).astype(dtype) - 0.5
         # TODO: test trans_a and trans_b
@@ -275,7 +275,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         K=st.integers(min_value=1, max_value=10),
         **hu.gcs
     )
-    def test_numpy_batch_matmul_2d_1d(self, M, K, gc, dc):
+    def test_numpy_batch_matmul_2d_1d(self, M, K, gc, dc) -> None:
         dtype = np.float32
         X = np.random.rand(*[M, K]).astype(dtype) - 0.5
         # TODO: test trans_a and trans_b

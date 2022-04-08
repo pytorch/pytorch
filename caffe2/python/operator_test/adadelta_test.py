@@ -18,17 +18,18 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 class TestAdadelta(serial.SerializedTestCase):
     @staticmethod
     def ref_adadelta(param_in,
-                     mom_in,
+                     mom_in: float,
                      mom_delta_in,
-                     grad, lr,
+                     grad: float, lr,
                      epsilon,
-                     decay,
+                     decay: float,
                      using_fp16=False):
         param_in_f32 = param_in
         mom_in_f32 = mom_in
         mom_delta_in_f32 = mom_delta_in
         if(using_fp16):
             param_in_f32 = param_in.astype(np.float32)
+            # pyre-fixme[16]: `float` has no attribute `astype`.
             mom_in_f32 = mom_in.astype(np.float32)
             mom_delta_in_f32 = mom_delta_in.astype(np.float32)
 
@@ -54,7 +55,7 @@ class TestAdadelta(serial.SerializedTestCase):
                            allow_nan=False, allow_infinity=False),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_adadelta(self, inputs, lr, epsilon, decay, gc, dc):
+    def test_adadelta(self, inputs, lr, epsilon, decay, gc, dc) -> None:
         param, moment, moment_delta, grad = inputs
         moment = np.abs(moment)
         moment_delta = np.abs(moment_delta)
@@ -85,7 +86,7 @@ class TestAdadelta(serial.SerializedTestCase):
            decay=hu.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    def test_sparse_adadelta(self, inputs, lr, epsilon, decay, gc, dc):
+    def test_sparse_adadelta(self, inputs, lr, epsilon, decay, gc, dc) -> None:
         param, moment, moment_delta, grad = inputs
         moment = np.abs(moment)
         moment_delta = np.abs(moment_delta)
@@ -150,7 +151,7 @@ class TestAdadelta(serial.SerializedTestCase):
                              allow_nan=False, allow_infinity=False),
            **hu.gcs)
     @settings(deadline=None)
-    def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay, gc, dc):
+    def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay, gc, dc) -> None:
         param, moment, moment_delta = inputs
         moment = np.abs(moment)
         lr = np.array([lr], dtype=np.float32)

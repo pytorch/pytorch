@@ -29,7 +29,7 @@ class TestMarginLossL2rOps(hu.HypothesisTestCase):
         m=st.integers(1, 5),
         **hu.gcs_cpu_only
     )
-    def test_session_margin_loss(self, n, k, m, gc, dc):
+    def test_session_margin_loss(self, n, k, m, gc, dc) -> None:
         y = np.random.rand(n * m).astype(np.float32)
         r = np.random.randint(k, size=n * m).astype(np.float32)
         # m sessions of length n

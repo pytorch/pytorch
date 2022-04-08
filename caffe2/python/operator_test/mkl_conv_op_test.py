@@ -26,7 +26,7 @@ class MKLConvTest(hu.HypothesisTestCase):
     @settings(max_examples=2, deadline=100)
     def test_mkl_convolution(self, stride, pad, kernel, size,
                              input_channels, output_channels,
-                             batch_size, gc, dc):
+                             batch_size, gc, dc) -> None:
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"],

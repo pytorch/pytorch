@@ -31,7 +31,7 @@ class TestBatchMomentsOp(serial.SerializedTestCase):
     @serial.given(N=st.integers(1, 5), C=st.integers(1, 5),
             H=st.integers(1, 5), W=st.integers(1, 5),
             order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
-    def test_batch_moments_2d(self, N, C, H, W, order, gc, dc):
+    def test_batch_moments_2d(self, N, C, H, W, order, gc, dc) -> None:
         op = core.CreateOperator(
             "BatchMoments",
             ["X"],
@@ -63,7 +63,7 @@ class TestBatchMomentsOp(serial.SerializedTestCase):
            H=st.integers(1, 3), W=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     @settings(deadline=10000)
-    def test_batch_moments_3d(self, N, C, T, H, W, order, gc, dc):
+    def test_batch_moments_3d(self, N, C, T, H, W, order, gc, dc) -> None:
         op = core.CreateOperator(
             "BatchMoments",
             ["X"],

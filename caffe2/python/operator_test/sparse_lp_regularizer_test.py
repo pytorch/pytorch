@@ -15,7 +15,7 @@ import caffe2.python.hypothesis_test_util as hu
 class TestSparseLpNorm(hu.HypothesisTestCase):
 
     @staticmethod
-    def ref_lpnorm(param_in, p, reg_lambda):
+    def ref_lpnorm(param_in, p, reg_lambda: int):
         """Reference function that should be matched by the Caffe2 operator."""
         if p == 2.0:
             return param_in * (1 - reg_lambda)
@@ -34,7 +34,7 @@ class TestSparseLpNorm(hu.HypothesisTestCase):
            reg_lambda=st.floats(min_value=1e-4, max_value=1e-1),
            data_strategy=st.data(),
            **hu.gcs_cpu_only)
-    def test_sparse_lpnorm(self, inputs, p, reg_lambda, data_strategy, gc, dc):
+    def test_sparse_lpnorm(self, inputs, p, reg_lambda, data_strategy, gc, dc) -> None:
 
         param, = inputs
         param += 0.02 * np.sign(param)

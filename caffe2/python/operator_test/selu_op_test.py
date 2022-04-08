@@ -18,7 +18,7 @@ class TestSelu(serial.SerializedTestCase):
     @serial.given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
-    def test_selu_1(self, X, gc, dc, engine):
+    def test_selu_1(self, X, gc, dc, engine) -> None:
         alpha = 1.0
         scale = 2.0
         op = core.CreateOperator("Selu", ["X"], ["Y"],
@@ -34,7 +34,7 @@ class TestSelu(serial.SerializedTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
     @settings(deadline=10000)
-    def test_selu_2(self, X, gc, dc, engine):
+    def test_selu_2(self, X, gc, dc, engine) -> None:
         alpha = 1.6732
         scale = 1.0507
         op = core.CreateOperator("Selu", ["X"], ["Y"],
@@ -51,7 +51,7 @@ class TestSelu(serial.SerializedTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
     @settings(deadline=10000)
-    def test_selu_3(self, X, gc, dc, engine):
+    def test_selu_3(self, X, gc, dc, engine) -> None:
         alpha = 1.3
         scale = 1.1
         op = core.CreateOperator("Selu", ["X"], ["Y"],
@@ -67,7 +67,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
-    def test_selu_inplace(self, X, gc, dc, engine):
+    def test_selu_inplace(self, X, gc, dc, engine) -> None:
         alpha = 1.3
         scale = 1.1
         op = core.CreateOperator("Selu", ["X"], ["X"],
@@ -84,14 +84,16 @@ class TestSelu(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op2, [Y, dX], [0])
 
     @staticmethod
-    def fix0(X):
+    def fix0(X: float):
         # go away from the origin point to avoid kink problems
         X += 0.02 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.02
         return X
 
     @staticmethod
-    def selu_ref(x, scale, alpha):
+    def selu_ref(x: int, scale, alpha):
         ret = scale * ((x > 0) * x + (x <= 0) * (alpha * (np.exp(x) - 1)))
         return [ret]
 

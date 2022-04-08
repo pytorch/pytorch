@@ -15,7 +15,7 @@ import itertools as it
 
 class TestReduceOps(serial.SerializedTestCase):
     def run_reduce_op_test_impl(
-            self, op_name, X, axes, keepdims, ref_func, gc, dc, allow_broadcast_fastpath):
+            self, op_name, X, axes, keepdims, ref_func, gc, dc, allow_broadcast_fastpath: bool) -> None:
         extra_args = dict(allow_broadcast_fastpath=True) if allow_broadcast_fastpath else {}
         if axes is None:
             op = core.CreateOperator(
@@ -23,6 +23,7 @@ class TestReduceOps(serial.SerializedTestCase):
                 ["X"],
                 ["Y"],
                 keepdims=keepdims,
+                # pyre-fixme[6]: For 5th param expected `str` but got `bool`.
                 **extra_args,
             )
         else:
@@ -32,6 +33,7 @@ class TestReduceOps(serial.SerializedTestCase):
                 ["Y"],
                 axes=axes,
                 keepdims=keepdims,
+                # pyre-fixme[6]: For 6th param expected `str` but got `bool`.
                 **extra_args,
             )
 
@@ -46,7 +48,7 @@ class TestReduceOps(serial.SerializedTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     def run_reduce_op_test(
-            self, op_name, X, keepdims, num_axes, ref_func, gc, dc, allow_broadcast_fastpath=False):
+            self, op_name, X, keepdims, num_axes, ref_func, gc, dc, allow_broadcast_fastpath: bool=False) -> None:
         self.run_reduce_op_test_impl(
             op_name, X, None, keepdims, ref_func, gc, dc, allow_broadcast_fastpath)
 
@@ -64,7 +66,7 @@ class TestReduceOps(serial.SerializedTestCase):
         keepdims=st.booleans(),
         allow_broadcast_fastpath=st.booleans(),
         num_axes=st.integers(1, 3), **hu.gcs)
-    def test_reduce_min(self, X, keepdims, allow_broadcast_fastpath, num_axes, gc, dc):
+    def test_reduce_min(self, X, keepdims, allow_broadcast_fastpath, num_axes, gc, dc) -> None:
         X_dims = X.shape
         X_size = X.size
         X = np.arange(X_size, dtype=np.float32)
@@ -79,7 +81,7 @@ class TestReduceOps(serial.SerializedTestCase):
         keepdims=st.booleans(),
         allow_broadcast_fastpath=st.booleans(),
         num_axes=st.integers(1, 3), **hu.gcs)
-    def test_reduce_max(self, X, keepdims, allow_broadcast_fastpath, num_axes, gc, dc):
+    def test_reduce_max(self, X, keepdims, allow_broadcast_fastpath, num_axes, gc, dc) -> None:
         X_dims = X.shape
         X_size = X.size
         X = np.arange(X_size, dtype=np.float32)
@@ -94,7 +96,7 @@ class TestReduceOps(serial.SerializedTestCase):
            allow_broadcast_fastpath=st.booleans(),
            num_axes=st.integers(1, 3), **hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_sum(self, n, m, k, t, keepdims, allow_broadcast_fastpath, num_axes, gc, dc):
+    def test_reduce_sum(self, n, m, k, t, keepdims, allow_broadcast_fastpath, num_axes, gc, dc) -> None:
         X = np.random.randn(n, m, k, t).astype(np.float32)
         self.run_reduce_op_test(
             "ReduceSum", X, keepdims, num_axes, np.sum, gc, dc,
@@ -103,7 +105,7 @@ class TestReduceOps(serial.SerializedTestCase):
     @serial.given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
                   allow_broadcast_fastpath=st.booleans(),
                   num_axes=st.integers(1, 4), **hu.gcs)
-    def test_reduce_mean(self, X, keepdims, allow_broadcast_fastpath, num_axes, gc, dc):
+    def test_reduce_mean(self, X, keepdims, allow_broadcast_fastpath, num_axes, gc, dc) -> None:
         self.run_reduce_op_test(
             "ReduceMean", X, keepdims, num_axes, np.mean, gc, dc,
             allow_broadcast_fastpath=allow_broadcast_fastpath)
@@ -112,7 +114,7 @@ class TestReduceOps(serial.SerializedTestCase):
            keepdims=st.booleans(), allow_broadcast_fastpath=st.booleans(),
            num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_reduce_l1(self, n, m, k, keepdims, allow_broadcast_fastpath, num_axes, gc, dc):
+    def test_reduce_l1(self, n, m, k, keepdims, allow_broadcast_fastpath, num_axes, gc, dc) -> None:
         X = np.arange(n * m * k, dtype=np.float32) - 0.5
         np.random.shuffle(X)
         X = X.reshape((m, n, k))
@@ -123,7 +125,7 @@ class TestReduceOps(serial.SerializedTestCase):
     @serial.given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
                   keepdims=st.booleans(), allow_broadcast_fastpath=st.booleans(),
                   num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
-    def test_reduce_l2(self, n, m, k, keepdims, allow_broadcast_fastpath, num_axes, gc, dc):
+    def test_reduce_l2(self, n, m, k, keepdims, allow_broadcast_fastpath, num_axes, gc, dc) -> None:
         X = np.random.randn(n, m, k).astype(np.float32)
         self.run_reduce_op_test(
             "ReduceL2", X, keepdims, num_axes, getNorm(2), gc, dc,
@@ -143,7 +145,7 @@ def getNorm(p):
 
 
 class TestReduceFrontReductions(serial.SerializedTestCase):
-    def grad_variant_input_test(self, grad_op_name, X, ref, num_reduce_dim):
+    def grad_variant_input_test(self, grad_op_name, X, ref, num_reduce_dim) -> None:
         workspace.ResetWorkspace()
 
         Y = np.array(ref(X)[0]).astype(np.float32)
@@ -169,7 +171,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
         np.testing.assert_array_equal(dX, dX1)
 
     def max_op_test(
-            self, op_name, num_reduce_dim, gc, dc, in_data, in_names, ref_max):
+            self, op_name, num_reduce_dim, gc, dc, in_data, in_names, ref_max) -> None:
 
         op = core.CreateOperator(
             op_name,
@@ -205,7 +207,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, grad_op, grad_in_data, [0])
 
     def reduce_op_test(self, op_name, op_ref, in_data, in_names,
-                       num_reduce_dims, device):
+                       num_reduce_dims, device) -> None:
         op = core.CreateOperator(
             op_name,
             in_names,
@@ -225,7 +227,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_front_sum(self, num_reduce_dim, gc, dc):
+    def test_reduce_front_sum(self, num_reduce_dim, gc, dc) -> None:
         X = np.random.rand(7, 4, 3, 5).astype(np.float32)
 
         def ref_sum(X):
@@ -237,7 +239,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceFrontSumGradient", X, ref_sum, num_reduce_dim)
 
     @given(num_reduce_dim=st.integers(0, 4), seed=st.integers(0, 4), **hu.gcs)
-    def test_reduce_front_sum_empty_batch(self, num_reduce_dim, seed, gc, dc):
+    def test_reduce_front_sum_empty_batch(self, num_reduce_dim, seed, gc, dc) -> None:
         np.random.seed(seed)
         X = np.random.rand(0, 4, 3, 5).astype(np.float32)
 
@@ -272,7 +274,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=None)
-    def test_reduce_front_sum_with_length(self, dc, gc):
+    def test_reduce_front_sum_with_length(self, dc, gc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         batch_size = int(np.prod([2, 3, 4, 5][num_reduce_dim:]))
@@ -292,7 +294,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_front_mean(self, num_reduce_dim, gc, dc):
+    def test_reduce_front_mean(self, num_reduce_dim, gc, dc) -> None:
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
         def ref_mean(X):
@@ -305,7 +307,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_front_mean_with_length(self, dc, gc):
+    def test_reduce_front_mean_with_length(self, dc, gc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         batch_size = int(np.prod([2, 3, 4, 5][num_reduce_dim:]))
@@ -324,7 +326,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             num_reduce_dim, gc)
 
     @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
-    def test_reduce_front_max(self, num_reduce_dim, gc, dc):
+    def test_reduce_front_max(self, num_reduce_dim, gc, dc) -> None:
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
         def ref_frontmax(X):
@@ -334,7 +336,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceFrontMax", num_reduce_dim, gc, dc, [X], ["X"], ref_frontmax)
 
     @given(**hu.gcs)
-    def test_reduce_front_max_with_length(self, dc, gc):
+    def test_reduce_front_max_with_length(self, dc, gc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         batch_size = int(np.prod([2, 3, 4, 5][num_reduce_dim:]))
@@ -353,7 +355,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             ["X", "lengths"], ref_max)
 
     @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
-    def test_reduce_back_max(self, num_reduce_dim, gc, dc):
+    def test_reduce_back_max(self, num_reduce_dim: int, gc, dc) -> None:
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
         def ref_backmax(X):
@@ -363,7 +365,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceBackMax", num_reduce_dim, gc, dc, [X], ["X"], ref_backmax)
 
     @given(**hu.gcs)
-    def test_reduce_back_max_with_length(self, gc, dc):
+    def test_reduce_back_max_with_length(self, gc, dc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         batch_size = int(np.prod([2, 3, 4, 5][:4 - num_reduce_dim]))
@@ -383,7 +385,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_back_sum(self, dc, gc):
+    def test_reduce_back_sum(self, dc, gc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
@@ -397,7 +399,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_back_sum_with_length(self, dc, gc):
+    def test_reduce_back_sum_with_length(self, dc, gc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         batch_size = int(np.prod([2, 3, 4, 5][:4 - num_reduce_dim]))
@@ -417,7 +419,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     @settings(deadline=10000)
-    def test_reduce_back_mean(self, num_reduce_dim, dc, gc):
+    def test_reduce_back_mean(self, num_reduce_dim: int, dc, gc) -> None:
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
         def ref_mean(X):
@@ -430,7 +432,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=None)
-    def test_reduce_back_mean_with_length(self, dc, gc):
+    def test_reduce_back_mean_with_length(self, dc, gc) -> None:
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         batch_size = int(np.prod([2, 3, 4, 5][:4 - num_reduce_dim]))

@@ -18,28 +18,32 @@ _NAMESCOPE_SEPARATOR = '/'
 _threadlocal_scope = threading.local()
 
 
-def CurrentNameScope():
+def CurrentNameScope() -> str:
     global _threadlocal_scope
     if not hasattr(_threadlocal_scope, "namescope"):
+        # pyre-fixme[16]: `local` has no attribute `namescope`.
         _threadlocal_scope.namescope = ''
     return _threadlocal_scope.namescope
 
 
-def CurrentDeviceScope():
+def CurrentDeviceScope() -> None:
     global _threadlocal_scope
     if not hasattr(_threadlocal_scope, "devicescope"):
+        # pyre-fixme[16]: `local` has no attribute `devicescope`.
         _threadlocal_scope.devicescope = None
     return _threadlocal_scope.devicescope
 
 
 @contextlib.contextmanager
-def NameScope(prefix, reset=False):
+def NameScope(prefix, reset: bool=False):
     global _threadlocal_scope
-    assert isinstance(prefix, basestring) or prefix is None, \
-        "NameScope takes in a string as its argument."
+    # pyre-fixme[16]: Module `builtins` has no attribute `basestring`.
+    assert (isinstance(prefix, basestring) or prefix is None), (
+        "NameScope takes in a string as its argument.")
     old_scope = CurrentNameScope()
     prefix = prefix + _NAMESCOPE_SEPARATOR if prefix else ''
     if reset:
+        # pyre-fixme[16]: `local` has no attribute `namescope`.
         _threadlocal_scope.namescope = prefix
     else:
         _threadlocal_scope.namescope = _threadlocal_scope.namescope + prefix

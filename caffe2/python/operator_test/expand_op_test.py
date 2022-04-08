@@ -26,7 +26,7 @@ class TestExpandOp(serial.SerializedTestCase):
             shape[j] = k
         return shape
 
-    def _run_expand_op_test(self, X, shape, gc, dc):
+    def _run_expand_op_test(self, X, shape, gc, dc) -> None:
         shape = np.array(shape)
         op = core.CreateOperator(
             'Expand',
@@ -42,7 +42,7 @@ class TestExpandOp(serial.SerializedTestCase):
 
     @serial.given(X=hu.tensor(max_dim=5, dtype=np.float32),
            **hu.gcs)
-    def test_expand_rand_shape(self, X, gc, dc):
+    def test_expand_rand_shape(self, X, gc, dc) -> None:
         shape = self._rand_shape(X.shape, 5)
         self._run_expand_op_test(X, shape, gc, dc)
 
@@ -50,7 +50,7 @@ class TestExpandOp(serial.SerializedTestCase):
                              np.ones([3, 1, 3]),
                              np.ones([1, 3])]),
            **hu.gcs)
-    def test_expand_nonrand_shape1(self, X, gc, dc):
+    def test_expand_nonrand_shape1(self, X, gc, dc) -> None:
         self._run_expand_op_test(X, [3, 1, 3], gc, dc)
         self._run_expand_op_test(X, [3, -1, 3], gc, dc)
 
@@ -60,6 +60,6 @@ class TestExpandOp(serial.SerializedTestCase):
                              np.ones([4, 1, 2])]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_expand_nonrand_shape2(self, X, gc, dc):
+    def test_expand_nonrand_shape2(self, X, gc, dc) -> None:
         self._run_expand_op_test(X, [4, 1, 2, 2], gc, dc)
         self._run_expand_op_test(X, [4, -1, 2, 2], gc, dc)

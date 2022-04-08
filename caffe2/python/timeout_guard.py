@@ -105,7 +105,7 @@ def CompleteInTimeOrDie(timeout_secs):
     watcher.condition.release()
 
 
-def EuthanizeIfNecessary(timeout_secs=120):
+def EuthanizeIfNecessary(timeout_secs: int=120) -> None:
     '''
     Call this if you have problem with process getting stuck at shutdown.
     It will kill the process if it does not terminate in timeout_secs.

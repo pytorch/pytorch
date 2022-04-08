@@ -21,7 +21,7 @@ class MKLSqueezeTest(hu.HypothesisTestCase):
         inplace=st.booleans(),
         **mu.gcs
     )
-    def test_mkl_squeeze(self, squeeze_dims, inplace, gc, dc):
+    def test_mkl_squeeze(self, squeeze_dims, inplace, gc, dc) -> None:
         shape = [
             1 if dim in squeeze_dims else np.random.randint(1, 5)
             for dim in range(4)

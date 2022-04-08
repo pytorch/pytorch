@@ -13,7 +13,7 @@ import caffe2.python.hypothesis_test_util as hu
 class TestFlatten(hu.HypothesisTestCase):
     @given(X=hu.tensor(min_dim=2, max_dim=4),
            **hu.gcs)
-    def test_flatten(self, X, gc, dc):
+    def test_flatten(self, X, gc, dc) -> None:
         for axis in range(X.ndim + 1):
             op = core.CreateOperator(
                 "Flatten",
@@ -30,6 +30,7 @@ class TestFlatten(hu.HypothesisTestCase):
             self.assertReferenceChecks(gc, op, [X], flatten_ref)
 
         # Check over multiple devices
+        # pyre-fixme[61]: `op` is undefined, or not always defined.
         self.assertDeviceChecks(dc, op, [X], [0])
 
 

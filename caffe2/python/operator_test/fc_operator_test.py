@@ -14,7 +14,7 @@ import unittest
 
 
 class TestFcOperator(serial.SerializedTestCase):
-    def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
+    def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc) -> None:
         if dtype == np.float16:
             # fp16 only supported with CUDA/HIP
             assume(core.IsGPUDeviceType(gc.device_type))
@@ -88,7 +88,7 @@ class TestFcOperator(serial.SerializedTestCase):
            dtype=st.sampled_from([np.float32, np.float16]),
            engine=st.sampled_from(['', 'TENSORCORE']),
            **hu.gcs)
-    def test_fc(self, **kwargs):
+    def test_fc(self, **kwargs) -> None:
         self._run_test(transposed=False, **kwargs)
 
     @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
@@ -99,7 +99,7 @@ class TestFcOperator(serial.SerializedTestCase):
            dtype=st.sampled_from([np.float32, np.float16]),
            engine=st.sampled_from(['', 'TENSORCORE']),
            **hu.gcs)
-    def test_fc_transposed(self, **kwargs):
+    def test_fc_transposed(self, **kwargs) -> None:
         self._run_test(transposed=True, **kwargs)
 
 

@@ -29,7 +29,7 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
            batch_size=st.sampled_from([1]),
            num_workers=st.sampled_from([8]))
     @executor_test_settings
-    def test_executor(self, executor, model_name, batch_size, num_workers):
+    def test_executor(self, executor, model_name, batch_size, num_workers) -> None:
         model = build_conv_model(model_name, batch_size)
         model.Proto().num_workers = num_workers
 
@@ -52,7 +52,7 @@ class ExecutorGPUResNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
            num_workers=st.sampled_from([8]))
     @executor_test_settings
-    def test_executor(self, executor, num_workers):
+    def test_executor(self, executor, num_workers) -> None:
         model = build_resnet50_dataparallel_model(
             num_gpus=workspace.NumGpuDevices(), batch_size=8, epoch_size=8)
         model.Proto().num_workers = num_workers
@@ -69,7 +69,7 @@ class ExecutorGPUResNetTest(ExecutorTestBase):
 
 
 class ExecutorFailingOpTest(TestCase):
-    def test_failing_op(self):
+    def test_failing_op(self) -> None:
         def create_failing_net(throw_exception):
             net = core.Net("failing_net")
             if throw_exception:

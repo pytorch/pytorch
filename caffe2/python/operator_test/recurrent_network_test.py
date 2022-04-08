@@ -16,7 +16,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     @settings(deadline=10000)
-    def test_sum_mul(self, T, n, d):
+    def test_sum_mul(self, T, n, d) -> None:
         model = ModelHelper(name='external')
 
         input_blob, initial_input_blob = model.net.AddExternalInputs(
@@ -36,7 +36,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     @settings(deadline=10000)
-    def test_mul(self, T, n, d):
+    def test_mul(self, T, n, d) -> None:
         model = ModelHelper(name='external')
 
         input_blob, initial_input_blob = model.net.AddExternalInputs(
@@ -54,7 +54,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
-    def test_extract(self, T, n, d):
+    def test_extract(self, T, n, d) -> None:
         model = ModelHelper(name='external')
         workspace.ResetWorkspace()
 
@@ -104,7 +104,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
             )
 
     def simple_rnn(self, T, n, d, model, step, input_t, output_t, output_t_prev,
-                   input_blob, initial_input_blob):
+                   input_blob, initial_input_blob) -> None:
 
         input = np.random.randn(T, n, d).astype(np.float32)
         initial_input = np.random.randn(1, n, d).astype(np.float32)
@@ -230,7 +230,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
         conv_window,
         batch_size,
         state_size,
-    ):
+    ) -> None:
         '''
         This unit test demonstrates another ways of using RecurrentNetwork.
 

@@ -13,7 +13,7 @@ import numpy as np
 class TestLossOps(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(1, 8), **hu.gcs)
-    def test_averaged_loss(self, n, gc, dc):
+    def test_averaged_loss(self, n, gc, dc) -> None:
         X = np.random.rand(n).astype(np.float32)
 
         def avg_op(X):

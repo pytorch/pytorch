@@ -27,7 +27,7 @@ class TestLars(OptimizerTestBase, TestCase):
         self._skip_gpu = False
         return build_sgd(model, base_learning_rate=0.1, lars=0.5, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertFalse(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().shared:
@@ -40,7 +40,7 @@ class TestMomentumSgd(OptimizerTestBase, TestCase):
         self._skip_gpu = False
         return build_sgd(model, base_learning_rate=0.1, momentum=0.1, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().shared:
@@ -53,7 +53,7 @@ class TestSgd(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = False
         return build_sgd(model, base_learning_rate=0.1, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertFalse(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().shared:
@@ -70,7 +70,7 @@ class TestMultiPrecisionSgd(
             model, base_learning_rate=0.1, **kwargs
         )
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertFalse(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().shared:
@@ -78,7 +78,7 @@ class TestMultiPrecisionSgd(
             np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
-    def testGPUDense(self):
+    def testGPUDense(self) -> None:
         super(TestMultiPrecisionSgd, self).testGPUDense(core.DataType.FLOAT16)
 
 
@@ -95,7 +95,7 @@ class TestFtrl(OptimizerTestBase, TestCase):
             **kwargs
         )
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -118,7 +118,7 @@ class TestGFtrl(OptimizerTestBase, TestCase):
             **kwargs
         )
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -130,7 +130,7 @@ class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = False
         return build_adagrad(model, base_learning_rate=1.0, lars=0.5, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -144,7 +144,7 @@ class TestRowWiseAdagrad(OptimizerTestBase, TestCase):
             model, base_learning_rate=1.0, lars=0.5, rowWise=True, **kwargs
         )
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -168,7 +168,7 @@ class TestRowWiseAdagradWithCounter(OptimizerTestBase, TestCase):
             **kwargs
         )
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
@@ -192,7 +192,7 @@ class TestWngrad(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = True
         return build_wngrad(model, base_learning_rate=25.0, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -204,7 +204,7 @@ class TestStorm(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = True
         return build_storm(model, base_learning_rate=2.0, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -216,7 +216,7 @@ class TestAdadelta(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = False
         return build_adadelta(model, base_learning_rate=1.0, decay=0.995, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -228,7 +228,7 @@ class TestAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = False
         return build_adam(model, base_learning_rate=0.1, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
@@ -247,7 +247,7 @@ class TestSmartDecayAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         kwargs['beta1'] = 0.0
         return build_adam(model, base_learning_rate=0.1, use_smart_decay=True, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
@@ -263,7 +263,7 @@ class TestDecayAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = True
         return build_decay_adagrad(model, base_learning_rate=1.0, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
@@ -284,7 +284,7 @@ class TestSparseRAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         self._skip_gpu = True
         return build_adam(model, base_learning_rate=0.1, enableRAdam=True, **kwargs)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
@@ -305,7 +305,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
         self._skip_gpu = False
         return build_yellowfin(model, base_learning_rate=0.1)
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
@@ -512,7 +512,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                                  grad_coef,
                                  n_dim,
                                  n_iter,
-                                 gpu):
+                                 gpu) -> None:
         model0_res = model0(zero_debias, grad_coef, n_dim, n_iter, gpu)
         model1_res = model1(zero_debias, grad_coef, n_dim, n_iter, gpu)
         assert_equal(len(model0_res), len(model1_res))
@@ -530,7 +530,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                                 err_msg=err_msg)
 
     @unittest.skip("Results might vary too much. Only for individual use.")
-    def test_caffe2_cpu_vs_numpy(self):
+    def test_caffe2_cpu_vs_numpy(self) -> None:
         n_dim = 1000000
         n_iter = 50
         cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
@@ -553,7 +553,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
 
     @unittest.skip("Results might vary too much. Only for individual use.")
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    def test_caffe2_gpu_vs_numpy(self):
+    def test_caffe2_gpu_vs_numpy(self) -> None:
         n_dim = 1000000
         n_iter = 50
         gpu_device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
@@ -578,7 +578,7 @@ class TestRmsProp(OptimizerTestBase, LRModificationTestBase, TestCase):
             model, base_learning_rate=0.1, epsilon=0.1, **kwargs
         )
 
-    def check_optimizer(self, optimizer):
+    def check_optimizer(self, optimizer) -> None:
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -589,7 +589,7 @@ class TestRmsProp(OptimizerTestBase, LRModificationTestBase, TestCase):
 
 
 class TestMultiOptimizers(TestCase):
-    def test_multiple_optimizers(self):
+    def test_multiple_optimizers(self) -> None:
         from caffe2.python import brew, core, optimizer
         from caffe2.python.model_helper import ModelHelper
 
@@ -656,7 +656,7 @@ class TestMultiOptimizers(TestCase):
 
 class TestWeightDecay(TestCase):
 
-    def test_weight_decay(self):
+    def test_weight_decay(self) -> None:
         from caffe2.python import brew
         from caffe2.python.model_helper import ModelHelper
 
@@ -696,7 +696,7 @@ class TestWeightDecay(TestCase):
 
 class TestOptimizerContext(TestCase):
 
-    def test_optimizer_context(self):
+    def test_optimizer_context(self) -> None:
         from caffe2.python import brew, optimizer
         from caffe2.python.model_helper import ModelHelper
 

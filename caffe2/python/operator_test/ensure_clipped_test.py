@@ -16,7 +16,7 @@ class TestEnsureClipped(hu.HypothesisTestCase):
         indices=hu.arrays(dims=[5], elements=st.booleans()),
         **hu.gcs_cpu_only
     )
-    def test_ensure_clipped(self, X, in_place, sparse, indices, gc, dc):
+    def test_ensure_clipped(self, X, in_place, sparse, indices, gc, dc) -> None:
         if (not in_place) and sparse:
             return
         param = X.astype(np.float32)

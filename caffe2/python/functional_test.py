@@ -15,7 +15,7 @@ import numpy as np
 
 
 @st.composite
-def _tensor_splits(draw, add_axis=False):
+def _tensor_splits(draw, add_axis: bool=False):
     """Generates (axis, split_info, tensor_splits) tuples."""
     tensor = draw(hu.tensor(min_value=4))  # Each dim has at least 4 elements.
     axis = draw(st.integers(0, len(tensor.shape) - 1))
@@ -47,9 +47,12 @@ def _tensor_splits(draw, add_axis=False):
 
 class TestFunctional(hu.HypothesisTestCase):
     @given(X=hu.tensor(), engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    def test_relu(self, X, engine, gc, dc):
+    def test_relu(self, X: float, engine, gc, dc) -> None:
         X += 0.02 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.02
+        # pyre-fixme[16]: `_Functional` has no attribute `Relu`.
         output = Functional.Relu(X, device_option=gc)
         Y_l = output[0]
         Y_d = output["output_0"]
@@ -69,9 +72,10 @@ class TestFunctional(hu.HypothesisTestCase):
         )
 
     @given(tensor_splits=_tensor_splits(), **hu.gcs)
-    def test_concat(self, tensor_splits, gc, dc):
+    def test_concat(self, tensor_splits, gc, dc) -> None:
         # Input Size: 1 -> inf
         axis, _, splits = tensor_splits
+        # pyre-fixme[16]: `_Functional` has no attribute `Concat`.
         concat_result, split_info = Functional.Concat(*splits, axis=axis, device_option=gc)
 
         concat_result_ref = np.concatenate(splits, axis=axis)
@@ -90,7 +94,7 @@ class TestFunctional(hu.HypothesisTestCase):
         )
 
     @given(tensor_splits=_tensor_splits(), split_as_arg=st.booleans(), **hu.gcs)
-    def test_split(self, tensor_splits, split_as_arg, gc, dc):
+    def test_split(self, tensor_splits, split_as_arg: bool, gc, dc) -> None:
         # Output Size: 1 - inf
         axis, split_info, splits = tensor_splits
 
@@ -102,6 +106,7 @@ class TestFunctional(hu.HypothesisTestCase):
         else:
             input_tensors = [np.concatenate(splits, axis=axis), split_info]
             kwargs = dict(axis=axis, num_output=len(splits))
+        # pyre-fixme[16]: `_Functional` has no attribute `Split`.
         result = Functional.Split(*input_tensors, device_option=gc, **kwargs)
 
         def split_ref(input, split=split_info):

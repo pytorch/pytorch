@@ -10,7 +10,7 @@ import tempfile
 
 class TestCounterOps(TestCase):
 
-    def test_counter_ops(self):
+    def test_counter_ops(self) -> None:
         workspace.RunOperatorOnce(core.CreateOperator(
             'CreateCounter', [], ['c'], init_count=1))
 

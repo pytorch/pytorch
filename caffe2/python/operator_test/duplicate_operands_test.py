@@ -10,7 +10,7 @@ from caffe2.python.test_util import TestCase
 
 
 class TestDuplicateOperands(TestCase):
-    def test_duplicate_operands(self):
+    def test_duplicate_operands(self) -> None:
         net = core.Net('net')
         shape = (2, 4)
         x_in = np.random.uniform(size=shape)

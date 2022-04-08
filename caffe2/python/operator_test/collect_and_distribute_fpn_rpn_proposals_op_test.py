@@ -66,7 +66,7 @@ def collect(inputs, **args):
     return rois
 
 
-def distribute(rois, _, outputs, **args):
+def distribute(rois, _, outputs, **args) -> None:
     """To understand the output blob order see return value of
     roi_data.fast_rcnn.get_fast_rcnn_blob_names(is_training=False)
     """
@@ -193,7 +193,7 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
         rpn_post_nms_topN,
         roi_canonical_scale, roi_canonical_level,
         gc, dc
-    ):
+    ) -> None:
         input_names, inputs = self._create_input(
             proposal_count, rpn_min_level, rpn_num_levels, roi_canonical_scale
         )
@@ -254,7 +254,7 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
         rpn_post_nms_topN,
         roi_canonical_scale, roi_canonical_level,
         gc, dc
-    ):
+    ) -> None:
         input_names, inputs = self._create_input(
             proposal_count, rpn_min_level, rpn_num_levels, roi_canonical_scale
         )

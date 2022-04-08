@@ -18,7 +18,7 @@ testing. The document lives in
 OpSchema = workspace.C.OpSchema
 
 
-def gen_serialized_test_coverage(source_dir, output_dir):
+def gen_serialized_test_coverage(source_dir, output_dir) -> None:
     (covered, not_covered, schemaless) = gen_coverage_sets(source_dir)
     num_covered = len(covered)
     num_not_covered = len(not_covered)

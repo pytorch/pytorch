@@ -48,7 +48,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
         epsilon=st.floats(min_value=1e-5, max_value=1e-4),
         order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     def test_group_norm_2d(
-            self, N, G, D, H, W, epsilon, order, gc, dc):
+            self, N, G, D, H, W, epsilon, order, gc, dc) -> None:
         op = core.CreateOperator(
             "GroupNorm",
             ["X", "gamma", "beta"],
@@ -86,7 +86,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
            epsilon=st.floats(min_value=1e-5, max_value=1e-4),
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     def test_group_norm_3d(
-            self, N, G, D, T, H, W, epsilon, order, gc, dc):
+            self, N, G, D, T, H, W, epsilon, order, gc, dc) -> None:
         op = core.CreateOperator(
             "GroupNorm",
             ["X", "gamma", "beta"],
@@ -125,7 +125,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     @settings(deadline=10000)
     def test_group_norm_grad(
-            self, N, G, D, H, W, epsilon, order, gc, dc):
+            self, N, G, D, H, W, epsilon, order, gc, dc) -> None:
         op = core.CreateOperator(
             "GroupNorm",
             ["X", "gamma", "beta"],

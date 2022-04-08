@@ -23,7 +23,7 @@ class Depthwise3x3ConvOpsTest(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_convolution_gradients(self, pad, kernel, size,
                                    channels, batch_size,
-                                   order, engine, use_bias, gc, dc):
+                                   order, engine, use_bias, gc, dc) -> None:
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"] if use_bias else ["X", "w"],

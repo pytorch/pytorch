@@ -13,7 +13,7 @@ import numpy as np
 
 
 class ComputeStatisticsForBlobsTest(unittest.TestCase):
-    def test_compute_statistics_for_blobs(self):
+    def test_compute_statistics_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -46,7 +46,7 @@ class ComputeStatisticsForBlobsTest(unittest.TestCase):
 
         assert model.net.output_record() is None
 
-    def test_compute_statistics_for_blobs_modify_output_record(self):
+    def test_compute_statistics_for_blobs_modify_output_record(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)

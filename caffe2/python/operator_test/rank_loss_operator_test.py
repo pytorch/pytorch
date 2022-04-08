@@ -18,7 +18,7 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
                            elements=st.integers(min_value=0, max_value=1),
                            dtype=np.float32),
            **hu.gcs_cpu_only)
-    def test_pair_wise_loss_predictions(self, X, label, gc, dc):
+    def test_pair_wise_loss_predictions(self, X, label, gc, dc) -> None:
         workspace.FeedBlob('X', X)
         workspace.FeedBlob('label', label)
         new_label = np.array([label[1], label[0]])
@@ -55,7 +55,7 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
            dY=hu.arrays(dims=[1],
                         elements=hu.floats(min_value=1, max_value=10)),
            **hu.gcs_cpu_only)
-    def test_pair_wise_loss_gradient(self, X, label, dY, gc, dc):
+    def test_pair_wise_loss_gradient(self, X, label, dY, gc, dc) -> None:
         workspace.FeedBlob('X', X)
         workspace.FeedBlob('dY', dY)
         workspace.FeedBlob('label', label)
@@ -101,7 +101,7 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
             rtol=1e-2, atol=1e-2)
 
     @serial.given(n=st.integers(0, 10), k=st.integers(1, 5), **hu.gcs_cpu_only)
-    def test_pair_wise_loss_batch(self, n, k, gc, dc):
+    def test_pair_wise_loss_batch(self, n, k, gc, dc) -> None:
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         X = np.random.rand(sum(lengths)).astype(np.float32)
         label = np.random.randint(k, size=sum(lengths)).astype(np.float32)

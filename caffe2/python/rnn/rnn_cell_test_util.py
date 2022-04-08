@@ -9,20 +9,20 @@ from caffe2.python.model_helper import ModelHelper
 import numpy as np
 
 
-def sigmoid(x):
+def sigmoid(x) -> float:
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def tanh(x):
+def tanh(x: float) -> float:
     return 2.0 * sigmoid(2.0 * x) - 1
 
 
 def _prepare_rnn(
     t, n, dim_in, create_rnn, outputs_with_grads,
-    forget_bias, memory_optim=False,
-    forward_only=False, drop_states=False, T=None,
+    forget_bias, memory_optim: bool=False,
+    forward_only: bool=False, drop_states: bool=False, T=None,
     two_d_initial_states=None, dim_out=None,
-    num_states=2,
+    num_states: int=2,
     **kwargs
 ):
     if dim_out is None:

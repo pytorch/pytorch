@@ -25,7 +25,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
     @settings(deadline=1000)
     def test_spatialbn_test_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            inplace, gc, dc):
+            inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
@@ -66,7 +66,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            **mu.gcs)
     def test_spatialbn_train_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            inplace, gc, dc):
+            inplace, gc, dc) -> None:
         print("dc0: {}, dc1: {}".format(dc[0], dc[1]))
         op = core.CreateOperator(
             "SpatialBN",
@@ -104,7 +104,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
     @settings(deadline=None, max_examples=50)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            gc, dc):
+            gc, dc) -> None:
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],

@@ -32,7 +32,7 @@ class TestNGramOps(hu.HypothesisTestCase):
         max_in_vcb_val,
         gc,
         dc,
-    ):
+    ) -> None:
         np.random.seed(seed)
         col_num = max(int(D / 2), 1)
         col_ids = np.random.choice(D, col_num, False).astype(np.int32)

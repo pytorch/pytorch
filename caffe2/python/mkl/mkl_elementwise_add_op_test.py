@@ -26,7 +26,7 @@ class MKLElementwiseAddTest(hu.HypothesisTestCase):
                                  batch_size,
                                  inplace,
                                  gc,
-                                 dc):
+                                 dc) -> None:
         op = core.CreateOperator(
             "Add",
             ["X0", "X1"],

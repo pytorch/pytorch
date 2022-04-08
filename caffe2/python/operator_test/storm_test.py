@@ -24,7 +24,7 @@ class TestStorm(hu.HypothesisTestCase):
            beta=st.floats(min_value=0.1, max_value=10.0,
                           allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
-    def test_storm_dense(self, inputs, grad_sq_sum, lr, momentum, beta, gc, dc):
+    def test_storm_dense(self, inputs, grad_sq_sum, lr, momentum, beta, gc, dc) -> None:
         param, moment, grad = inputs
         grad_sq_sum = np.array([grad_sq_sum], dtype=np.float32)
         lr = np.array([lr], dtype=np.float32)
@@ -68,7 +68,7 @@ class TestStorm(hu.HypothesisTestCase):
                           allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
     def test_storm_sparse(self, inputs, grad_sq_sum, lr,
-                          momentum, beta, gc, dc):
+                          momentum, beta, gc, dc) -> None:
         param, moment, grad = inputs
         grad_sq_sum = np.array([grad_sq_sum], dtype=np.float32)
         lr = np.array([lr], dtype=np.float32)
@@ -125,7 +125,7 @@ class TestStorm(hu.HypothesisTestCase):
            data_strategy=st.data(),
            **hu.gcs_cpu_only)
     def test_storm_sparse_empty(self, inputs, grad_sq_sum, lr, momentum,
-                                beta, data_strategy, gc, dc):
+                                beta, data_strategy, gc, dc) -> None:
         param, moment = inputs
         grad_sq_sum = np.array([grad_sq_sum], dtype=np.float32)
         lr = np.array([lr], dtype=np.float32)

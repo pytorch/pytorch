@@ -69,7 +69,7 @@ def make_processor(processor, reader=None):
         return processor
 
 
-def normalize_processor_output(output):
+def normalize_processor_output(output) -> Output:
     """
     Allow for processors to return results in several formats.
     TODO(azzolini): simplify once all processors use NetBuilder API.
@@ -97,8 +97,8 @@ def normalize_processor_output(output):
 
 
 def pipe(
-        input, output=None, num_threads=1, processor=None, name=None,
-        capacity=None, group=None, num_runtime_threads=1):
+        input, output=None, num_threads: int=1, processor=None, name=None,
+        capacity=None, group=None, num_runtime_threads: int=1):
     """
     Given a Reader, Queue or DataStream in `input`, and optionally, a Writer,
     Queue or DataStream in `output`, creates a Task that, when run, will
@@ -150,8 +150,8 @@ def pipe(
 
 
 def pipe_and_output(
-        input, output=None, num_threads=1, processor=None, name=None,
-        capacity=None, group=None, num_runtime_threads=1, final_outputs=None):
+        input, output=None, num_threads: int=1, processor=None, name=None,
+        capacity=None, group=None, num_runtime_threads: int=1, final_outputs=None):
     """
     Similar to `pipe`, with the additional ability for the pipe Task to
     return output values to the `Session` once done.
@@ -312,7 +312,7 @@ def _static_threads_task(name, group, final_outputs, reader, num_threads,
 
 
 def _pipe_step(
-        input, output=None, num_threads=1, processor=None, name=None,
+        input, output=None, num_threads: int=1, processor=None, name=None,
         capacity=None, group=None, num_runtime_threads=None, final_outputs=None):
     """
     """

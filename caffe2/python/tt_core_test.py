@@ -11,7 +11,7 @@ import caffe2.python.hypothesis_test_util as hu
 
 
 class TestTTSVD(hu.HypothesisTestCase):
-    def test_full_tt_svd(self):
+    def test_full_tt_svd(self) -> None:
         size = 256
         np.random.seed(1234)
         X = np.expand_dims(

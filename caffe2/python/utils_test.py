@@ -9,7 +9,7 @@ import numpy as np
 
 
 class TestUtils(test_util.TestCase):
-    def testArgsToDict(self):
+    def testArgsToDict(self) -> None:
         args = [utils.MakeArgument("int1", 3),
                 utils.MakeArgument("float1", 4.0),
                 utils.MakeArgument("string1", "foo"),
@@ -26,7 +26,7 @@ class TestUtils(test_util.TestCase):
         self.assertEqual(dict_, expected, "dictionary version of arguments "
                          "doesn't match original")
 
-    def testBuildUniqueMutexIter(self):
+    def testBuildUniqueMutexIter(self) -> None:
         init_net = core.Net("init_net")
         net = core.Net("net")
         utils.BuildUniqueMutexIter(init_net, net)

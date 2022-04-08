@@ -17,7 +17,7 @@ import unittest
 class TestMomentumSGD(serial.SerializedTestCase):
     @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_momentum_sgd(self, n, nesterov, gc, dc):
+    def test_momentum_sgd(self, n, nesterov, gc, dc) -> None:
         param = np.random.rand(n).astype(np.float32)
         grad = np.random.rand(n).astype(np.float32)
         lr = np.random.rand(1).astype(np.float32)
@@ -81,8 +81,8 @@ class TestMomentumSGD(serial.SerializedTestCase):
     )
     @settings(deadline=10000)
     def test_sparse_momentum_sgd(
-        self, inputs, momentum, nesterov, lr, data_strategy, gc, dc
-    ):
+        self, inputs, momentum: int, nesterov, lr, data_strategy, gc, dc
+    ) -> None:
         w, grad, m = inputs
 
         # Create an indexing array containing values which index into grad
@@ -144,7 +144,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/31368")
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
-    def test_fp16momentum_sgd(self, n, nesterov, gc, dc):
+    def test_fp16momentum_sgd(self, n, nesterov, gc, dc) -> None:
         assume(core.IsGPUDeviceType(gc.device_type))
         gpuvers = workspace.GetDeviceProperties(0)["major"]
         if gc.device_type == caffe2_pb2.CUDA and gpuvers < 6:

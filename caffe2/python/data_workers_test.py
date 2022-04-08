@@ -37,7 +37,7 @@ def dummy_fetcher_rnn(fetcher_id, batch_size):
 
 class DataWorkersTest(unittest.TestCase):
 
-    def testNonParallelModel(self):
+    def testNonParallelModel(self) -> None:
         workspace.ResetWorkspace()
 
         model = model_helper.ModelHelper(name="test")
@@ -76,7 +76,7 @@ class DataWorkersTest(unittest.TestCase):
         coordinator.stop_coordinator("unittest")
         self.assertEqual(coordinator._coordinators, [])
 
-    def testRNNInput(self):
+    def testRNNInput(self) -> None:
         workspace.ResetWorkspace()
         model = model_helper.ModelHelper(name="rnn_test")
         old_seq_id = data_workers.global_coordinator._fetcher_id_seq
@@ -113,12 +113,13 @@ class DataWorkersTest(unittest.TestCase):
         self.assertTrue(coordinator.stop())
 
     @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/9064")
-    def testInputOrder(self):
+    def testInputOrder(self) -> None:
         #
         # Create two models (train and validation) with same input blobs
         # names and ensure that both will get the data in correct order
         #
         workspace.ResetWorkspace()
+        # pyre-fixme[16]: `DataWorkersTest` has no attribute `counters`.
         self.counters = {0: 0, 1: 1}
 
         def dummy_fetcher_rnn_ordered1(fetcher_id, batch_size):

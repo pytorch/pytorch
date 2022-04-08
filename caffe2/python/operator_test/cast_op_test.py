@@ -14,7 +14,7 @@ import numpy as np
 class TestCastOp(hu.HypothesisTestCase):
 
     @given(**hu.gcs)
-    def test_cast_int_float(self, gc, dc):
+    def test_cast_int_float(self, gc, dc) -> None:
         data = np.random.rand(5, 5).astype(np.int32)
         # from int to float
         op = core.CreateOperator('Cast', 'data', 'data_cast', to=1, from_type=2)
@@ -23,7 +23,7 @@ class TestCastOp(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [data], 0, [0])
 
     @given(**hu.gcs)
-    def test_cast_int_float_empty(self, gc, dc):
+    def test_cast_int_float_empty(self, gc, dc) -> None:
         data = np.random.rand(0).astype(np.int32)
         # from int to float
         op = core.CreateOperator('Cast', 'data', 'data_cast', to=1, from_type=2)
@@ -32,7 +32,7 @@ class TestCastOp(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [data], 0, [0])
 
     @given(data=hu.tensor(dtype=np.int32), **hu.gcs_cpu_only)
-    def test_cast_int_to_string(self, data, gc, dc):
+    def test_cast_int_to_string(self, data, gc, dc) -> None:
         op = core.CreateOperator(
             'Cast', 'data', 'data_cast', to=core.DataType.STRING)
 

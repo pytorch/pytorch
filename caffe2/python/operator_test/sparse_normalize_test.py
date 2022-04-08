@@ -27,7 +27,7 @@ class TestSparseNormalize(hu.HypothesisTestCase):
     )
     def test_sparse_normalize(
         self, inputs, use_max_norm, norm, data_strategy, use_fp16, gc, dc
-    ):
+    ) -> None:
         param, grad = inputs
         param += 0.02 * np.sign(param)
         param[param == 0.0] += 0.02

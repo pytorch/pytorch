@@ -9,12 +9,12 @@ import numpy as np
 import unittest
 
 
-def setThrowIfFpExceptions(enabled):
+def setThrowIfFpExceptions(enabled) -> None:
     core.GlobalInit(["caffe2", "--caffe2_operator_throw_if_fp_exceptions=%d" % (1 if enabled else 0)])
 
 
 class OperatorFPExceptionsTest(TestCase):
-    def test_fp_exception_divbyzero(self):
+    def test_fp_exception_divbyzero(self) -> None:
         # This test asserts the followings
         # - If flag caffe2_operator_throw_if_fp_exceptions is set,
         # floating point exceptions will be thrown

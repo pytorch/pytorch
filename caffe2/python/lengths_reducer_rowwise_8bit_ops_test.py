@@ -22,7 +22,7 @@ def FakeQuantization8BitsRowwise(data):
 
 class TestQuantize8bits(hu.HypothesisTestCase):
 
-    def test_quantize_op(self):
+    def test_quantize_op(self) -> None:
         op = core.CreateOperator(
             'FloatToRowwiseQuantized8Bits',
             ['input_data'],
@@ -41,7 +41,7 @@ class TestQuantize8bits(hu.HypothesisTestCase):
         np.testing.assert_array_almost_equal(
             result, ground_truth)
 
-    def test_quantize_tensor_with_const_row_op(self):
+    def test_quantize_tensor_with_const_row_op(self) -> None:
         op = core.CreateOperator(
             'FloatToRowwiseQuantized8Bits',
             ['input_data'],
@@ -61,7 +61,7 @@ class TestQuantize8bits(hu.HypothesisTestCase):
         np.testing.assert_array_almost_equal(
             result, ground_truth)
 
-    def test_SparseSegmentUint8(self):
+    def test_SparseSegmentUint8(self) -> None:
 
         init_net = core.Net("init")
         net = core.Net("bench")

@@ -15,7 +15,7 @@ class CopyTest(unittest.TestCase):
     def _get_deep_device(self):
         return caffe2_pb2.DeviceOption(device_type=caffe2_pb2.IDEEP)
 
-    def test_copy_to_ideep(self):
+    def test_copy_to_ideep(self) -> None:
         op = core.CreateOperator(
             "CopyCPUToIDEEP",
             ["X"],
@@ -32,7 +32,7 @@ class CopyTest(unittest.TestCase):
         X_ideep = workspace.FetchBlob("X_ideep")
         np.testing.assert_allclose(X, X_ideep)
 
-    def test_copy_to_ideep_zero_dim(self):
+    def test_copy_to_ideep_zero_dim(self) -> None:
         op = core.CreateOperator(
             "CopyCPUToIDEEP",
             ["X"],
@@ -47,7 +47,7 @@ class CopyTest(unittest.TestCase):
         X_ideep = workspace.FetchBlob("X_ideep")
         np.testing.assert_allclose(X, X_ideep)
 
-    def test_copy_from_ideep(self):
+    def test_copy_from_ideep(self) -> None:
         op = core.CreateOperator(
             "CopyIDEEPToCPU",
             ["X_ideep"],
@@ -64,7 +64,7 @@ class CopyTest(unittest.TestCase):
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
 
-    def test_copy_from_ideep_zero_dim(self):
+    def test_copy_from_ideep_zero_dim(self) -> None:
         op = core.CreateOperator(
             "CopyIDEEPToCPU",
             ["X_ideep"],
@@ -79,7 +79,7 @@ class CopyTest(unittest.TestCase):
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
 
-    def test_copy_from_ideep_fallthrough(self):
+    def test_copy_from_ideep_fallthrough(self) -> None:
         op = core.CreateOperator(
             "CopyIDEEPToCPU",
             ["X_ideep"],

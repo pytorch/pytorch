@@ -20,7 +20,7 @@ class TestClip(serial.SerializedTestCase):
            inplace=st.booleans(),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_clip(self, X, min_, max_, inplace, gc, dc):
+    def test_clip(self, X, min_, max_, inplace, gc, dc) -> None:
         # go away from the origin point to avoid kink problems
         if np.isscalar(X):
             X = np.array([], dtype=np.float32)
@@ -46,9 +46,10 @@ class TestClip(serial.SerializedTestCase):
     @given(X=hu.tensor(min_dim=0),
            inplace=st.booleans(),
            **hu.gcs)
-    def test_clip_default(self, X, inplace, gc, dc):
+    def test_clip_default(self, X: float, inplace, gc, dc) -> None:
         # go away from the origin point to avoid kink problems
         if np.isscalar(X):
+            # pyre-fixme[9]: X has type `float`; used as `ndarray`.
             X = np.array([], dtype=np.float32)
         else:
             X += 0.04 * np.sign(X)

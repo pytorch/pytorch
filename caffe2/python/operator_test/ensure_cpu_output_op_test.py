@@ -29,7 +29,7 @@ class TestEnsureCPUOutputOp(hu.HypothesisTestCase):
         input=hu.tensor(dtype=np.float32),
         dev_options=_dev_options()
     )
-    def test_ensure_cpu_output(self, input, dev_options):
+    def test_ensure_cpu_output(self, input, dev_options) -> None:
         op_dev, input_blob_dev = dev_options
         net = core.Net('test_net')
         data = net.GivenTensorFill(

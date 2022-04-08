@@ -14,7 +14,7 @@ class TestPackRNNSequenceOperator(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(0, 10), k=st.integers(1, 5),
            dim=st.integers(1, 5), **hu.gcs_cpu_only)
-    def test_pack_rnn_seqence(self, n, k, dim, gc, dc):
+    def test_pack_rnn_seqence(self, n, k, dim, gc, dc) -> None:
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         values = np.random.rand(sum(lengths), dim).astype(np.float32)
 
@@ -49,7 +49,7 @@ class TestPackRNNSequenceOperator(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(0, 10), k=st.integers(2, 5),
            dim=st.integers(1, 5), **hu.gcs_cpu_only)
-    def test_unpack_rnn_seqence(self, n, k, dim, gc, dc):
+    def test_unpack_rnn_seqence(self, n, k, dim, gc, dc) -> None:
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         T = max(lengths) if any(lengths) else 0
         N = lengths.size

@@ -17,7 +17,7 @@ from hypothesis import given, settings
 
 class TestRNNExecutor(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         super(TestRNNExecutor, self).setUp()
         self.batch_size = 8
         self.input_dim = 20
@@ -29,7 +29,8 @@ class TestRNNExecutor(test_util.TestCase):
         forward_only=st.booleans(),
         **hu.gcs)
     @settings(deadline=10000)
-    def test_lstm_with_attention_equal_simplenet(self, T, forward_only, gc, dc):
+    def test_lstm_with_attention_equal_simplenet(self, T, forward_only, gc, dc) -> None:
+        # pyre-fixme[16]: `TestRNNExecutor` has no attribute `Tseq`.
         self.Tseq = [T, T // 2, T // 2 + T // 4, T, T // 2 + 1]
         workspace.ResetWorkspace()
         with core.DeviceScope(gc):
@@ -111,7 +112,7 @@ class TestRNNExecutor(test_util.TestCase):
 
             self._compare(model, forward_only)
 
-    def init_lstm_model(self, T, num_layers, forward_only, use_loss=True):
+    def init_lstm_model(self, T, num_layers, forward_only, use_loss: bool=True):
         workspace.FeedBlob(
             "seq_lengths",
             np.array([T] * self.batch_size, dtype=np.int32)
@@ -166,7 +167,7 @@ class TestRNNExecutor(test_util.TestCase):
 
         return model, output
 
-    def test_empty_sequence(self):
+    def test_empty_sequence(self) -> None:
         '''
         Test the RNN executor's handling of empty input sequences
         '''
@@ -205,11 +206,12 @@ class TestRNNExecutor(test_util.TestCase):
         forward_only=st.booleans(),
         **hu.gcs)
     @settings(deadline=10000)
-    def test_lstm_equal_simplenet(self, num_layers, T, forward_only, gc, dc):
+    def test_lstm_equal_simplenet(self, num_layers, T, forward_only, gc, dc) -> None:
         '''
         Test that the RNN executor produces same results as
         the non-executor (i.e running step nets as sequence of simple nets).
         '''
+        # pyre-fixme[16]: `TestRNNExecutor` has no attribute `Tseq`.
         self.Tseq = [T, T // 2, T // 2 + T // 4, T, T // 2 + 1]
 
         workspace.ResetWorkspace()
@@ -220,7 +222,7 @@ class TestRNNExecutor(test_util.TestCase):
             model, _ = self.init_lstm_model(T, num_layers, forward_only)
             self._compare(model, forward_only)
 
-    def _compare(self, model, forward_only):
+    def _compare(self, model, forward_only) -> None:
         # Store list of blobs that exist in the beginning
         workspace.RunNetOnce(model.param_init_net)
         init_ws = {k: workspace.FetchBlob(k) for k in workspace.Blobs()}
@@ -236,6 +238,7 @@ class TestRNNExecutor(test_util.TestCase):
 
             np.random.seed(10022015)
             ws = {}
+            # pyre-fixme[16]: `TestRNNExecutor` has no attribute `Tseq`.
             for j in range(len(self.Tseq)):
                 input_shape = [self.Tseq[j], self.batch_size, self.input_dim]
                 workspace.FeedBlob(
@@ -284,7 +287,7 @@ class TestRNNExecutor(test_util.TestCase):
 
         self.assertFalse(mismatch)
 
-    def enable_rnn_executor(self, net, value, forward_only):
+    def enable_rnn_executor(self, net, value, forward_only) -> None:
         num_found = 0
         for op in net.Proto().op:
             if op.type.startswith("RecurrentNetwork"):

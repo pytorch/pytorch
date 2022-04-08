@@ -15,7 +15,7 @@ class TestFcOperator(hu.HypothesisTestCase):
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            use_length=st.booleans(), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_sparse_to_dense_mask(self, n, k, use_length, gc, dc):
+    def test_sparse_to_dense_mask(self, n, k, use_length, gc, dc) -> None:
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
         indices = np.random.randint(5, size=N)
@@ -48,7 +48,7 @@ class TestFcOperator(hu.HypothesisTestCase):
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            use_length=st.booleans(), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, gc, dc):
+    def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, gc, dc) -> None:
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
         int64_mask = 10000000000
@@ -82,7 +82,7 @@ class TestFcOperator(hu.HypothesisTestCase):
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            dim=st.integers(1, 3), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_sparse_to_dense_mask_high_dim(self, n, k, dim, gc, dc):
+    def test_sparse_to_dense_mask_high_dim(self, n, k, dim, gc, dc) -> None:
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
         indices = np.random.randint(5, size=N)

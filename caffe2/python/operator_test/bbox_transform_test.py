@@ -107,9 +107,9 @@ def bbox_transform_rotated(
     boxes,
     deltas,
     weights=(1.0, 1.0, 1.0, 1.0),
-    angle_bound_on=True,
-    angle_bound_lo=-90,
-    angle_bound_hi=90,
+    angle_bound_on: bool=True,
+    angle_bound_lo: int=-90,
+    angle_bound_hi: int=90,
 ):
     """
     Similar to bbox_transform but for rotated boxes with angle info.
@@ -154,7 +154,7 @@ def bbox_transform_rotated(
     return pred_boxes
 
 
-def clip_tiled_boxes_rotated(boxes, im_shape, angle_thresh=1.0):
+def clip_tiled_boxes_rotated(boxes, im_shape, angle_thresh: float=1.0):
     """
     Similar to clip_tiled_boxes but for rotated boxes with angle info.
     Only clips almost horizontal boxes within angle_thresh. The rest are
@@ -226,7 +226,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         clip_angle_thresh,
         gc,
         dc,
-    ):
+    ) -> None:
         """
         Test with all rois belonging to a single image per run.
         """
@@ -292,7 +292,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         clip_angle_thresh,
         gc,
         dc,
-    ):
+    ) -> None:
         """
         Test with rois for multiple images in a batch
         """

@@ -21,13 +21,13 @@ def _ConvBase(
     bias_init=None,
     WeightInitializer=None,
     BiasInitializer=None,
-    group=1,
+    group: int=1,
     transform_inputs=None,
-    use_cudnn=False,
-    order="NCHW",
-    cudnn_exhaustive_search=False,
+    use_cudnn: bool=False,
+    order: str="NCHW",
+    cudnn_exhaustive_search: bool=False,
     ws_nbytes_limit=None,
-    float16_compute=False,
+    float16_compute: bool=False,
     **kwargs
 ):
     kernels = []
@@ -96,6 +96,7 @@ def _ConvBase(
         )
 
     if use_bias:
+        # pyre-fixme[61]: `bias` is undefined, or not always defined.
         inputs = [blob_in, weight, bias]
     else:
         inputs = [blob_in, weight]
@@ -151,9 +152,9 @@ def conv_nd(
     bias_init=None,
     WeightInitializer=None,
     BiasInitializer=None,
-    group=1,
+    group: int=1,
     transform_inputs=None,
-    order="NCHW",
+    order: str="NCHW",
     **kwargs
 ):
     """N-dimensional convolution for inputs with NCHW storage order.
@@ -175,7 +176,7 @@ def conv(
     bias_init=None,
     WeightInitializer=None,
     BiasInitializer=None,
-    group=1,
+    group: int=1,
     transform_inputs=None,
     **kwargs
 ):
@@ -195,9 +196,9 @@ def conv_transpose(
     kernel,
     weight_init=None,
     bias_init=None,
-    use_cudnn=False,
-    order="NCHW",
-    cudnn_exhaustive_search=False,
+    use_cudnn: bool=False,
+    order: str="NCHW",
+    cudnn_exhaustive_search: bool=False,
     ws_nbytes_limit=None,
     **kwargs
 ):
@@ -253,7 +254,7 @@ def group_conv(
     kernel,
     weight_init=None,
     bias_init=None,
-    group=1,
+    group: int=1,
     **kwargs
 ):
     """Group Convolution.
@@ -275,10 +276,10 @@ def group_conv_deprecated(
     kernel,
     weight_init=None,
     bias_init=None,
-    group=1,
-    use_cudnn=False,
-    order="NCHW",
-    cudnn_exhaustive_search=False,
+    group: int=1,
+    use_cudnn: bool=False,
+    order: str="NCHW",
+    cudnn_exhaustive_search: bool=False,
     ws_nbytes_limit=None,
     **kwargs
 ):
@@ -337,8 +338,10 @@ def group_conv_deprecated(
                     blob_out + '_gconv_%d_b' % i, model.param_init_net)
         model.AddParameter(weight, ParameterTags.WEIGHT)
         if use_bias:
+            # pyre-fixme[61]: `bias` is undefined, or not always defined.
             model.AddParameter(bias, ParameterTags.BIAS)
         if use_bias:
+            # pyre-fixme[61]: `bias` is undefined, or not always defined.
             inputs = [weight, bias]
         else:
             inputs = [weight]

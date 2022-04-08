@@ -25,7 +25,7 @@ class TestAdamOps(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **mu.gcs)
-    def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+    def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -56,7 +56,7 @@ class TestAdamOps(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **mu.gcs)
-    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc) -> None:
         param, mom1, mom2, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)

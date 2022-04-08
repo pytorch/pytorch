@@ -29,7 +29,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
         return input_data, scale_data, bias_data
 
     def _get_op(self, device_option, store_mean, store_inv_stdev, epsilon,
-                order, inplace=False):
+                order, inplace: bool=False):
         outputs = ['output' if not inplace else "input"]
         if store_mean or store_inv_stdev:
             outputs += ['mean']
@@ -44,7 +44,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
             device_option=device_option)
         return op
 
-    def _feed_inputs(self, input_blobs, device_option):
+    def _feed_inputs(self, input_blobs, device_option) -> None:
         names = ['input', 'scale', 'bias']
         for name, blob in zip(names, input_blobs):
             self.ws.create_blob(name).feed(blob, device_option=device_option)
@@ -63,7 +63,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
     @settings(deadline=10000)
     def test_instance_norm_gradients(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
-            epsilon, seed):
+            epsilon, seed) -> None:
         np.random.seed(seed)
 
         # force store_inv_stdev if store_mean to match existing forward pass
@@ -114,7 +114,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            store_mean=st.booleans(),
            store_inv_stdev=st.booleans())
     def test_instance_norm_layout(self, gc, dc, N, C, H, W, store_mean,
-                                  store_inv_stdev, epsilon, seed):
+                                  store_inv_stdev, epsilon, seed) -> None:
         # force store_inv_stdev if store_mean to match existing forward pass
         # implementation
         store_inv_stdev |= store_mean
@@ -152,7 +152,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            inplace=st.booleans())
     def test_instance_norm_reference_check(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
-            epsilon, seed, inplace):
+            epsilon, seed, inplace) -> None:
         np.random.seed(seed)
 
         # force store_inv_stdev if store_mean to match existing forward pass
@@ -210,7 +210,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            store_inv_stdev=st.booleans())
     def test_instance_norm_device_check(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
-            epsilon, seed):
+            epsilon, seed) -> None:
         np.random.seed(seed)
 
         # force store_inv_stdev if store_mean to match existing forward pass
@@ -236,7 +236,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            epsilon=st.floats(1e-6, 1e-4),
            seed=st.integers(0, 1000))
     def test_instance_norm_model_helper(
-            self, N, C, H, W, order, epsilon, seed, is_test):
+            self, N, C, H, W, order, epsilon, seed, is_test) -> None:
         np.random.seed(seed)
         model = model_helper.ModelHelper(name="test_model")
         brew.instance_norm(

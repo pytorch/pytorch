@@ -19,7 +19,7 @@ class TestRMSNormOp(hu.HypothesisTestCase):
         **hu.gcs,
     )
     @settings(deadline=None)
-    def test_rms_norm(self, M, N, eps, dtype, gc, dc):
+    def test_rms_norm(self, M, N, eps, dtype, gc, dc) -> None:
         X = (np.random.randn(M, N) * 2.0 + 1.0).astype(dtype)
         gamma = np.random.randn(N).astype(dtype)
         beta = np.random.randn(N).astype(dtype)

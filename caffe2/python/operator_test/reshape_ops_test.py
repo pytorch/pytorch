@@ -11,14 +11,14 @@ from caffe2.proto import caffe2_pb2
 
 
 class TestLengthsToShapeOps(TestCase):
-    def test_lengths_to_shape_ops(self):
+    def test_lengths_to_shape_ops(self) -> None:
         workspace.FeedBlob('l', np.array([200, 200, 200], dtype=np.int32))
         workspace.RunOperatorOnce(core.CreateOperator(
             'LengthsToShape', ['l'], ['s']))
         workspace.FeedBlob('res', np.array([3, 200], dtype=np.int32))
         assert_array_equal(workspace.FetchBlob('s'), workspace.FetchBlob('res'))
 
-    def test_reshape_ops(self):
+    def test_reshape_ops(self) -> None:
         workspace.FeedBlob('res', np.array([[0, 0, 0, 0]], dtype=np.float32))
         workspace.FeedBlob('shape', np.array([1, 4], dtype=np.int32))
         workspace.FeedBlob('input', np.zeros((2, 2), dtype=np.float32))
@@ -27,20 +27,20 @@ class TestLengthsToShapeOps(TestCase):
         assert_array_equal(workspace.FetchBlob('output'),
                            workspace.FetchBlob('res'))
 
-    def test_basic_reshape(self):
+    def test_basic_reshape(self) -> None:
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(2, 4))
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False)
 
-    def test_missing_dim(self):
+    def test_missing_dim(self) -> None:
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(-1, 8))
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(-1, 8), arg_shape=False)
 
-    def test_in_place(self):
+    def test_in_place(self) -> None:
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(-1, 8), in_place=True)
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(-1, 8),
                      in_place=True, arg_shape=False)
 
-    def test_zero_dim(self):
+    def test_zero_dim(self) -> None:
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
                      expected_shape=(4, 2, 1))
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
@@ -52,7 +52,7 @@ class TestLengthsToShapeOps(TestCase):
         _test_reshape_output_and_gradient(old_shape=(0, 0), new_shape=(0, 0, 0),
                      expected_shape=(0, 0, 0), arg_shape=False)
 
-    def test_zero_dim_and_missing_dim(self):
+    def test_zero_dim_and_missing_dim(self) -> None:
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
                      expected_shape=(4, 2, 1))
         _test_reshape_output_and_gradient(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
@@ -70,7 +70,7 @@ class TestLengthsToShapeOps(TestCase):
             arg_shape=False
         )
 
-    def test_backprop(self):
+    def test_backprop(self) -> None:
         old_shape = (4, 2, 1)
         new_shape = (1, 8)
         X = np.random.rand(*old_shape).astype(np.float32)
@@ -100,7 +100,7 @@ class TestLengthsToShapeOps(TestCase):
         # Check the gradient
         np.testing.assert_allclose(X_grad, Y.reshape(old_shape), rtol=1e-5)
 
-    def test_input_shape_changes(self):
+    def test_input_shape_changes(self) -> None:
         workspace.FeedBlob(
             'input_blob',
             np.array(np.random.rand(10, 20, 10), dtype=np.float32))
@@ -115,7 +115,7 @@ class TestLengthsToShapeOps(TestCase):
             np.array(np.random.rand(10, 40, 10), dtype=np.float32))
         workspace.RunNet(net)
 
-    def test_nonempty_tensor_gradient(self):
+    def test_nonempty_tensor_gradient(self) -> None:
         old_shape = [4, 2]
         new_shape = [1, 2, -1]
         expected_new_shape = [1, 2, 4]
@@ -126,7 +126,7 @@ class TestLengthsToShapeOps(TestCase):
             expected_gradient=np.ones(shape=old_shape)
         )
 
-    def test_empty_tensor(self):
+    def test_empty_tensor(self) -> None:
         old_shape = [4, 0]
         new_shape = [1, -1]
         expected_new_shape = [1, 0]
@@ -137,7 +137,7 @@ class TestLengthsToShapeOps(TestCase):
             expected_gradient=np.empty(shape=old_shape)
         )
 
-    def test_one_dim_empty_tensor_gradient(self):
+    def test_one_dim_empty_tensor_gradient(self) -> None:
         old_shape = (0,)
         new_shape = [1, -1]
         expected_new_shape = [1, 0]
@@ -148,13 +148,13 @@ class TestLengthsToShapeOps(TestCase):
             expected_gradient=np.empty(shape=old_shape)
         )
 
-    def test_one_dim_and_empty_tensor(self):
+    def test_one_dim_and_empty_tensor(self) -> None:
         old_shape = (0,)
         new_shape = [0, -1]
         expected_new_shape = [0, 0]
         _test_reshape_output_and_gradient(old_shape=old_shape, new_shape=new_shape, expected_shape=expected_new_shape)
 
-    def test_scalar_to_tensor(self):
+    def test_scalar_to_tensor(self) -> None:
         old_shape = ()
         new_shape = [1, -1]
         expected_new_shape = [1, 1]
@@ -165,10 +165,10 @@ def _test_reshape_output_and_gradient(
     old_shape,
     new_shape,
     expected_shape=None,
-    arg_shape=True,
-    in_place=False,
+    arg_shape: bool=True,
+    in_place: bool=False,
     expected_gradient=None
-):
+) -> None:
     devices = [core.DeviceOption(caffe2_pb2.CPU, 0)]
     if workspace.NumGpuDevices() > 0:
         devices.append(core.DeviceOption(workspace.GpuDeviceType, 0))

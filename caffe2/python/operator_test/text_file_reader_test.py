@@ -11,7 +11,7 @@ import numpy as np
 
 
 class TestTextFileReader(TestCase):
-    def test_text_file_reader(self):
+    def test_text_file_reader(self) -> None:
         schema = Struct(
             ('field1', Scalar(dtype=str)),
             ('field2', Scalar(dtype=str)),

@@ -25,7 +25,7 @@ class LeakyReluTest(hu.HypothesisTestCase):
 
         return input_data,
 
-    def _get_op(self, device_option, alpha, order, inplace=False):
+    def _get_op(self, device_option, alpha, order, inplace: bool=False):
         outputs = ['output' if not inplace else "input"]
         op = core.CreateOperator(
             'LeakyRelu',
@@ -35,7 +35,7 @@ class LeakyReluTest(hu.HypothesisTestCase):
             device_option=device_option)
         return op
 
-    def _feed_inputs(self, input_blobs, device_option):
+    def _feed_inputs(self, input_blobs, device_option) -> None:
         names = ['input', 'scale', 'bias']
         for name, blob in zip(names, input_blobs):
             self.ws.create_blob(name).feed(blob, device_option=device_option)
@@ -48,7 +48,7 @@ class LeakyReluTest(hu.HypothesisTestCase):
            seed=st.integers(0, 1000),
            **mu.gcs)
     @settings(deadline=1000)
-    def test_leaky_relu_gradients(self, gc, dc, N, C, H, W, alpha, seed):
+    def test_leaky_relu_gradients(self, gc, dc, N, C, H, W, alpha, seed) -> None:
         np.random.seed(seed)
 
         op = self._get_op(
@@ -66,7 +66,7 @@ class LeakyReluTest(hu.HypothesisTestCase):
            W=st.integers(7, 10),
            alpha=st.floats(0, 1),
            seed=st.integers(0, 1000))
-    def test_leaky_relu_model_helper_helper(self, N, C, H, W, alpha, seed):
+    def test_leaky_relu_model_helper_helper(self, N, C, H, W, alpha, seed) -> None:
         np.random.seed(seed)
         order = 'NCHW'
         arg_scope = {'order': order}

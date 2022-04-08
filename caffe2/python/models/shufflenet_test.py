@@ -15,7 +15,7 @@ import caffe2.python.models.imagenet_trainer_test_utils as utils
 class ShufflenetMemongerTest(hu.HypothesisTestCase):
     @given(with_shapes=st.booleans(), **hu.gcs_cpu_only)
     @settings(max_examples=2, deadline=None)
-    def test_shufflenet_shared_grads(self, with_shapes, gc, dc):
+    def test_shufflenet_shared_grads(self, with_shapes, gc, dc) -> None:
         results = utils.test_shared_grads(
             with_shapes,
             shufflenet.create_shufflenet,
@@ -26,7 +26,7 @@ class ShufflenetMemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(results[1][0], results[1][1])
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
-    def test_shufflenet_forward_only(self):
+    def test_shufflenet_forward_only(self) -> None:
         results = utils.test_forward_only(
             shufflenet.create_shufflenet,
             'gpu_0/last_out_L1000'
@@ -35,7 +35,7 @@ class ShufflenetMemongerTest(hu.HypothesisTestCase):
         self.assertTrue(results[1] < 10 and results[1] > 0)
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
-    def test_shufflenet_forward_only_fast_simplenet(self):
+    def test_shufflenet_forward_only_fast_simplenet(self) -> None:
         '''
         Test C++ memonger that is only for simple nets
         '''

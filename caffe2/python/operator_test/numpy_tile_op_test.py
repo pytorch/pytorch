@@ -19,7 +19,7 @@ class TestNumpyTile(serial.SerializedTestCase):
            seed=st.integers(min_value=0, max_value=65536),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_numpy_tile(self, ndim, seed, gc, dc):
+    def test_numpy_tile(self, ndim, seed, gc, dc) -> None:
         np.random.seed(seed)
 
         input_dims = np.random.randint(1, 4, size=ndim)
@@ -42,7 +42,7 @@ class TestNumpyTile(serial.SerializedTestCase):
            seed=st.integers(min_value=0, max_value=65536),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_numpy_tile_zero_dim(self, ndim, seed, gc, dc):
+    def test_numpy_tile_zero_dim(self, ndim, seed, gc, dc) -> None:
         np.random.seed(seed)
 
         input_dims = np.random.randint(0, 4, size=ndim)

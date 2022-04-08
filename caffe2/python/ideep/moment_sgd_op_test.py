@@ -16,7 +16,7 @@ import caffe2.python.ideep_test_util as mu
 class TestMomentumSGDUpdateOps(hu.HypothesisTestCase):
     @given(n=st.integers(4, 8), nesterov=st.booleans(),
            **mu.gcs)
-    def test_MomentumSGDUpdate(self, n, nesterov, gc, dc):
+    def test_MomentumSGDUpdate(self, n, nesterov, gc, dc) -> None:
         param = np.random.rand(n).astype(np.float32)
         grad = np.random.rand(n).astype(np.float32)
         lr = np.random.rand(1).astype(np.float32)

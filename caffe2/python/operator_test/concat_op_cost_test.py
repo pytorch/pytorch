@@ -6,7 +6,7 @@ from caffe2.python.test_util import TestCase
 
 
 class TestConcatOpCost(TestCase):
-    def test_columnwise_concat(self):
+    def test_columnwise_concat(self) -> None:
         def _test_columnwise_concat_for_type(dtype):
             workspace.ResetWorkspace()
             workspace.FeedBlob("input_1", np.array([[1, 2, 3], [4, 5, 6]], dtype=dtype))
@@ -41,7 +41,7 @@ class TestConcatOpCost(TestCase):
             for t in [np.int64, np.float, np.half, np.int8]
         ]
 
-    def test_split_then_concat(self):
+    def test_split_then_concat(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         workspace.FeedBlob("split", np.array([1, 1, 1], dtype=np.int32))
@@ -70,6 +70,7 @@ class TestConcatOpCost(TestCase):
         split_cost = workspace.GetOperatorCost(split_op, split_op.input)
         self.assertTupleEqual(
             split_cost,
+            # pyre-fixme[19]: Expected 1 positional argument.
             namedtuple("expected_cost", ["flops", "bytes_written", "bytes_read"])(
                 0, 24, 36
             ),
@@ -78,6 +79,7 @@ class TestConcatOpCost(TestCase):
         concat_cost = workspace.GetOperatorCost(concat_op, concat_op.input)
         self.assertTupleEqual(
             concat_cost,
+            # pyre-fixme[19]: Expected 1 positional argument.
             namedtuple("expected_cost", ["flops", "bytes_written", "bytes_read"])(
                 0, 36, 24
             ),

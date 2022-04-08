@@ -12,13 +12,13 @@ from caffe2.python import workspace, core, model_helper, brew, test_util
 
 class CopyOpsTest(test_util.TestCase):
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         # Reset workspace after each test
         # Otherwise, the multi-GPU test will use previously created tensors,
         #   which may have been placed on the wrong device
         workspace.ResetWorkspace()
 
-    def run_test_copy_gradient(self, device_opt):
+    def run_test_copy_gradient(self, device_opt) -> None:
         model = model_helper.ModelHelper(name="copy_test")
         with core.DeviceScope(device_opt):
             x = model.net.AddExternalInputs("x")
@@ -37,15 +37,15 @@ class CopyOpsTest(test_util.TestCase):
                 workspace.FetchBlob(gradient_map[y]),
             ))
 
-    def test_copy_gradient_cpu(self):
+    def test_copy_gradient_cpu(self) -> None:
         self.run_test_copy_gradient(core.DeviceOption(caffe2_pb2.CPU, 0))
 
     @unittest.skipIf(workspace.NumGpuDevices() < 1, "Need at least 1 GPU.")
-    def test_copy_gradient_gpu(self):
+    def test_copy_gradient_gpu(self) -> None:
         self.run_test_copy_gradient(core.DeviceOption(workspace.GpuDeviceType, 0))
 
     @unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPU.")
-    def test_copy_gradient_multiple_gpus(self):
+    def test_copy_gradient_multiple_gpus(self) -> None:
         model = model_helper.ModelHelper(name="copy_test")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
@@ -88,7 +88,7 @@ class CopyOpsTest(test_util.TestCase):
         )
 
     @unittest.skipIf(workspace.NumGpuDevices() < 1, "Need at least 1 GPU.")
-    def test_cpu2gpu_gpu2cpu_sparse_gradients(self):
+    def test_cpu2gpu_gpu2cpu_sparse_gradients(self) -> None:
         model = model_helper.ModelHelper(name="copy_test")
         v = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
         indices = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
@@ -113,7 +113,7 @@ class CopyOpsTest(test_util.TestCase):
         self.assertTrue(isinstance(gradient_map['v'], core.GradientSlice))
 
     @unittest.skipIf(workspace.NumGpuDevices() < 1, "Need at least 1 GPU.")
-    def test_cpu2gpu_gpu2cpu_gradients(self):
+    def test_cpu2gpu_gpu2cpu_gradients(self) -> None:
         model = model_helper.ModelHelper(name="copy_test")
 
         batch = 32

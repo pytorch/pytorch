@@ -13,24 +13,28 @@ import numpy as np
 
 
 class BrewTest(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
 
         def myhelper(model, val=-1):
             return val
 
+        # pyre-fixme[16]: Module `brew` has no attribute `has_helper`.
         if not brew.has_helper(myhelper):
+            # pyre-fixme[16]: Module `brew` has no attribute `Register`.
             brew.Register(myhelper)
         self.myhelper = myhelper
 
         def myhelper2(model, val=-1):
             return val
 
+        # pyre-fixme[16]: Module `brew` has no attribute `has_helper`.
         if not brew.has_helper(myhelper2):
+            # pyre-fixme[16]: Module `brew` has no attribute `Register`.
             brew.Register(myhelper2)
         self.myhelper2 = myhelper2
         self.model = ModelHelper(name="test_model")
 
-    def test_dropout(self):
+    def test_dropout(self) -> None:
         p = 0.2
         X = np.ones((100, 100)).astype(np.float32) - p
         workspace.FeedBlob("x", X)
@@ -41,7 +45,7 @@ class BrewTest(unittest.TestCase):
         out = workspace.FetchBlob("out")
         self.assertLess(abs(out.mean() - (1 - p)), 0.05)
 
-    def test_fc(self):
+    def test_fc(self) -> None:
         m, n, k = (15, 15, 15)
         X = np.random.rand(m, k).astype(np.float32) - 0.5
 
@@ -52,7 +56,7 @@ class BrewTest(unittest.TestCase):
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
 
-    def test_relu(self):
+    def test_relu(self) -> None:
         Xpos = np.ones((5, 5)).astype(np.float32) - 0.5
         Xneg = np.ones((5, 5)).astype(np.float32) - 1.5
 
@@ -70,7 +74,7 @@ class BrewTest(unittest.TestCase):
         neg = workspace.FetchBlob("out_xneg")
         self.assertAlmostEqual(neg.mean(), 0)
 
-    def test_tanh(self):
+    def test_tanh(self) -> None:
         X = np.ones((5, 5)).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
@@ -83,7 +87,7 @@ class BrewTest(unittest.TestCase):
         out = workspace.FetchBlob("out_tanh")
         self.assertAlmostEqual(out.mean(), np.tanh(0.5), places=5)
 
-    def test_validate(self):
+    def test_validate(self) -> None:
         model = ModelHelper(name="test_model")
         model.params.append("aaa")
         model.params.append("bbb")
@@ -93,20 +97,23 @@ class BrewTest(unittest.TestCase):
         model.params.append("bbb")
         self.assertEqual(model._Validate(), ["bbb"])
 
-    def test_arg_scope(self):
+    def test_arg_scope(self) -> None:
         myhelper = self.myhelper
         myhelper2 = self.myhelper2
         n = 15
         with brew.arg_scope([myhelper], val=n):
+            # pyre-fixme[16]: Module `brew` has no attribute `myhelper`.
             res = brew.myhelper(self.model)
         self.assertEqual(n, res)
 
         with brew.arg_scope([myhelper, myhelper2], val=n):
+            # pyre-fixme[16]: Module `brew` has no attribute `myhelper`.
             res1 = brew.myhelper(self.model)
+            # pyre-fixme[16]: Module `brew` has no attribute `myhelper2`.
             res2 = brew.myhelper2(self.model)
         self.assertEqual([n, n], [res1, res2])
 
-    def test_arg_scope_single(self):
+    def test_arg_scope_single(self) -> None:
         X = np.random.rand(64, 3, 32, 32).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
@@ -132,36 +139,43 @@ class BrewTest(unittest.TestCase):
         out = workspace.FetchBlob("out")
         self.assertEqual(out.shape, (64, 64, 17, 17))
 
-    def test_arg_scope_nested(self):
+    def test_arg_scope_nested(self) -> None:
         myhelper = self.myhelper
         n = 16
         with brew.arg_scope([myhelper], val=-3), \
                 brew.arg_scope([myhelper], val=-2):
             with brew.arg_scope([myhelper], val=n):
+                # pyre-fixme[16]: Module `brew` has no attribute `myhelper`.
                 res = brew.myhelper(self.model)
                 self.assertEqual(n, res)
+            # pyre-fixme[16]: Module `brew` has no attribute `myhelper`.
             res = brew.myhelper(self.model)
             self.assertEqual(res, -2)
 
+        # pyre-fixme[16]: Module `brew` has no attribute `myhelper`.
         res = brew.myhelper(self.model, val=15)
         self.model.Validate()
         self.assertEqual(res, 15)
 
-    def test_double_register(self):
+    def test_double_register(self) -> None:
         myhelper = self.myhelper
         with self.assertRaises(AttributeError):
+            # pyre-fixme[16]: Module `brew` has no attribute `Register`.
             brew.Register(myhelper)
 
-    def test_has_helper(self):
+    def test_has_helper(self) -> None:
+        # pyre-fixme[16]: Module `brew` has no attribute `has_helper`.
         self.assertTrue(brew.has_helper(brew.conv))
+        # pyre-fixme[16]: Module `brew` has no attribute `has_helper`.
         self.assertTrue(brew.has_helper("conv"))
 
         def myhelper3():
             pass
 
+        # pyre-fixme[16]: Module `brew` has no attribute `has_helper`.
         self.assertFalse(brew.has_helper(myhelper3))
 
-    def test_model_helper(self):
+    def test_model_helper(self) -> None:
         X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
@@ -188,7 +202,7 @@ class BrewTest(unittest.TestCase):
         out = workspace.FetchBlob("out")
         self.assertEqual(out.shape, (64, 15, 17, 64))
 
-    def test_cnn_model_helper_deprecated(self):
+    def test_cnn_model_helper_deprecated(self) -> None:
         X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
@@ -197,7 +211,7 @@ class BrewTest(unittest.TestCase):
         model = CNNModelHelper(name="test_model", order='NHWC')
         self.assertEqual(model.arg_scope['order'], 'NHWC')
 
-    def test_get_params(self):
+    def test_get_params(self) -> None:
         def param(x):
             return core.ScopedBlobReference(x)
 
@@ -226,7 +240,7 @@ class BrewTest(unittest.TestCase):
         self.assertEqual(to_str_list(model.GetAllParams('c')), ['c/a', 'c/d'])
         self.assertEqual(to_str_list(model.GetAllParams('c/')), ['c/a', 'c/d'])
 
-    def test_param_consistence(self):
+    def test_param_consistence(self) -> None:
         model = ModelHelper(name='test_mode')
         cnv = brew.conv(model, 'data', 'cnv', 32, 32, 4)
         step_model = ModelHelper(name='step_model', param_model=model)
@@ -235,7 +249,7 @@ class BrewTest(unittest.TestCase):
         # test the _parameters_info is shared between model and step_model
         self.assertEqual(model._parameters_info, step_model._parameters_info)
 
-    def test_cond(self):
+    def test_cond(self) -> None:
         workspace.FeedBlob("cond", np.array(True))
         workspace.FeedBlob("then_value", np.array(1))
         workspace.FeedBlob("else_value", np.array(2))
@@ -264,7 +278,7 @@ class BrewTest(unittest.TestCase):
         output_value = workspace.FetchBlob("output_blob")
         self.assertEqual(output_value, 2)
 
-    def test_loop(self):
+    def test_loop(self) -> None:
         workspace.FeedBlob("cond", np.array(True))
         workspace.FeedBlob("ONE", np.array(1))
         workspace.FeedBlob("TWO", np.array(2))
@@ -296,7 +310,7 @@ class BrewTest(unittest.TestCase):
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class BrewGPUTest(unittest.TestCase):
-    def test_relu(self):
+    def test_relu(self) -> None:
         Xpos = np.ones((5, 5)).astype(np.float32) - 0.5
         Xneg = np.ones((5, 5)).astype(np.float32) - 1.5
 
@@ -314,7 +328,7 @@ class BrewGPUTest(unittest.TestCase):
         neg = workspace.FetchBlob("out_xneg")
         self.assertAlmostEqual(neg.mean(), 0)
 
-    def test_tanh(self):
+    def test_tanh(self) -> None:
         X = np.ones((5, 5)).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)

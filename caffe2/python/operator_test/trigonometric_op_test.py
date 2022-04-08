@@ -17,31 +17,31 @@ class TestTrigonometricOp(serial.SerializedTestCase):
         X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_acos(self, X, gc, dc):
+    def test_acos(self, X, gc, dc) -> None:
         self.assertTrigonometricChecks("Acos", X, lambda x: (np.arccos(X),), gc, dc)
 
     @given(
         X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_asin(self, X, gc, dc):
+    def test_asin(self, X, gc, dc) -> None:
         self.assertTrigonometricChecks("Asin", X, lambda x: (np.arcsin(X),), gc, dc)
 
     @given(
         X=hu.tensor(elements=hu.floats(min_value=-100, max_value=100)),
         **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_atan(self, X, gc, dc):
+    def test_atan(self, X, gc, dc) -> None:
         self.assertTrigonometricChecks("Atan", X, lambda x: (np.arctan(X),), gc, dc)
 
     @given(
         X=hu.tensor(elements=hu.floats(min_value=-0.5, max_value=0.5)),
         **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_tan(self, X, gc, dc):
+    def test_tan(self, X, gc, dc) -> None:
         self.assertTrigonometricChecks("Tan", X, lambda x: (np.tan(X),), gc, dc)
 
-    def assertTrigonometricChecks(self, op_name, input, reference, gc, dc):
+    def assertTrigonometricChecks(self, op_name, input, reference, gc, dc) -> None:
         op = core.CreateOperator(op_name, ["X"], ["Y"])
         self.assertReferenceChecks(gc, op, [input], reference)
         self.assertDeviceChecks(dc, op, [input], [0])

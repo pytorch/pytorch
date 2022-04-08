@@ -6,7 +6,7 @@ from caffe2.python import core, workspace, muji, test_util
 
 @unittest.skipIf(not workspace.has_gpu_support, "no gpu")
 class TestMuji(test_util.TestCase):
-    def RunningAllreduceWithGPUs(self, gpu_ids, allreduce_function):
+    def RunningAllreduceWithGPUs(self, gpu_ids, allreduce_function) -> None:
         """A base function to test different scenarios."""
         net = core.Net("mujitest")
         for id in gpu_ids:
@@ -24,6 +24,7 @@ class TestMuji(test_util.TestCase):
         workspace.RunNetOnce(net)
         target_value = sum(gpu_ids) + len(gpu_ids)
         all_blobs = workspace.Blobs()
+        # pyre-fixme[16]: `Dict` has no attribute `sort`.
         all_blobs.sort()
         for blob in all_blobs:
             print('{} {}'.format(blob, workspace.FetchBlob(blob)))
@@ -36,37 +37,37 @@ class TestMuji(test_util.TestCase):
                 err_msg="gpu id %d of %s" % (idx, str(gpu_ids))
             )
 
-    def testAllreduceFallback(self):
+    def testAllreduceFallback(self) -> None:
         self.RunningAllreduceWithGPUs(
             list(range(workspace.NumGpuDevices())), muji.AllreduceFallback
         )
 
-    def testAllreduceSingleGPU(self):
+    def testAllreduceSingleGPU(self) -> None:
         for i in range(workspace.NumGpuDevices()):
             self.RunningAllreduceWithGPUs([i], muji.Allreduce)
 
-    def testAllreduceWithTwoGPUs(self):
+    def testAllreduceWithTwoGPUs(self) -> None:
         pattern = workspace.GetGpuPeerAccessPattern()
         if pattern.shape[0] >= 2 and np.all(pattern[:2, :2]):
             self.RunningAllreduceWithGPUs([0, 1], muji.Allreduce2)
         else:
             print('Skipping allreduce with 2 gpus. Not peer access ready.')
 
-    def testAllreduceWithFourGPUs(self):
+    def testAllreduceWithFourGPUs(self) -> None:
         pattern = workspace.GetGpuPeerAccessPattern()
         if pattern.shape[0] >= 4 and np.all(pattern[:4, :4]):
             self.RunningAllreduceWithGPUs([0, 1, 2, 3], muji.Allreduce4)
         else:
             print('Skipping allreduce with 4 gpus. Not peer access ready.')
 
-    def testAllreduceWithFourGPUsAndTwoGroups(self):
+    def testAllreduceWithFourGPUsAndTwoGroups(self) -> None:
         pattern = workspace.GetGpuPeerAccessPattern()
         if pattern.shape[0] >= 4 and np.all(pattern[:2, :2]) and np.all(pattern[2:4, 2:4]):
             self.RunningAllreduceWithGPUs([0, 1, 2, 3], muji.Allreduce4Group2)
         else:
             print('Skipping allreduce with 4 gpus and 2 groups. Not peer access ready.')
 
-    def testAllreduceWithEightGPUs(self):
+    def testAllreduceWithEightGPUs(self) -> None:
         pattern = workspace.GetGpuPeerAccessPattern()
         if (
             pattern.shape[0] >= 8 and np.all(pattern[:4, :4]) and

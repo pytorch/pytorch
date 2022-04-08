@@ -10,7 +10,7 @@ import unittest
 
 class TestAtomicOps(TestCase):
     @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/28179")
-    def test_atomic_ops(self):
+    def test_atomic_ops(self) -> None:
         """
         Test that both countdown and checksum are update atomically by having
         cowntdown count from 20k to 0 from parallel the workers and updating
@@ -49,7 +49,7 @@ class TestAtomicOps(TestCase):
         self.assertEquals(workspace.FetchBlob(checksum), 200010000)
 
     @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/28179")
-    def test_atomic64_ops(self):
+    def test_atomic64_ops(self) -> None:
         """
         Test that both countdown and checksum are update atomically by having
         cowntdown count from 20k to 0 from parallel the workers and updating

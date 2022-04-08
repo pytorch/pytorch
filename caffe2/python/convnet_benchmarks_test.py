@@ -6,7 +6,7 @@ from caffe2.python import test_util, workspace
 # TODO: investigate why this randomly core dump in ROCM CI
 @unittest.skipIf(not workspace.has_cuda_support, "no cuda gpu")
 class TestConvnetBenchmarks(test_util.TestCase):
-    def testConvnetBenchmarks(self):
+    def testConvnetBenchmarks(self) -> None:
         all_args = [
             '--batch_size 16 --order NCHW --iterations 1 '
             '--warmup_iterations 1',

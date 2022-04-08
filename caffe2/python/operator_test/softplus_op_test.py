@@ -15,7 +15,7 @@ class TestSoftplus(hu.HypothesisTestCase):
     @given(X=hu.tensor(),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_softplus(self, X, gc, dc):
+    def test_softplus(self, X, gc, dc) -> None:
         op = core.CreateOperator("Softplus", ["X"], ["Y"])
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])

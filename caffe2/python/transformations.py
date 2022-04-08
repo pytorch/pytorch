@@ -40,19 +40,25 @@ class Transformer(object):
         return lambda net : self.runTransform(transform_name, net)
 
 
-def fuseNNPACKConvRelu(net):
+def fuseNNPACKConvRelu(net) -> None:
     net.Proto().ParseFromString(
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute
+        #  `transform_fuseNNPACKConvRelu`.
         C.transform_fuseNNPACKConvRelu(net.Proto().SerializeToString())
     )
 
 
-def optimizeForMKLDNN(net, training_mode = False):
+def optimizeForMKLDNN(net, training_mode: bool = False) -> None:
     net.Proto().ParseFromString(
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute
+        #  `transform_optimizeForMKLDNN`.
         C.transform_optimizeForMKLDNN(net.Proto().SerializeToString(), training_mode)
     )
 
 
-def fuseConvBN(net):
+def fuseConvBN(net) -> None:
     net.Proto().ParseFromString(
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute
+        #  `transform_fuseConvBN`.
         C.transform_fuseConvBN(net.Proto().SerializeToString())
     )

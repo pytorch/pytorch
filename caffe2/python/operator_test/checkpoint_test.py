@@ -15,7 +15,7 @@ class CheckpointTest(test_util.TestCase):
     """
 
     @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
-    def testCheckpoint(self):
+    def testCheckpoint(self) -> None:
         temp_root = tempfile.mkdtemp()
         net = core.Net("test_checkpoint")
         # Note(jiayq): I am being a bit lazy here and am using the old iter

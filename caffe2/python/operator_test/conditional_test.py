@@ -11,7 +11,7 @@ import numpy as np
 
 class TestConditionalOp(serial.SerializedTestCase):
     @serial.given(rows_num=st.integers(1, 10000), **hu.gcs_cpu_only)
-    def test_conditional(self, rows_num, gc, dc):
+    def test_conditional(self, rows_num, gc, dc) -> None:
         op = core.CreateOperator(
             "Conditional", ["condition", "data_t", "data_f"], "output"
         )

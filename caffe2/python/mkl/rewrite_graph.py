@@ -8,18 +8,18 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 
 
-def rewrite_init_net_simple(net):
+def rewrite_init_net_simple(net) -> None:
     for op in net.op:
         op.device_option.device_type = caffe2_pb2.IDEEP
 
-def last_producer(ops, blob):
+def last_producer(ops, blob) -> int:
     for (i, op) in reversed(list(enumerate(ops))):
         if blob in op.output:
             return i
     raise ValueError("Failed to find last producer of blob, %s", blob)
 
 
-def fix_BoxWithNMSLimit(net):
+def fix_BoxWithNMSLimit(net) -> None:
     outputs = set()
     for op in net.op:
         if op.type == 'BoxWithNMSLimit':
@@ -34,7 +34,7 @@ def fix_BoxWithNMSLimit(net):
                 op.device_option.device_type = caffe2_pb2.CPU
 
 
-def rewrite_run_net_simple(net):
+def rewrite_run_net_simple(net) -> None:
     # Simple rewrite for now - assume entire graph can be executed
     # with MKL, so just insert copy ops for external_input[0] and
     # external_output[0]
@@ -83,7 +83,7 @@ def rewrite_run_net_simple(net):
     fix_BoxWithNMSLimit(net)
 
 
-def rewrite_run_net_simple_xrayocr_lstm(net):
+def rewrite_run_net_simple_xrayocr_lstm(net) -> None:
     # For xrayocr model with lstm, only rewrite the non-lstm part of the net to
     # enable mkl, then copy the temporary output blob at the break point
     # and all external inputs for lstm part to cpu, and execuate rest of the net

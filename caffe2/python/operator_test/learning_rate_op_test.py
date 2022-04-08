@@ -19,7 +19,7 @@ import numpy as np
 class TestLearningRate(serial.SerializedTestCase):
     @given(**hu.gcs_cpu_only)
     @settings(deadline=None, max_examples=50)
-    def test_alter_learning_rate_op(self, gc, dc):
+    def test_alter_learning_rate_op(self, gc, dc) -> None:
         iter = np.random.randint(low=1, high=1e5, size=1)
         active_period = int(np.random.randint(low=1, high=1e3, size=1))
         inactive_period = int(np.random.randint(low=1, high=1e3, size=1))
@@ -47,7 +47,7 @@ class TestLearningRate(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [iter], ref)
 
     @given(**hu.gcs_cpu_only)
-    def test_hill_learning_rate_op(self, gc, dc):
+    def test_hill_learning_rate_op(self, gc, dc) -> None:
         iter = np.random.randint(low=1, high=1e5, size=1)
 
         num_iter = int(np.random.randint(low=1e2, high=1e8, size=1))
@@ -84,7 +84,7 @@ class TestLearningRate(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [iter], ref)
 
     @given(**hu.gcs_cpu_only)
-    def test_slope_learning_rate_op(self, gc, dc):
+    def test_slope_learning_rate_op(self, gc, dc) -> None:
         iter = np.random.randint(low=1, high=1e5, size=1)
 
         num_iter_1 = int(np.random.randint(low=1e2, high=1e3, size=1))
@@ -121,7 +121,7 @@ class TestLearningRate(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     @settings(max_examples=10)
-    def test_gate_learningrate(self, gc, dc):
+    def test_gate_learningrate(self, gc, dc) -> None:
         iter = np.random.randint(low=1, high=1e5, size=1)
         num_iter = int(np.random.randint(low=1e2, high=1e3, size=1))
         base_lr = float(np.random.uniform(-1, 1))
@@ -154,7 +154,7 @@ class TestLearningRate(serial.SerializedTestCase):
         max_num_iter=st.integers(min_value=50, max_value=100),
     )
     @settings(max_examples=2, deadline=None)
-    def test_composite_learning_rate_op(self, gc, min_num_iter, max_num_iter):
+    def test_composite_learning_rate_op(self, gc, min_num_iter, max_num_iter) -> None:
         np.random.seed(65535)
         # Generate the iteration numbers for sub policy
         # The four sub policies are as follows:

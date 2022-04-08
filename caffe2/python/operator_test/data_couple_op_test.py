@@ -10,7 +10,7 @@ import numpy as np
 
 class TestDataCoupleOp(TestCase):
 
-    def test_data_couple_op(self):
+    def test_data_couple_op(self) -> None:
         param_array = np.random.rand(10, 10)
         gradient_array = np.random.rand(10, 10)
         extra_array = np.random.rand(10, 10)

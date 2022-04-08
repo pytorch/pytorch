@@ -25,7 +25,7 @@ class PoolTest(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
-                         method, gc, dc):
+                         method, gc, dc) -> None:
         assume(pad < kernel)
         op = core.CreateOperator(
             method,
@@ -55,7 +55,7 @@ class PoolTest(hu.HypothesisTestCase):
            **mu.gcs_cpu_ideep)
     def test_int8_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
-                         method, gc, dc):
+                         method, gc, dc) -> None:
         assume(pad < kernel)
         pool_fp32 = core.CreateOperator(
             method,
@@ -143,6 +143,7 @@ class PoolTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace(old_ws_name)
 
 

@@ -19,12 +19,13 @@ COMM = None
 RANK = 0
 SIZE = 0
 
-def SetupMPI():
+def SetupMPI() -> None:
     try:
         # pyre-fixme[21]: undefined import
         from mpi4py import MPI
         global _has_mpi, COMM, RANK, SIZE
         _has_mpi = core.IsOperatorWithEngine("CreateCommonWorld", "MPI")
+        # pyre-fixme[16]: Module `mpi4py` has no attribute `MPI`.
         COMM = MPI.COMM_WORLD
         RANK = COMM.Get_rank()
         SIZE = COMM.Get_size()
@@ -39,7 +40,7 @@ class TestMPI(hu.HypothesisTestCase):
            root=st.integers(min_value=0, max_value=SIZE - 1),
            device_option=st.sampled_from(hu.device_options),
            **hu.gcs)
-    def test_broadcast(self, X, root, device_option, gc, dc):
+    def test_broadcast(self, X, root, device_option, gc, dc) -> None:
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
         X = COMM.bcast(X)
@@ -64,7 +65,7 @@ class TestMPI(hu.HypothesisTestCase):
            root=st.integers(min_value=0, max_value=SIZE - 1),
            device_option=st.sampled_from(hu.device_options),
            **hu.gcs)
-    def test_reduce(self, X, root, device_option, gc, dc):
+    def test_reduce(self, X, root, device_option, gc, dc) -> None:
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
         X = COMM.bcast(X)
@@ -91,7 +92,7 @@ class TestMPI(hu.HypothesisTestCase):
            device_option=st.sampled_from(hu.device_options),
            inplace=st.booleans(),
            **hu.gcs)
-    def test_allreduce(self, X, root, device_option, inplace, gc, dc):
+    def test_allreduce(self, X, root, device_option, inplace, gc, dc) -> None:
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
         X = COMM.bcast(X)
@@ -126,7 +127,7 @@ class TestMPI(hu.HypothesisTestCase):
            **hu.gcs)
     def test_sendrecv(
             self, X, device_option, specify_send_blob, specify_recv_blob,
-            gc, dc):
+            gc, dc) -> None:
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
         X = COMM.bcast(X)

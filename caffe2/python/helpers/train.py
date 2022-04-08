@@ -34,7 +34,7 @@ def iter(model, blob_out, **kwargs):
     return model.net.Iter(blob_out, blob_out, **kwargs)
 
 
-def accuracy(model, blob_in, blob_out, **kwargs):
+def accuracy(model, blob_in, blob_out, **kwargs) -> None:
     dev = kwargs['device_option'] if 'device_option' in kwargs \
         else scope.CurrentDeviceScope()
     is_cpu = dev is None or dev.device_type == caffe2_pb2.CPU
@@ -55,7 +55,7 @@ def accuracy(model, blob_in, blob_out, **kwargs):
         model.net.Accuracy(blob_in, blob_out)
 
 
-def add_weight_decay(model, weight_decay):
+def add_weight_decay(model, weight_decay) -> None:
     """Adds a decay to weights in the model.
 
     This is a form of L2 regularization.

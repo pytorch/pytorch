@@ -68,7 +68,7 @@ def _layer_norm_grad_ref(axis, gout_full, norm, mean_full, stdev_full, X_full):
 class TestLayerNormOp(serial.SerializedTestCase):
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     @settings(deadline=10000)
-    def test_layer_norm_grad_op(self, X, gc, dc):
+    def test_layer_norm_grad_op(self, X, gc, dc) -> None:
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -99,7 +99,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
-    def test_layer_norm_op(self, X, eps, elementwise_affine, gc, dc):
+    def test_layer_norm_op(self, X, eps, elementwise_affine, gc, dc) -> None:
         axis = np.random.randint(0, len(X.shape))
 
         op = core.CreateOperator(
@@ -144,7 +144,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_layer_norm_grad(
-            self, M, N, axis, eps, elementwise_affine, gc, dc):
+            self, M, N, axis, eps, elementwise_affine, gc, dc) -> None:
         op = core.CreateOperator(
             "LayerNorm",
             ["X", "gamma", "beta"] if elementwise_affine else ["X"],
@@ -174,7 +174,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            elementwise_affine=st.booleans(),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_layer_norm_op_c10(self, X, eps, elementwise_affine, gc, dc):
+    def test_layer_norm_op_c10(self, X, eps, elementwise_affine, gc, dc) -> None:
         axis = np.random.randint(0, len(X.shape))
 
         op = core.CreateOperator(
@@ -218,7 +218,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            elementwise_affine=st.booleans(),
            **hu.gcs)
     def test_layer_norm_op_c10_preallocated_outputs(
-            self, X, eps, elementwise_affine, gc, dc):
+            self, X, eps, elementwise_affine, gc, dc) -> None:
         # This test case ensures that it works correctly when output tensors are
         # preallocated.
         axis = np.random.randint(0, len(X.shape))
@@ -245,8 +245,10 @@ class TestLayerNormOp(serial.SerializedTestCase):
         net.run()
 
         if elementwise_affine:
-            expected_norm, expected_mean, expected_std = \
-                _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
+            expected_norm, expected_mean, expected_std = (
+                # pyre-fixme[61]: `gamma` is undefined, or not always defined.
+                # pyre-fixme[61]: `beta` is undefined, or not always defined.
+                _layer_norm_with_affine_ref(axis, eps, X, gamma, beta))
         else:
             expected_norm, expected_mean, expected_std = _layer_norm_ref(
                 axis, eps, X)
@@ -263,7 +265,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
-    def test_layer_norm_op_pytorch(self, X, eps, elementwise_affine, gc, dc):
+    def test_layer_norm_op_pytorch(self, X, eps, elementwise_affine, gc, dc) -> None:
         axis = np.random.randint(0, len(X.shape))
 
         if elementwise_affine:
@@ -292,7 +294,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
     @given(X=hu.tensor(min_dim=2),
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans())
-    def test_layer_norm_op_pytorch_cuda(self, X, eps, elementwise_affine):
+    def test_layer_norm_op_pytorch_cuda(self, X, eps, elementwise_affine) -> None:
         axis = np.random.randint(0, len(X.shape))
 
         if elementwise_affine:
@@ -323,7 +325,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            elementwise_affine=st.booleans(),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
+    def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc) -> None:
         @torch.jit.script
         def jit_layer_norm(
                 X: torch.Tensor,
@@ -358,7 +360,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_std, actual_std)
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
-    def test_layer_norm_brew_wrapper(self, X, gc, dc):
+    def test_layer_norm_brew_wrapper(self, X, gc, dc) -> None:
         axis = np.random.randint(0, len(X.shape))
         scale_dim = [1] * np.ndim(X)
         scale_dim[axis] = X.shape[axis]
@@ -380,7 +382,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
 
     @given(N=st.integers(1, 10), elementwise_affine=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_layer_norm_with_empty_batch(self, N, elementwise_affine, gc, dc):
+    def test_layer_norm_with_empty_batch(self, N, elementwise_affine, gc, dc) -> None:
         X = np.random.randn(0, N).astype(np.float32)
         gamma = np.random.rand(N).astype(np.float32)
         beta = np.random.rand(N).astype(np.float32)

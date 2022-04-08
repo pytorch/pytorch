@@ -107,14 +107,14 @@ def build_conv_model(model_name, batch_size):
 def build_resnet50_dataparallel_model(
         num_gpus,
         batch_size,
-        epoch_size,
-        cudnn_workspace_limit_mb=64,
-        num_channels=3,
-        num_labels=1000,
-        weight_decay=1e-4,
-        base_learning_rate=0.1,
-        image_size=227,
-        use_cpu=False):
+        epoch_size: int,
+        cudnn_workspace_limit_mb: int=64,
+        num_channels: int=3,
+        num_labels: int=1000,
+        weight_decay: float=1e-4,
+        base_learning_rate: float=0.1,
+        image_size: int=227,
+        use_cpu: bool=False):
 
     batch_per_device = batch_size // num_gpus
 
@@ -202,7 +202,7 @@ def build_resnet50_dataparallel_model(
     return train_model
 
 
-def run_resnet50_epoch(train_model, batch_size, epoch_size, skip_first_n_iter=0):
+def run_resnet50_epoch(train_model, batch_size, epoch_size, skip_first_n_iter: int=0):
     epoch_iters = int(epoch_size / batch_size)
     prefix = "{}_{}".format(
         train_model._device_prefix,

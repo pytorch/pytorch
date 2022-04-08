@@ -10,7 +10,7 @@ from caffe2.proto import caffe2_pb2
 import numpy as np
 
 
-def add_tensor(net, name, blob):
+def add_tensor(net, name, blob) -> None:
     ''' Create an operator to store the tensor 'blob',
         run the operator to put the blob to workspace.
         uint8 is stored as an array of string with one element.

@@ -30,7 +30,7 @@ class ConvTest(hu.HypothesisTestCase):
     @settings(max_examples=10, deadline=None)
     def test_convolution(self, stride, pad, kernel, size,
                          input_channels, output_channels,
-                         batch_size, use_bias, training_mode, group, gc, dc):
+                         batch_size, use_bias, training_mode, group, gc, dc) -> None:
         training = 1 if training_mode else 0
         op = core.CreateOperator(
             "Conv",
@@ -67,7 +67,7 @@ class ConvTest(hu.HypothesisTestCase):
            **mu.gcs)
     def test_winograd_convolution(self, stride, pad, size,
                              input_channels, output_channels,
-                             batch_size, use_bias, training_mode, gc, dc):
+                             batch_size, use_bias, training_mode, gc, dc) -> None:
         training = 1 if training_mode else 0
         conv3x3_winograd_algorithm = 1
         kernel = 3
@@ -96,7 +96,7 @@ class ConvTest(hu.HypothesisTestCase):
                 self.assertGradientChecks(gc, op, inputs, i, [0], threshold=0.01)
 
     @given(batch_size=st.integers(1, 3), **mu.gcs)
-    def test_depthwise_convolution(self, batch_size, gc, dc):
+    def test_depthwise_convolution(self, batch_size, gc, dc) -> None:
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"],

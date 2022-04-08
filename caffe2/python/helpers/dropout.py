@@ -6,7 +6,7 @@
 
 
 
-def dropout(model, blob_in, blob_out, use_cudnn=False, **kwargs):
+def dropout(model, blob_in, blob_out, use_cudnn: bool=False, **kwargs):
     """dropout"""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'

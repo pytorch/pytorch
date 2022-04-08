@@ -11,7 +11,7 @@ import numpy as np
 
 class SparseItemwiseDropoutWithReplacementTest(hu.HypothesisTestCase):
     @given(**hu.gcs_cpu_only)
-    def test_no_dropout(self, gc, dc):
+    def test_no_dropout(self, gc, dc) -> None:
         X = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).astype(np.int64)
         Lengths = np.array([2, 2, 2, 2, 2]).astype(np.int32)
         replacement_value = -1
@@ -29,7 +29,7 @@ class SparseItemwiseDropoutWithReplacementTest(hu.HypothesisTestCase):
                              "Lengths should stay unchanged.")
 
     @given(**hu.gcs_cpu_only)
-    def test_all_dropout(self, gc, dc):
+    def test_all_dropout(self, gc, dc) -> None:
         X = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).astype(np.int64)
         Lengths = np.array([2, 2, 2, 2, 2]).astype(np.int32)
         replacement_value = -1
@@ -49,7 +49,7 @@ class SparseItemwiseDropoutWithReplacementTest(hu.HypothesisTestCase):
         self.assertEqual(sum(lengths), len(y))
 
     @given(**hu.gcs_cpu_only)
-    def test_all_dropout_empty_input(self, gc, dc):
+    def test_all_dropout_empty_input(self, gc, dc) -> None:
         X = np.array([]).astype(np.int64)
         Lengths = np.array([0]).astype(np.int32)
         replacement_value = -1

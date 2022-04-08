@@ -19,15 +19,17 @@ import unittest
 op_engine = 'GLOO'
 
 class TemporaryDirectory:
-    def __enter__(self):
+    def __enter__(self) -> str:
+        # pyre-fixme[16]: `TemporaryDirectory` has no attribute `tmpdir`.
         self.tmpdir = tempfile.mkdtemp()
         return self.tmpdir
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, type, value, traceback) -> None:
+        # pyre-fixme[16]: `TemporaryDirectory` has no attribute `tmpdir`.
         shutil.rmtree(self.tmpdir)
 
 
-def allcompare_process(filestore_dir, process_id, data, num_procs):
+def allcompare_process(filestore_dir, process_id, data, num_procs) -> None:
     from caffe2.python import core, data_parallel_model, workspace, lazy_dyndep
     from caffe2.python.model_helper import ModelHelper
     from caffe2.proto import caffe2_pb2
@@ -61,7 +63,7 @@ class TestLazyDynDepAllCompare(hu.HypothesisTestCase):
         d=st.integers(1, 5), n=st.integers(2, 11), num_procs=st.integers(1, 8)
     )
     @settings(deadline=None)
-    def test_allcompare(self, d, n, num_procs):
+    def test_allcompare(self, d, n, num_procs) -> None:
         dims = []
         for _ in range(d):
             dims.append(np.random.randint(1, high=n))
@@ -82,7 +84,7 @@ class TestLazyDynDepAllCompare(hu.HypothesisTestCase):
                 process.join()
 
 class TestLazyDynDepError(unittest.TestCase):
-    def test_errorhandler(self):
+    def test_errorhandler(self) -> None:
         from caffe2.python import core, lazy_dyndep
         import tempfile
 
@@ -95,7 +97,7 @@ class TestLazyDynDepError(unittest.TestCase):
             with self.assertRaises(ValueError, msg="test"):
                 core.RefreshRegisteredOperators()
 
-    def test_importaftererror(self):
+    def test_importaftererror(self) -> None:
         from caffe2.python import core, lazy_dyndep
         import tempfile
 
@@ -114,7 +116,7 @@ class TestLazyDynDepError(unittest.TestCase):
             lazy_dyndep.RegisterOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
             core.RefreshRegisteredOperators()
 
-    def test_workspacecreatenet(self):
+    def test_workspacecreatenet(self) -> None:
         from caffe2.python import workspace, lazy_dyndep
         import tempfile
 

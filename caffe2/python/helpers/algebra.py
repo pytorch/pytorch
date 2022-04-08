@@ -6,7 +6,7 @@
 
 
 
-def transpose(model, blob_in, blob_out, use_cudnn=False, **kwargs):
+def transpose(model, blob_in, blob_out, use_cudnn: bool=False, **kwargs):
     """Transpose."""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
@@ -38,7 +38,7 @@ def arg_min(model, blob_in, blob_out, **kwargs):
     return model.net.ArgMin(blob_in, blob_out, **kwargs)
 
 def batch_mat_mul(model, blob_in, blob_out,
-                  enable_tensor_core=False, **kwargs):
+                  enable_tensor_core: bool=False, **kwargs):
     if enable_tensor_core:
         kwargs['engine'] = 'TENSORCORE'
 

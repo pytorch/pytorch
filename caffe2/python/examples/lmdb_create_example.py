@@ -62,7 +62,7 @@ def create_db(output_file):
     return checksum
 
 
-def read_db_with_caffe2(db_file, expected_checksum):
+def read_db_with_caffe2(db_file, expected_checksum) -> None:
     print(">>> Read database...")
     model = model_helper.ModelHelper(name="lmdbtest")
     batch_size = 32
@@ -88,7 +88,7 @@ def read_db_with_caffe2(db_file, expected_checksum):
         "Read/write checksums dont match"
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Example LMDB creation"
     )

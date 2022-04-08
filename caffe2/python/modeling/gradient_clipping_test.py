@@ -26,7 +26,7 @@ import numpy as np
 
 
 class GradientClippingTest(unittest.TestCase):
-    def test_gradient_clipping_by_norm(self):
+    def test_gradient_clipping_by_norm(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -59,7 +59,7 @@ class GradientClippingTest(unittest.TestCase):
         # 5 forward ops + 6 backward ops + 2 * (3 gradient clipping ops)
         self.assertEqual(len(model.net.Proto().op), 17)
 
-    def test_gradient_clipping_by_norm_l1_norm(self):
+    def test_gradient_clipping_by_norm_l1_norm(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -92,7 +92,7 @@ class GradientClippingTest(unittest.TestCase):
         # 5 forward ops + 6 backward ops + 2 * (2 gradient clipping ops)
         self.assertEqual(len(model.net.Proto().op), 15)
 
-    def test_gradient_clipping_by_norm_using_param_norm(self):
+    def test_gradient_clipping_by_norm_using_param_norm(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -126,7 +126,7 @@ class GradientClippingTest(unittest.TestCase):
         # 5 forward ops + 6 backward ops + 2 * (5 gradient clipping ops)
         self.assertEqual(len(model.net.Proto().op), 21)
 
-    def test_gradient_clipping_by_norm_compute_norm_ratio(self):
+    def test_gradient_clipping_by_norm_compute_norm_ratio(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -161,7 +161,7 @@ class GradientClippingTest(unittest.TestCase):
         # 5 forward ops + 6 backward ops + 2 * (6 gradient clipping ops)
         self.assertEqual(len(model.net.Proto().op), 23)
 
-    def test_gradient_clipping_by_value(self):
+    def test_gradient_clipping_by_value(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -200,7 +200,7 @@ class GradientClippingTest(unittest.TestCase):
         self.assertLessEqual(np.amax(fc1_w_grad), clip_max)
         self.assertGreaterEqual(np.amin(fc1_w_grad), clip_min)
 
-    def test_gradient_clipping_by_norm_including_blobs(self):
+    def test_gradient_clipping_by_norm_including_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -235,7 +235,7 @@ class GradientClippingTest(unittest.TestCase):
         # 5 forward ops + 6 backward ops + 1 * (3 gradient clipping ops)
         self.assertEqual(len(model.net.Proto().op), 14)
 
-    def test_gradient_clipping_by_norm_excluding_blobs(self):
+    def test_gradient_clipping_by_norm_excluding_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)

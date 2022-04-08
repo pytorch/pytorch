@@ -26,7 +26,7 @@ class TestFallbackOps(hu.HypothesisTestCase):
            **mu.gcs)
     def test_in_place(self, stride, pad, kernel, size,
                              input_channels, output_channels,
-                             batch_size, use_bias, gc, dc):
+                             batch_size, use_bias, gc, dc) -> None:
         # To expose fallback in-place potential issue, the fallback op
         # following ideep op must be run at least two iterations.
         conv = core.CreateOperator(
@@ -92,6 +92,7 @@ class TestFallbackOps(hu.HypothesisTestCase):
             print(np.max(np.abs(Y1 - Y0)))
             self.assertTrue(False)
 
+        # pyre-fixme[6]: For 1st param expected `Workspace` but got `str`.
         workspace.SwitchWorkspace(old_ws_name)
 
 

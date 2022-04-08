@@ -14,8 +14,8 @@ import unittest
 from caffe2.python import workspace
 
 
-def _gen_test_add_padding(with_pad_data=True,
-                          is_remove=False):
+def _gen_test_add_padding(with_pad_data: bool=True,
+                          is_remove: bool=False):
     def gen_with_size(args):
         lengths, inner_shape = args
         data_dim = [sum(lengths)] + inner_shape
@@ -110,7 +110,7 @@ class TestSequenceOps(serial.SerializedTestCase):
     @settings(deadline=10000)
     def test_add_padding(
         self, start_pad_width, end_pad_width, args, ret_lengths, gc, dc
-    ):
+    ) -> None:
         lengths, data, start_padding, end_padding = args
         start_padding = np.array(start_padding, dtype=np.float32)
         end_padding = np.array(end_padding, dtype=np.float32)
@@ -137,7 +137,7 @@ class TestSequenceOps(serial.SerializedTestCase):
         end_pad_width,
         ret_lengths,
         lengths=None,
-    ):
+    ) -> None:
         if ret_lengths and lengths is None:
             return
 
@@ -178,7 +178,7 @@ class TestSequenceOps(serial.SerializedTestCase):
 
     def test_add_padding_shape_and_type_3(
         self
-    ):
+    ) -> None:
         for start_pad_width in range(3):
             for end_pad_width in range(3):
                 for ret_lengths in [True, False]:
@@ -192,7 +192,7 @@ class TestSequenceOps(serial.SerializedTestCase):
 
     def test_add_padding_shape_and_type_4(
         self
-    ):
+    ) -> None:
         for start_pad_width in range(3):
             for end_pad_width in range(3):
                 for ret_lengths in [True, False]:
@@ -206,7 +206,7 @@ class TestSequenceOps(serial.SerializedTestCase):
 
     def test_add_padding_shape_and_type_5(
         self
-    ):
+    ) -> None:
         for start_pad_width in range(3):
             for end_pad_width in range(3):
                 for ret_lengths in [True, False]:
@@ -227,7 +227,7 @@ class TestSequenceOps(serial.SerializedTestCase):
     @settings(deadline=1000)
     def test_add_padding_shape_and_type(
         self, start_pad_width, end_pad_width, num_dims, num_groups, ret_lengths, gc, dc
-    ):
+    ) -> None:
         np.random.seed(666)
         lengths = []
         for _ in range(num_groups):
@@ -255,7 +255,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=False),
            **hu.gcs)
-    def test_add_zero_padding(self, start_pad_width, end_pad_width, args, gc, dc):
+    def test_add_zero_padding(self, start_pad_width, end_pad_width, args, gc, dc) -> None:
         lengths, data = args
         op = core.CreateOperator(
             'AddPadding',
@@ -273,7 +273,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            end_pad_width=st.integers(min_value=0, max_value=2),
            data=hu.tensor(min_dim=1, max_dim=3),
            **hu.gcs)
-    def test_add_padding_no_length(self, start_pad_width, end_pad_width, data, gc, dc):
+    def test_add_padding_no_length(self, start_pad_width, end_pad_width, data, gc, dc) -> None:
         op = core.CreateOperator(
             'AddPadding',
             ['data'],
@@ -296,7 +296,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=False, is_remove=True),
            **hu.gcs)
-    def test_remove_padding(self, start_pad_width, end_pad_width, args, gc, dc):
+    def test_remove_padding(self, start_pad_width, end_pad_width, args, gc, dc) -> None:
         lengths, data = args
         op = core.CreateOperator(
             'RemovePadding',
@@ -315,7 +315,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            args=_gen_test_add_padding(with_pad_data=True),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_gather_padding(self, start_pad_width, end_pad_width, args, gc, dc):
+    def test_gather_padding(self, start_pad_width, end_pad_width, args, gc, dc) -> None:
         lengths, data, start_padding, end_padding = args
         padded_data, padded_lengths = _add_padding_ref(
             start_pad_width, end_pad_width, True, data,
@@ -338,7 +338,7 @@ class TestSequenceOps(serial.SerializedTestCase):
                           min_value=1, max_value=10),
                           **hu.gcs)
     @settings(deadline=10000)
-    def test_reverse_packed_segs(self, data, gc, dc):
+    def test_reverse_packed_segs(self, data, gc, dc) -> None:
         max_length = data.shape[0]
         batch_size = data.shape[1]
         lengths = np.random.randint(max_length + 1, size=batch_size)
@@ -376,7 +376,7 @@ class TestSequenceOps(serial.SerializedTestCase):
                             max_size=10),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_remove_data_blocks(self, data, indices, gc, dc):
+    def test_remove_data_blocks(self, data, indices, gc, dc) -> None:
         indices = np.array(indices)
 
         op = core.CreateOperator(
@@ -401,7 +401,7 @@ class TestSequenceOps(serial.SerializedTestCase):
                              max_size=10),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_find_duplicate_elements(self, elements, gc, dc):
+    def test_find_duplicate_elements(self, elements, gc, dc) -> None:
         mapping = {
             0: "a",
             1: "b",

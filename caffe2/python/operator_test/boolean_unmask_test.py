@@ -24,7 +24,7 @@ class TestUnmaskOp(serial.SerializedTestCase):
                np.float32,
                np.float64]),
            **hu.gcs)
-    def test(self, N, dtype, gc, dc):
+    def test(self, N, dtype, gc, dc) -> None:
         if dtype is np.bool_:
             all_value = np.random.choice(a=[True, False], size=N)
         else:

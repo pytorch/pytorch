@@ -26,7 +26,7 @@ class TestGivenTensorFillOps(hu.HypothesisTestCase):
                (core.DataType.INT32, np.double, "GivenTensorDoubleFill"),
            ]),
            **hu.gcs)
-    def test_given_tensor_fill(self, X, t, gc, dc):
+    def test_given_tensor_fill(self, X, t, gc, dc) -> None:
         X = X.astype(t[1])
         print('X: ', str(X))
         op = core.CreateOperator(

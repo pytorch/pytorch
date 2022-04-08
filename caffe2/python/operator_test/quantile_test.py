@@ -8,7 +8,7 @@ from caffe2.python import core, workspace
 
 
 class TestQuantile(hu.HypothesisTestCase):
-    def _test_quantile(self, inputs, quantile, abs, tol):
+    def _test_quantile(self, inputs, quantile, abs, tol: float) -> None:
         net = core.Net("test_net")
         net.Proto().type = "dag"
         input_tensors = []
@@ -44,7 +44,7 @@ class TestQuantile(hu.HypothesisTestCase):
         # less than "quantile" portion of elements
         assert lo_cnt <= target_cnt
 
-    def test_quantile_1(self):
+    def test_quantile_1(self) -> None:
         inputs = []
         num_tensors = 5
         for i in range(num_tensors):
@@ -52,7 +52,7 @@ class TestQuantile(hu.HypothesisTestCase):
             inputs.append(np.random.rand(dim))
         self._test_quantile(inputs=inputs, quantile=0.2, abs=1, tol=1e-4)
 
-    def test_quantile_2(self):
+    def test_quantile_2(self) -> None:
         inputs = []
         num_tensors = 5
         for i in range(num_tensors):
@@ -60,7 +60,7 @@ class TestQuantile(hu.HypothesisTestCase):
             inputs.append(np.random.rand(dim))
         self._test_quantile(inputs=inputs, quantile=1e-6, abs=0, tol=1e-3)
 
-    def test_quantile_3(self):
+    def test_quantile_3(self) -> None:
         inputs = []
         num_tensors = 5
         for i in range(num_tensors):
@@ -69,7 +69,7 @@ class TestQuantile(hu.HypothesisTestCase):
             inputs.append(np.random.rand(dim1, dim2))
         self._test_quantile(inputs=inputs, quantile=1 - 1e-6, abs=1, tol=1e-5)
 
-    def test_quantile_4(self):
+    def test_quantile_4(self) -> None:
         inputs = []
         num_tensors = 5
         for i in range(num_tensors):

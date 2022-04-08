@@ -20,7 +20,7 @@ from caffe2.python.onnx.tests.test_utils import TestCase
 ONNXIFI_DATATYPE_FLOAT32 = 1
 
 
-def _print_net(net):
+def _print_net(net) -> None:
     for i in net.external_input:
         print("Input: {}".format(i))
     for i in net.external_output:
@@ -35,12 +35,13 @@ def _print_net(net):
 
 class OnnxifiTest(TestCase):
     @unittest.skip("Need ONNXIFI backend support")
-    def test_relu_graph(self):
+    def test_relu_graph(self) -> None:
         batch_size = 1
         X = np.random.randn(batch_size, 1, 3, 2).astype(np.float32)
         graph_def = make_graph(
             [make_node("Relu", ["X"], ["Y"])],
             name="test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT,
                 [batch_size, 1, 3, 2])],
             outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT,
@@ -60,7 +61,7 @@ class OnnxifiTest(TestCase):
         np.testing.assert_almost_equal(Y, np.maximum(X, 0))
 
     @unittest.skip("Need ONNXIFI backend support")
-    def test_conv_graph(self):
+    def test_conv_graph(self) -> None:
         X = np.array([[[[0., 1., 2., 3., 4.],  # (1, 1, 5, 5) input tensor
                         [5., 6., 7., 8., 9.],
                         [10., 11., 12., 13., 14.],
@@ -82,6 +83,7 @@ class OnnxifiTest(TestCase):
                 pads=[0, 0, 0, 0],
             )],
             name="test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [1, 1, 5, 5]),
                 make_tensor_value_info("W", onnx.TensorProto.FLOAT, [1, 1, 3, 3]),
             ],
@@ -107,10 +109,10 @@ class OnnxifiTest(TestCase):
 
 
 class OnnxifiTransformTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.model_downloader = ModelDownloader()
 
-    def _add_head_tail(self, pred_net, new_head, new_tail):
+    def _add_head_tail(self, pred_net, new_head: str, new_tail: str) -> None:
         orig_head = pred_net.external_input[0]
         orig_tail = pred_net.external_output[0]
 
@@ -135,7 +137,7 @@ class OnnxifiTransformTest(TestCase):
         pred_net.external_output[0] = new_tail
 
     @unittest.skip("Need ONNXIFI backend support")
-    def test_resnet50_core(self):
+    def test_resnet50_core(self) -> None:
         N = 1
         repeat = 1
         print("Batch size: {}, repeat inference {} times".format(N, repeat))
@@ -173,6 +175,7 @@ class OnnxifiTransformTest(TestCase):
 
         # Cut the graph
         start = time.time()
+        # pyre-fixme[28]: Unexpected keyword argument `infer_shapes`.
         pred_net_cut = onnxifi_caffe2_net(pred_net,
                                           {input_name: input_blob_dims},
                                           infer_shapes=True)

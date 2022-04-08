@@ -14,7 +14,7 @@ class DistanceTest(serial.SerializedTestCase):
     @serial.given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
            **hu.gcs)
-    def test_cosine_similarity(self, n, dim, gc, dc):
+    def test_cosine_similarity(self, n, dim, gc, dc) -> None:
         X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         self.ws.create_blob("X").feed(X)
@@ -37,7 +37,7 @@ class DistanceTest(serial.SerializedTestCase):
                              max_dim=2,
                              dtype=np.float32),
            **hu.gcs)
-    def test_dot_product(self, inputs, gc, dc):
+    def test_dot_product(self, inputs, gc, dc) -> None:
         X, Y = inputs
         op = core.CreateOperator(
             'DotProduct',
@@ -60,7 +60,7 @@ class DistanceTest(serial.SerializedTestCase):
     @serial.given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
            **hu.gcs)
-    def test_L1_distance(self, n, dim, gc, dc):
+    def test_L1_distance(self, n, dim, gc, dc) -> None:
         X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         # avoid kinks by moving away from 0
@@ -91,7 +91,7 @@ class DistanceTest(serial.SerializedTestCase):
     @serial.given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
            **hu.gcs)
-    def test_L2_distance(self, n, dim, gc, dc):
+    def test_L2_distance(self, n, dim, gc, dc) -> None:
         X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         self.ws.create_blob("X").feed(X)

@@ -13,7 +13,7 @@ import unittest
 
 
 @st.composite
-def _tensor_splits(draw, add_axis=False):
+def _tensor_splits(draw, add_axis: bool=False):
     """Generates (axis, split_info, tensor_splits) tuples."""
     tensor = draw(hu.tensor(min_value=4))  # Each dim has at least 4 elements.
     axis = draw(st.integers(-len(tensor.shape), len(tensor.shape) - 1))
@@ -47,7 +47,7 @@ def _tensor_splits(draw, add_axis=False):
 class TestConcatSplitOps(serial.SerializedTestCase):
     @serial.given(tensor_splits=_tensor_splits(),
            **hu.gcs)
-    def test_concat(self, tensor_splits, gc, dc):
+    def test_concat(self, tensor_splits, gc, dc) -> None:
         axis, _, splits = tensor_splits
 
         op = core.CreateOperator(
@@ -73,7 +73,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
     @given(tensor_splits=_tensor_splits(add_axis=True),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_concat_add_axis(self, tensor_splits, gc, dc):
+    def test_concat_add_axis(self, tensor_splits, gc, dc) -> None:
         axis, _, splits = tensor_splits
 
         op = core.CreateOperator(
@@ -104,7 +104,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
     @serial.given(tensor_splits=_tensor_splits(),
            split_as_arg=st.booleans(),
            **hu.gcs)
-    def test_split(self, tensor_splits, split_as_arg, gc, dc):
+    def test_split(self, tensor_splits, split_as_arg: bool, gc, dc) -> None:
         axis, split_info, splits = tensor_splits
 
         split_as_arg = True
@@ -153,7 +153,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_split_by_lengths(self, inputs, split_by_scaling_lengths, gc, dc):
+    def test_split_by_lengths(self, inputs, split_by_scaling_lengths, gc, dc) -> None:
         data, lengths = inputs
         len_len = len(lengths)
 

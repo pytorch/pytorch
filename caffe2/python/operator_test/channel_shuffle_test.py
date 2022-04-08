@@ -37,7 +37,7 @@ class ChannelShuffleOpsTest(serial.SerializedTestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs
     )
-    def test_channel_shuffle(self, N, G, K, H, W, order, gc, dc):
+    def test_channel_shuffle(self, N, G, K, H, W, order, gc, dc) -> None:
         C = G * K
         if order == "NCHW":
             X = np.random.randn(N, C, H, W).astype(np.float32)

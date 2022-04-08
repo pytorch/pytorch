@@ -28,7 +28,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            **hu.gcs)
     def test_spatialbn_test_mode_3d(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            inplace, engine, gc, dc):
+            inplace, engine, gc, dc) -> None:
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
@@ -75,7 +75,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            **hu.gcs)
     def test_spatialbn_test_mode_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            inplace, engine, gc, dc):
+            inplace, engine, gc, dc) -> None:
         # Currently MIOPEN SpatialBN only supports 2D
         if hiputl.run_in_hip(gc, dc):
             assume(engine != "CUDNN")
@@ -122,7 +122,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            **hu.gcs)
     def test_spatialbn_test_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            inplace, engine, gc, dc):
+            inplace, engine, gc, dc) -> None:
         # Currently HIP SpatialBN only supports NCHW
         if hiputl.run_in_hip(gc, dc):
             assume(order == "NCHW")
@@ -172,7 +172,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            **hu.gcs)
     def test_spatialbn_train_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            momentum, inplace, engine, gc, dc):
+            momentum: float, inplace, engine, gc, dc) -> None:
         # Currently HIP SpatialBN only supports NCHW
         if hiputl.run_in_hip(gc, dc):
             assume(order == "NCHW")
@@ -252,7 +252,7 @@ class TestSpatialBN(serial.SerializedTestCase):
     @settings(deadline=None, max_examples=50)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            momentum, engine, gc, dc):
+            momentum, engine, gc, dc) -> None:
         # Currently HIP SpatialBN only supports NCHW
         if hiputl.run_in_hip(gc, dc):
             assume(order == "NCHW")
@@ -293,7 +293,7 @@ class TestSpatialBN(serial.SerializedTestCase):
     @settings(deadline=10000)
     def test_spatialbn_train_mode_gradient_check_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            momentum, engine, gc, dc):
+            momentum, engine, gc, dc) -> None:
         # Currently MIOPEN SpatialBN only supports 2D
         if hiputl.run_in_hip(gc, dc):
             assume(engine != "CUDNN")
@@ -333,8 +333,8 @@ class TestSpatialBN(serial.SerializedTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_spatial_bn_multi_batch(
-            self, N, C, H, W, epsilon, momentum, order, num_batches, in_place,
-            engine, gc, dc):
+            self, N, C, H, W, epsilon, momentum: float, order, num_batches, in_place,
+            engine, gc, dc) -> None:
         if in_place:
             outputs = ["Y", "mean", "var", "batch_mean", "batch_var"]
         else:
@@ -407,7 +407,7 @@ class TestSpatialBN(serial.SerializedTestCase):
     @settings(deadline=None)
     def test_spatial_bn_multi_batch_grad(
             self, N, C, H, W, epsilon, order, num_batches, in_place, engine,
-            gc, dc):
+            gc, dc) -> None:
         if in_place:
             outputs = ["dX", "dscale_sum", "dbias_sum"]
         else:
@@ -472,7 +472,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            **hu.gcs)
     def test_spatialbn_brew_wrapper(
             self, size, input_channels, batch_size, seed, epsilon,
-            engine, gc, dc):
+            engine, gc, dc) -> None:
         np.random.seed(seed)
         X = np.random.rand(
             batch_size, input_channels, size, size).astype(np.float32)

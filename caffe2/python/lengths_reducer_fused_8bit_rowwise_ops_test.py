@@ -7,7 +7,7 @@ from caffe2.python import core, workspace
 from hypothesis import given
 
 
-def compare_rowwise(emb_orig, emb_reconstructed, fp16):
+def compare_rowwise(emb_orig, emb_reconstructed, fp16) -> None:
     # there is an absolute error introduced per row through int8 quantization
     # and a relative error introduced when quantizing back from fp32 to fp16
     assert emb_orig.shape == emb_reconstructed.shape
@@ -42,7 +42,7 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_sum(
         self, num_rows, blocksize, weighted, seed, empty_indices, fp16
-    ):
+    ) -> None:
         net = core.Net("bench")
 
         np.random.seed(seed)
@@ -129,7 +129,7 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         empty_indices=st.booleans(),
         fp16=st.booleans(),
     )
-    def test_sparse_lengths_mean(self, num_rows, blocksize, seed, empty_indices, fp16):
+    def test_sparse_lengths_mean(self, num_rows, blocksize, seed, empty_indices, fp16) -> None:
         net = core.Net("bench")
 
         np.random.seed(seed)

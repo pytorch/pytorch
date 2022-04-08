@@ -21,7 +21,7 @@ class TestLengthsTileOp(serial.SerializedTestCase):
             )
         ),
         **hu.gcs)
-    def test_lengths_tile(self, inputs, gc, dc):
+    def test_lengths_tile(self, inputs, gc, dc) -> None:
         data, lengths = inputs
 
         def lengths_tile_op(data, lengths):

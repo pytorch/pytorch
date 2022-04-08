@@ -445,7 +445,7 @@ class ReaderWithLimit(ReaderWithLimitBase):
                 shape=[], value=False, dtype=core.DataType.BOOL)
 
 
-def CountUntil(num_iter):
+def CountUntil(num_iter) -> ReaderWithLimit:
     return ReaderWithLimit(CounterReader(), num_iter)
 
 

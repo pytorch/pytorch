@@ -14,7 +14,7 @@ import numpy as np
 
 class ComputeHistogramForBlobsTest(unittest.TestCase):
 
-    def histogram(self, X, lower_bound=0.0, upper_bound=1.0, num_buckets=20):
+    def histogram(self, X, lower_bound: float=0.0, upper_bound: float=1.0, num_buckets: int=20):
         assert X.ndim == 2, ('this test assume 2d array,  but X.ndim is {0}'.
             format(X.ndim))
         N, M = X.shape
@@ -35,7 +35,7 @@ class ComputeHistogramForBlobsTest(unittest.TestCase):
         acc_hist = cur_hist
         return [cur_hist, acc_hist]
 
-    def test_compute_histogram_for_blobs(self):
+    def test_compute_histogram_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -74,7 +74,7 @@ class ComputeHistogramForBlobsTest(unittest.TestCase):
 
         assert model.net.output_record() is None
 
-    def test_compute_histogram_for_blobs_modify_output_record(self):
+    def test_compute_histogram_for_blobs_modify_output_record(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)

@@ -13,7 +13,7 @@ import unittest
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class TestLSTMs(unittest.TestCase):
 
-    def testEqualToCudnn(self):
+    def testEqualToCudnn(self) -> None:
         with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType)):
             T = 8
             batch_size = 4

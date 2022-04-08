@@ -57,7 +57,7 @@ def _transformList(l):
     return ret
 
 
-def _prepare_dir(path):
+def _prepare_dir(path) -> None:
     if os.path.exists(path):
         shutil.rmtree(path)
     os.makedirs(path)
@@ -271,7 +271,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
             _output_context.disable_serialized_check = orig
 
 
-def testWithArgs():
+def testWithArgs() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '-G', '--generate-serialized', action='store_true', dest='generate',

@@ -34,7 +34,7 @@ class Trie(object):
         self.dictionary = {}
 
 
-def GetSymbolTrie(target, nm_command, max_depth):
+def GetSymbolTrie(target, nm_command, max_depth) -> Trie:
     """Gets a symbol trie with the passed in target.
 
     Args:
@@ -83,7 +83,7 @@ def GetSymbolTrie(target, nm_command, max_depth):
     return symbol_trie
 
 
-def MaybeAddColor(s, color):
+def MaybeAddColor(s, color) -> str:
     """Wrap the input string to the xterm green color, if color is set.
     """
     if color:
@@ -92,7 +92,7 @@ def MaybeAddColor(s, color):
         return s
 
 
-def ReadableSize(num):
+def ReadableSize(num) -> str:
     """Get a human-readable size."""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if abs(num) <= 1024.0:
@@ -103,7 +103,7 @@ def ReadableSize(num):
 
 # Note(jiayq): I know, I know, this is a recursive function, but it is
 # convenient to write.
-def PrintTrie(trie, prefix, max_depth, min_size, color):
+def PrintTrie(trie, prefix, max_depth, min_size, color) -> None:
     """Prints the symbol trie in a readable manner.
     """
     if len(trie.name) == max_depth or not trie.dictionary.keys():
@@ -132,7 +132,7 @@ def PrintTrie(trie, prefix, max_depth, min_size, color):
                 trie.dictionary[k], prefix + ' |', max_depth, min_size, color)
 
 
-def main(argv):
+def main(argv) -> None:
     if not sys.platform.startswith('linux'):
         raise RuntimeError('Currently this tool only supports Linux.')
     parser = argparse.ArgumentParser(

@@ -25,7 +25,7 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
     def test_ctc_greedy_decoder(
         self, batch, max_time,
         num_classes, merge_repeated, gc, dc
-    ):
+    ) -> None:
 
         def input_generater():
             inputs = np.random.rand(max_time, batch, num_classes)\
@@ -95,7 +95,7 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
     def test_ctc_greedy_decoder_no_merge_arg(
         self, batch, max_time,
         num_classes, gc, dc
-    ):
+    ) -> None:
 
         def input_generater():
             inputs = np.random.rand(max_time, batch, num_classes)\

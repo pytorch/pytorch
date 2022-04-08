@@ -50,7 +50,7 @@ def int8_to_bytes(int8s):
     return byte_matrix
 
 
-def fused_rowwise_nbit_quantize_reference(data, bit):
+def fused_rowwise_nbit_quantize_reference(data, bit: int):
     minimum = np.min(data, axis=1).astype(np.float16).astype(np.float32)
     maximum = np.max(data, axis=1)
     span = maximum - minimum
@@ -88,7 +88,7 @@ def fused_rowwise_nbit_quantize_reference(data, bit):
     return np.concatenate([packed_data, scale_bytes, bias_bytes], axis=1)
 
 
-def fused_rowwise_nbit_quantize_dequantize_reference(data, bit):
+def fused_rowwise_nbit_quantize_dequantize_reference(data, bit: int):
     fused_quantized = fused_rowwise_nbit_quantize_reference(data, bit)
     scale = bytes_to_half_floats(fused_quantized[:, -4:-2].astype(np.uint8)).astype(
         np.float32
@@ -116,7 +116,7 @@ def fused_rowwise_nbit_quantize_dequantize_reference(data, bit):
 
 class TestFusedNBitRowwiseQuantizationConversion(hu.HypothesisTestCase):
     @given(input_data=hu.tensor(min_dim=2, max_dim=2), bit_rate=st.sampled_from([2, 4]))
-    def test_quantize_op(self, input_data, bit_rate):
+    def test_quantize_op(self, input_data, bit_rate: int) -> None:
         assert 8 % bit_rate == 0
         num_elem_per_byte = 8 // bit_rate
         assume(input_data.shape[1] % num_elem_per_byte == 0)
@@ -156,7 +156,7 @@ class TestFusedNBitRowwiseQuantizationConversion(hu.HypothesisTestCase):
         block_size=st.integers(1, 100),
         bit_rate=st.sampled_from([2, 4]),
     )
-    def test_quantize_and_dequantize_op(self, batch_size, block_size, bit_rate):
+    def test_quantize_and_dequantize_op(self, batch_size, block_size, bit_rate: int) -> None:
         assert 8 % bit_rate == 0
         num_elem_per_byte = 8 // bit_rate
         input_data = np.random.rand(batch_size, block_size).astype(np.float32)
@@ -187,7 +187,7 @@ class TestFusedNBitRowwiseQuantizationConversion(hu.HypothesisTestCase):
         np.testing.assert_array_almost_equal(dequantized_data, reference)
 
 
-def ErrorThresholdRow(X, bit_rate):
+def ErrorThresholdRow(X, bit_rate: int):
     # minimum representable error in bit_rate per row
     min_elem = np.min(X, axis=1)
     max_elem = np.max(X, axis=1)
@@ -206,7 +206,7 @@ def ErrorThresholdRow(X, bit_rate):
 class TestNBitFakeFused(hu.HypothesisTestCase):
     @given(bit_rate=st.sampled_from([2, 4]))
     @settings(deadline=10000)
-    def testNBit(self, bit_rate):
+    def testNBit(self, bit_rate) -> None:
         # uncomment for debugging
         # np.random.seed(0)
         net = core.Net("bench")
@@ -272,7 +272,7 @@ class TestNBitFakeFused(hu.HypothesisTestCase):
 class TestNBitGreedyFused(hu.HypothesisTestCase):
     @given(bit_rate=st.sampled_from([2, 4]))
     @settings(deadline=None, max_examples=50)
-    def testNBit(self, bit_rate):
+    def testNBit(self, bit_rate: int) -> None:
         # uncomment for debugging
         # np.random.seed(0)
         net = core.Net("bench")

@@ -17,7 +17,7 @@ class TestArgOps(serial.SerializedTestCase):
         X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
         keepdims=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_argmax(self, X, axis, keepdims, gc, dc):
+    def test_argmax(self, X, axis, keepdims, gc, dc) -> None:
         if axis >= len(X.shape):
             axis %= len(X.shape)
         op = core.CreateOperator(
@@ -39,7 +39,7 @@ class TestArgOps(serial.SerializedTestCase):
         X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
         keepdims=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_argmin(self, X, axis, keepdims, gc, dc):
+    def test_argmin(self, X, axis, keepdims, gc, dc) -> None:
         if axis >= len(X.shape):
             axis %= len(X.shape)
         op = core.CreateOperator(

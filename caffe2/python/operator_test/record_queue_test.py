@@ -12,7 +12,7 @@ import numpy as np
 
 
 class TestRecordQueue(TestCase):
-    def test_record_queue(self):
+    def test_record_queue(self) -> None:
         num_prod = 8
         num_consume = 3
         schema = Struct(

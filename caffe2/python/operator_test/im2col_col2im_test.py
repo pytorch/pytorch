@@ -20,8 +20,8 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            channels=st.integers(1, 8),
            **hu.gcs)
-    def test_im2col_layout(self, batch_size, stride, pad, kernel, dilation,
-                           size, channels, gc, dc):
+    def test_im2col_layout(self, batch_size, stride: int, pad: int, kernel, dilation,
+                           size, channels, gc, dc) -> None:
 
         dkernel = (dilation * (kernel - 1) + 1)
         assume(size >= dkernel)
@@ -122,7 +122,7 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_col2im_gradients(self, batch_size, stride, pad, kernel,
-                              dilation, size, channels, order, gc, dc):
+                              dilation, size, channels, order, gc, dc) -> None:
         assume(size >= dilation * (kernel - 1) + 1)
         op = core.CreateOperator(
             "Im2Col",

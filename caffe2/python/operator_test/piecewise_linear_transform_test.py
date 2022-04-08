@@ -34,7 +34,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
 
     @given(n=st.integers(1, 100), **hu.gcs)
     @settings(deadline=10000)
-    def test_multi_predictions_params_from_arg(self, n, gc, dc):
+    def test_multi_predictions_params_from_arg(self, n, gc, dc) -> None:
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         bounds = np.random.uniform(0.1, 0.9,
@@ -62,7 +62,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
 
     @given(n=st.integers(1, 100), **hu.gcs)
     @settings(deadline=10000)
-    def test_binary_predictions_params_from_arg(self, n, gc, dc):
+    def test_binary_predictions_params_from_arg(self, n, gc, dc) -> None:
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
         bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
@@ -89,7 +89,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
 
     @given(n=st.integers(1, 100), **hu.gcs)
     @settings(deadline=10000)
-    def test_multi_predictions_params_from_input(self, n, gc, dc):
+    def test_multi_predictions_params_from_input(self, n, gc, dc) -> None:
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         bounds = np.random.uniform(0.1, 0.9,
@@ -117,7 +117,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
 
     @given(n=st.integers(1, 100), **hu.gcs)
     @settings(deadline=10000)
-    def test_binary_predictions_params_from_input(self, n, gc, dc):
+    def test_binary_predictions_params_from_input(self, n, gc, dc) -> None:
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
         bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
@@ -143,7 +143,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
 
     @given(n=st.integers(1, 100), **hu.gcs)
     @settings(deadline=10000)
-    def test_1D_predictions_params_from_input(self, n, gc, dc):
+    def test_1D_predictions_params_from_input(self, n, gc, dc) -> None:
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
         bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)

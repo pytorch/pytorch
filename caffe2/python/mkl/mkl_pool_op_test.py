@@ -26,7 +26,7 @@ class MKLPoolTest(hu.HypothesisTestCase):
     @settings(max_examples=2, deadline=100)
     def test_mkl_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
-                         method, gc, dc):
+                         method, gc, dc) -> None:
         assume(pad < kernel)
         op = core.CreateOperator(
             method,

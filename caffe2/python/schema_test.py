@@ -11,11 +11,11 @@ import pickle
 import random
 
 class TestField(unittest.TestCase):
-    def testInitShouldSetEmptyParent(self):
+    def testInitShouldSetEmptyParent(self) -> None:
         f = schema.Field([])
         self.assertTupleEqual(f._parent, (None, 0))
 
-    def testInitShouldSetFieldOffsets(self):
+    def testInitShouldSetFieldOffsets(self) -> None:
         f = schema.Field([
             schema.Scalar(dtype=np.int32),
             schema.Struct(
@@ -31,13 +31,13 @@ class TestField(unittest.TestCase):
         ])
         self.assertListEqual(f._field_offsets, [0, 1, 4, 5, 8, 9])
 
-    def testInitShouldSetFieldOffsetsIfNoChildren(self):
+    def testInitShouldSetFieldOffsetsIfNoChildren(self) -> None:
         f = schema.Field([])
         self.assertListEqual(f._field_offsets, [0])
 
 
 class TestDB(unittest.TestCase):
-    def testPicklable(self):
+    def testPicklable(self) -> None:
         s = schema.Struct(
             ('field1', schema.Scalar(dtype=np.int32)),
             ('field2', schema.List(schema.Scalar(dtype=str)))
@@ -48,7 +48,7 @@ class TestDB(unittest.TestCase):
             self.assertTrue(isinstance(r.field2, schema.List))
             self.assertTrue(getattr(r, 'non_existent', None) is None)
 
-    def testListSubclassClone(self):
+    def testListSubclassClone(self) -> None:
         class Subclass(schema.List):
             pass
 
@@ -58,7 +58,7 @@ class TestDB(unittest.TestCase):
         self.assertEqual(s, clone)
         self.assertIsNot(clone, s)
 
-    def testListWithEvictedSubclassClone(self):
+    def testListWithEvictedSubclassClone(self) -> None:
         class Subclass(schema.ListWithEvicted):
             pass
 
@@ -68,7 +68,7 @@ class TestDB(unittest.TestCase):
         self.assertEqual(s, clone)
         self.assertIsNot(clone, s)
 
-    def testStructSubclassClone(self):
+    def testStructSubclassClone(self) -> None:
         class Subclass(schema.Struct):
             pass
 
@@ -80,7 +80,7 @@ class TestDB(unittest.TestCase):
         self.assertEqual(s, clone)
         self.assertIsNot(clone, s)
 
-    def testNormalizeField(self):
+    def testNormalizeField(self) -> None:
         s = schema.Struct(('field1', np.int32), ('field2', str))
         self.assertEquals(
             s,
@@ -90,7 +90,7 @@ class TestDB(unittest.TestCase):
             )
         )
 
-    def testTuple(self):
+    def testTuple(self) -> None:
         s = schema.Tuple(np.int32, str, np.float32)
         s2 = schema.Struct(
             ('field_0', schema.Scalar(dtype=np.int32)),
@@ -114,7 +114,7 @@ class TestDB(unittest.TestCase):
             self.assertEquals(s[i], v1)
             self.assertEquals(s2[i], v1)
 
-    def testRawTuple(self):
+    def testRawTuple(self) -> None:
         s = schema.RawTuple(2)
         self.assertEquals(
             s, schema.Struct(
@@ -124,7 +124,7 @@ class TestDB(unittest.TestCase):
         self.assertEquals(s[0], schema.Scalar())
         self.assertEquals(s[1], schema.Scalar())
 
-    def testStructIndexing(self):
+    def testStructIndexing(self) -> None:
         s = schema.Struct(
             ('field1', schema.Scalar(dtype=np.int32)),
             ('field2', schema.List(schema.Scalar(dtype=str))),
@@ -141,7 +141,7 @@ class TestDB(unittest.TestCase):
             )
         )
 
-    def testListInStructIndexing(self):
+    def testListInStructIndexing(self) -> None:
         a = schema.List(schema.Scalar(dtype=str))
         s = schema.Struct(
             ('field1', schema.Scalar(dtype=np.int32)),
@@ -154,7 +154,7 @@ class TestDB(unittest.TestCase):
         with self.assertRaises(KeyError):
             s['fields2:non_existent']
 
-    def testListWithEvictedInStructIndexing(self):
+    def testListWithEvictedInStructIndexing(self) -> None:
         a = schema.ListWithEvicted(schema.Scalar(dtype=str))
         s = schema.Struct(
             ('field1', schema.Scalar(dtype=np.int32)),
@@ -168,7 +168,7 @@ class TestDB(unittest.TestCase):
         with self.assertRaises(KeyError):
             s['fields2:non_existent']
 
-    def testMapInStructIndexing(self):
+    def testMapInStructIndexing(self) -> None:
         a = schema.Map(
             schema.Scalar(dtype=np.int32),
             schema.Scalar(dtype=np.float32),
@@ -182,23 +182,26 @@ class TestDB(unittest.TestCase):
         with self.assertRaises(KeyError):
             s['fields2:keys:non_existent']
 
-    def testPreservesMetadata(self):
+    def testPreservesMetadata(self) -> None:
         s = schema.Struct(
             ('a', schema.Scalar(np.float32)), (
                 'b', schema.Scalar(
                     np.int32,
+                    # pyre-fixme[20]: Argument `expected_value` expected.
                     metadata=schema.Metadata(categorical_limit=5)
                 )
             ), (
                 'c', schema.List(
                     schema.Scalar(
                         np.int32,
+                        # pyre-fixme[20]: Argument `expected_value` expected.
                         metadata=schema.Metadata(categorical_limit=6)
                     )
                 )
             )
         )
         # attach metadata to lengths field
+        # pyre-fixme[20]: Argument `expected_value` expected.
         s.c.lengths.set_metadata(schema.Metadata(categorical_limit=7))
 
         self.assertEqual(None, s.a.metadata)
@@ -221,18 +224,18 @@ class TestDB(unittest.TestCase):
         self.assertEqual(6, sv.c.value.metadata.categorical_limit)
         self.assertEqual(7, sv.c.lengths.metadata.categorical_limit)
 
-    def testDupField(self):
+    def testDupField(self) -> None:
         with self.assertRaises(ValueError):
             schema.Struct(
                 ('a', schema.Scalar()),
                 ('a', schema.Scalar()))
 
-    def testAssignToField(self):
+    def testAssignToField(self) -> None:
         with self.assertRaises(TypeError):
             s = schema.Struct(('a', schema.Scalar()))
             s.a = schema.Scalar()
 
-    def testPreservesEmptyFields(self):
+    def testPreservesEmptyFields(self) -> None:
         s = schema.Struct(
             ('a', schema.Scalar(np.float32)),
             ('b', schema.Struct()),
@@ -245,7 +248,7 @@ class TestDB(unittest.TestCase):
         self.assertIn("b", sv.fields)
         self.assertEqual(0, len(sv.b.fields))
 
-    def testStructSubstraction(self):
+    def testStructSubstraction(self) -> None:
         s1 = schema.Struct(
             ('a', schema.Scalar()),
             ('b', schema.Scalar()),
@@ -266,7 +269,7 @@ class TestDB(unittest.TestCase):
         with self.assertRaises(TypeError):
             s1 - schema.Scalar()
 
-    def testStructNestedSubstraction(self):
+    def testStructNestedSubstraction(self) -> None:
         s1 = schema.Struct(
             ('a', schema.Scalar()),
             ('b', schema.Struct(
@@ -285,7 +288,7 @@ class TestDB(unittest.TestCase):
         s = s1 - s2
         self.assertEqual(['a', 'b:c', 'b:f'], s.field_names())
 
-    def testStructAddition(self):
+    def testStructAddition(self) -> None:
         s1 = schema.Struct(
             ('a', schema.Scalar())
         )
@@ -300,7 +303,7 @@ class TestDB(unittest.TestCase):
         with self.assertRaises(TypeError):
             s1 + schema.Scalar()
 
-    def testStructNestedAddition(self):
+    def testStructNestedAddition(self) -> None:
         s1 = schema.Struct(
             ('a', schema.Scalar()),
             ('b', schema.Struct(
@@ -321,7 +324,7 @@ class TestDB(unittest.TestCase):
         with self.assertRaises(TypeError):
             s = s1 + s3
 
-    def testGetFieldByNestedName(self):
+    def testGetFieldByNestedName(self) -> None:
         st = schema.Struct(
             ('a', schema.Scalar()),
             ('b', schema.Struct(
@@ -341,7 +344,7 @@ class TestDB(unittest.TestCase):
         bcd = st['b:c:d']
         self.assertTrue(isinstance(bcd, schema.Scalar))
 
-    def testAddFieldByNestedName(self):
+    def testAddFieldByNestedName(self) -> None:
         f_a = schema.Scalar(blob=core.BlobReference('blob1'))
         f_b = schema.Struct(
             ('c', schema.Struct(
@@ -389,7 +392,7 @@ class TestDB(unittest.TestCase):
         self.assertEqual(['a:a1', 'a:x', 'b:b1:c:d'], st.field_names())
         self.assertEqual(['blob1', 'blob3', 'blob2'], st.field_blobs())
 
-    def testContains(self):
+    def testContains(self) -> None:
         st = schema.Struct(
             ('a', schema.Scalar()),
             ('b', schema.Struct(
@@ -406,13 +409,13 @@ class TestDB(unittest.TestCase):
         self.assertFalse('b:c:x' in st)
         self.assertFalse('b:c:d:x' in st)
 
-    def testFromEmptyColumnList(self):
+    def testFromEmptyColumnList(self) -> None:
         st = schema.Struct()
         columns = st.field_names()
         rec = schema.from_column_list(col_names=columns)
         self.assertEqual(rec, schema.Struct())
 
-    def testFromColumnList(self):
+    def testFromColumnList(self) -> None:
         st = schema.Struct(
             ('a', schema.Scalar()),
             ('b', schema.List(schema.Scalar())),
@@ -429,7 +432,7 @@ class TestDB(unittest.TestCase):
                              [str('blob:' + name) for name in rec.field_names()])
             random.shuffle(columns)
 
-    def testStructGet(self):
+    def testStructGet(self) -> None:
         net = core.Net('test_net')
         s1 = schema.NewRecord(net, schema.Scalar(np.float32))
         s2 = schema.NewRecord(net, schema.Scalar(np.float32))
@@ -438,7 +441,7 @@ class TestDB(unittest.TestCase):
         assert t.get('field_1', None) == s2
         assert t.get('field_2', None) is None
 
-    def testScalarForVoidType(self):
+    def testScalarForVoidType(self) -> None:
         s0_good = schema.Scalar((None, (2, )))
         with self.assertRaises(TypeError):
             s0_bad = schema.Scalar((np.void, (2, )))
@@ -447,7 +450,7 @@ class TestDB(unittest.TestCase):
         s2_good = schema.Scalar(None)
         assert s1_good == s2_good
 
-    def testScalarShape(self):
+    def testScalarShape(self) -> None:
         s0 = schema.Scalar(np.int32)
         self.assertEqual(s0.field_type().shape, ())
 
@@ -463,7 +466,7 @@ class TestDB(unittest.TestCase):
         s2 = schema.Scalar((np.int32, (2, 3)))
         self.assertEqual(s2.field_type().shape, (2, 3))
 
-    def testDtypeForCoreType(self):
+    def testDtypeForCoreType(self) -> None:
         dtype = schema.dtype_for_core_type(core.DataType.FLOAT16)
         self.assertEqual(dtype, np.float16)
 

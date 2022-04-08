@@ -8,15 +8,16 @@ from hypothesis import given, settings
 
 
 class TestSelfBinningHistogramBase(object):
-    def __init__(self, bin_spacing, dtype, abs=False):
+    def __init__(self, bin_spacing, dtype, abs: bool=False) -> None:
         self.bin_spacing = bin_spacing
         self.dtype = dtype
         self.abs = abs
 
-    def _check_histogram(self, arrays, num_bins, expected_values=None, expected_counts=None):
+    def _check_histogram(self, arrays, num_bins, expected_values=None, expected_counts=None) -> None:
         # Check that sizes match and counts add up.
         values = workspace.FetchBlob("histogram_values")
         counts = workspace.FetchBlob("histogram_counts")
+        # pyre-fixme[16]: `TestSelfBinningHistogramBase` has no attribute `assertTrue`.
         self.assertTrue(np.size(values) == num_bins)
         self.assertTrue(np.size(counts) == num_bins)
         self.assertTrue(np.sum(counts) == sum([np.size(array) for array in arrays]))
@@ -36,11 +37,18 @@ class TestSelfBinningHistogramBase(object):
                     self.assertTrue(found, f"input value must fit inside values array: "
                                            f"input={input_val}, last_value={values[-1]}")
                     if self.bin_spacing == "linear":
+                        # pyre-fixme[61]: `pos` is undefined, or not always defined.
                         self.assertTrue(pos > 0,
                                         f"input should not be smaller than the first bin value: "
+                                        # pyre-fixme[61]: `pos` is undefined, or not
+                                        #  always defined.
                                         f"input={input_val}, 1st bin value={values[pos]}")
+                    # pyre-fixme[61]: `pos` is undefined, or not always defined.
                     if pos == 0:
+                        # pyre-fixme[16]: `TestSelfBinningHistogramBase` has no
+                        #  attribute `assertEqual`.
                         self.assertEqual(self.bin_spacing, "logarithmic")
+                        # pyre-fixme[61]: `pos` is undefined, or not always defined.
                         expected_counts[pos] += 1
                     else:
                         expected_counts[pos - 1] += 1
@@ -56,7 +64,7 @@ class TestSelfBinningHistogramBase(object):
             self.assertTrue(values[0] >= 0)
 
 
-    def _run_single_op_net(self, arrays, num_bins, logspacing_start=None):
+    def _run_single_op_net(self, arrays, num_bins, logspacing_start=None) -> None:
         for i in range(len(arrays)):
             workspace.FeedBlob(
                 "X{}".format(i), arrays[i]
@@ -83,7 +91,7 @@ class TestSelfBinningHistogramBase(object):
 
     @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_histogram_device_consistency(self, rows, cols, gc, dc):
+    def test_histogram_device_consistency(self, rows, cols, gc, dc) -> None:
         X = np.random.rand(rows, cols)
         op = core.CreateOperator(
             "SelfBinningHistogram",
@@ -92,9 +100,11 @@ class TestSelfBinningHistogramBase(object):
             num_bins=1000,
             bin_spacing=self.bin_spacing,
         )
+        # pyre-fixme[16]: `TestSelfBinningHistogramBase` has no attribute
+        #  `assertDeviceChecks`.
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    def test_histogram_bin_to_fewer(self):
+    def test_histogram_bin_to_fewer(self) -> None:
         X = np.array([-2.0, -2.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 9.0], dtype=self.dtype)
         if self.bin_spacing == 'linear':
             if not self.abs:
@@ -117,7 +127,7 @@ class TestSelfBinningHistogramBase(object):
             expected_counts=expected_counts
         )
 
-    def test_histogram_bin_to_more(self):
+    def test_histogram_bin_to_more(self) -> None:
         X = np.array([-2.0, -2.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 9.0], dtype=self.dtype)
         self._run_single_op_net([X], 100)
         self._check_histogram(
@@ -125,7 +135,7 @@ class TestSelfBinningHistogramBase(object):
             101,
         )
 
-    def test_histogram_bin_to_two(self):
+    def test_histogram_bin_to_two(self) -> None:
         """This test roughly tests [min,max+EPSILON] and [N,0]"""
         X = np.array([-2.0, -2.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 9.0], dtype=self.dtype)
         if self.bin_spacing == 'linear':
@@ -144,7 +154,7 @@ class TestSelfBinningHistogramBase(object):
             expected_counts=expected_counts
         )
 
-    def test_histogram_min_max_equal(self):
+    def test_histogram_min_max_equal(self) -> None:
         """This test uses exact value match, so is only relevant for float type."""
         X = np.array([0., 0., 0., 0., 0.], dtype='f')
         logspacing_start = np.float(1e-24)
@@ -157,6 +167,8 @@ class TestSelfBinningHistogramBase(object):
                 expected_counts=[5, 0, 0, 0]
             )
         else:
+            # pyre-fixme[16]: `TestSelfBinningHistogramBase` has no attribute
+            #  `assertEqual`.
             self.assertEqual(self.bin_spacing, "logarithmic")
             self._check_histogram(
                 [X],
@@ -165,7 +177,7 @@ class TestSelfBinningHistogramBase(object):
                 expected_counts=[5, 0, 0, 0],
             )
 
-    def test_histogram_min_max_equal_nonzero(self):
+    def test_histogram_min_max_equal_nonzero(self) -> None:
         X = np.array([1., 1., 1., 1., 1.], dtype=self.dtype)
         logspacing_start = 1e-24
         self._run_single_op_net([X], 3, logspacing_start)
@@ -176,7 +188,7 @@ class TestSelfBinningHistogramBase(object):
             expected_counts=[5, 0, 0, 0]
         )
 
-    def test_histogram_empty_input_tensor(self):
+    def test_histogram_empty_input_tensor(self) -> None:
         X = np.array([], dtype=self.dtype)
         self._run_single_op_net([X], 1)
         self._check_histogram(
@@ -193,7 +205,7 @@ class TestSelfBinningHistogramBase(object):
             expected_counts=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         )
 
-    def test_histogram_multi_input(self):
+    def test_histogram_multi_input(self) -> None:
         X1 = np.array([-2.0, -2.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 9.0], dtype=self.dtype)
         X2 = np.array([-5.0, -3.0, 7, 7, 0.0, 1.0, 2.0, -3.0, 4.0, 6.0, 9.0], dtype=self.dtype)
         if self.bin_spacing == 'linear':
@@ -217,7 +229,7 @@ class TestSelfBinningHistogramBase(object):
             expected_counts=expected_counts
         )
 
-    def test_histogram_very_small_range_for_stride_underflow(self):
+    def test_histogram_very_small_range_for_stride_underflow(self) -> None:
         """Tests a large number of bins for a very small range of values.
 
         This test uses float type. 1-e302 is very small, and with 1M bins, it
@@ -237,7 +249,9 @@ class TestSelfBinningHistogramBase(object):
         )
 
 
-    def test_histogram_insufficient_bins(self):
+    def test_histogram_insufficient_bins(self) -> None:
+        # pyre-fixme[16]: `TestSelfBinningHistogramBase` has no attribute
+        #  `assertRaisesRegex`.
         with self.assertRaisesRegex(
             RuntimeError, "Number of bins must be greater than or equal to 1."
         ):
@@ -245,52 +259,54 @@ class TestSelfBinningHistogramBase(object):
 
 
 class TestSelfBinningHistogramLinear(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="linear", dtype='d')
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLogarithmic(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="logarithmic", dtype='d')
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLinearFloat(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="linear", dtype='f')
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLogarithmicFloat(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="logarithmic", dtype='f')
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLinearWithAbs(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="linear", dtype='d', abs=True)
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLogarithmicWithAbs(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="logarithmic", dtype='d', abs=True)
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLinearFloatWithAbs(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="linear", dtype='f', abs=True)
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLogarithmicFloatWithAbs(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="logarithmic", dtype='f', abs=True)
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLinearWithNoneAbs(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
+        # pyre-fixme[6]: For 4th param expected `bool` but got `None`.
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="linear", dtype='d', abs=None)
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 
 class TestSelfBinningHistogramLinearFloatWithNoneAbs(TestSelfBinningHistogramBase, hu.HypothesisTestCase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
+        # pyre-fixme[6]: For 4th param expected `bool` but got `None`.
         TestSelfBinningHistogramBase.__init__(self, bin_spacing="linear", dtype='f', abs=None)
         hu.HypothesisTestCase.__init__(self, *args, **kwargs)
 

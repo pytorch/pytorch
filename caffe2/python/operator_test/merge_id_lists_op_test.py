@@ -52,7 +52,7 @@ def merge_id_lists_ref(*args):
 
 
 class TestMergeIdListsOp(serial.SerializedTestCase):
-    def test_merge_id_lists_ref(self):
+    def test_merge_id_lists_ref(self) -> None:
         # Verify that the reference implementation is correct!
         lengths_0 = np.array([3, 0, 4], dtype=np.int32)
         values_0 = np.array([1, 5, 6, 2, 4, 5, 6], dtype=np.int64)
@@ -68,7 +68,7 @@ class TestMergeIdListsOp(serial.SerializedTestCase):
         np.testing.assert_array_equal(merged_values, expected_values)
 
     @serial.given(inputs=id_list_batch(), **hu.gcs_cpu_only)
-    def test_merge_id_lists_op(self, inputs, gc, dc):
+    def test_merge_id_lists_op(self, inputs, gc, dc) -> None:
         num_inputs = int(len(inputs) / 2)
         op = core.CreateOperator(
             "MergeIdLists",

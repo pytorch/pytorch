@@ -179,8 +179,8 @@ def create_shufflenet(
     num_input_channels,
     num_labels,
     label=None,
-    is_test=False,
-    no_loss=False,
+    is_test: bool=False,
+    no_loss: bool=False,
 ):
     builder = ShuffleNetV2Builder(model, data, num_input_channels,
                                   num_labels,
@@ -188,6 +188,7 @@ def create_shufflenet(
     builder.create()
 
     if no_loss:
+        # pyre-fixme[16]: `ShuffleNetV2Builder` has no attribute `last_out`.
         return builder.last_out
 
     if (label is not None):

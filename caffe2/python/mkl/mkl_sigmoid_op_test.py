@@ -17,7 +17,7 @@ import caffe2.python.mkl_test_util as mu
 class MKLSigmoidTest(hu.HypothesisTestCase):
     @given(n=st.integers(1, 5), m=st.integers(1, 5), inplace=st.booleans(),
            **mu.gcs)
-    def test_mkl_sigmoid(self, n, m, inplace, gc, dc):
+    def test_mkl_sigmoid(self, n, m, inplace, gc, dc) -> None:
         X = np.random.rand(m, n).astype(np.float32)
         op = core.CreateOperator(
             "Sigmoid",

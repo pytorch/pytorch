@@ -18,16 +18,17 @@ except ImportError:
 
 
 class VideoInputOpTest(unittest.TestCase):
-    def create_a_list(self, output_file, line, n):
+    def create_a_list(self, output_file, line, n) -> None:
         # create a list that repeat a line n times
         # used for creating a list file for simple test input
         with open(output_file, "w") as file:
             for _i in range(n):
                 file.write(line)
 
-    def create_video_db(self, list_file, output_file, use_list=False):
+    def create_video_db(self, list_file, output_file, use_list: bool=False) -> int:
         # Write to lmdb database...
         LMDB_MAP_SIZE = 1 << 40  # MODIFY
+        # pyre-fixme[16]: Module `lmdb` has no attribute `open`.
         env = lmdb.open(output_file, map_size=LMDB_MAP_SIZE)
         total_size = 0
 
@@ -53,6 +54,8 @@ class VideoInputOpTest(unittest.TestCase):
                     tensor_protos = caffe2_pb2.TensorProtos()
                     video_tensor = tensor_protos.protos.add()
                     video_tensor.data_type = 4  # string data
+                    # pyre-fixme[6]: For 1st param expected `bytes` but got
+                    #  `Union[bytes, str]`.
                     video_tensor.string_data.append(video_data)
 
                     label_tensor = tensor_protos.protos.add()
@@ -72,7 +75,7 @@ class VideoInputOpTest(unittest.TestCase):
         return total_size
 
     # sample one clip randomly from the video
-    def test_rgb_with_temporal_jittering(self):
+    def test_rgb_with_temporal_jittering(self) -> None:
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
@@ -113,7 +116,7 @@ class VideoInputOpTest(unittest.TestCase):
         shutil.rmtree(video_db_dir)
 
     # sample multiple clips uniformly from the video
-    def test_rgb_with_uniform_sampling(self):
+    def test_rgb_with_uniform_sampling(self) -> None:
         random_label = np.random.randint(0, 100)
         clip_per_video = np.random.randint(2, 11)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
@@ -155,7 +158,7 @@ class VideoInputOpTest(unittest.TestCase):
         shutil.rmtree(video_db_dir)
 
     # test optical flow
-    def test_optical_flow_with_temporal_jittering(self):
+    def test_optical_flow_with_temporal_jittering(self) -> None:
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
@@ -198,7 +201,7 @@ class VideoInputOpTest(unittest.TestCase):
 
     # test rgb output VideoResType is
     # USE_SHORTER_EDGE
-    def test_rgb_use_shorter_edge(self):
+    def test_rgb_use_shorter_edge(self) -> None:
         batch_size = 16
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
@@ -244,7 +247,7 @@ class VideoInputOpTest(unittest.TestCase):
 
     # test optical flow output VideoResType is
     # USE_SHORTER_EDGE
-    def test_optical_flow_use_shorter_edge(self):
+    def test_optical_flow_use_shorter_edge(self) -> None:
         batch_size = 16
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"

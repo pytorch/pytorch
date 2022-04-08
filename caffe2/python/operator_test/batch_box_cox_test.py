@@ -58,12 +58,12 @@ class TestBatchBoxCox(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     @settings(deadline=10000)
-    def test_batch_box_cox(self, inputs, gc, dc):
+    def test_batch_box_cox(self, inputs, gc, dc) -> None:
         self.batch_box_cox(inputs, gc, dc)
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_lambda1_is_all_zero(self, gc, dc):
+    def test_lambda1_is_all_zero(self, gc, dc) -> None:
         inputs = (1, 1, [[2]], [0], [0])
         self.batch_box_cox(inputs, gc, dc)
         inputs = (2, 1, [[2], [4]], [0], [0])
@@ -75,7 +75,7 @@ class TestBatchBoxCox(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_lambda1_is_partially_zero(self, gc, dc):
+    def test_lambda1_is_partially_zero(self, gc, dc) -> None:
         inputs = (1, 5, [[1, 2, 3, 4, 5]],
                   [0, -.5, 0, .5, 0], [0.1, 0.2, 0.3, 0.4, 0.5])
         self.batch_box_cox(inputs, gc, dc)
@@ -91,12 +91,12 @@ class TestBatchBoxCox(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_bound_base_away_from_zero(self, gc, dc):
+    def test_bound_base_away_from_zero(self, gc, dc) -> None:
         inputs = (2, 3, [[1e-5, 1e-6, 1e-7], [1e-7, -1e-6, 1e-5]],
                   [0, 0, 0], [0, 0, 1e-6])
         self.batch_box_cox(inputs, gc, dc)
 
-    def batch_box_cox(self, inputs, gc, dc):
+    def batch_box_cox(self, inputs, gc, dc) -> None:
         N, D, data, lambda1, lambda2 = inputs
 
         data = np.array(data, dtype=np.float32).reshape(N, D)

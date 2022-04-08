@@ -20,7 +20,7 @@ class TestChannelBackpropStats(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def testChannelBackpropStats(self, size, inputChannels, batchSize, gc, dc):
+    def testChannelBackpropStats(self, size, inputChannels, batchSize, gc, dc) -> None:
 
         op = core.CreateOperator(
             "ChannelBackpropStats",

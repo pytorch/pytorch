@@ -38,7 +38,7 @@ class TestUpSample(serial.SerializedTestCase):
     @settings(max_examples=50, deadline=None)
     def test_upsample(self, height_scale, width_scale, height, width,
                      num_channels, batch_size, seed,
-                     gc, dc):
+                     gc, dc) -> None:
 
         np.random.seed(seed)
 
@@ -118,7 +118,7 @@ class TestUpSample(serial.SerializedTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_upsample_grad(self, height_scale, width_scale, height, width,
-                          num_channels, batch_size, seed, gc, dc):
+                          num_channels, batch_size, seed, gc, dc) -> None:
 
         np.random.seed(seed)
 

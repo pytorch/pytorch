@@ -11,7 +11,7 @@ import numpy as np
 
 
 class TestHyperbolicOps(serial.SerializedTestCase):
-    def _test_hyperbolic_op(self, op_name, np_ref, X, in_place, engine, gc, dc):
+    def _test_hyperbolic_op(self, op_name, np_ref, X, in_place, engine, gc, dc) -> None:
         op = core.CreateOperator(
             op_name,
             ["X"],
@@ -32,14 +32,14 @@ class TestHyperbolicOps(serial.SerializedTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(dtype=np.float32), **hu.gcs)
-    def test_sinh(self, X, gc, dc):
+    def test_sinh(self, X, gc, dc) -> None:
         self._test_hyperbolic_op("Sinh", np.sinh, X, False, "", gc, dc)
 
     @serial.given(X=hu.tensor(dtype=np.float32), **hu.gcs)
-    def test_cosh(self, X, gc, dc):
+    def test_cosh(self, X, gc, dc) -> None:
         self._test_hyperbolic_op("Cosh", np.cosh, X, False, "", gc, dc)
 
     @serial.given(X=hu.tensor(dtype=np.float32), in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    def test_tanh(self, X, in_place, engine, gc, dc):
+    def test_tanh(self, X, in_place, engine, gc, dc) -> None:
         self._test_hyperbolic_op("Tanh", np.tanh, X, in_place, engine, gc, dc)

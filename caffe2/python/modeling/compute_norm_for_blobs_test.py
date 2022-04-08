@@ -11,7 +11,7 @@ import numpy as np
 
 
 class ComputeNormForBlobsTest(unittest.TestCase):
-    def test_compute_norm_for_blobs(self):
+    def test_compute_norm_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -43,7 +43,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         assert model.net.output_record() is None
 
-    def test_compute_norm_for_blobs_modify_output_record(self):
+    def test_compute_norm_for_blobs_modify_output_record(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -79,7 +79,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
             model.net.output_record().field_blobs(),\
             model.net.output_record().field_blobs()
 
-    def test_compute_averaged_norm_for_blobs(self):
+    def test_compute_averaged_norm_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -110,7 +110,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 10)
 
-    def test_compute_norm_for_blobs_no_print(self):
+    def test_compute_norm_for_blobs_no_print(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -140,7 +140,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 8)
 
-    def test_compute_l1_norm_for_blobs(self):
+    def test_compute_l1_norm_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -171,7 +171,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 10)
 
-    def test_compute_l1_averaged_norm_for_blobs(self):
+    def test_compute_l1_averaged_norm_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
@@ -203,7 +203,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 10)
 
-    def test_compute_norm_row_index_for_blobs(self):
+    def test_compute_norm_row_index_for_blobs(self) -> None:
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")
         fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)

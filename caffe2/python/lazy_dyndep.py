@@ -9,7 +9,7 @@ import os
 from caffe2.python import dyndep, lazy
 
 
-def RegisterOpsLibrary(name):
+def RegisterOpsLibrary(name) -> None:
     """Registers a dynamic library that contains custom operators into Caffe2.
 
     Since Caffe2 uses static variable registration, you can optionally load a
@@ -45,7 +45,7 @@ _LAZY_IMPORTED_DYNDEPS = set()
 _error_handler = None
 
 
-def SetErrorHandler(handler):
+def SetErrorHandler(handler) -> None:
     """Registers an error handler for errors from registering operators
 
     Since the lazy registration may happen at a much later time, having a dedicated
@@ -68,12 +68,13 @@ def GetImportedOpsLibraries():
     return dyndep.GetImportedOpsLibraries()
 
 
-def _import_lazy():
+def _import_lazy() -> None:
     global _LAZY_IMPORTED_DYNDEPS
     if not _LAZY_IMPORTED_DYNDEPS:
         return
     for name in list(_LAZY_IMPORTED_DYNDEPS):
         try:
+            # pyre-fixme[16]: Module `dyndep` has no attribute `InitOpLibrary`.
             dyndep.InitOpLibrary(name, trigger_lazy=False)
         except BaseException as e:
             if _error_handler:

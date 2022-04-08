@@ -11,7 +11,7 @@ from future.utils import viewitems, viewkeys
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
         links, timestep=None, scope=None, outputs_with_grads=(0,),
-        recompute_blobs_on_backward=None, forward_only=False,
+        recompute_blobs_on_backward=None, forward_only: bool=False,
 ):
     '''
     net: the main net operator should be added to
@@ -233,6 +233,7 @@ def recurrent_net(
 
     backward_args = {}
     if backward_cell_net is not None:
+        # pyre-fixme[61]: `backward_mapping` is undefined, or not always defined.
         backward_mapping_keys = set(viewkeys(backward_mapping))
         backward_link_internal, backward_link_external, backward_link_offset = \
             unpack_triple(backward_links)
@@ -286,7 +287,7 @@ def recurrent_net(
     return results[:-1]
 
 
-def set_rnn_executor_config(rnn_op, num_threads=None, max_cuda_streams=None):
+def set_rnn_executor_config(rnn_op, num_threads=None, max_cuda_streams=None) -> None:
     from caffe2.proto import caffe2_pb2
     assert rnn_op.type in {'RecurrentNetwork', 'RecurrentNetworkGradient'}
 
@@ -302,7 +303,7 @@ def set_rnn_executor_config(rnn_op, num_threads=None, max_cuda_streams=None):
         add_arg('max_cuda_streams', max_cuda_streams)
 
 
-def retrieve_step_blobs(net, prefix='rnn'):
+def retrieve_step_blobs(net, prefix: str='rnn'):
     '''
     Retrieves blobs from step workspaces (which contain intermediate recurrent
     network computation for each timestep) and puts them in the global

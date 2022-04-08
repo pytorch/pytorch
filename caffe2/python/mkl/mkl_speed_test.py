@@ -11,7 +11,7 @@ from caffe2.python import core, workspace, test_util
 
 @unittest.skipIf(not workspace.C.has_mkldnn, "Skipping as we do not have mkldnn.")
 class TestMKLBasic(test_util.TestCase):
-    def testReLUSpeed(self):
+    def testReLUSpeed(self) -> None:
         X = np.random.randn(128, 4096).astype(np.float32)
         mkl_do = core.DeviceOption(caffe2_pb2.MKLDNN)
         # Makes sure that feed works.
@@ -43,7 +43,7 @@ class TestMKLBasic(test_util.TestCase):
         print("Relu CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
 
 
-    def testConvSpeed(self):
+    def testConvSpeed(self) -> None:
         # We randomly select a shape to test the speed. Intentionally we
         # test a batch size of 1 since this may be the most frequent use
         # case for MKL during deployment time.

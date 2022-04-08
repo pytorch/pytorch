@@ -83,7 +83,7 @@ def AddNogradient(op, g_output):
 
 
 class TestGradientCalculation(test_util.TestCase):
-    def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
+    def assertOperatorListEqual(self, operatorDefList1, operatorDefList2) -> None:
         for op in operatorDefList1:
             op.debug_info = ""
             if op.device_option:
@@ -98,7 +98,7 @@ class TestGradientCalculation(test_util.TestCase):
         None,
         core.DeviceOption(workspace.GpuDeviceType, 1)]))
     @settings(deadline=10000)
-    def testDirect(self, device_option):
+    def testDirect(self, device_option) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('Direct', 'hidden', 'out'),
@@ -117,7 +117,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testDirectImplicitGradientSource(self):
+    def testDirectImplicitGradientSource(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('Direct', 'hidden', 'out'),
@@ -135,7 +135,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, ['out'])
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testDoesNotGenerateUnnecessaryGradients(self):
+    def testDoesNotGenerateUnnecessaryGradients(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('Direct', 'hidden', 'out'),
@@ -149,7 +149,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'hidden': 'hidden_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testDirectButNoOutputGradientGiven(self):
+    def testDirectButNoOutputGradientGiven(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('Direct', 'hidden', 'out'),
@@ -158,7 +158,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {})
         self.assertOperatorListEqual(gradients, [])
 
-    def testDirectInPlace(self):
+    def testDirectInPlace(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'in'),
             CreateOperator('Direct', 'in', 'out'),
@@ -171,7 +171,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testVersionMismatch(self):
+    def testVersionMismatch(self) -> None:
         operators = [
             CreateOperator('Direct', 'x', 'x'),
             CreateOperator('Direct', 'y', 'x'),
@@ -186,7 +186,7 @@ class TestGradientCalculation(test_util.TestCase):
             self.assertTrue("version" in str(e))
             pass
 
-    def testUseOutput(self):
+    def testUseOutput(self) -> None:
         operators = [
             CreateOperator('UseOutput', 'in', 'hidden'),
             CreateOperator('UseOutput', 'hidden', 'out'),
@@ -207,7 +207,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'sink': 'sink_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testUseOutputInPlace(self):
+    def testUseOutputInPlace(self) -> None:
         operators = [
             CreateOperator('UseOutput', 'in', 'in'),
             CreateOperator('UseOutput', 'in', 'out'),
@@ -228,7 +228,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'sink': 'sink_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testUseOutputButOutputHasBeenChanged(self):
+    def testUseOutputButOutputHasBeenChanged(self) -> None:
         operators = [
             CreateOperator('UseOutput', 'in', 'hidden'),
             # Note here: we overwrite hidden, but hidden will be needed by the
@@ -242,7 +242,7 @@ class TestGradientCalculation(test_util.TestCase):
             gradients, _ = GradientRegistry.GetBackwardPass(
                 operators, {'sink': 'sink_grad'})
 
-    def testUseInput(self):
+    def testUseInput(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('UseInput', 'hidden', 'out'),
@@ -263,7 +263,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'sink': 'sink_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testUseInputButInputHasBeenChanged(self):
+    def testUseInputButInputHasBeenChanged(self) -> None:
         """Test gradient for the following case:
 
         in -> out, with UseInput
@@ -284,7 +284,7 @@ class TestGradientCalculation(test_util.TestCase):
         None,
         core.DeviceOption(workspace.GpuDeviceType, 1)]))
     @settings(deadline=10000)
-    def testMultiUseInput(self, device_option):
+    def testMultiUseInput(self, device_option) -> None:
         """Test gradient for the following case:
 
         in -> hidden1
@@ -324,7 +324,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {"out": "out_grad"})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testMultiUseInputButWithNoGradient(self):
+    def testMultiUseInputButWithNoGradient(self) -> None:
         """Test gradient for the following case:
 
         in -> hidden1
@@ -350,7 +350,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testMultiUseInputAndMultipleVersions(self):
+    def testMultiUseInputAndMultipleVersions(self) -> None:
         """Test gradient for the following case:
 
         in -> in
@@ -389,7 +389,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testMultiUseInputAutoGenSumDevice(self):
+    def testMultiUseInputAutoGenSumDevice(self) -> None:
         parallel_tag = "parallelize:shard_by_1"
         split_op_device_option_clear_auto_gen_sum = core.DeviceOption(
             caffe2_pb2.CPU,
@@ -440,7 +440,7 @@ class TestGradientCalculation(test_util.TestCase):
             gradients_no_clear_auto_gen_sum[-1].device_option.extra_info
         )
 
-    def testMultiUseInputAndMultipleVersionsBig(self):
+    def testMultiUseInputAndMultipleVersionsBig(self) -> None:
         """Test gradient for the following case:
 
         in -> in
@@ -510,7 +510,7 @@ class TestGradientCalculation(test_util.TestCase):
             print(str(s))
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testGradientMappingUsingSumOp(self):
+    def testGradientMappingUsingSumOp(self) -> None:
         """Since Sum is used in accumulating gradients, we will test if
         it is OK to also explicitly use it in the graph."""
         operators = [
@@ -524,7 +524,7 @@ class TestGradientCalculation(test_util.TestCase):
         for s in gradient_ops:
             print(str(s))
 
-    def testGradientCalculationWithPrint(self):
+    def testGradientCalculationWithPrint(self) -> None:
         """Test a common use case where we have Print in the forward pass."""
         operators = [
             CreateOperator('FC', ['in', 'w', 'b'], 'fc'),
@@ -546,7 +546,7 @@ class TestGradientCalculation(test_util.TestCase):
             print(str(s))
         self.assertOperatorListEqual(gradient_ops, desired_grad_operators)
 
-    def testStopGradient(self):
+    def testStopGradient(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('StopGradient', 'hidden', 'hidden2'),
@@ -559,7 +559,7 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
 
-    def testStopGradientOrphan(self):
+    def testStopGradientOrphan(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('StopGradient', 'hidden', 'auto_blobx'),
@@ -570,7 +570,7 @@ class TestGradientCalculation(test_util.TestCase):
             gradients, _ = GradientRegistry.GetBackwardPass(
                 operators, {'out': 'out_grad'})
 
-    def testStopGradientInplace(self):
+    def testStopGradientInplace(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('StopGradient', 'hidden', 'hidden'),
@@ -584,7 +584,7 @@ class TestGradientCalculation(test_util.TestCase):
         self.assertOperatorListEqual(gradients, desired_grad_operators)
         self.assertEqual(grad_map, {'out': 'out_grad'})
 
-    def testStopGradientWithMultiUseOperators(self):
+    def testStopGradientWithMultiUseOperators(self) -> None:
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
             CreateOperator('Direct', 'hidden', 'hidden2'),
@@ -605,7 +605,7 @@ class TestGradientCalculation(test_util.TestCase):
                        'hidden3': 'hidden3_grad', 'hidden': 'hidden_grad',
                        'in': 'in_grad'})
 
-    def test_zero_gradient(self):
+    def test_zero_gradient(self) -> None:
         net = core.Net("zero_grad_test")
 
         hidden_prev, cell, gates, seq_lengths, timestep =\
@@ -618,7 +618,7 @@ class TestGradientCalculation(test_util.TestCase):
         net.ZeroGradient(cell, [])
         net.AddGradientOperators([hidden])
 
-    def test_two_grads(self):
+    def test_two_grads(self) -> None:
         net = core.Net("test_two_grads")
         input, two, three = net.AddExternalInput("input", "two", "three")
 
@@ -641,7 +641,7 @@ class TestGradientCalculation(test_util.TestCase):
 @unittest.skipIf(not core.IsOperator('SparseFunHash'),
                  'Sparse operators not available')
 class TestSparseGradientsAccumulation(test_util.TestCase):
-    def testSparseAccumulationWithValues(self):
+    def testSparseAccumulationWithValues(self) -> None:
         # The gradient for "Gather" only computes values. indices are directly
         # passed from the input
         #
@@ -664,7 +664,7 @@ class TestSparseGradientsAccumulation(test_util.TestCase):
         self.assertEqual(sum_op_v.input[1], "x4_grad")
         self.assertEqual(sum_op_v.output[0], "x2_grad_values_concat")
 
-    def testSparseGradientToDense(self):
+    def testSparseGradientToDense(self) -> None:
         #
         #                                        x1-->Gather-->x4-->
         #                                                 |        |
@@ -683,7 +683,7 @@ class TestSparseGradientsAccumulation(test_util.TestCase):
         self.assertEqual(ensure_dense_op.input[1], "x2_grad_values_concat")
         self.assertEqual(ensure_dense_op.output[0], "x2_grad")
 
-    def testSparseAccumulationWithIndicesAndValues(self):
+    def testSparseAccumulationWithIndicesAndValues(self) -> None:
         # The gradient for "SparseFunHash" computes both indices and values
         #
         # x1-------->
@@ -715,7 +715,7 @@ class TestSparseGradientsAccumulation(test_util.TestCase):
 
 
 class TestGradientsAccumulationWithNoGradientOps(test_util.TestCase):
-    def testNormalAccumulation(self):
+    def testNormalAccumulation(self) -> None:
         #  x1-->Relu--x2----------------->DotProduct-->x4
         #                |                 |
         #                 -->Softmax-->x3-->
@@ -729,7 +729,7 @@ class TestGradientsAccumulationWithNoGradientOps(test_util.TestCase):
         self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
 
-    def testAccumulationWithNoGradientBranch(self):
+    def testAccumulationWithNoGradientBranch(self) -> None:
         #                 -->PRINT
         #                |
         #  x1-->Relu--x2----------------->DotProduct-->x4
@@ -748,7 +748,7 @@ class TestGradientsAccumulationWithNoGradientOps(test_util.TestCase):
 
 
 class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
-    def testAddOpInMiddle(self):
+    def testAddOpInMiddle(self) -> None:
         #  x1-->Relu--x2----------------->Add-->x4
         #                |                 |
         #                 -->Softmax-->x3-->
@@ -769,7 +769,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(sum_op.output[0], "x2_grad")
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
-    def testAddAndDynamicConstant(self):
+    def testAddAndDynamicConstant(self) -> None:
         net = core.Net("test_net")
         net.FC(["x1", "x1_w", "x1_b"], ["x2"])
         net.Relu("x2", "x2")
@@ -785,7 +785,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertTrue("x1" in input_to_grad)
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
-    def testAddAndStaticConstant(self):
+    def testAddAndStaticConstant(self) -> None:
         net = core.Net("test_net")
         net.FC(["x1", "x1_w", "x1_b"], ["x2"])
         net.Relu("x2", "x2")
@@ -799,7 +799,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertTrue("x1" in input_to_grad)
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
-    def testSubOpInMiddle(self):
+    def testSubOpInMiddle(self) -> None:
         #  x1-->Relu--x2----------------->Sub-->x4
         #                |                 |
         #                 -->Softmax-->x3-->
@@ -821,7 +821,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(sum_op.output[0], "x2_grad")
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
-    def testAddOpAtLeaf(self):
+    def testAddOpAtLeaf(self) -> None:
         # x1
         #   \
         #    -->Add-->x4
@@ -850,7 +850,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(input_to_grad["x2"], "x2_grad")
         self.assertEqual(input_to_grad["x3"], "x3_grad")
 
-    def testSubOpAtLeaf(self):
+    def testSubOpAtLeaf(self) -> None:
         # x1
         #   \
         #    -->Sub-->x4
@@ -879,7 +879,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(input_to_grad["x2"], "x2_grad")
         self.assertEqual(input_to_grad["x3"], "x3_grad")
 
-    def testMultiLayerAddOps(self):
+    def testMultiLayerAddOps(self) -> None:
         # x1
         #   \
         #    -->Add-->x4
@@ -908,7 +908,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(input_to_grad["x2"], "x2_grad")
         self.assertEqual(input_to_grad["x3"], "x3_grad")
 
-    def testMultiLayerSubOps(self):
+    def testMultiLayerSubOps(self) -> None:
         # x1
         #   \
         #    -->Sub-->x4
@@ -937,7 +937,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(input_to_grad["x2"], "x2_grad")
         self.assertEqual(input_to_grad["x3"], "x3_grad")
 
-    def testAccumulationRuns(self):
+    def testAccumulationRuns(self) -> None:
         net = core.Net("test_net")
         input, one, two, three = net.AddExternalInput(
             "input", "one", "two", "three")
@@ -956,7 +956,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         print("Input grad: ", workspace.blobs[grad_map[str(input)]])
         assert workspace.blobs[grad_map[str(input)]] == 5.0
 
-    def testIncorrectOperator(self):
+    def testIncorrectOperator(self) -> None:
         net = core.Net("test_net")
         a, b, one = net.AddExternalInput("a", "b", "one")
         m1 = net.Mul(a, b)  # does not have second output
@@ -967,7 +967,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         except Exception as e:
             self.assertTrue("schema" in str(e))
 
-    def testDeviceOptionsPropagation(self):
+    def testDeviceOptionsPropagation(self) -> None:
         '''
         Test verifies that aggregation operators in a backward path will be in
         the same device as the parameter.

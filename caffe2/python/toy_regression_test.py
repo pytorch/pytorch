@@ -5,7 +5,7 @@ from caffe2.python import core, workspace, test_util
 
 
 class TestToyRegression(test_util.TestCase):
-    def testToyRegression(self):
+    def testToyRegression(self) -> None:
         """Tests a toy regression end to end.
 
         The test code carries a simple toy regression in the form

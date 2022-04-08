@@ -9,7 +9,7 @@ import tempfile
 
 
 class TestIndexOps(TestCase):
-    def _test_index_ops(self, entries, dtype, index_create_op):
+    def _test_index_ops(self, entries, dtype, index_create_op) -> None:
         workspace.RunOperatorOnce(core.CreateOperator(
             index_create_op,
             [],
@@ -120,16 +120,16 @@ class TestIndexOps(TestCase):
             result3 = workspace.FetchBlob('result3')
             np.testing.assert_array_equal([1, 4, 1, 5, 5], result3)
 
-    def test_string_index_ops(self):
+    def test_string_index_ops(self) -> None:
         self._test_index_ops([
             'entry1', 'entry2', 'entry3', 'new_entry1',
             'new_entry2', 'miss1', 'miss2', 'miss3',
         ], str, 'StringIndexCreate')
 
-    def test_int_index_ops(self):
+    def test_int_index_ops(self) -> None:
         self._test_index_ops(list(range(8)), np.int32, 'IntIndexCreate')
 
-    def test_long_index_ops(self):
+    def test_long_index_ops(self) -> None:
         self._test_index_ops(list(range(8)), np.int64, 'LongIndexCreate')
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ class TestONNXWhile(serial.SerializedTestCase):
         **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_onnx_while_fibb(
-            self, condition, max_trip_count, save_scopes, disable_scopes, seed, gc, dc):
+            self, condition, max_trip_count, save_scopes: bool, disable_scopes, seed, gc, dc) -> None:
         np.random.seed(seed)
         if disable_scopes:
             save_scopes = False

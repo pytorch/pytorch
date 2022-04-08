@@ -16,7 +16,7 @@ class TestCosineEmbeddingCriterion(serial.SerializedTestCase):
            seed=st.integers(min_value=0, max_value=65535),
            margin=st.floats(min_value=-0.5, max_value=0.5),
            **hu.gcs)
-    def test_cosine_embedding_criterion(self, N, seed, margin, gc, dc):
+    def test_cosine_embedding_criterion(self, N, seed, margin, gc, dc) -> None:
         np.random.seed(seed)
         S = np.random.randn(N).astype(np.float32)
         Y = np.random.choice([-1, 1], size=N).astype(np.int32)

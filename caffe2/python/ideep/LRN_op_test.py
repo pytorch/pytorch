@@ -22,7 +22,7 @@ class LRNTest(hu.HypothesisTestCase):
     @settings(deadline=10000)
     def test_LRN(self, input_channels,
                             batch_size, im_size, order,
-                             gc, dc):
+                             gc, dc) -> None:
         op = core.CreateOperator(
             "LRN",
             ["X"],

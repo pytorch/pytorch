@@ -9,12 +9,12 @@ import ctypes
 import sys
 
 
-_set_global_flags = (
+_set_global_flags: bool = (
     hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags'))
 
 
 @contextlib.contextmanager
-def DlopenGuard(extra_flags=ctypes.RTLD_GLOBAL):
+def DlopenGuard(extra_flags: int=ctypes.RTLD_GLOBAL):
     if _set_global_flags:
         old_flags = sys.getdlopenflags()
         sys.setdlopenflags(old_flags | extra_flags)
@@ -26,4 +26,5 @@ def DlopenGuard(extra_flags=ctypes.RTLD_GLOBAL):
         yield
     finally:
         if _set_global_flags:
+            # pyre-fixme[61]: `old_flags` is undefined, or not always defined.
             sys.setdlopenflags(old_flags)

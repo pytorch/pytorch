@@ -167,7 +167,7 @@ def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
 class TestGatherRanges(serial.SerializedTestCase):
     @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_gather_ranges(self, boarders_and_data, gc, dc):
+    def test_gather_ranges(self, boarders_and_data, gc, dc) -> None:
         boarders, data = boarders_and_data
 
         def boarders_to_range(boarders):
@@ -188,7 +188,7 @@ class TestGatherRanges(serial.SerializedTestCase):
 
     @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_gather_ranges_split(self, tensor_splits, gc, dc):
+    def test_gather_ranges_split(self, tensor_splits, gc, dc) -> None:
         data, ranges, lengths, _ = tensor_splits
 
         self.assertReferenceChecks(
@@ -204,7 +204,7 @@ class TestGatherRanges(serial.SerializedTestCase):
         )
 
     @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
-    def test_gather_ranges_with_key_split(self, tensor_splits, gc, dc):
+    def test_gather_ranges_with_key_split(self, tensor_splits, gc, dc) -> None:
         data, ranges, lengths, key = tensor_splits
 
         self.assertReferenceChecks(
@@ -219,7 +219,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             reference=gather_ranges_to_dense_with_key,
         )
 
-    def test_shape_and_type_inference(self):
+    def test_shape_and_type_inference(self) -> None:
         with hu.temp_workspace("shape_type_inf_int32"):
             net = core.Net("test_net")
             net.ConstantFill([], "ranges", shape=[3, 5, 2], dtype=core.DataType.INT32)
@@ -234,7 +234,7 @@ class TestGatherRanges(serial.SerializedTestCase):
 
     @given(tensor_splits=_bad_tensor_splits(), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_empty_range_check(self, tensor_splits, gc, dc):
+    def test_empty_range_check(self, tensor_splits, gc, dc) -> None:
         data, ranges, lengths, key = tensor_splits
 
         workspace.FeedBlob("data", data)

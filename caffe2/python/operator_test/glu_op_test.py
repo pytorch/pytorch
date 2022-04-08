@@ -30,7 +30,7 @@ class TestGlu(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_glu_old(self, X_axis, gc, dc):
+    def test_glu_old(self, X_axis, gc, dc) -> None:
         X, axis = X_axis
 
         def glu_ref(X):

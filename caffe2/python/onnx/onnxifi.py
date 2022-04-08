@@ -25,16 +25,16 @@ def onnxifi_get_option(option_name):
 def onnxifi_caffe2_net(
         pred_net,
         input_shapes,
-        max_batch_size=1,
-        max_seq_size=1,
-        debug=False,
-        use_onnx=True,
-        merge_fp32_inputs_into_fp16=False,
-        adjust_batch=True,
+        max_batch_size: int=1,
+        max_seq_size: int=1,
+        debug: bool=False,
+        use_onnx: bool=True,
+        merge_fp32_inputs_into_fp16: bool=False,
+        adjust_batch: bool=True,
         block_list=None,
         weight_names=None,
-        net_ssa_rewritten=False,
-        timeout=0):
+        net_ssa_rewritten: bool=False,
+        timeout: int=0):
     """
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
@@ -51,6 +51,7 @@ def onnxifi_caffe2_net(
             shape_hints.shapes.extend([tbs])
         shape_hints.max_batch_size = max_batch_size
         shape_hints.max_feature_len = max_seq_size
+    # pyre-fixme[16]: Module `_import_c_extension` has no attribute `onnxifi`.
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
                              shape_hints.SerializeToString(),
                              block_list if block_list else [],

@@ -19,7 +19,7 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
             pct_upper,
             pct_lower,
             lengths,
-    ):
+    ) -> None:
         def bisect_percentile_op_ref(
             raw_data,
             pct_raw_data,
@@ -89,7 +89,7 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
         output = workspace.blobs['pct_output']
         np.testing.assert_array_almost_equal(output, expected_output)
 
-    def test_bisect_percentil_op_simple(self):
+    def test_bisect_percentil_op_simple(self) -> None:
         raw_data = np.array([
             [1, 1],
             [2, 2],
@@ -124,7 +124,7 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
     )
     def test_bisect_percentil_op_large(
         self, N: int, lengths_in: List[int], max_value: int, discrete: bool, p: float, gc, dc
-    ):
+    ) -> None:
         lengths = np.array(lengths_in, dtype=np.int32)
         D = len(lengths)
 

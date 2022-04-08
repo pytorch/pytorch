@@ -11,7 +11,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python.modeling import initializers
 
 
-def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):
+def lrn(model, blob_in, blob_out, order: str="NCHW", use_cudnn: bool=False, **kwargs):
     """LRN"""
     dev = kwargs['device_option'] if 'device_option' in kwargs \
         else scope.CurrentDeviceScope()
@@ -34,7 +34,7 @@ def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):
         return lrn[0]
 
 
-def softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
+def softmax(model, blob_in, blob_out=None, use_cudnn: bool=False, **kwargs):
     """Softmax."""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
@@ -44,7 +44,7 @@ def softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
         return model.net.Softmax(blob_in, **kwargs)
 
 
-def instance_norm(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
+def instance_norm(model, blob_in, blob_out, dim_in, order: str="NCHW", **kwargs):
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias
     # Output: output, saved_mean, saved_inv_std
@@ -73,10 +73,10 @@ def instance_norm(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
 
 
 def spatial_bn(model, blob_in, blob_out, dim_in,
-               init_scale=1., init_bias=0.,
+               init_scale: float=1., init_bias: float=0.,
                ScaleInitializer=None, BiasInitializer=None,
                RunningMeanInitializer=None, RunningVarianceInitializer=None,
-               order="NCHW", **kwargs):
+               order: str="NCHW", **kwargs):
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias, est_mean, est_inv_var
     # Output: output, running_mean, running_inv_var, saved_mean,
@@ -154,10 +154,10 @@ def spatial_bn(model, blob_in, blob_out, dim_in,
 
 
 def spatial_gn(model, blob_in, blob_out, dim_in,
-               init_scale=1., init_bias=0.,
+               init_scale: float=1., init_bias: float=0.,
                ScaleInitializer=None, BiasInitializer=None,
                RunningMeanInitializer=None, RunningVarianceInitializer=None,
-               order="NCHW", **kwargs):
+               order: str="NCHW", **kwargs):
     '''
     Group normalizes the input, cf. https://arxiv.org/abs/1803.08494.
     '''
@@ -213,10 +213,10 @@ def layer_norm(
     blob_in,
     blob_out,
     dim_in,
-    axis=1,
-    epsilon=1e-4,
-    initial_scale=1.0,
-    initial_bias=0.0,
+    axis: int=1,
+    epsilon: float=1e-4,
+    initial_scale: float=1.0,
+    initial_bias: float=0.0,
 ):
     '''
     Layer normalizes the input, cf. https://arxiv.org/pdf/1607.06450.pdf.
@@ -277,7 +277,7 @@ def layer_norm(
 
 def moments_with_running_stats(model, blob_in, blob_out, dim_in,
                                      RunningMeanInitializer=None, RunningVarianceInitializer=None,
-                                     order="NCHW", **kwargs):
+                                     order: str="NCHW", **kwargs):
 
     if model.init_params:
         rm_init = ("ConstantFill", {'value': 0.0})
@@ -319,4 +319,5 @@ def moments_with_running_stats(model, blob_in, blob_out, dim_in,
             [blob_in], blob_outs,
             axes=[0, 1, 2],
             order=order, keepdims=False, **kwargs)
+    # pyre-fixme[61]: `blob_outputs` is undefined, or not always defined.
     return blob_outputs

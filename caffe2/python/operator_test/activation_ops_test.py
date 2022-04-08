@@ -22,7 +22,7 @@ class TestActivations(serial.SerializedTestCase):
     @given(X=hu.tensor(), in_place=st.booleans(),
                   engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
     @settings(deadline=10000)
-    def test_relu(self, X, in_place, engine, gc, dc):
+    def test_relu(self, X: float, in_place: bool, engine, gc, dc) -> None:
         if gc == mu.mkl_do:
             in_place = False
 
@@ -38,6 +38,8 @@ class TestActivations(serial.SerializedTestCase):
 
         # go away from the origin point to avoid kink problems
         X += 0.02 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.02
 
         self.assertReferenceChecks(gc, op, [X], relu_ref, ensure_outputs_are_inferred=True)
@@ -46,7 +48,7 @@ class TestActivations(serial.SerializedTestCase):
 
     @given(N=st.integers(1, 10), M=st.integers(1, 10), in_place=st.booleans(),
            **hu.gcs)
-    def test_relu_empty_input(self, N, M, in_place, gc, dc):
+    def test_relu_empty_input(self, N, M, in_place, gc, dc) -> None:
         op = core.CreateOperator(
             "Relu",
             ["X"],
@@ -66,7 +68,7 @@ class TestActivations(serial.SerializedTestCase):
                      "Relu for float16 can only run on GPU now.")
     @given(X=hu.tensor(dtype=np.float16), in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    def test_relu_fp16(self, X, in_place, engine, gc, dc):
+    def test_relu_fp16(self, X: float, in_place, engine, gc, dc) -> None:
         # fp16 is only supported on CUDA/HIP
         assume(core.IsGPUDeviceType(gc.device_type))
         op = core.CreateOperator(
@@ -88,6 +90,8 @@ class TestActivations(serial.SerializedTestCase):
 
         # go away from the origin point to avoid kink problems
         X += 0.02 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.02
 
         self.assertReferenceChecks(
@@ -101,7 +105,7 @@ class TestActivations(serial.SerializedTestCase):
     @serial.given(X=hu.tensor(elements=hu.floats(-3.0, 3.0)),
                   n=hu.floats(min_value=0.5, max_value=2.0),
                   in_place=st.booleans(), **hu.gcs)
-    def test_relu_n(self, X, n, in_place, gc, dc):
+    def test_relu_n(self, X: float, n, in_place, gc, dc) -> None:
         op = core.CreateOperator(
             "ReluN",
             ["X"],
@@ -114,6 +118,8 @@ class TestActivations(serial.SerializedTestCase):
 
         # go away from 0 and n to avoid kink problems
         X += 0.04 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.04
         X -= n
         X += 0.02 * np.sign(X)
@@ -129,7 +135,7 @@ class TestActivations(serial.SerializedTestCase):
                   alpha=hu.floats(min_value=0.1, max_value=2.0),
                   in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
                   **hu.gcs)
-    def test_elu(self, X, alpha, in_place, engine, gc, dc):
+    def test_elu(self, X: float, alpha, in_place, engine, gc, dc) -> None:
         op = core.CreateOperator(
             "Elu",
             ["X"],
@@ -145,6 +151,8 @@ class TestActivations(serial.SerializedTestCase):
 
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.04
 
         self.assertReferenceChecks(gc, op, [X], elu_ref, ensure_outputs_are_inferred=True)
@@ -159,9 +167,10 @@ class TestActivations(serial.SerializedTestCase):
            seed=st.sampled_from([20, 100]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_prelu(self, X, alpha, inplace, shared, order, seed, gc, dc):
+    def test_prelu(self, X: float, alpha, inplace, shared, order, seed, gc, dc) -> None:
         np.random.seed(seed)
         W = np.random.randn(
+            # pyre-fixme[16]: `float` has no attribute `shape`.
             X.shape[1] if order == "NCHW" else X.shape[3]).astype(np.float32)
 
         if shared:
@@ -169,6 +178,8 @@ class TestActivations(serial.SerializedTestCase):
 
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.04
 
         def prelu_ref(X, W):
@@ -199,9 +210,11 @@ class TestActivations(serial.SerializedTestCase):
                   alpha=hu.floats(min_value=0.1, max_value=2.0),
                   inplace=st.booleans(),
                   **hu.gcs)
-    def test_leaky_relu(self, X, alpha, inplace, gc, dc):
+    def test_leaky_relu(self, X: float, alpha, inplace, gc, dc) -> None:
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.04
 
         def leaky_relu_ref(X):
@@ -222,9 +235,11 @@ class TestActivations(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            inplace=st.booleans(),
            **hu.gcs)
-    def test_leaky_relu_default(self, X, inplace, gc, dc):
+    def test_leaky_relu_default(self, X: float, inplace, gc, dc) -> None:
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
+        # pyre-fixme[16]: `float` has no attribute `__getitem__`.
+        # pyre-fixme[16]: `float` has no attribute `__setitem__`.
         X[X == 0.0] += 0.04
 
         def leaky_relu_ref(X):
@@ -244,7 +259,7 @@ class TestActivations(serial.SerializedTestCase):
            fast_gelu=st.booleans(),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_gelu(self, X, fast_gelu, gc, dc):
+    def test_gelu(self, X, fast_gelu, gc, dc) -> None:
         op = core.CreateOperator(
             "Gelu",
             ["X"],
@@ -265,7 +280,7 @@ class TestActivations(serial.SerializedTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs_cpu_only)
-    def test_mish(self, n, m, gc, dc, seed):
+    def test_mish(self, n, m, gc, dc, seed) -> None:
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)
 

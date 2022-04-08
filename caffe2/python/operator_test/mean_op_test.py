@@ -20,7 +20,7 @@ class TestMean(serial.SerializedTestCase):
         seed=st.integers(0, 2**32 - 1),
         **hu.gcs
     )
-    def test_mean(self, k, n, m, in_place, seed, gc, dc):
+    def test_mean(self, k, n, m, in_place, seed, gc, dc) -> None:
         np.random.seed(seed)
         input_names = []
         input_vars = []

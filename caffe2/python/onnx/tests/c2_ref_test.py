@@ -29,13 +29,15 @@ import caffe2.python._import_c_extension as C
 
 
 class TestCaffe2Basic(TestCase):
-    def test_dummy_name(self):
+    def test_dummy_name(self) -> None:
         g = C.DummyName()
+        # pyre-fixme[16]: `DummyName` has no attribute `new_dummy_name`.
         n1 = g.new_dummy_name()
         n2 = g.new_dummy_name()
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
-    def test_check_arguments(self):
+    def test_check_arguments(self) -> None:
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute `Caffe2Backend`.
         b2 = C.Caffe2Backend()
 
         node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"])
@@ -46,14 +48,16 @@ class TestCaffe2Basic(TestCase):
                                     "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
-    def test_dynamicslice_3inputs_graph(self):
+    def test_dynamicslice_3inputs_graph(self) -> None:
         node_def = make_node(
             "DynamicSlice", ["X1", "X2", "X3"], ["Y"])
 
         graph_def = make_graph(
             [node_def],
             name="test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             inputs=[make_tensor_value_info("X1", onnx.TensorProto.FLOAT, (2, 4)),
+             # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `INT32`.
              make_tensor_value_info("X2", onnx.TensorProto.INT32, (1, 2)),
              make_tensor_value_info("X3", onnx.TensorProto.INT32, (1, 2))],
             outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, (1, 2))])
@@ -66,13 +70,15 @@ class TestCaffe2Basic(TestCase):
         output = prepared.run(inputs=[np.array(x), np.array(start), np.array(end)])
         self.assertSameOutputs(output[0], np.array(x)[0:-1, 0:4])
 
-    def test_dynamicslice_4inputs_graph(self):
+    def test_dynamicslice_4inputs_graph(self) -> None:
         node_def = make_node(
             "DynamicSlice", ["X1", "X2", "X3", "axes"], ["Y"])
         graph_def = make_graph(
             [node_def],
             name="test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             inputs=[make_tensor_value_info("X1", onnx.TensorProto.FLOAT, (2, 4)),
+             # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `INT32`.
              make_tensor_value_info("X2", onnx.TensorProto.INT32, (1, 2)),
              make_tensor_value_info("X3", onnx.TensorProto.INT32, (1, 2)),
              make_tensor_value_info("axes", onnx.TensorProto.INT32, (1, 2))],
@@ -86,7 +92,7 @@ class TestCaffe2Basic(TestCase):
         output = prepared.run(inputs=[np.array(x), np.array(start), np.array(end), np.array(axes)])
         self.assertSameOutputs(output[0], np.array(x)[1:5, 0:4])
 
-    def test_relu_graph(self):
+    def test_relu_graph(self) -> None:
         X = np.random.randn(3, 2).astype(np.float32)
         Y_ref = np.clip(X, 0, np.inf)
 
@@ -99,13 +105,14 @@ class TestCaffe2Basic(TestCase):
         graph_def = make_graph(
             [node_def],
             name="test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [3, 2])],
             outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, [3, 2])])
         c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run(X)
         np.testing.assert_almost_equal(output.Y, Y_ref)
 
-    def test_elementwiselinear(self):
+    def test_elementwiselinear(self) -> None:
         X = np.random.randn(4, 2, 5, 7, 3).astype(np.float32)
         W = np.random.randn(21).astype(np.float32)
         B = np.random.randn(21).astype(np.float32)
@@ -137,12 +144,13 @@ class TestCaffe2Basic(TestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X, W, B])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_initializer(self):
+    def test_initializer(self) -> None:
         X = np.array([[1, 2], [3, 4]]).astype(np.float32)
         Y = np.array([[1, 2], [3, 4]]).astype(np.float32)
         weight = np.array([[1, 0], [0, 1]])
         graph_def = make_graph(
             [make_node("Add", ["X", "Y"], ["Z0"]),
+             # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
              make_node("Cast", ["Z0"], ["Z"], to=onnx.TensorProto.FLOAT),
              make_node("Mul", ["Z", "weight"], ["W0"]),
              make_node("Tanh", ["W0"], ["W1"]),
@@ -171,7 +179,7 @@ class TestCaffe2Basic(TestCase):
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
 
-    def test_reducemean(self):
+    def test_reducemean(self) -> None:
         X = np.random.randn(4, 6, 10, 5, 3).astype(np.float32)
 
         predict_net = caffe2_pb2.NetDef()
@@ -224,7 +232,7 @@ class TestCaffe2Basic(TestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_upsample(self):
+    def test_upsample(self) -> None:
         X = np.random.randn(1, 1, 2, 2).astype(np.float32)
         width_scale = 2.0
         height_scale = 2.0
@@ -255,7 +263,7 @@ class TestCaffe2Basic(TestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_fc(self):
+    def test_fc(self) -> None:
         X_fake = np.zeros((3, 1, 3, 1, 7), dtype=np.float32)
         X = np.random.randn(5, 2, 3, 1, 7).astype(np.float32)
         W = np.random.randn(11, 21).astype(np.float32)
@@ -288,7 +296,7 @@ class TestCaffe2Basic(TestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X, W, B])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_gemm(self):
+    def test_gemm(self) -> None:
         # simple
         A = np.random.randn(3, 2).astype(np.float32)
         B = np.random.randn(2, 4).astype(np.float32)
@@ -427,7 +435,7 @@ class TestCaffe2Basic(TestCase):
             output["Y"],
             alpha * np.dot(A, B) + beta * C)
 
-    def test_gemm_conversion(self):
+    def test_gemm_conversion(self) -> None:
         node_def = make_node(
             'Gemm',
             ['A', 'B', 'C'],
@@ -458,6 +466,7 @@ class TestCaffe2Basic(TestCase):
             transB=1,
             broadcast=1)
 
+        # pyre-fixme[16]: Module `_import_c_extension` has no attribute `Caffe2Backend`.
         backend = C.Caffe2Backend()
 
         # without broadcast and without shape info, gemm will be
@@ -473,6 +482,7 @@ class TestCaffe2Basic(TestCase):
         # opset7
         # If C is a 1d tensor, gemm will be converted to FC/FCTransposed
         _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
+        # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
         ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
         7)
         op_names = []
@@ -576,7 +586,7 @@ class TestCaffe2Basic(TestCase):
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
 
-    def test_mergedim(self):
+    def test_mergedim(self) -> None:
         X = np.random.randn(2, 3, 1, 5).astype(np.float32)
 
         predict_net = caffe2_pb2.NetDef()
@@ -603,17 +613,37 @@ class TestCaffe2Basic(TestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_tensor_filling_ops(self):
+    def test_tensor_filling_ops(self) -> None:
         for dtype in [
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `FLOAT`.
                 onnx.TensorProto.FLOAT,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `DOUBLE`.
                 onnx.TensorProto.DOUBLE,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `BOOL`.
                 onnx.TensorProto.BOOL,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT8`.
                 onnx.TensorProto.INT8,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT16`.
                 onnx.TensorProto.INT16,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT32`.
                 onnx.TensorProto.INT32,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT64`.
                 onnx.TensorProto.INT64,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `UINT8`.
                 onnx.TensorProto.UINT8,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `UINT16`.
                 onnx.TensorProto.UINT16,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `UINT32`.
                 onnx.TensorProto.UINT32,
         ]:
             shape = (1, 2, 3)
@@ -636,17 +666,37 @@ class TestCaffe2Basic(TestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
-    def test_tensor_filling_ops_c_backend(self):
+    def test_tensor_filling_ops_c_backend(self) -> None:
         for dtype in [
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `FLOAT`.
                 onnx.TensorProto.FLOAT,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `DOUBLE`.
                 onnx.TensorProto.DOUBLE,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `BOOL`.
                 onnx.TensorProto.BOOL,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT8`.
                 onnx.TensorProto.INT8,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT16`.
                 onnx.TensorProto.INT16,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT32`.
                 onnx.TensorProto.INT32,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `INT64`.
                 onnx.TensorProto.INT64,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `UINT8`.
                 onnx.TensorProto.UINT8,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `UINT16`.
                 onnx.TensorProto.UINT16,
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `UINT32`.
                 onnx.TensorProto.UINT32,
         ]:
             shape = (1, 2, 3)
@@ -661,6 +711,8 @@ class TestCaffe2Basic(TestCase):
                 dims=[1, 2, 3],
                 vals=vals.flatten().tolist(),
             )
+            # pyre-fixme[16]: Module `_import_c_extension` has no attribute
+            #  `Caffe2Backend`.
             b = C.Caffe2Backend()
             op = caffe2_pb2.OperatorDef()
             op.ParseFromString(b._build_tensor_filling_op(tensor.SerializeToString(), ''))
@@ -671,7 +723,7 @@ class TestCaffe2Basic(TestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
-    def test_concat(self):
+    def test_concat(self) -> None:
         I0 = np.random.randn(20, 4).astype(np.float32)
         I1 = np.random.randn(20, 4).astype(np.float32)
         for i in range(2):
@@ -701,7 +753,7 @@ class TestCaffe2Basic(TestCase):
             onnx_outputs = c2.run_model(onnx_model, inputs=[I0, I1])
             self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_slice(self):
+    def test_slice(self) -> None:
         X = np.random.randn(1, 2, 3).astype(np.float32)
         starts = np.array([0, 1, 0], dtype=np.int32)
         ends = np.array([-1, 2, 3], dtype=np.int32)
@@ -732,7 +784,7 @@ class TestCaffe2Basic(TestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
-    def test_cast(self):
+    def test_cast(self) -> None:
         X = np.random.randn(1, 2, 3).astype(np.float32)
 
         for to_type in ['INT8', caffe2_pb2.TensorProto.INT8,
@@ -764,13 +816,13 @@ class TestCaffe2Basic(TestCase):
 
 
 class TestCaffe2End2End(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.model_downloader = ModelDownloader('ONNX_MODELS')
 
     def _test_net(self,
                   net_name,
                   input_blob_dims=(1, 3, 224, 224),
-                  decimal=7):
+                  decimal: int=7) -> None:
         np.random.seed(seed=0)
         try:
             c2_init_net, c2_predict_net, value_info, debug_str = self.model_downloader.get_c2_model_dbg(net_name)
@@ -786,12 +838,18 @@ class TestCaffe2End2End(TestCase):
         n, c, h, w = input_blob_dims
         data = np.random.randn(n, c, h, w).astype(np.float32)
         inputs = [data]
+        # pyre-fixme[61]: `c2_init_net` is undefined, or not always defined.
+        # pyre-fixme[61]: `c2_predict_net` is undefined, or not always defined.
+        # pyre-fixme[61]: `debug_str` is undefined, or not always defined.
         _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs, debug_str)
         del _
 
         model = c2_onnx.caffe2_net_to_onnx_model(
+            # pyre-fixme[61]: `c2_predict_net` is undefined, or not always defined.
             predict_net=c2_predict_net,
+            # pyre-fixme[61]: `c2_init_net` is undefined, or not always defined.
             init_net=c2_init_net,
+            # pyre-fixme[61]: `value_info` is undefined, or not always defined.
             value_info=value_info,
         )
         c2_ir = c2.prepare(model)
@@ -801,67 +859,67 @@ class TestCaffe2End2End(TestCase):
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_alexnet(self):
+    def test_alexnet(self) -> None:
         self._test_net('bvlc_alexnet', decimal=4)
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_resnet50(self):
+    def test_resnet50(self) -> None:
         self._test_net('resnet50')
 
     @unittest.skipIf(
         os.environ.get('JENKINS_URL') or os.environ.get('SKIP_IN_FB'),
         'Taking too long to download!')
-    def test_vgg16(self):
+    def test_vgg16(self) -> None:
         self._test_net('vgg16')
 
     @unittest.skipIf(
         os.environ.get('JENKINS_URL') or os.environ.get('SKIP_IN_FB'),
         'Taking too long to download!')
-    def test_zfnet(self):
+    def test_zfnet(self) -> None:
         self._test_net('zfnet')
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_inception_v1(self):
+    def test_inception_v1(self) -> None:
         self._test_net('inception_v1', decimal=2)
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_inception_v2(self):
+    def test_inception_v2(self) -> None:
         self._test_net('inception_v2')
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_squeezenet(self):
+    def test_squeezenet(self) -> None:
         self._test_net('squeezenet')
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_densenet121(self):
+    def test_densenet121(self) -> None:
         self._test_net('densenet121')
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_bvlc_googlenet(self):
+    def test_bvlc_googlenet(self) -> None:
         self._test_net('bvlc_googlenet')
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_bvlc_reference_caffenet(self):
+    def test_bvlc_reference_caffenet(self) -> None:
         self._test_net('bvlc_reference_caffenet')
 
     @unittest.skipIf(
         os.environ.get('SKIP_IN_FB'),
         'Skip internally!')
-    def test_bvlc_reference_rcnn_ilsvrc13(self):
+    def test_bvlc_reference_rcnn_ilsvrc13(self) -> None:
         self._test_net('bvlc_reference_rcnn_ilsvrc13')
 
 

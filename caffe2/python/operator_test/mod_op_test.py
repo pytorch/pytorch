@@ -33,7 +33,7 @@ class TestMod(hu.HypothesisTestCase):
     )
     def test_mod(
         self, data, divisor, inplace, sign_follow_divisor, gc, dc
-    ):
+    ) -> None:
         if divisor == 0:
             # invalid test case
             return None

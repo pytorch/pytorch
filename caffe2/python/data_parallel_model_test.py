@@ -24,11 +24,13 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
 
 class TemporaryDirectory:
-    def __enter__(self):
+    def __enter__(self) -> str:
+        # pyre-fixme[16]: `TemporaryDirectory` has no attribute `tmpdir`.
         self.tmpdir = tempfile.mkdtemp()
         return self.tmpdir
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, type, value, traceback) -> None:
+        # pyre-fixme[16]: `TemporaryDirectory` has no attribute `tmpdir`.
         shutil.rmtree(self.tmpdir)
 
 # Note(jiayq): we are yet to find out why Travis gives out an error in gloo
@@ -129,7 +131,7 @@ class DataParallelModelTest(TestCase):
 
         return workspace.FetchBlob("{}_0/fc_w".format(model._device_prefix))
 
-    def run_test_locally(self, fn, device_option=None, **kwargs):
+    def run_test_locally(self, fn, device_option=None, **kwargs) -> None:
         # Queue for assertion errors on subprocesses
         queue = Queue()
 
@@ -169,7 +171,7 @@ class DataParallelModelTest(TestCase):
                 if not queue.empty():
                     raise queue.get()
 
-    def test_equiv(self):
+    def test_equiv(self) -> None:
         '''
         Test that the model produces exactly same results given
         total batchsize, independent of number of GPUs.
@@ -195,7 +197,7 @@ class DataParallelModelTest(TestCase):
                 result_16gpus = self.run_model(list(range(16)), gpu=gpu)
                 self.assertTrue(np.allclose(result_1gpus, result_16gpus))
 
-    def test_checkpoint_params(self):
+    def test_checkpoint_params(self) -> None:
         def add_input_ops(model):
             pass
 
@@ -250,7 +252,7 @@ class DataParallelModelTest(TestCase):
         self.assertFalse(core.BlobReference("cpu_1/data") in checkpoint_params)
         self.assertTrue(core.BlobReference("optimizer_iteration") in checkpoint_params)
 
-    def test_net_conversion_and_append_net(self):
+    def test_net_conversion_and_append_net(self) -> None:
         other = model_helper.ModelHelper()
         fc1 = brew.fc(other, "data", "other_fc1", dim_in=3*227*227, dim_out=10)
         fc2 = brew.fc(other, fc1, "other_fc2", dim_in=10, dim_out=10)
@@ -303,7 +305,7 @@ class DataParallelModelTest(TestCase):
         workspace.RunNet(model.net)
 
     @unittest.skip("Test fails on GPU/RE")
-    def test_synchronization_barrier(self):
+    def test_synchronization_barrier(self) -> None:
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):
                 pass
@@ -353,7 +355,7 @@ class DataParallelModelTest(TestCase):
                 tmpdir=tmpdir)
 
     @unittest.skip("Test fails on GPU/RE")
-    def test_pre_train_synchronization_barrier(self):
+    def test_pre_train_synchronization_barrier(self) -> None:
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):
                 pass
@@ -409,12 +411,12 @@ class DataParallelModelTest(TestCase):
                 device_option=None,
                 tmpdir=tmpdir)
 
-    def test_device_scope_check(self):
+    def test_device_scope_check(self) -> None:
         with self.assertRaises(AssertionError):
             with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
                 data_parallel_model.Parallelize_GPU(None, None, None)
 
-    def test_net_transformer_function(self):
+    def test_net_transformer_function(self) -> None:
         devices = [1, 2, 3]
 
         def add_input_ops(model):
@@ -451,17 +453,17 @@ class DataParallelModelTest(TestCase):
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
     @settings(deadline=2000)
-    def test_multi_device_bn_op_level_cpu(self, seed, batch_size):
+    def test_multi_device_bn_op_level_cpu(self, seed, batch_size) -> None:
         self._bn_check_op_level("cpu", seed, batch_size)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
     @settings(deadline=2000)
-    def test_multi_device_bn_op_level_gpu(self, seed, batch_size):
+    def test_multi_device_bn_op_level_gpu(self, seed, batch_size) -> None:
         self._bn_check_op_level("gpu", seed, batch_size)
 
-    def _bn_check_op_level(self, device_type, seed, batch_size):
+    def _bn_check_op_level(self, device_type, seed, batch_size) -> None:
         '''
         Test multi device batch normalization at the operation level. This is
         done by checking the outputs of batch normalization and its gradient
@@ -585,7 +587,7 @@ class DataParallelModelTest(TestCase):
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
     @settings(deadline=2000)
-    def test_multi_device_bn_net_lvl_cpu(self, seed, batch_size):
+    def test_multi_device_bn_net_lvl_cpu(self, seed, batch_size: int) -> None:
         if batch_size % 2 == 1:
             batch_size += 1
         self._test_multi_device_bn_net_lvl("cpu", seed, batch_size)
@@ -594,12 +596,12 @@ class DataParallelModelTest(TestCase):
     @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
     @settings(deadline=2000)
-    def test_multi_device_bn_net_lvl_gpu(self, seed, batch_size):
+    def test_multi_device_bn_net_lvl_gpu(self, seed, batch_size: int) -> None:
         if batch_size % 2 == 1:
             batch_size += 1
         self._test_multi_device_bn_net_lvl("gpu", seed, batch_size)
 
-    def _test_multi_device_bn_net_lvl(self, device_type, seed, batch_size):
+    def _test_multi_device_bn_net_lvl(self, device_type, seed, batch_size) -> None:
         '''
         Test multi device batch normalization at the net level. This is done
         by verifying that the final batch normalization outputs and the
@@ -860,7 +862,7 @@ class RecurrentNetworkParallelTest(TestCase):
         return workspace.FetchBlob("{}_0/partest/i2h_w".format(model._device_prefix))
 
     @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/10322")
-    def test_equiv_recurrent(self):
+    def test_equiv_recurrent(self) -> None:
         '''
         Test that the model produces exactly same results given
         total batchsize, independent of number of GPUs/CPUs.
@@ -1053,7 +1055,7 @@ class SparseDataParallelModelTest(TestCase):
         return [workspace.FetchBlob(self.vecs if cpu_indices else "gpu_0/gpuvecs"),
                 workspace.FetchBlob("gpu_0/fc_w")]
 
-    def _test_equiv_sparse(self, cpu_indices):
+    def _test_equiv_sparse(self, cpu_indices) -> None:
         '''
             Test that the model produces exactly same results given
             total batchsize, independent of number of GPUs.
@@ -1075,7 +1077,7 @@ class SparseDataParallelModelTest(TestCase):
             self.assertTrue(np.allclose(result_1gpus[0], result_8gpus[0]))
             self.assertTrue(np.allclose(result_1gpus[1], result_8gpus[1]))
 
-    def test_equiv_sparse(self):
+    def test_equiv_sparse(self) -> None:
         self._test_equiv_sparse(True)
         self._test_equiv_sparse(False)
 
@@ -1084,7 +1086,7 @@ class SparseDataParallelModelTest(TestCase):
 @unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class ParallelizeBMUFTest(TestCase):
 
-    def _run_model(self, gpu_devices):
+    def _run_model(self, gpu_devices) -> None:
         '''
         Helper function for test_equiv
         '''
@@ -1103,7 +1105,7 @@ class ParallelizeBMUFTest(TestCase):
 
         return [loss]
 
-    def _param_update_fun(self, model):
+    def _param_update_fun(self, model) -> None:
         ITER = model.Iter("ITER")
         LR = model.net.LearningRate(
             [ITER],
@@ -1118,7 +1120,7 @@ class ParallelizeBMUFTest(TestCase):
             grad = model.param_to_grad[param]
             model.WeightedSum([param, ONE, grad, LR], param)
 
-    def _generate_data(self, devices, device_type, device_prefix):
+    def _generate_data(self, devices, device_type, device_prefix) -> None:
         np.random.seed(26)
         # Each run has same input, independent of number of gpus
         batch_size = 64
@@ -1140,7 +1142,7 @@ class ParallelizeBMUFTest(TestCase):
         cpu_device=st.booleans()
     )
     @settings(deadline=2000)
-    def test_parallelize_bmuf(self, cpu_device):
+    def test_parallelize_bmuf(self, cpu_device) -> None:
         assume(cpu_device or workspace.has_gpu_support or workspace.has_hip_support)
 
         workspace.ResetWorkspace()
@@ -1236,7 +1238,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
     Create and run the model. We try with both storing indices for gather
     on CPU and on GPU
     '''
-    def run_model(self, V, gpu_devices):
+    def run_model(self, V, gpu_devices) -> None:
 
         def input_builder_fun(model):
             return None
@@ -1308,7 +1310,11 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
         with core.NameScope("cpu"):
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                # pyre-fixme[16]: `SparseDataParallelModelTestWithSharedIndices` has
+                #  no attribute `ITER`.
                 self.ITER = model.Iter("ITER")
+                # pyre-fixme[16]: `SparseDataParallelModelTestWithSharedIndices` has
+                #  no attribute `LR`.
                 self.LR = model.net.LearningRate(
                     [self.ITER],
                     "LR",
@@ -1321,6 +1327,8 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                 2) FC bias, shape=(V)
                 3) FC input, shape=(batch_per_device, 16)
                 '''
+                # pyre-fixme[16]: `SparseDataParallelModelTestWithSharedIndices` has
+                #  no attribute `vecs`.
                 self.vecs = [
                     model.param_init_net.UniformFill(
                         [], "vec_{}".format(num), shape=[V, 16])
@@ -1332,6 +1340,8 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                         "vec_2", shape=[batch_per_device, 16]
                     )
                 )
+                # pyre-fixme[16]: `SparseDataParallelModelTestWithSharedIndices` has
+                #  no attribute `ONE_CPU`.
                 self.ONE_CPU = model.param_init_net.ConstantFill(
                     [], "ONE_CPU", shape=[1], value=1.0,
                 )
@@ -1407,7 +1417,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                     )
                 )
 
-    def test_sparse_shared_indices_gpu(self):
+    def test_sparse_shared_indices_gpu(self) -> None:
         '''
             Test that the model has same number of indices and gradient rows
             given total batchsize, independent of number of GPUs.

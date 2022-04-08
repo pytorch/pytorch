@@ -4,7 +4,7 @@ from caffe2.python.test_util import TestCase
 
 
 class TestSplitOpCost(TestCase):
-    def _verify_cost(self, workspace, split_op):
+    def _verify_cost(self, workspace, split_op) -> None:
         flops, bytes_written, bytes_read = workspace.GetOperatorCost(
             split_op, split_op.input
         )
@@ -18,7 +18,7 @@ class TestSplitOpCost(TestCase):
             sum(workspace.FetchBlob(b).nbytes for b in split_op.output),
         )
 
-    def test_columnwise_equal_outputSplit(self):
+    def test_columnwise_equal_outputSplit(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         split_op = core.CreateOperator(
@@ -40,7 +40,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_rowwise_equal_outputSplit(self):
+    def test_rowwise_equal_outputSplit(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         split_op = core.CreateOperator(
@@ -60,7 +60,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_columnwise_equal_outputSplit_columnRemoved(self):
+    def test_columnwise_equal_outputSplit_columnRemoved(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         # To be able to use 'add_axis' (which should have been called 'remove_axis') on 'axis',
@@ -86,7 +86,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_rowwise_equal_outputSplit_rowRemoved(self):
+    def test_rowwise_equal_outputSplit_rowRemoved(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         split_op = core.CreateOperator(
@@ -107,7 +107,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_rowwise_unequal_argSplit(self):
+    def test_rowwise_unequal_argSplit(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob(
             "input", np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=np.int32)
@@ -131,7 +131,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_rowwise_unequal_argSplit_rowRemoved(self):
+    def test_rowwise_unequal_argSplit_rowRemoved(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob(
             "input", np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=np.int32)
@@ -158,7 +158,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_rowwise_unequal_blobSplit(self):
+    def test_rowwise_unequal_blobSplit(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob(
             "input", np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=np.int32)
@@ -182,7 +182,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_columnwise_unequal_argSplit(self):
+    def test_columnwise_unequal_argSplit(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         split_op = core.CreateOperator(
@@ -204,7 +204,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_columnWise_unequal_blobSplit_columnRemoved(self):
+    def test_columnWise_unequal_blobSplit_columnRemoved(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))
         workspace.FeedBlob("split", np.array([1, 1, 1], dtype=np.int32))
@@ -229,7 +229,7 @@ class TestSplitOpCost(TestCase):
 
         self._verify_cost(workspace, split_op)
 
-    def test_equal_outputSplit_NHWC(self):
+    def test_equal_outputSplit_NHWC(self) -> None:
         workspace.ResetWorkspace()
         workspace.FeedBlob("input", np.random.rand(2, 5, 7, 9).astype(np.int32))
         split_op = core.CreateOperator(

@@ -13,7 +13,7 @@ class OrderSwitchOpsTest(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_nchw2nhwc(self, X, engine, gc, dc):
+    def test_nchw2nhwc(self, X, engine, gc, dc) -> None:
         op = core.CreateOperator("NCHW2NHWC", ["X"], ["Y"], engine=engine)
 
         def nchw2nhwc_ref(X):
@@ -29,7 +29,7 @@ class OrderSwitchOpsTest(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_nhwc2nchw(self, X, engine, gc, dc):
+    def test_nhwc2nchw(self, X, engine, gc, dc) -> None:
         op = core.CreateOperator("NHWC2NCHW", ["X"], ["Y"], engine=engine)
 
         def nhwc2nchw_ref(X):

@@ -41,7 +41,7 @@ def dense_vector_to_id_list_ref(*arg):
 
 
 class TestDenseVectorToIdList(hu.HypothesisTestCase):
-    def test_dense_vector_to_id_list_ref(self):
+    def test_dense_vector_to_id_list_ref(self) -> None:
         # Verify that the reference implementation is correct!
         dense_input = np.array(
             [[1, 0, 0, 1, 0, 0, 0, 1],
@@ -56,7 +56,7 @@ class TestDenseVectorToIdList(hu.HypothesisTestCase):
         np.testing.assert_array_equal(sparse_values, expected_values)
 
     @given(inputs=id_list_batch(), **hu.gcs_cpu_only)
-    def test_dense_vector_to_id_list_op(self, inputs, gc, dc):
+    def test_dense_vector_to_id_list_op(self, inputs, gc, dc) -> None:
         op = core.CreateOperator(
             "DenseVectorToIdList",
             ["values"],

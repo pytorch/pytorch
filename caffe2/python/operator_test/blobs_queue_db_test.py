@@ -10,7 +10,7 @@ from caffe2.python import core, workspace, timeout_guard, test_util
 
 
 class BlobsQueueDBTest(test_util.TestCase):
-    def test_create_blobs_queue_db_string(self):
+    def test_create_blobs_queue_db_string(self) -> None:
         def add_blobs(queue, num_samples):
             blob = core.BlobReference("blob")
             status = core.BlobReference("blob_status")
@@ -20,7 +20,7 @@ class BlobsQueueDBTest(test_util.TestCase):
                 )
         self._test_create_blobs_queue_db(add_blobs)
 
-    def test_create_blobs_queue_db_tensor(self):
+    def test_create_blobs_queue_db_tensor(self) -> None:
         def add_blobs(queue, num_samples):
             blob = core.BlobReference("blob")
             status = core.BlobReference("blob_status")
@@ -32,7 +32,7 @@ class BlobsQueueDBTest(test_util.TestCase):
                 )
         self._test_create_blobs_queue_db(add_blobs)
 
-    def _test_create_blobs_queue_db(self, add_blobs_fun):
+    def _test_create_blobs_queue_db(self, add_blobs_fun) -> None:
         num_samples = 10000
         batch_size = 10
         init_net = core.Net('init_net')
@@ -72,7 +72,7 @@ class BlobsQueueDBTest(test_util.TestCase):
                 self.assertEqual(1, item)
         workspace.RunNetOnce(close_net)
 
-    def _add_blob_to_queue(self, queue, data, blob, status):
+    def _add_blob_to_queue(self, queue, data, blob, status) -> None:
         workspace.FeedBlob(blob, data)
         op = core.CreateOperator(
             "SafeEnqueueBlobs",
@@ -81,7 +81,7 @@ class BlobsQueueDBTest(test_util.TestCase):
         )
         workspace.RunOperatorOnce(op)
 
-    def _create_test_tensor_protos(self, idx):
+    def _create_test_tensor_protos(self, idx) -> bytes:
         item = caffe2_pb2.TensorProtos()
         data = item.protos.add()
         data.data_type = core.DataType.STRING

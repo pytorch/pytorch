@@ -62,7 +62,7 @@ class BasicRNNCellTest(hu.HypothesisTestCase):
     )
     @ht_settings(max_examples=15)
     def test_basic_rnn(self, seed, seq_length, batch_size, input_size, hidden_size,
-                       drop_states, sequence_lengths, gc, dc):
+                       drop_states, sequence_lengths, gc, dc) -> None:
         np.random.seed(seed)
 
         seq_lengths_data = np.random.randint(

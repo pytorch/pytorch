@@ -27,7 +27,7 @@ class MKLConvTest(hu.HypothesisTestCase):
            **mu.gcs)
     def test_mkl_convolution(self, stride, pad, kernel, size,
                              input_channels, output_channels,
-                             batch_size, use_bias, group, gc, dc):
+                             batch_size, use_bias, group, gc, dc) -> None:
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"] if use_bias else ["X", "w"],

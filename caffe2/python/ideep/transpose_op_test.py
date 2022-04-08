@@ -16,7 +16,7 @@ class TransposeTest(hu.HypothesisTestCase):
     @given(
         X=hu.tensor(min_dim=1, max_dim=5, dtype=np.float32), use_axes=st.booleans(), **mu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_transpose(self, X, use_axes, gc, dc):
+    def test_transpose(self, X, use_axes, gc, dc) -> None:
         ndim = len(X.shape)
         axes = np.arange(ndim)
         np.random.shuffle(axes)

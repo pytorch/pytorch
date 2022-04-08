@@ -23,7 +23,7 @@ class ChannelShuffleTest(hu.HypothesisTestCase):
            kernel=st.integers(3, 5),
            **mu.gcs)
     @settings(max_examples=10, deadline=None)
-    def test_channel_shuffle(self, size, input_channels, batch_size, group, stride, pad, kernel, gc, dc):
+    def test_channel_shuffle(self, size, input_channels, batch_size, group, stride, pad, kernel, gc, dc) -> None:
         op = core.CreateOperator(
             "ChannelShuffle",
             ["X"],

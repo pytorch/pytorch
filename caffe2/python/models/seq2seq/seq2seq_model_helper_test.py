@@ -8,7 +8,7 @@ from caffe2.python import scope, test_util
 
 
 class Seq2SeqModelHelperTest(test_util.TestCase):
-    def testConstuctor(self):
+    def testConstuctor(self) -> None:
         model_name = 'TestModel'
         m = seq2seq_model_helper.Seq2SeqModelHelper(name=model_name)
 
@@ -21,14 +21,14 @@ class Seq2SeqModelHelperTest(test_util.TestCase):
             'order': 'NHWC'
         })
 
-    def testAddParam(self):
+    def testAddParam(self) -> None:
         m = seq2seq_model_helper.Seq2SeqModelHelper()
 
         param_name = 'test_param'
         param = m.AddParam(param_name, init_value=1)
         self.assertEqual(str(param), param_name)
 
-    def testGetNonTrainableParams(self):
+    def testGetNonTrainableParams(self) -> None:
         m = seq2seq_model_helper.Seq2SeqModelHelper()
 
         m.AddParam('test_param1', init_value=1, trainable=True)
@@ -51,7 +51,7 @@ class Seq2SeqModelHelperTest(test_util.TestCase):
             [p2, p3]
         )
 
-    def testGetAllParams(self):
+    def testGetAllParams(self) -> None:
         m = seq2seq_model_helper.Seq2SeqModelHelper()
 
         p1 = m.AddParam('test_param1', init_value=1, trainable=True)

@@ -19,7 +19,7 @@ class RMACRegionsOpTest(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test(self, n, h, w, scales, gc, dc):
+    def test(self, n, h, w, scales, gc, dc) -> None:
         X = np.random.rand(n, 64, h, w).astype(np.float32)
         overlap = 0.4
 

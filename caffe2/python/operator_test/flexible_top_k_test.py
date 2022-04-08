@@ -41,7 +41,7 @@ class TestFlexibleTopK(serial.SerializedTestCase):
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_flexible_top_k(self, X, gc, dc):
+    def test_flexible_top_k(self, X, gc, dc) -> None:
         X = X.astype(dtype=np.float32)
         k_shape = (int(X.size / X.shape[-1]), )
         k = np.random.randint(1, high=X.shape[-1] + 1, size=k_shape)
@@ -58,7 +58,7 @@ class TestFlexibleTopK(serial.SerializedTestCase):
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_flexible_top_k_grad(self, X, gc, dc):
+    def test_flexible_top_k_grad(self, X, gc, dc) -> None:
         X = X.astype(np.float32)
         k_shape = (int(X.size / X.shape[-1]), )
         k = np.random.randint(1, high=X.shape[-1] + 1, size=k_shape)

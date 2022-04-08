@@ -39,7 +39,7 @@ def caffe2_to_onnx(caffe2_net,
                    caffe2_net_name,
                    caffe2_init_net,
                    value_info,
-                   output):
+                   output) -> None:
     c2_net_proto = caffe2_pb2.NetDef()
     c2_net_proto.ParseFromString(caffe2_net.read())
     if not c2_net_proto.name and not caffe2_net_name:
@@ -79,7 +79,7 @@ def caffe2_to_onnx(caffe2_net,
               required=True,
               type=click.File('wb'),
               help='Output path for the caffe2 init net file')
-def onnx_to_caffe2(onnx_model, output, init_net_output):
+def onnx_to_caffe2(onnx_model, output, init_net_output) -> None:
     onnx_model_proto = ModelProto()
     onnx_model_proto.ParseFromString(onnx_model.read())
 

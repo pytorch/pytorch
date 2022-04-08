@@ -9,7 +9,7 @@ import numpy as np
 
 
 class TestSparseToDense(TestCase):
-    def test_sparse_to_dense(self):
+    def test_sparse_to_dense(self) -> None:
         op = core.CreateOperator(
             'SparseToDense',
             ['indices', 'values'],
@@ -33,7 +33,7 @@ class TestSparseToDense(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
-    def test_sparse_to_dense_shape_inference(self):
+    def test_sparse_to_dense_shape_inference(self) -> None:
         indices = np.array([2, 4, 999, 2], dtype=np.int32)
         values = np.array([[1, 2], [2, 4], [6, 7], [7, 8]], dtype=np.int32)
         data_to_infer_dim = np.array(np.zeros(1500, ), dtype=np.int32)
@@ -67,7 +67,7 @@ class TestSparseToDense(TestCase):
         self.assertEqual(types["output"], core.DataType.INT32)
 
 
-    def test_sparse_to_dense_invalid_inputs(self):
+    def test_sparse_to_dense_invalid_inputs(self) -> None:
         op = core.CreateOperator(
             'SparseToDense',
             ['indices', 'values'],
@@ -82,7 +82,7 @@ class TestSparseToDense(TestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    def test_sparse_to_dense_with_data_to_infer_dim(self):
+    def test_sparse_to_dense_with_data_to_infer_dim(self) -> None:
         op = core.CreateOperator(
             'SparseToDense',
             ['indices', 'values', 'data_to_infer_dim'],

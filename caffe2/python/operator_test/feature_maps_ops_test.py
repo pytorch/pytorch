@@ -9,7 +9,7 @@ import numpy as np
 
 class TestFeatureMapsOps(TestCase):
 
-    def test_merge_dense_feature_tensors(self):
+    def test_merge_dense_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeDenseFeatureTensors",
             [
@@ -46,7 +46,7 @@ class TestFeatureMapsOps(TestCase):
         )
 
 
-    def test_merge_single_scalar_feature_tensors(self):
+    def test_merge_single_scalar_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeSingleScalarFeatureTensors",
             [
@@ -93,7 +93,7 @@ class TestFeatureMapsOps(TestCase):
             np.array([11.1, 12.1, 12.2], dtype=np.float)
         )
 
-    def test_merge_single_scalar_feature_tensors_gradient(self):
+    def test_merge_single_scalar_feature_tensors_gradient(self) -> None:
         op = core.CreateOperator(
             "MergeSingleScalarFeatureTensorsGradient",
             [
@@ -141,7 +141,7 @@ class TestFeatureMapsOps(TestCase):
             np.array([0, 2.3], dtype=np.float)
         )
 
-    def test_merge_single_scalar_feature_tensors_gradient_with_strings(self):
+    def test_merge_single_scalar_feature_tensors_gradient_with_strings(self) -> None:
         op = core.CreateOperator(
             "MergeSingleScalarFeatureTensorsGradient",
             [
@@ -189,7 +189,7 @@ class TestFeatureMapsOps(TestCase):
             np.array(["", "2.3"], dtype=np.bytes_)
         )
 
-    def test_merge_single_list_feature_tensors(self):
+    def test_merge_single_list_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeSingleListFeatureTensors",
             [
@@ -249,17 +249,17 @@ class TestFeatureMapsOps(TestCase):
             np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float)
         )
 
-    def test_merge_single_list_feature_tensors_gradient(self):
+    def test_merge_single_list_feature_tensors_gradient(self) -> None:
         self._test_merge_single_list_or_map_feature_tensors_gradient(
             "MergeSingleListFeatureTensorsGradient"
         )
 
-    def test_merge_single_map_feature_tensors_gradient(self):
+    def test_merge_single_map_feature_tensors_gradient(self) -> None:
         self._test_merge_single_list_or_map_feature_tensors_gradient(
             "MergeSingleMapFeatureTensorsGradient"
         )
 
-    def _test_merge_single_list_or_map_feature_tensors_gradient(self, op_name):
+    def _test_merge_single_list_or_map_feature_tensors_gradient(self, op_name) -> None:
         op = core.CreateOperator(
             op_name,
             [
@@ -307,7 +307,7 @@ class TestFeatureMapsOps(TestCase):
             np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float)
         )
 
-    def test_merge_single_map_feature_tensors(self):
+    def test_merge_single_map_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeSingleMapFeatureTensors",
             [
@@ -379,7 +379,7 @@ class TestFeatureMapsOps(TestCase):
             np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float)
         )
 
-    def test_merge_multi_scalar_feature_tensors(self):
+    def test_merge_multi_scalar_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeMultiScalarFeatureTensors",
             [
@@ -433,7 +433,7 @@ class TestFeatureMapsOps(TestCase):
             np.array([11.0, 14.0, 15.0, 12.0, 13.0, 16.0], dtype=np.float)
         )
 
-    def test_merge_multi_scalar_feature_tensors_gradient(self):
+    def test_merge_multi_scalar_feature_tensors_gradient(self) -> None:
         op = core.CreateOperator(
             "MergeMultiScalarFeatureTensorsGradient",
             [
@@ -474,7 +474,7 @@ class TestFeatureMapsOps(TestCase):
             np.array([14.0, 15.0, 16.0, 17.0], dtype=np.float)
         )
 
-    def test_merge_multi_list_feature_tensors(self):
+    def test_merge_multi_list_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeMultiListFeatureTensors",
             [
@@ -549,7 +549,7 @@ class TestFeatureMapsOps(TestCase):
             )
         )
 
-    def test_merge_multi_map_feature_tensors(self):
+    def test_merge_multi_map_feature_tensors(self) -> None:
         op = core.CreateOperator(
             "MergeMultiMapFeatureTensors",
             [
@@ -639,17 +639,17 @@ class TestFeatureMapsOps(TestCase):
             )
         )
 
-    def test_merge_multi_list_feature_tensors_gradient(self):
+    def test_merge_multi_list_feature_tensors_gradient(self) -> None:
         self._test_merge_multi_list_or_map_feature_tensors_gradient(
             "MergeMultiListFeatureTensorsGradient"
         )
 
-    def test_merge_multi_map_feature_tensors_gradient(self):
+    def test_merge_multi_map_feature_tensors_gradient(self) -> None:
         self._test_merge_multi_list_or_map_feature_tensors_gradient(
             "MergeMultiMapFeatureTensorsGradient"
         )
 
-    def _test_merge_multi_list_or_map_feature_tensors_gradient(self, op_name):
+    def _test_merge_multi_list_or_map_feature_tensors_gradient(self, op_name) -> None:
         op = core.CreateOperator(
             op_name,
             [

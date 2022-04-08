@@ -6,7 +6,7 @@ from caffe2.python import workspace, core, lstm_benchmark, utils
 from copy import copy
 
 @utils.debug
-def Compare(args):
+def Compare(args) -> None:
     results = []
     num_iters = 1000
     args.gpu = True

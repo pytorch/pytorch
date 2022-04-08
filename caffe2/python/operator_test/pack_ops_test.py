@@ -15,7 +15,7 @@ import time
 
 class TestTensorPackOps(serial.SerializedTestCase):
 
-    def pack_segments_ref(self, return_presence_mask=False, max_length=None):
+    def pack_segments_ref(self, return_presence_mask: bool=False, max_length=None):
         def pack_segments_ref(lengths, data, max_length=max_length):
             arr = []
             constant_values = 0
@@ -65,7 +65,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
     @settings(deadline=None, max_examples=50)
     def test_pack_with_max_length_ops(
         self, num_seq, cell_size, max_length_buffer, gc, dc
-    ):
+    ) -> None:
         # create data
         lengths = np.arange(num_seq, dtype=np.int32) + 1
         num_cell = np.sum(lengths)
@@ -136,7 +136,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_pack_ops(self, num_seq, cell_size, gc, dc):
+    def test_pack_ops(self, num_seq, cell_size, gc, dc) -> None:
         # create data
         lengths = np.arange(num_seq, dtype=np.int32) + 1
         num_cell = np.sum(lengths)
@@ -184,7 +184,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
     @given(
         **hu.gcs_cpu_only
     )
-    def test_pack_ops_str(self, gc, dc):
+    def test_pack_ops_str(self, gc, dc) -> None:
         # GPU does not support string. Test CPU implementation only.
         workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int64))
         strs = np.array([
@@ -208,7 +208,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             device_option=gc))
         assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())
 
-    def test_pad_minf(self):
+    def test_pad_minf(self) -> None:
         workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int32))
         workspace.FeedBlob(
             'd',
@@ -233,7 +233,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
 
-    def test_pad_no_minf(self):
+    def test_pad_no_minf(self) -> None:
         workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int32))
         workspace.FeedBlob(
             'd',
@@ -270,7 +270,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         assert(result[0, -1, 0] == 0)
 
     @given(**hu.gcs)
-    def test_presence_mask(self, gc, dc):
+    def test_presence_mask(self, gc, dc) -> None:
         lengths = np.array([1, 2, 3], dtype=np.int32)
         data = np.array(
             [
@@ -310,7 +310,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
         np.testing.assert_array_equal(presence_mask, expected_presence_mask)
 
-    def test_presence_mask_empty(self):
+    def test_presence_mask_empty(self) -> None:
         lengths = np.array([], dtype=np.int32)
         data = np.array([], dtype=np.float32)
 
@@ -327,7 +327,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_out_of_bounds(self, gc, dc):
+    def test_out_of_bounds(self, gc, dc) -> None:
         # Copy pasted from test_pack_ops but with 3 changed to 4
         lengths = np.array([1, 2, 4], dtype=np.int32)
         data = np.array([
@@ -350,7 +350,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_under_bounds(self, gc, dc):
+    def test_under_bounds(self, gc, dc) -> None:
         # Copy pasted from test_pack_ops but with 3 changed to 2
         lengths = np.array([1, 2, 2], dtype=np.int32)
         data = np.array([

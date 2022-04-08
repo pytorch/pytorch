@@ -79,28 +79,28 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
 
     @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_Add(self, allow_broadcast_fastpath: bool, gc, dc):
+    def test_broadcast_Add(self, allow_broadcast_fastpath: bool, gc, dc) -> None:
         self.__test_binary_op(
             gc, dc, "Add", operator.add, allow_broadcast_fastpath=allow_broadcast_fastpath
         )
 
     @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_Mul(self, allow_broadcast_fastpath: bool, gc, dc):
+    def test_broadcast_Mul(self, allow_broadcast_fastpath: bool, gc, dc) -> None:
         self.__test_binary_op(
             gc, dc, "Mul", operator.mul, allow_broadcast_fastpath=allow_broadcast_fastpath
         )
 
     @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_Sub(self, allow_broadcast_fastpath: bool, gc, dc):
+    def test_broadcast_Sub(self, allow_broadcast_fastpath: bool, gc, dc) -> None:
         self.__test_binary_op(
             gc, dc, "Sub", operator.sub, allow_broadcast_fastpath=allow_broadcast_fastpath
         )
 
     @given(**hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_powt(self, gc, dc):
+    def test_broadcast_powt(self, gc, dc) -> None:
         np.random.seed(101)
 
         #operator
@@ -204,7 +204,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
                                    grad_reference=powt_grad_mixed)
 
     @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
-    def test_broadcast_scalar(self, allow_broadcast_fastpath: bool, gc, dc):
+    def test_broadcast_scalar(self, allow_broadcast_fastpath: bool, gc, dc) -> None:
         # broadcasting constant
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(1).astype(np.float32)
@@ -234,7 +234,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
     @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
-    def test_semantic_broadcast(self, allow_broadcast_fastpath: bool, gc, dc):
+    def test_semantic_broadcast(self, allow_broadcast_fastpath: bool, gc, dc) -> None:
         # NCHW as default
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(3).astype(np.float32)
@@ -263,7 +263,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
     @given(**hu.gcs)
-    def test_sum_reduce_empty_blob(self, gc, dc):
+    def test_sum_reduce_empty_blob(self, gc, dc) -> None:
         net = core.Net('test')
 
         with core.DeviceScope(gc):
@@ -273,7 +273,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             workspace.RunNetOnce(net)
 
     @given(**hu.gcs)
-    def test_sum_reduce(self, gc, dc):
+    def test_sum_reduce(self, gc, dc) -> None:
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(4, 5).astype(np.float32)
@@ -348,7 +348,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs)
-    def test_sum_reduce_fp16(self, gc, dc):
+    def test_sum_reduce_fp16(self, gc, dc) -> None:
         assume(core.IsGPUDeviceType(gc.device_type))
 
         # Set broadcast and no axis, i.e. broadcasting last dimensions.

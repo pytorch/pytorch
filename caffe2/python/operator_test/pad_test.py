@@ -25,7 +25,7 @@ class TestPad(serial.SerializedTestCase):
                   pad_t, pad_l, pad_b, pad_r,
                   mode,
                   size_w, size_h, size_c, size_n,
-                  gc, dc):
+                  gc, dc) -> None:
         op = core.CreateOperator(
             "PadImage",
             ["X"],

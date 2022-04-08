@@ -18,7 +18,7 @@ import math
 
 
 class TestPipeline(TestCase):
-    def test_dequeue_many(self):
+    def test_dequeue_many(self) -> None:
         init_net = core.Net('init')
         N = 17
         NUM_DEQUEUE_RECORDS = 3

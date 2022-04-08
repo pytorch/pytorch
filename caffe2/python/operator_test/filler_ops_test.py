@@ -23,7 +23,7 @@ class TestFillerOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=10000)
-    def test_shape_error(self, gc, dc):
+    def test_shape_error(self, gc, dc) -> None:
         op = core.CreateOperator(
             'GaussianFill',
             [],
@@ -52,7 +52,7 @@ class TestFillerOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=10000)
-    def test_int64_shape(self, gc, dc):
+    def test_int64_shape(self, gc, dc) -> None:
         large_dim = 2 ** 31 + 1
         net = core.Net("test_shape_net")
         net.UniformFill(
@@ -78,7 +78,7 @@ class TestFillerOperator(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_uniform_int_fill_op_blob_input(self, shape, a, b, gc, dc):
+    def test_uniform_int_fill_op_blob_input(self, shape, a, b, gc, dc) -> None:
         net = core.Net('test_net')
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
@@ -103,7 +103,7 @@ class TestFillerOperator(serial.SerializedTestCase):
     @given(
         **hu.gcs
     )
-    def test_uniform_fill_using_arg(self, gc, dc):
+    def test_uniform_fill_using_arg(self, gc, dc) -> None:
         net = core.Net('test_net')
         shape = [2**3, 5]
         # uncomment this to test filling large blob
@@ -140,7 +140,7 @@ class TestFillerOperator(serial.SerializedTestCase):
         ),
         **hu.gcs
     )
-    def test_diagonal_fill_op_float(self, shape, gc, dc):
+    def test_diagonal_fill_op_float(self, shape, gc, dc) -> None:
         value = 2.5
         op = core.CreateOperator(
             'DiagonalFill',
@@ -156,7 +156,7 @@ class TestFillerOperator(serial.SerializedTestCase):
             self.assertReferenceChecks(gc, op, [shape, value], _fill_diagonal)
 
     @given(**hu.gcs)
-    def test_diagonal_fill_op_int(self, gc, dc):
+    def test_diagonal_fill_op_int(self, gc, dc) -> None:
         value = 2
         shape = [3, 3]
         op = core.CreateOperator(
@@ -175,7 +175,7 @@ class TestFillerOperator(serial.SerializedTestCase):
                                    min_size=0,
                                    max_size=10),
            **hu.gcs)
-    def test_lengths_range_fill(self, lengths, gc, dc):
+    def test_lengths_range_fill(self, lengths, gc, dc) -> None:
         op = core.CreateOperator(
             "LengthsRangeFill",
             ["lengths"],
@@ -194,7 +194,7 @@ class TestFillerOperator(serial.SerializedTestCase):
             reference=_len_range_fill)
 
     @given(**hu.gcs)
-    def test_gaussian_fill_op(self, gc, dc):
+    def test_gaussian_fill_op(self, gc, dc) -> None:
         op = core.CreateOperator(
             'GaussianFill',
             [],
@@ -214,7 +214,7 @@ class TestFillerOperator(serial.SerializedTestCase):
             "zeros. Is the random generator functioning correctly?"
 
     @given(**hu.gcs)
-    def test_msra_fill_op(self, gc, dc):
+    def test_msra_fill_op(self, gc, dc) -> None:
         op = core.CreateOperator(
             'MSRAFill',
             [],
@@ -237,7 +237,7 @@ class TestFillerOperator(serial.SerializedTestCase):
         dim_size=st.sampled_from((16, 32, 64)),
         **hu.gcs)
     @settings(deadline=None)
-    def test_fp16_uniformfill_op(self, min, range, emb_size, dim_size, gc, dc):
+    def test_fp16_uniformfill_op(self, min, range, emb_size, dim_size, gc, dc) -> None:
         op = core.CreateOperator(
             'Float16UniformFill',
             [],

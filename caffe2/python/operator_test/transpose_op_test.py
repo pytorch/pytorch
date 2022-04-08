@@ -17,7 +17,7 @@ class TestTransposeOp(serial.SerializedTestCase):
     @given(
         X=hu.tensor(dtype=np.float32), use_axes=st.booleans(), **hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_transpose(self, X, use_axes, gc, dc):
+    def test_transpose(self, X, use_axes, gc, dc) -> None:
         ndim = len(X.shape)
         axes = np.arange(ndim)
         np.random.shuffle(axes)
@@ -41,7 +41,7 @@ class TestTransposeOp(serial.SerializedTestCase):
 
     @given(M=st.integers(10, 200), N=st.integers(10, 200), **hu.gcs)
     @settings(max_examples=10, deadline=None)
-    def test_transpose_large_matrix(self, M, N, gc, dc):
+    def test_transpose_large_matrix(self, M, N, gc, dc) -> None:
         op = core.CreateOperator("Transpose", ["X"], ["Y"], device_option=gc)
         X = np.random.rand(M, N).astype(np.float32) - 0.5
 
@@ -56,7 +56,7 @@ class TestTransposeOp(serial.SerializedTestCase):
     @unittest.skipIf(not workspace.has_cuda_support, "no cuda support")
     @given(X=hu.tensor(dtype=np.float32), use_axes=st.booleans(),
            **hu.gcs_cuda_only)
-    def test_transpose_cudnn(self, X, use_axes, gc, dc):
+    def test_transpose_cudnn(self, X, use_axes, gc, dc) -> None:
         ndim = len(X.shape)
         axes = np.arange(ndim)
         np.random.shuffle(axes)

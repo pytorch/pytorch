@@ -12,7 +12,7 @@ import unittest
 
 
 class TestCrossProtoCalls(unittest.TestCase):
-    def testSimple(self):
+    def testSimple(self) -> None:
         net = caffe2_pb2.NetDef()
         meta = metanet_pb2.MetaNetDef()
         # if metanet_pb2 wasn't initialized properly the following fails with a

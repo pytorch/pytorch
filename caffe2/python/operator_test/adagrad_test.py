@@ -25,7 +25,7 @@ class TestAdagrad(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc):
+    def test_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc) -> None:
         param, momentum, grad = inputs
         momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
@@ -60,7 +60,7 @@ class TestAdagrad(serial.SerializedTestCase):
     @settings(deadline=10000)
     def test_adagrad_output_effective_lr(
         self, inputs, lr, epsilon, weight_decay, gc, dc
-    ):
+    ) -> None:
         param, momentum, grad = inputs
         momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
@@ -97,7 +97,7 @@ class TestAdagrad(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     @settings(deadline=10000)
-    def test_adagrad_output_effective_lr_and_update(self, inputs, lr, epsilon, gc, dc):
+    def test_adagrad_output_effective_lr_and_update(self, inputs, lr, epsilon, gc, dc) -> None:
         param, momentum, grad = inputs
         momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
@@ -133,7 +133,7 @@ class TestAdagrad(serial.SerializedTestCase):
         weight_decay=st.sampled_from([0.0, 0.1]),
         **hu.gcs
     )
-    def test_sparse_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc):
+    def test_sparse_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc) -> None:
         adagrad_sparse_test_helper(
             self,
             inputs,
@@ -157,7 +157,7 @@ class TestAdagrad(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=10000)
-    def test_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc):
+    def test_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc) -> None:
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
 
@@ -199,7 +199,7 @@ class TestAdagrad(serial.SerializedTestCase):
     )
     def test_row_wise_sparse_adagrad(
         self, inputs, lr, epsilon, weight_decay, counter_halflife, gc, dc
-    ):
+    ) -> None:
         adagrad_sparse_test_helper(
             self,
             inputs,
@@ -225,7 +225,7 @@ class TestAdagrad(serial.SerializedTestCase):
         **hu.gcs
     )
     @settings(deadline=None)
-    def test_row_wise_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc):
+    def test_row_wise_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc) -> None:
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
         adagrad_sparse_test_helper(

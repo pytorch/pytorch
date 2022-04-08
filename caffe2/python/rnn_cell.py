@@ -1477,12 +1477,12 @@ def _LSTM(
     dim_out,
     scope=None,
     outputs_with_grads=(0,),
-    return_params=False,
-    memory_optimization=False,
-    forget_bias=0.0,
-    forward_only=False,
-    drop_states=False,
-    return_last_layer_only=True,
+    return_params: bool=False,
+    memory_optimization: bool=False,
+    forget_bias: float=0.0,
+    forward_only: bool=False,
+    drop_states: bool=False,
+    return_last_layer_only: bool=True,
     static_rnn_unroll_size=None,
     **cell_kwargs
 ):
@@ -1671,7 +1671,7 @@ def GetLSTMParamNames():
     return {'weights': weight_params, 'biases': bias_params}
 
 
-def InitFromLSTMParams(lstm_pblobs, param_values):
+def InitFromLSTMParams(lstm_pblobs, param_values) -> None:
     '''
     Set the parameters of LSTM based on predefined values
     '''
@@ -1708,7 +1708,7 @@ def InitFromLSTMParams(lstm_pblobs, param_values):
 
 def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
                scope, recurrent_params=None, input_params=None,
-               num_layers=1, return_params=False):
+               num_layers: int=1, return_params: bool=False):
     '''
     CuDNN version of LSTM for GPUs.
     input_blob          Blob containing the input. Will need to be available
@@ -1856,10 +1856,10 @@ def LSTMWithAttention(
     attention_type=AttentionType.Regular,
     outputs_with_grads=(0, 4),
     weighted_encoder_outputs=None,
-    lstm_memory_optimization=False,
-    attention_memory_optimization=False,
-    forget_bias=0.0,
-    forward_only=False,
+    lstm_memory_optimization: bool=False,
+    attention_memory_optimization: bool=False,
+    forget_bias: float=0.0,
+    forward_only: bool=False,
 ):
     '''
     Adds a LSTM with attention mechanism to a model.
@@ -1951,9 +1951,9 @@ def LSTMWithAttention(
 
 def _layered_LSTM(
         model, input_blob, seq_lengths, initial_states,
-        dim_in, dim_out, scope, outputs_with_grads=(0,), return_params=False,
-        memory_optimization=False, forget_bias=0.0, forward_only=False,
-        drop_states=False, create_lstm=None):
+        dim_in, dim_out, scope, outputs_with_grads=(0,), return_params: bool=False,
+        memory_optimization: bool=False, forget_bias: float=0.0, forward_only: bool=False,
+        drop_states: bool=False, create_lstm=None):
     params = locals()  # leave it as a first line to grab all params
     params.pop('create_lstm')
     if not isinstance(dim_out, list):
@@ -1975,6 +1975,10 @@ def _layered_LSTM(
             'initial_states': (last_output, last_state),
             'scope': scope + '_layer_{}'.format(i + 1)
         })
+    # pyre-fixme[61]: `output` is undefined, or not always defined.
+    # pyre-fixme[61]: `last_output` is undefined, or not always defined.
+    # pyre-fixme[61]: `all_states` is undefined, or not always defined.
+    # pyre-fixme[61]: `last_state` is undefined, or not always defined.
     return output, last_output, all_states, last_state
 
 

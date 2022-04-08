@@ -28,7 +28,7 @@ class MKLElementwiseSumTest(hu.HypothesisTestCase):
                                  inputs,
                                  inplace,
                                  gc,
-                                 dc):
+                                 dc) -> None:
         op = core.CreateOperator(
             "Sum",
             ["X_{}".format(i) for i in range(inputs)],

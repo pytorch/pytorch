@@ -15,7 +15,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
 
     @given(with_shapes=st.booleans(), **hu.gcs_cpu_only)
     @settings(max_examples=2, deadline=None)
-    def test_resnet_shared_grads(self, with_shapes, gc, dc):
+    def test_resnet_shared_grads(self, with_shapes, gc, dc) -> None:
         results = utils.test_shared_grads(
             with_shapes,
             resnet.create_resnet50,
@@ -26,7 +26,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(results[1][0], results[1][1])
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
-    def test_resnet_forward_only(self):
+    def test_resnet_forward_only(self) -> None:
         results = utils.test_forward_only(
             resnet.create_resnet50,
             'gpu_0/last_out_L1000'
@@ -35,7 +35,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         self.assertTrue(results[1] < 7 and results[1] > 0)
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
-    def test_resnet_forward_only_fast_simplenet(self):
+    def test_resnet_forward_only_fast_simplenet(self) -> None:
         '''
         Test C++ memonger that is only for simple nets
         '''

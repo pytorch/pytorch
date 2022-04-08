@@ -14,7 +14,7 @@ from caffe2.python.task import Node, Task
 
 
 class TestScopes(test_util.TestCase):
-    def testBlobReferenceIsIndependentFromNameScope(self):
+    def testBlobReferenceIsIndependentFromNameScope(self) -> None:
         blob_v = core.BlobReference("v")
         with core.NameScope("foo"):
             blob_w = core.BlobReference("w")
@@ -24,7 +24,7 @@ class TestScopes(test_util.TestCase):
         self.assertEqual(str(blob_w), "w")
         self.assertEqual(str(blob_x), "x")
 
-    def testNameScopeWithOp(self):
+    def testNameScopeWithOp(self) -> None:
         global_x = core.BlobReference("x")
         global_y = core.BlobReference("y")
         with core.NameScope("foo"):
@@ -41,7 +41,7 @@ class TestScopes(test_util.TestCase):
             self.assertEqual(len(op.output), 1)
             self.assertEqual(op.output[0], "y")
 
-    def testNameScopeWithReset(self):
+    def testNameScopeWithReset(self) -> None:
         with core.NameScope("foo"):
             # foo/
             op = core.CreateOperator("Relu", "x", "y")
@@ -76,7 +76,7 @@ class TestScopes(test_util.TestCase):
             self.assertEqual(len(op.output), 1)
             self.assertEqual(op.output[0], "foo/y")
 
-    def testDeviceScope(self):
+    def testDeviceScope(self) -> None:
         # No device
         op = core.CreateOperator("Relu", "x", "y")
         self.assertFalse(op.HasField('device_option'))
@@ -106,7 +106,7 @@ class TestScopes(test_util.TestCase):
         self.assertFalse(op.HasField('device_option'))
         device_option = caffe2_pb2.DeviceOption()
 
-    def testNameAndDeviceScopeTogether(self):
+    def testNameAndDeviceScopeTogether(self) -> None:
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = workspace.GpuDeviceType
         device_option.device_id = 1
@@ -123,7 +123,7 @@ class TestScopes(test_util.TestCase):
 
 
 class TestCloneNet(test_util.TestCase):
-    def testPartialClone(self):
+    def testPartialClone(self) -> None:
         params = core.Net('params')
         p1 = params.ConstantFill([], ['p1'])
         workspace.CreateNet(params)
@@ -198,7 +198,7 @@ class TestCloneNet(test_util.TestCase):
         params._CheckLookupTables()
         n._CheckLookupTables()
 
-    def test_mask_clone_update_external_list(self):
+    def test_mask_clone_update_external_list(self) -> None:
         n = core.Net('original')
         a1 = n.AddExternalInput('a1')
         a2 = n.AddExternalInput('a2')
@@ -232,7 +232,7 @@ class TestCloneNet(test_util.TestCase):
             "external output not matched",
         )
 
-    def test_control_op_remap(self):
+    def test_control_op_remap(self) -> None:
         # Subnets under If/AsyncIf operators should get name remapping when cloned
         n = core.Net("original")
         then_net = core.Net("a")
@@ -252,7 +252,7 @@ class TestCloneNet(test_util.TestCase):
 
 
 class TestExternalInputs(test_util.TestCase):
-    def testAddExternalInputShouldRaiseIfDuplicate(self):
+    def testAddExternalInputShouldRaiseIfDuplicate(self) -> None:
         net = core.Net("test")
         net.AddExternalInput(
             schema.Struct(("x", schema.Scalar(np.float))),
@@ -262,7 +262,7 @@ class TestExternalInputs(test_util.TestCase):
                 schema.Struct(("x", schema.Scalar(np.float))),
             )
 
-    def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self):
+    def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self) -> None:
         net = core.Net("test")
         with self.assertRaises(AssertionError):
             net.AddExternalInput(
@@ -270,7 +270,7 @@ class TestExternalInputs(test_util.TestCase):
                 schema.Struct(("x", schema.Scalar(np.float))),
             )
 
-    def testSetInputRecordWithBlobs(self):
+    def testSetInputRecordWithBlobs(self) -> None:
         net = core.Net("test")
         record = schema.NewRecord(net, schema.Struct(
             ("x", schema.Scalar(np.float)),
@@ -279,7 +279,7 @@ class TestExternalInputs(test_util.TestCase):
         self.assertTrue(net.BlobIsDefined(input_record.x()))
         self.assertIn(input_record.x(), net.external_inputs)
 
-    def testSetInputRecordWithoutBlobs(self):
+    def testSetInputRecordWithoutBlobs(self) -> None:
         net = core.Net("test")
         record = schema.Struct(("x", schema.Scalar(np.float)))
         input_record = net.set_input_record(record)
@@ -288,7 +288,7 @@ class TestExternalInputs(test_util.TestCase):
 
 
 class TestCreateOperator(test_util.TestCase):
-    def testCreate(self):
+    def testCreate(self) -> None:
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = workspace.GpuDeviceType
         device_option.device_id = 1
@@ -328,7 +328,7 @@ class TestCreateOperator(test_util.TestCase):
 
 
 class TestAutoNaming(test_util.TestCase):
-    def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
+    def assertOperatorListEqual(self, operatorDefList1, operatorDefList2) -> None:
         for op in operatorDefList1:
             op.debug_info = ""
         for op in operatorDefList2:
@@ -338,7 +338,7 @@ class TestAutoNaming(test_util.TestCase):
     Test that operators are named with different names, and that automatically
     named blob names don't clash intra or inter networks.
     """
-    def test_next_blob(self):
+    def test_next_blob(self) -> None:
         def create_net():
             net = core.Net('net')
             with core.NameScope('foo'):
@@ -359,7 +359,7 @@ class TestAutoNaming(test_util.TestCase):
         # different calls return different blob names
         self.assertNotEqual(str(net_c.NextBlob('b')), str(net_c.NextBlob('b')))
 
-    def test_auto_naming(self):
+    def test_auto_naming(self) -> None:
         a = core.Net('net')
         b = core.Net('net')
         self.assertNotEqual(a.Proto().name, b.Proto().name)
@@ -406,7 +406,7 @@ class TestAutoNaming(test_util.TestCase):
 
 class TestAppendNet(test_util.TestCase):
 
-    def test_external_inputs_merged_correctly(self):
+    def test_external_inputs_merged_correctly(self) -> None:
         netA = core.Net("A")
         netA.Sum(["in1", "in2"], ["sum1"])
         self.assertTrue("in1" in netA.external_inputs)
@@ -416,7 +416,7 @@ class TestAppendNet(test_util.TestCase):
         netB.AppendNet(netA)
         self.assertFalse("in1" in netB.external_inputs)
 
-    def test_external_inputs_merged_correctlyB(self):
+    def test_external_inputs_merged_correctlyB(self) -> None:
         netA = core.Net("A")
         netA.Sum(["in1", "in2"], ["sum1"])
         self.assertTrue("in1" in netA.external_inputs)
@@ -430,7 +430,7 @@ class TestAppendNet(test_util.TestCase):
 class TestExtractPredictorNet(test_util.TestCase):
 
     @unittest.skipIf('ImageInput' not in workspace.RegisteredOperators(), "Needs OpenCV")
-    def test_extract_simple(self):
+    def test_extract_simple(self) -> None:
         from caffe2.python import brew
         from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
 
@@ -482,16 +482,18 @@ class TestExtractPredictorNet(test_util.TestCase):
 
 
 class TestOperatorTraceback(test_util.TestCase):
-    def op_name_check(self, net, cf, line, func):
+    def op_name_check(self, net, cf, line, func) -> None:
         net.PopulateProtoWithFileName()
         filename = getframeinfo(cf).filename
         self.assertEqual(net.Proto().op[0].name, '{}:{}:{}'.format(
             filename, line, func))
 
-    def test_operator_constructor_traceback(self):
+    def test_operator_constructor_traceback(self) -> None:
         net = core.Net("test")
         a, b = net.AddExternalInput("a", "b")
+        # pyre-fixme[16]: Optional type has no attribute `f_lineno`.
         net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
+        # pyre-fixme[16]: Optional type has no attribute `f_code`.
         func = cf.f_code.co_name
         with self.assertRaises(Exception):
             workspace.RunNetOnce(net)
@@ -499,11 +501,13 @@ class TestOperatorTraceback(test_util.TestCase):
             workspace.CreateNet(net)
         self.op_name_check(net, cf, line, func)
 
-    def test_operator_runtime_traceback(self):
+    def test_operator_runtime_traceback(self) -> None:
         net = core.Net("test")
         a = net.AddExternalInput("a")
         workspace.blobs[a] = np.array([1, 2, 3], dtype=np.float32)
+        # pyre-fixme[16]: Optional type has no attribute `f_lineno`.
         net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
+        # pyre-fixme[16]: Optional type has no attribute `f_code`.
         func = cf.f_code.co_name
         with self.assertRaises(Exception):
             workspace.RunNetOnce(net)
@@ -512,10 +516,12 @@ class TestOperatorTraceback(test_util.TestCase):
             workspace.RunNet(net)
         self.op_name_check(net, cf, line, func)
 
-    def test_c_workspace_constructor(self):
+    def test_c_workspace_constructor(self) -> None:
         net = core.Net("test")
         a, b = net.AddExternalInput("a", "b")
+        # pyre-fixme[16]: Optional type has no attribute `f_lineno`.
         net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
+        # pyre-fixme[16]: Optional type has no attribute `f_code`.
         func = cf.f_code.co_name
         ws = workspace.C.Workspace()
         with self.assertRaises(Exception):
@@ -524,10 +530,12 @@ class TestOperatorTraceback(test_util.TestCase):
             ws.create_net(net)
         self.op_name_check(net, cf, line, func)
 
-    def test_c_workspace_runtime(self):
+    def test_c_workspace_runtime(self) -> None:
         net = core.Net("test")
         a = net.AddExternalInput("a")
+        # pyre-fixme[16]: Optional type has no attribute `f_lineno`.
         net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
+        # pyre-fixme[16]: Optional type has no attribute `f_code`.
         func = cf.f_code.co_name
         ws = workspace.C.Workspace()
         ws.create_blob(str(a)).feed(np.array([1, 2, 3], dtype=np.float32))
@@ -536,11 +544,13 @@ class TestOperatorTraceback(test_util.TestCase):
             ws.run(net)
         self.op_name_check(net, cf, line, func)
 
-    def test_async_exception_handling(self):
+    def test_async_exception_handling(self) -> None:
         net = core.Net("test")
         net.Proto().type = 'dag'  # this runs operators on background threads
         a = net.AddExternalInput("a")
+        # pyre-fixme[16]: Optional type has no attribute `f_lineno`.
         net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
+        # pyre-fixme[16]: Optional type has no attribute `f_code`.
         func = cf.f_code.co_name
         workspace.FeedBlob(a, np.array([1, 2, 3], dtype=np.float32))
         with self.assertRaises(Exception) as enforceNotMet:
@@ -551,7 +561,7 @@ class TestOperatorTraceback(test_util.TestCase):
 
 class TestCreatePlan(test_util.TestCase):
 
-    def test_create_plan_from_proto_correctly(self):
+    def test_create_plan_from_proto_correctly(self) -> None:
         from caffe2.python.net_builder import ops
         with Node('trainer'), Task(name='my_task', num_instances=2) as task:
             with ops.task_init():
@@ -586,17 +596,17 @@ class TestCreatePlan(test_util.TestCase):
 
 
 class TestOpRegistryKey(test_util.TestCase):
-    def test_is_operator(self):
+    def test_is_operator(self) -> None:
         self.assertTrue(core.IsOperator('Relu'))
         self.assertFalse(core.IsOperator('NOEXIST'))
 
-    def test_is_operator_with_engine(self):
+    def test_is_operator_with_engine(self) -> None:
         self.assertTrue(core.IsOperatorWithEngine('Relu', 'DEFAULT'))
         self.assertFalse(core.IsOperatorWithEngine('Relu', 'NOEXIST'))
 
 
 class TestDeviceOption(test_util.TestCase):
-    def test_check_equal_node_name(self):
+    def test_check_equal_node_name(self) -> None:
         opt1 = core.DeviceOption(0)
         opt2 = core.DeviceOption(0)
         self.assertTrue(core.device_option_equal(opt1, opt2))
@@ -606,7 +616,7 @@ class TestDeviceOption(test_util.TestCase):
         opt1.node_name = 'test'
         self.assertTrue(core.device_option_equal(opt1, opt2, ignore_node_name=False))
 
-    def test_check_equal_default_value(self):
+    def test_check_equal_default_value(self) -> None:
         opt1 = caffe2_pb2.DeviceOption()
         opt2 = caffe2_pb2.DeviceOption()
         opt1.device_type = 0
@@ -621,7 +631,7 @@ class TestDeviceOption(test_util.TestCase):
 
 
 class TestInferDeviceCpuOnly(test_util.TestCase):
-    def test_inject_copy(self):
+    def test_inject_copy(self) -> None:
         '''
         Test inject cross device copies - this is a no-op on CPU only devices.
         '''
@@ -683,7 +693,7 @@ class TestInferDeviceCpuOnly(test_util.TestCase):
 @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = workspace.GpuDeviceType
         device_option.device_id = 1
@@ -698,7 +708,7 @@ class TestInferDevice(test_util.TestCase):
         op_option=None,
         inputs=None,
         outputs=None
-    ):
+    ) -> None:
         op_option = self.gpu_option if not op_option else op_option
         inputs = ["blob_1"] if not inputs else inputs
         outputs = ["blob_2"] if not outputs else outputs
@@ -724,7 +734,7 @@ class TestInferDevice(test_util.TestCase):
             for out_dev in output_dev:
                 self.assertEqual(out_dev, out_option)
 
-    def test_infer_device(self):
+    def test_infer_device(self) -> None:
         self._test_op(
             "FC",
             self.gpu_option,
@@ -734,7 +744,7 @@ class TestInferDevice(test_util.TestCase):
             outputs=["fc_1"]
         )
 
-    def test_infer_device_split_by_lengths(self):
+    def test_infer_device_split_by_lengths(self) -> None:
         self._test_op(
             "SplitByLengths",
             [self.gpu_option, self.cpu_option],
@@ -744,8 +754,9 @@ class TestInferDevice(test_util.TestCase):
             outputs=["fc_1"]
         )
 
-    def test_infer_device_adam(self):
+    def test_infer_device_adam(self) -> None:
         in_options = [self.gpu_option] * 6
+        # pyre-fixme[16]: `int` has no attribute `__setitem__`.
         in_options[5] = self.cpu_option
         out_options = [self.gpu_option] * 4
         self._test_op(
@@ -758,7 +769,7 @@ class TestInferDevice(test_util.TestCase):
                 "output_grad"]
         )
 
-    def test_infer_device_cross_device(self):
+    def test_infer_device_cross_device(self) -> None:
         self._test_op("CopyGPUToCPU", self.gpu_option, self.cpu_option)
         self._test_op("CopyCPUToGPU", self.cpu_option, self.gpu_option)
         self._test_op("CopyFromCPUInput", self.cpu_option, self.gpu_option)
@@ -769,7 +780,7 @@ class TestInferDevice(test_util.TestCase):
             op_option=self.cpu_option
         )
 
-    def test_device_inference_function(self):
+    def test_device_inference_function(self) -> None:
         # ConcatOp.
         op_option = self.gpu_option
         with core.DeviceScope(op_option):
@@ -794,7 +805,7 @@ class TestInferDevice(test_util.TestCase):
         # 2nd input's type is CPU irrespective of Split op's device option.
         self.assertEqual(input_dev[1], self.cpu_option)
 
-    def test_inject_copy(self):
+    def test_inject_copy(self) -> None:
         net = core.Net("test")
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
@@ -821,7 +832,7 @@ class TestInferDevice(test_util.TestCase):
         self.assertEqual(new_net._net.op[0].type, "CopyCPUToGPU")
         self.assertNotEqual(blob_to_device["fc_w"], device_option)
 
-    def test_cross_nets(self):
+    def test_cross_nets(self) -> None:
         net = core.Net("test")
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
@@ -916,7 +927,7 @@ external_input: "const"
 external_input: "const_gpu_1"
 """
 
-    def test_cross_nets_no_change(self):
+    def test_cross_nets_no_change(self) -> None:
         net = core.Net("test")
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
@@ -959,7 +970,7 @@ external_input: "fc_w"
 external_input: "fc_b"
 """
 
-    def test_inject_copy_multi_use(self):
+    def test_inject_copy_multi_use(self) -> None:
         net = core.Net("test")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = workspace.GpuDeviceType
@@ -1098,7 +1109,7 @@ op {
 external_input: "data"
 """
 
-    def test_inject_copy_placeholder_ops(self):
+    def test_inject_copy_placeholder_ops(self) -> None:
         '''
         Test inject cross device copies with placeholder ops. Placeholder ops
         are decorator/fake ops that don't have operator schema.
@@ -1175,7 +1186,7 @@ external_input: "data"
         self.assertEqual(op.input[1], "fc_w_cpu")
         self.assertEqual(op.input[2], "fc_b_cpu")
 
-    def test_blob_inplace(self):
+    def test_blob_inplace(self) -> None:
         net = core.Net("test")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = workspace.GpuDeviceType
@@ -1202,7 +1213,7 @@ external_input: "data"
 
 
 class TestRerouteTensor(test_util.TestCase):
-    def test_reroute_tensor(self):
+    def test_reroute_tensor(self) -> None:
         net = core.Net("reroute_tensor")
         net.Conv(["input", "w", "b"], "conv1")
         net.Relu(["conv1"], "conv1_relu")
@@ -1216,7 +1227,7 @@ class TestRerouteTensor(test_util.TestCase):
 
 
 class TestRunAllOnGPU(test_util.TestCase):
-    def test_rnn_run_on_gpu(self):
+    def test_rnn_run_on_gpu(self) -> None:
         step_net = core.Net("step_net")
         step_net.Conv(["input_1", "w", "b"], "conv1")
         step_net.Relu(["conv1"], "input_1")
@@ -1239,7 +1250,7 @@ class TestRunAllOnGPU(test_util.TestCase):
 
 
 class TestConstructionFromProto(test_util.TestCase):
-    def test_inplace_construction(self):
+    def test_inplace_construction(self) -> None:
         # just create some random net
         n = core.Net('original')
         a1 = n.AddExternalInput('a1')

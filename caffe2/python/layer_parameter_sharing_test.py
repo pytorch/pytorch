@@ -13,9 +13,10 @@ from caffe2.python.layer_test_util import LayersTestCase
 
 class ParameterSharingTest(LayersTestCase):
 
-    def test_layer_parameter_name(self):
+    def test_layer_parameter_name(self) -> None:
         output_dims = 2
         with scope.NameScope('global_scope'):
+            # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
             fc1_output = self.model.FC(
                 self.model.input_feature_schema.float_features,
                 output_dims
@@ -42,11 +43,12 @@ class ParameterSharingTest(LayersTestCase):
                 self.assertEquals(fc3_output(),
                                   'global_scope/nested_scope/fc_auto_0/output')
 
-    def test_layer_shared_parameter_name_different_namescopes(self):
+    def test_layer_shared_parameter_name_different_namescopes(self) -> None:
         output_dims = 2
         with scope.NameScope('global_scope'):
             with ParameterSharing({'scope_1': 'scope_0'}):
                 with scope.NameScope('scope_0'):
+                    # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
                     fc1_output = self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims
@@ -66,10 +68,11 @@ class ParameterSharingTest(LayersTestCase):
                     self.assertEquals(fc2_output(),
                                       'global_scope/scope_1/fc/output')
 
-    def test_layer_shared_parameter_name_within_same_namescope(self):
+    def test_layer_shared_parameter_name_within_same_namescope(self) -> None:
         output_dims = 2
         with scope.NameScope('global_scope'):
             with ParameterSharing({'fc_auto_0': 'fc'}):
+                # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
                 self.model.FC(
                     self.model.input_feature_schema.float_features,
                     output_dims
@@ -84,10 +87,11 @@ class ParameterSharingTest(LayersTestCase):
                 self.assertEquals(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
-    def test_layer_shared_parameter_name_within_same_namescope_customized_name(self):
+    def test_layer_shared_parameter_name_within_same_namescope_customized_name(self) -> None:
         output_dims = 2
         with scope.NameScope('global_scope'):
             with ParameterSharing({'new_fc': 'shared_fc'}):
+                # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
                 self.model.FC(
                     self.model.input_feature_schema.float_features,
                     output_dims,
@@ -104,10 +108,11 @@ class ParameterSharingTest(LayersTestCase):
                 self.assertEquals(self.model.layers[-1].w,
                                   'global_scope/shared_fc/w')
 
-    def test_layer_shared_parameter_name_different_shapes(self):
+    def test_layer_shared_parameter_name_different_shapes(self) -> None:
         output_dims = 2
         with scope.NameScope('global_scope'):
             with ParameterSharing({'fc_auto_0': 'fc'}):
+                # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
                 self.model.FC(
                     self.model.input_feature_schema.float_features,
                     output_dims
@@ -121,10 +126,11 @@ class ParameterSharingTest(LayersTestCase):
                         output_dims + 1
                     )
 
-    def test_layer_duplicated_parameter_init(self):
+    def test_layer_duplicated_parameter_init(self) -> None:
         output_dims = 2
         with scope.NameScope('global_scope'):
             with ParameterSharing({'new_fc': 'shared_fc'}):
+                # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
                 self.model.FC(
                     self.model.input_feature_schema.float_features,
                     output_dims,
@@ -150,7 +156,7 @@ class ParameterSharingTest(LayersTestCase):
             ['global_scope/shared_fc/b', 'global_scope/shared_fc/w']
         )
 
-    def test_layer_shared_parameter_optim_validator(self):
+    def test_layer_shared_parameter_optim_validator(self) -> None:
         """
         This test is to cover the _validate_param_optim function in
         layer_model_helper class.
@@ -169,6 +175,7 @@ class ParameterSharingTest(LayersTestCase):
         with scope.NameScope('global_scope_0'):
             with ParameterSharing({'scope_1': 'scope_0'}):
                 with scope.NameScope('scope_0'):
+                    # pyre-fixme[16]: `ParameterSharingTest` has no attribute `model`.
                     fc1_output = self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims,

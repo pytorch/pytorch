@@ -14,7 +14,7 @@ import hypothesis.strategies as st
 
 
 class TestNomnigraphTransformations(tu.TestCase):
-    def test_simple_replace(self):
+    def test_simple_replace(self) -> None:
         net = core.Net("name")
         net.FC(["X", "W"], ["Y"])
         nn = ng.NNModule(net)
@@ -33,7 +33,7 @@ class TestNomnigraphTransformations(tu.TestCase):
         expected_out = np.array([2, 4, 6])
         np.testing.assert_almost_equal(out, expected_out)
 
-    def test_simple_rewire(self):
+    def test_simple_rewire(self) -> None:
         net = core.Net("name")
         # Rewire this so that we get
         # c = Add(a, d)
@@ -87,8 +87,8 @@ class TestNomnigraphTransformations(tu.TestCase):
         seed=st.integers(0, 65535),
         kernel=st.integers(3, 5),
     )
-    def test_transpose_network(self, batch_size, channels, height, width, seed,
-                               kernel):
+    def test_transpose_network(self, batch_size, channels: int, height, width, seed,
+                               kernel) -> None:
         net = core.Net("net")
         net.Conv(["X", "w1", "b1"], ["c1"], stride=1, pad=0, kernel=kernel)
         net.Conv(["X", "w2", "b2"], ["c2"], stride=1, pad=0, kernel=kernel)

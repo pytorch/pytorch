@@ -15,7 +15,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
         value_to_pct_map,
         dist_lengths,
         expected_values
-    ):
+    ) -> None:
         op = core.CreateOperator(
             'Percentile',
             ['original_values', 'value_to_pct_map', 'dist_lengths'],
@@ -46,7 +46,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
         value_to_pct_map,
         dist_lengths,
         expected_values
-    ):
+    ) -> None:
         net = core.Net('test_shape_inference')
         result = net.Percentile(
             ['original_values', 'value_to_pct_map', 'dist_lengths'],
@@ -64,7 +64,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
         self.assertEqual(shapes[result], list(workspace.blobs['original_values'].shape))
         self.assertEqual(types[result], core.DataType.FLOAT)
 
-    def test_percentile_op_with_only_one_dist(self):
+    def test_percentile_op_with_only_one_dist(self) -> None:
         self._test_percentile_op(
             original_inp=[[5]],
             value_to_pct_map=[[5, 0.4]],
@@ -72,7 +72,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
             expected_values=[[0.4]]
         )
 
-    def test_percentile_op_with_all_elements_in_map(self):
+    def test_percentile_op_with_all_elements_in_map(self) -> None:
         self._test_percentile_op(
             original_inp=[[3, 4], [10, 4]],
             value_to_pct_map=[[3, 0.3], [4, 0.6],
@@ -81,7 +81,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
             expected_values=[[0.3, 0.5], [0.8, 0.5]],
         )
 
-    def test_percentile_op_with_same_value(self):
+    def test_percentile_op_with_same_value(self) -> None:
         self._test_percentile_op(
             original_inp=[[1, 1], [1, 2]],
             value_to_pct_map=[[1, 0.1], [4, 0.4], [2, 0.5]],
@@ -89,7 +89,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
             expected_values=[[0.1, 0.0], [0.1, 0.5]]
         )
 
-    def test_percentile_op_with_elements_bigger_than_map_range(self):
+    def test_percentile_op_with_elements_bigger_than_map_range(self) -> None:
         self._test_percentile_op(
             original_inp=[[1, 5], [3, 4]],
             value_to_pct_map=[[1, 0.1], [4, 0.4], [2, 0.1], [3, 0.3]],
@@ -97,7 +97,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
             expected_values=[[0.1, 1.], [0.3, 1.0]]
         )
 
-    def test_percentile_op_with_elements_smaller_than_map_range(self):
+    def test_percentile_op_with_elements_smaller_than_map_range(self) -> None:
         self._test_percentile_op(
             original_inp=[[1], [5], [6]],
             value_to_pct_map=[[2, 0.2], [5, 0.5], [7, 0.5]],
@@ -105,7 +105,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
             expected_values=[[0.0], [0.5], [0.5]]
         )
 
-    def test_percentile_op_with_interpolation(self):
+    def test_percentile_op_with_interpolation(self) -> None:
         self._test_percentile_op(
             original_inp=[[3, 2, 5], [6, 7, 8]],
             value_to_pct_map=[[1, 0.1], [4, 0.7], [4.5, 0.8],
@@ -115,7 +115,7 @@ class TestPercentileOp(hu.HypothesisTestCase):
             expected_values=[[0.5, 0.0, 0.0], [1.0, 0.7, 0.6]]
         )
 
-    def test_percentile_op_with_large_sample_size_per_dist(self):
+    def test_percentile_op_with_large_sample_size_per_dist(self) -> None:
         self._test_percentile_op(
             original_inp=[[3, 1], [5, 7]],
             value_to_pct_map=[[3, 0.5], [4, 0.6], [5, 0.7],

@@ -7,7 +7,7 @@
 
 
 def image_input(
-    model, blob_in, blob_out, order="NCHW", use_gpu_transform=False, **kwargs
+    model, blob_in, blob_out, order: str="NCHW", use_gpu_transform: bool=False, **kwargs
 ):
     assert 'is_test' in kwargs, "Argument 'is_test' is required"
     if order == "NCHW":

@@ -21,10 +21,10 @@ class Seq2SeqBeamSearchTest(test_util.TestCase):
         self,
         model_params,
         tmp_dir,
-        source_vocab_size=20,
-        target_vocab_size=20,
-        num_gpus=0,
-        batch_size=2,
+        source_vocab_size: int=20,
+        target_vocab_size: int=20,
+        num_gpus: int=0,
+        batch_size: int=2,
     ):
         training_params = dict(
             model_params,
@@ -51,7 +51,7 @@ class Seq2SeqBeamSearchTest(test_util.TestCase):
 
         return model_obj, checkpoint_path
 
-    def _run_compare_train_inference(self, model_params):
+    def _run_compare_train_inference(self, model_params) -> None:
         tmp_dir = tempfile.mkdtemp()
 
         model_obj, checkpoint_path = self._build_seq2seq_model(
@@ -136,7 +136,7 @@ class Seq2SeqBeamSearchTest(test_util.TestCase):
                 decimal=4,
             )
 
-    def test_attention(self):
+    def test_attention(self) -> None:
         model_params = dict(
             attention='regular',
             decoder_layer_configs=[
@@ -158,7 +158,7 @@ class Seq2SeqBeamSearchTest(test_util.TestCase):
         )
         self._run_compare_train_inference(model_params)
 
-    def test_2layer_attention(self):
+    def test_2layer_attention(self) -> None:
         model_params = dict(
             attention='regular',
             decoder_layer_configs=[
@@ -186,7 +186,7 @@ class Seq2SeqBeamSearchTest(test_util.TestCase):
         )
         self._run_compare_train_inference(model_params)
 
-    def test_multi_decoder(self):
+    def test_multi_decoder(self) -> None:
         model_params = dict(
             attention='regular',
             decoder_layer_configs=[

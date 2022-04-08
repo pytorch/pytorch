@@ -8,14 +8,14 @@
 
 
 
-def max_pool(model, blob_in, blob_out, use_cudnn=False, order="NCHW", **kwargs):
+def max_pool(model, blob_in, blob_out, use_cudnn: bool=False, order: str="NCHW", **kwargs):
     """Max pooling"""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
     return model.net.MaxPool(blob_in, blob_out, order=order, **kwargs)
 
 
-def average_pool(model, blob_in, blob_out, use_cudnn=False, order="NCHW",
+def average_pool(model, blob_in, blob_out, use_cudnn: bool=False, order: str="NCHW",
                  **kwargs):
     """Average pooling"""
     if use_cudnn:
@@ -28,7 +28,7 @@ def average_pool(model, blob_in, blob_out, use_cudnn=False, order="NCHW",
     )
 
 
-def max_pool_with_index(model, blob_in, blob_out, order="NCHW", **kwargs):
+def max_pool_with_index(model, blob_in, blob_out, order: str="NCHW", **kwargs):
     """Max pooling with an explicit index of max position"""
     return model.net.MaxPoolWithIndex(
         blob_in,

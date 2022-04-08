@@ -21,7 +21,7 @@ class TestThresholdedRelu(serial.SerializedTestCase):
     @serial.given(input=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
-    def test_thresholded_relu_1(self, input, gc, dc, engine):
+    def test_thresholded_relu_1(self, input, gc, dc, engine) -> None:
         X = input
         op = core.CreateOperator("ThresholdedRelu", ["X"], ["Y"],
                                  engine=engine)
@@ -38,7 +38,7 @@ class TestThresholdedRelu(serial.SerializedTestCase):
            alpha=st.floats(min_value=1.0, max_value=5.0),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
-    def test_thresholded_relu_2(self, input, alpha, gc, dc, engine):
+    def test_thresholded_relu_2(self, input, alpha, gc, dc, engine) -> None:
         X = input
         op = core.CreateOperator("ThresholdedRelu", ["X"], ["Y"],
                                  alpha=alpha, engine=engine)
@@ -56,14 +56,14 @@ class TestThresholdedRelu(serial.SerializedTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_thresholded_relu_3(self, input, alpha, gc, dc, engine):
+    def test_thresholded_relu_3(self, input, alpha, gc, dc, engine) -> None:
         X = TestThresholdedRelu.fix_input(input)
         op = core.CreateOperator("ThresholdedRelu", ["X"], ["Y"],
                                  alpha=float(alpha), engine=engine)
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @staticmethod
-    def fix_input(input):
+    def fix_input(input: float):
         # go away from alpha to avoid derivative discontinuities
         input += 0.02 * np.sign(input)
         return input

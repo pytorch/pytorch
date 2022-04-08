@@ -25,7 +25,7 @@ class MKCopyTest(hu.HypothesisTestCase):
                       height,
                       input_channels,
                       batch_size,
-                      gc, dc):
+                      gc, dc) -> None:
         X = np.random.rand(
             batch_size, input_channels, width, height).astype(np.float32)
         self.ws.create_blob("X").feed(X, pb2.DeviceOption())
@@ -44,7 +44,7 @@ class MKCopyTest(hu.HypothesisTestCase):
         np.testing.assert_array_equal(X, self.ws.blobs["X_copy"].fetch())
 
     @given(n=st.sampled_from([0, 10]))
-    def test_mkl_zero_copy(self, n):
+    def test_mkl_zero_copy(self, n) -> None:
         shape = (0, n)
         X = np.zeros(shape=shape).astype(np.float32)
         self.ws.create_blob("X").feed(X, pb2.DeviceOption())

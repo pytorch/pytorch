@@ -19,7 +19,7 @@ class TestNormalizeOp(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(max_examples=10, deadline=None)
-    def test_normalize(self, X, gc, dc):
+    def test_normalize(self, X, gc, dc) -> None:
         def ref_normalize(X, axis):
             x_normed = X / np.maximum(
                 np.sqrt((X ** 2).sum(axis=axis, keepdims=True)), 1e-12
@@ -42,7 +42,7 @@ class TestNormalizeOp(hu.HypothesisTestCase):
         **hu.gcs
     )
     @settings(max_examples=10, deadline=None)
-    def test_normalize_L1(self, X, gc, dc):
+    def test_normalize_L1(self, X, gc, dc) -> None:
         def ref(X, axis):
             norm = abs(X).sum(axis=axis, keepdims=True)
             return (X / norm,)

@@ -58,7 +58,7 @@ def _get_grad(net, outputs, outputs_with_grad, input_values, inputs_with_grads):
     return forward_results, grads, grad_net
 
 
-def _assert_close(value1, value2, threshold, err_msg=''):
+def _assert_close(value1, value2, threshold, err_msg: str=''):
     np.testing.assert_allclose(
         value1, value2,
         atol=threshold, rtol=threshold,

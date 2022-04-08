@@ -15,7 +15,7 @@ class TestAssert(hu.HypothesisTestCase):
         shape=st.lists(elements=st.integers(1, 10), min_size=1, max_size=4),
         **hu.gcs)
     @settings(deadline=10000)
-    def test_assert(self, dtype, shape, gc, dc):
+    def test_assert(self, dtype, shape, gc, dc) -> None:
         test_tensor = np.random.rand(*shape).astype(np.dtype(dtype))
 
         op = core.CreateOperator('Assert', ['X'], [])

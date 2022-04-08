@@ -75,8 +75,8 @@ def gru_reference(input, hidden_input,
                   reset_gate_w, reset_gate_b,
                   update_gate_w, update_gate_b,
                   output_gate_w, output_gate_b,
-                  seq_lengths, drop_states=False,
-                  linear_before_reset=False):
+                  seq_lengths, drop_states: bool=False,
+                  linear_before_reset: bool=False):
     D = hidden_input.shape[hidden_input.ndim - 1]
     T = input.shape[0]
     N = input.shape[1]
@@ -171,9 +171,9 @@ def gru_input():
     return dims_.flatmap(create_input)
 
 
-def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
-                         forward_only=False, drop_states=False,
-                         sequence_lengths=False,
+def _prepare_gru_unit_op(gc, n, d: int, outputs_with_grads,
+                         forward_only: bool=False, drop_states: bool=False,
+                         sequence_lengths: bool=False,
                          two_d_initial_states=None):
     print("Dims: (n,d) = ({},{})".format(n, d))
 
@@ -213,6 +213,7 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
         )
 
         if sequence_lengths:
+            # pyre-fixme[61]: `seq_lengths` is undefined, or not always defined.
             inputs = [hidden_t_prev, gates_t, seq_lengths, timestep]
         else:
             inputs = [hidden_t_prev, gates_t, timestep]
@@ -231,6 +232,7 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
             # 10 is used as a magic number to simulate some reasonable timestep
             # and generate some reasonable seq. lengths
             workspace.FeedBlob(
+                # pyre-fixme[61]: `seq_lengths` is undefined, or not always defined.
                 seq_lengths,
                 np.random.randint(1, 10, size=(n,)).astype(np.int32),
                 device_option=gc
@@ -258,7 +260,7 @@ class GRUCellTest(serial.SerializedTestCase):
         **hu.gcs
     )
     def test_gru_unit_op(self, seed, input_tensor, fwd_only,
-                         drop_states, sequence_lengths, gc, dc):
+                         drop_states, sequence_lengths, gc, dc) -> None:
         np.random.seed(seed)
         outputs_with_grads = [0]
         ref = gru_unit
@@ -319,7 +321,7 @@ class GRUCellTest(serial.SerializedTestCase):
         **hu.gcs
     )
     @ht_settings(max_examples=20, deadline=None)
-    def test_gru_main(self, seed, **kwargs):
+    def test_gru_main(self, seed, **kwargs) -> None:
         np.random.seed(seed)
         for outputs_with_grads in [[0], [1], [0, 1]]:
             self.gru_base(gru_cell.GRU, gru_reference,
@@ -327,7 +329,7 @@ class GRUCellTest(serial.SerializedTestCase):
                           **kwargs)
 
     def gru_base(self, create_rnn, ref, outputs_with_grads,
-                 input_tensor, fwd_only, drop_states, linear_before_reset, gc, dc):
+                 input_tensor, fwd_only, drop_states, linear_before_reset, gc, dc) -> None:
 
         print("GRU test parameters: ", locals())
         t, n, d = input_tensor.shape

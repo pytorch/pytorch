@@ -26,10 +26,10 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            **hu.gcs)
     def test_convolution_transpose_layout_legacy_args(
-            self, stride, pad, kernel, adj,
+            self, stride: int, pad: int, kernel: int, adj: int,
             size, input_channels,
             output_channels, batch_size,
-            engine, shared_buffer, use_bias, gc, dc):
+            engine, shared_buffer, use_bias, gc, dc) -> None:
         assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -96,10 +96,10 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            **hu.gcs)
     def test_convolution_transpose_layout(
-            self, stride, pad, kernel, adj,
+            self, stride: int, pad: int, kernel: int, adj: int,
             size, input_channels,
             output_channels, batch_size,
-            engine, shared_buffer, use_bias, gc, dc):
+            engine, shared_buffer, use_bias, gc, dc) -> None:
         assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -171,9 +171,9 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            **hu.gcs)
     def test_convolution_transpose_separate_stride_pad_adj_layout(
-            self, stride_h, stride_w, pad_t, pad_l, pad_b, pad_r, kernel,
-            adj_h, adj_w, size, input_channels, output_channels, batch_size,
-            engine, use_bias, gc, dc):
+            self, stride_h: int, stride_w: int, pad_t: int, pad_l: int, pad_b: int, pad_r: int, kernel: int,
+            adj_h: int, adj_w: int, size, input_channels, output_channels, batch_size,
+            engine, use_bias, gc, dc) -> None:
         assume(adj_h < stride_h)
         assume(adj_w < stride_w)
         X = np.random.rand(
@@ -246,7 +246,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                                              size, input_channels,
                                              output_channels, batch_size,
                                              order, engine, use_bias,
-                                             compute_dX, gc, dc):
+                                             compute_dX, gc, dc) -> None:
         assume(adj < stride)
         if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
             assume(order == "NCHW")
@@ -313,7 +313,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
     def test_convolution_transpose_separate_stride_pad_adj_gradient(
             self, stride_h, stride_w, pad_t, pad_l, pad_b, pad_r, kernel,
             adj_h, adj_w, size, input_channels, output_channels, batch_size,
-            order, engine, use_bias, compute_dX, gc, dc):
+            order, engine, use_bias, compute_dX, gc, dc) -> None:
         assume(adj_h < stride_h)
         assume(adj_w < stride_w)
         X = np.random.rand(
@@ -378,8 +378,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
     @settings(max_examples=2, deadline=None)
     def test_convolution_transpose_with_group(
             self, stride, pad, kernel, adj, size, input_channels,
-            output_channels, batch_size, group, order, engine, shared_buffer,
-            use_bias, gc, dc):
+            output_channels, batch_size, group, order, engine: str, shared_buffer,
+            use_bias, gc, dc) -> None:
         assume(adj < stride)
         # TODO: Group conv_transpose in NHWC not implemented for GPU yet.
         assume(group == 1 or order == "NCHW" or

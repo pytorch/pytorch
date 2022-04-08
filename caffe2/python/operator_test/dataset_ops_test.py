@@ -22,14 +22,14 @@ from caffe2.python.test_util import TestCase
 from hypothesis import given
 
 
-def _assert_arrays_equal(actual, ref, err_msg):
+def _assert_arrays_equal(actual, ref, err_msg) -> None:
     if ref.dtype.kind in ("S", "O", "U"):
         np.testing.assert_array_equal(actual, ref, err_msg=err_msg)
     else:
         np.testing.assert_allclose(actual, ref, atol=1e-4, rtol=1e-4, err_msg=err_msg)
 
 
-def _assert_records_equal(actual, ref):
+def _assert_records_equal(actual, ref) -> None:
     assert isinstance(actual, Field)
     assert isinstance(ref, Field)
     b1 = actual.field_blobs()
@@ -43,7 +43,7 @@ def _assert_records_equal(actual, ref):
 
 
 @st.composite
-def _sparse_features_map(draw, num_records, **kwargs):
+def _sparse_features_map(draw, num_records: int, **kwargs):
     sparse_maps_lengths = draw(
         st.lists(
             st.integers(min_value=1, max_value=10),
@@ -91,7 +91,7 @@ def _sparse_features_map(draw, num_records, **kwargs):
 
 
 @st.composite
-def _dense_features_map(draw, num_records, **kwargs):
+def _dense_features_map(draw, num_records: int, **kwargs):
     float_lengths = draw(
         st.lists(
             st.integers(min_value=1, max_value=10),
@@ -165,7 +165,7 @@ def _dataset(draw, min_elements=3, max_elements=10, **kwargs):
 
 class TestDatasetOps(TestCase):
     @given(_dataset())
-    def test_pack_unpack(self, input):
+    def test_pack_unpack(self, input) -> None:
         """
         Tests if packing and unpacking of the whole dataset is an identity.
         """
@@ -197,7 +197,7 @@ class TestDatasetOps(TestCase):
                     workspace.FetchBlob(unpacked_tensor),
                 )
 
-    def test_dataset_ops(self):
+    def test_dataset_ops(self) -> None:
         """
         1. Defining the schema of our dataset.
 
@@ -538,7 +538,7 @@ class TestDatasetOps(TestCase):
         actual_sizes = [d.shape[0] for d in trimmed.field_blobs()]
         self.assertEquals(EXPECTED_SIZES, actual_sizes)
 
-    def test_last_n_window_ops(self):
+    def test_last_n_window_ops(self) -> None:
         collect_net = core.Net("collect_net")
         collect_net.GivenTensorFill(
             [],
@@ -573,7 +573,7 @@ class TestDatasetOps(TestCase):
         reference_result = workspace.FetchBlob("output")
         npt.assert_array_equal(input_array[[2, 0, 1, 2, 2, 0, 1]], reference_result)
 
-    def test_last_n_window_ops_shape_inference(self):
+    def test_last_n_window_ops_shape_inference(self) -> None:
         collect_net = core.Net("collect_net")
         collect_net.GivenTensorFill(
             [],
@@ -598,7 +598,7 @@ class TestDatasetOps(TestCase):
             )
         )
 
-    def test_last_n_window_ops_shape_inference_4d_input(self):
+    def test_last_n_window_ops_shape_inference_4d_input(self) -> None:
         input_shape = [3, 2, 4, 5]
         collect_net = core.Net("collect_net")
         collect_net.GivenTensorFill(
@@ -626,7 +626,7 @@ class TestDatasetOps(TestCase):
             )
         )
 
-    def test_collect_tensor_ops(self):
+    def test_collect_tensor_ops(self) -> None:
         init_net = core.Net("init_net")
         blobs = ["blob_1", "blob_2", "blob_3"]
         bvec_map = {}

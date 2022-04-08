@@ -14,10 +14,10 @@ from caffe2.python import core, test_util, workspace
 
 if workspace.has_gpu_support:
     DEVICES = [caffe2_pb2.CPU, workspace.GpuDeviceType]
-    max_gpuid = workspace.NumGpuDevices() - 1
+    max_gpuid: int = workspace.NumGpuDevices() - 1
 else:
     DEVICES = [caffe2_pb2.CPU]
-    max_gpuid = 0
+    max_gpuid: int = 0
 
 
 class MiniDBEntry(NamedTuple):
@@ -30,7 +30,7 @@ class MiniDBEntry(NamedTuple):
 # each derived class will inherit it as well and cause test duplication
 class TestLoadSaveBase(test_util.TestCase):
 
-    def __init__(self, methodName, db_type='minidb'):
+    def __init__(self, methodName: str, db_type: str='minidb') -> None:
         super(TestLoadSaveBase, self).__init__(methodName)
         self._db_type = db_type
 
@@ -40,7 +40,7 @@ class TestLoadSaveBase(test_util.TestCase):
            dst_device_type=st.sampled_from(DEVICES),
            dst_gpu_id=st.integers(min_value=0, max_value=max_gpuid))
     def load_save(self, src_device_type, src_gpu_id,
-                  dst_device_type, dst_gpu_id):
+                  dst_device_type, dst_gpu_id) -> None:
         workspace.ResetWorkspace()
         dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
@@ -149,10 +149,10 @@ class TestLoadSaveBase(test_util.TestCase):
 
 class TestLoadSave(TestLoadSaveBase):
 
-    def testLoadSave(self):
+    def testLoadSave(self) -> None:
         self.load_save()
 
-    def testRepeatedArgs(self):
+    def testRepeatedArgs(self) -> None:
         dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
@@ -172,7 +172,7 @@ class TestLoadSave(TestLoadSaveBase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    def testLoadExcessblobs(self):
+    def testLoadExcessblobs(self) -> None:
         tmp_folder = self.make_tempdir()
         tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
 
@@ -205,7 +205,7 @@ class TestLoadSave(TestLoadSaveBase):
             workspace.ResetWorkspace()
             workspace.RunOperatorOnce(op)
 
-    def testTruncatedFile(self):
+    def testTruncatedFile(self) -> None:
         tmp_folder = self.make_tempdir()
         tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
 
@@ -231,7 +231,7 @@ class TestLoadSave(TestLoadSaveBase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    def testBlobNameOverrides(self):
+    def testBlobNameOverrides(self) -> None:
         original_names = ['blob_a', 'blob_b', 'blob_c']
         new_names = ['x', 'y', 'z']
         blobs = [np.random.permutation(6) for i in range(3)]
@@ -317,7 +317,7 @@ class TestLoadSave(TestLoadSaveBase):
             self.assertTrue(workspace.HasBlob(name))
             self.assertTrue((workspace.FetchBlob(name) == blobs[i]).all())
 
-    def testMissingFile(self):
+    def testMissingFile(self) -> None:
         tmp_folder = self.make_tempdir()
         tmp_file = tmp_folder / "missing_db"
 
@@ -334,7 +334,7 @@ class TestLoadSave(TestLoadSaveBase):
                 print(e)
                 raise
 
-    def testLoadMultipleFilesGivenSourceBlobNames(self):
+    def testLoadMultipleFilesGivenSourceBlobNames(self) -> None:
         tmp_folder = self.make_tempdir()
         db_file_1, arrays_1 = self.saveFile(tmp_folder, "db1", self._db_type, 0)
         db_file_2, arrays_2 = self.saveFile(
@@ -366,7 +366,7 @@ class TestLoadSave(TestLoadSaveBase):
                 workspace.FetchBlob(str(i + len(arrays_1))), arrays_2[i]
             )
 
-    def testLoadAllMultipleFiles(self):
+    def testLoadAllMultipleFiles(self) -> None:
         tmp_folder = self.make_tempdir()
         db_file_1, arrays_1 = self.saveFile(tmp_folder, "db1", self._db_type, 0)
         db_file_2, arrays_2 = self.saveFile(
@@ -397,7 +397,7 @@ class TestLoadSave(TestLoadSaveBase):
                 workspace.FetchBlob(str(i + len(arrays_1))), arrays_2[i]
             )
 
-    def testLoadAllMultipleFilesWithSameKey(self):
+    def testLoadAllMultipleFilesWithSameKey(self) -> None:
         tmp_folder = self.make_tempdir()
         db_file_1, arrays_1 = self.saveFile(tmp_folder, "db1", self._db_type, 0)
         db_file_2, arrays_2 = self.saveFile(tmp_folder, "db2", self._db_type, 0)
@@ -414,7 +414,7 @@ class TestLoadSave(TestLoadSaveBase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    def testLoadRepeatedFiles(self):
+    def testLoadRepeatedFiles(self) -> None:
         tmp_folder = self.make_tempdir()
         tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
 

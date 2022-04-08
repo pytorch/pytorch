@@ -8,7 +8,7 @@
 from caffe2.python import core
 
 
-def prelu(model, blob_in, blob_out, num_channels=1, slope_init=None,
+def prelu(model, blob_in, blob_out, num_channels: int=1, slope_init=None,
           **kwargs):
     """PRelu"""
     slope_init = (
@@ -29,14 +29,14 @@ def prelu(model, blob_in, blob_out, num_channels=1, slope_init=None,
     return model.net.PRelu([blob_in, slope], [blob_out])
 
 
-def relu(model, blob_in, blob_out, use_cudnn=False, order="NCHW", **kwargs):
+def relu(model, blob_in, blob_out, use_cudnn: bool=False, order: str="NCHW", **kwargs):
     """Relu."""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
     return model.net.Relu(blob_in, blob_out, order=order, **kwargs)
 
 
-def tanh(model, blob_in, blob_out, use_cudnn=False, order="NCHW", **kwargs):
+def tanh(model, blob_in, blob_out, use_cudnn: bool=False, order: str="NCHW", **kwargs):
     """Tanh."""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'

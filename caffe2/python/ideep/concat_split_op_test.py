@@ -12,7 +12,7 @@ from hypothesis import given, settings
 import caffe2.python.ideep_test_util as mu
 
 @st.composite
-def _tensor_splits(draw, add_axis=False):
+def _tensor_splits(draw, add_axis: bool=False):
     """Generates (axis, split_info, tensor_splits) tuples."""
     tensor = draw(hu.tensor(min_dim=2, min_value=4))  # Each dim has at least 4 elements.
     axis = draw(st.integers(-len(tensor.shape), len(tensor.shape) - 1))
@@ -50,7 +50,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
     @given(tensor_splits=_tensor_splits(),
            **mu.gcs)
     @settings(deadline=10000)
-    def test_concat(self, tensor_splits, gc, dc):
+    def test_concat(self, tensor_splits, gc, dc) -> None:
         axis, _, splits = tensor_splits
 
         op = core.CreateOperator(
@@ -67,7 +67,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
            split_as_arg=st.booleans(),
            **mu.gcs)
     @settings(deadline=10000)
-    def test_split(self, tensor_splits, split_as_arg, gc, dc):
+    def test_split(self, tensor_splits, split_as_arg: bool, gc, dc) -> None:
         axis, split_info, splits = tensor_splits
 
         split_as_arg = True
@@ -100,7 +100,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
 
     @given(tensor_splits=_tensor_splits(add_axis=True), **mu.gcs)
     @settings(deadline=10000)
-    def test_concat_add_axis(self, tensor_splits, gc, dc):
+    def test_concat_add_axis(self, tensor_splits, gc, dc) -> None:
         axis, _, splits = tensor_splits
         op = core.CreateOperator(
             "Concat",
@@ -117,7 +117,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
 
 
     @given(tensor_splits=_tensor_splits(add_axis=True), **mu.gcs)
-    def test_concat_with_TensorCPU(self, tensor_splits, gc, dc):
+    def test_concat_with_TensorCPU(self, tensor_splits, gc, dc) -> None:
         axis, _, splits = tensor_splits
         op0 = core.CreateOperator(
             "Concat",

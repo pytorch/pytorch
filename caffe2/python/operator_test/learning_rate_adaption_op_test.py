@@ -21,7 +21,7 @@ class TestLearningRateAdaption(serial.SerializedTestCase):
            **hu.gcs_cpu_only)
     @settings(deadline=None, max_examples=50)
     def test_learning_rate_adaption_op_normalization(self, inputs, lr, lr_alpha,
-                                                     gc, dc):
+                                                     gc, dc) -> None:
         grad, effgrad = inputs
         lr = np.array([lr], dtype=np.float32)
 
@@ -56,7 +56,7 @@ class TestLearningRateAdaption(serial.SerializedTestCase):
                            allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
     def test_learning_rate_adaption_op_without_normalization(self, inputs, lr,
-                                                             lr_alpha, gc, dc):
+                                                             lr_alpha, gc, dc) -> None:
         grad, effgrad = inputs
         lr = np.array([lr], dtype=np.float32)
 

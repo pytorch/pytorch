@@ -24,7 +24,7 @@ class MKLSpatialBNTest(hu.HypothesisTestCase):
            epsilon=st.floats(1e-5, 1e-2),
            **mu.gcs)
     def test_spatialbn_test_mode(self, size, input_channels,
-                                 batch_size, seed, order, epsilon, gc, dc):
+                                 batch_size, seed, order, epsilon, gc, dc) -> None:
         np.random.seed(seed)
         scale = np.random.rand(input_channels).astype(np.float32) + 0.5
         bias = np.random.rand(input_channels).astype(np.float32) - 0.5
@@ -54,7 +54,7 @@ class MKLSpatialBNTest(hu.HypothesisTestCase):
            **mu.gcs)
     def test_spatialbn_train_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            gc, dc):
+            gc, dc) -> None:
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "running_mean", "running_var"],

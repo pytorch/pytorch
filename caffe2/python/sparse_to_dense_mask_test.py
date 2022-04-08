@@ -10,7 +10,7 @@ import numpy as np
 
 class TestSparseToDenseMask(TestCase):
 
-    def test_sparse_to_dense_mask_float(self):
+    def test_sparse_to_dense_mask_float(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default', 'lengths'],
@@ -30,7 +30,7 @@ class TestSparseToDenseMask(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
-    def test_sparse_to_dense_mask_invalid_inputs(self):
+    def test_sparse_to_dense_mask_invalid_inputs(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default', 'lengths'],
@@ -57,7 +57,7 @@ class TestSparseToDenseMask(TestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorMultiple(op, 3)
 
-    def test_sparse_to_dense_mask_subtensor(self):
+    def test_sparse_to_dense_mask_subtensor(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default', 'lengths'],
@@ -80,7 +80,7 @@ class TestSparseToDenseMask(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
-    def test_sparse_to_dense_mask_string(self):
+    def test_sparse_to_dense_mask_string(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default', 'lengths'],
@@ -101,7 +101,7 @@ class TestSparseToDenseMask(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
-    def test_sparse_to_dense_mask_empty_lengths(self):
+    def test_sparse_to_dense_mask_empty_lengths(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default'],
@@ -116,7 +116,7 @@ class TestSparseToDenseMask(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
-    def test_sparse_to_dense_mask_no_lengths(self):
+    def test_sparse_to_dense_mask_no_lengths(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default'],
@@ -131,7 +131,7 @@ class TestSparseToDenseMask(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
-    def test_sparse_to_dense_mask_presence_mask(self):
+    def test_sparse_to_dense_mask_presence_mask(self) -> None:
         op = core.CreateOperator(
             'SparseToDenseMask',
             ['indices', 'values', 'default', 'lengths'],

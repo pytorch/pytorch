@@ -17,7 +17,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @given(X=hu.tensor(), args=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_slice(self, X, args, gc, dc):
+    def test_slice(self, X, args, gc, dc) -> None:
         X = X.astype(dtype=np.float32)
         dim = random.randint(0, X.ndim - 1)
         slice_start = random.randint(0, X.shape[dim] - 1)
@@ -60,7 +60,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @given(ndims=st.integers(min_value=1, max_value=10), **hu.gcs)
     @settings(deadline=10000)
-    def test_resize_like(self, ndims, gc, dc):
+    def test_resize_like(self, ndims, gc, dc) -> None:
         X = np.zeros((ndims * 2, ))
         Y = np.zeros((ndims, 2))
 
@@ -81,7 +81,7 @@ class TestUtilityOps(serial.SerializedTestCase):
            engine=st.sampled_from(['CUDNN', None]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_transpose(self, dtype, ndims, seed, null_axes, engine, gc, dc):
+    def test_transpose(self, dtype, ndims, seed, null_axes, engine, gc, dc) -> None:
         if (gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN"):
             # cudnn 5.1 does not support int.
             assume(workspace.GetCuDNNVersion() >= 6000 or dtype != np.int32)
@@ -113,7 +113,7 @@ class TestUtilityOps(serial.SerializedTestCase):
     @given(m=st.integers(5, 10), n=st.integers(5, 10),
            o=st.integers(5, 10), nans=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_nan_check(self, m, n, o, nans, gc, dc):
+    def test_nan_check(self, m, n, o, nans, gc, dc) -> None:
         other = np.array([1, 2, 3]).astype(np.float32)
         X = np.random.rand(m, n, o).astype(np.float32)
         if nans:
@@ -164,7 +164,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
-    def test_elementwise_max(self, n, m, d, gc, dc):
+    def test_elementwise_max(self, n, m, d, gc, dc) -> None:
         X = np.random.rand(n, m, d).astype(np.float32)
         Y = np.random.rand(n, m, d).astype(np.float32)
         Z = np.random.rand(n, m, d).astype(np.float32)
@@ -190,7 +190,7 @@ class TestUtilityOps(serial.SerializedTestCase):
     @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
     @settings(deadline=10000)
-    def test_elementwise_max_grad(self, n, m, d, gc, dc):
+    def test_elementwise_max_grad(self, n, m, d, gc, dc) -> None:
         go = np.random.rand(n, m, d).astype(np.float32)
         X = np.random.rand(n, m, d).astype(np.float32)
         Y = np.random.rand(n, m, d).astype(np.float32)
@@ -220,7 +220,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @serial.given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
-    def test_elementwise_min(self, n, m, d, gc, dc):
+    def test_elementwise_min(self, n, m, d, gc, dc) -> None:
         X = np.random.rand(n, m, d).astype(np.float32)
         Y = np.random.rand(n, m, d).astype(np.float32)
         Z = np.random.rand(n, m, d).astype(np.float32)
@@ -246,7 +246,7 @@ class TestUtilityOps(serial.SerializedTestCase):
     @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
     @settings(deadline=10000)
-    def test_elementwise_min_grad(self, n, m, d, gc, dc):
+    def test_elementwise_min_grad(self, n, m, d, gc, dc) -> None:
         go = np.random.rand(n, m, d).astype(np.float32)
         X = np.random.rand(n, m, d).astype(np.float32)
         Y = np.random.rand(n, m, d).astype(np.float32)
@@ -282,7 +282,7 @@ class TestUtilityOps(serial.SerializedTestCase):
         **hu.gcs)
     @settings(deadline=10000)
     def test_sum(
-            self, n, m, d, in_place, engine, seed, dtype, gc, dc):
+            self, n, m, d, in_place, engine, seed, dtype, gc, dc) -> None:
         input_names = []
         input_vars = []
         np.random.seed(seed)
@@ -333,7 +333,7 @@ class TestUtilityOps(serial.SerializedTestCase):
         ),
         **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_lengths_gather(self, inputs, gc, dc):
+    def test_lengths_gather(self, inputs, gc, dc) -> None:
         items = inputs[0]
         lengths = inputs[1]
         indices = inputs[2]
@@ -360,7 +360,7 @@ class TestUtilityOps(serial.SerializedTestCase):
         inputs=hu.lengths_tensor(),
         **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_lengths_to_ranges(self, inputs, gc, dc):
+    def test_lengths_to_ranges(self, inputs, gc, dc) -> None:
         _, lengths = inputs
 
         def lengths_to_ranges_op(lengths):
@@ -398,7 +398,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=None, max_examples=50)
-    def test_size_op(self, gc, dc):
+    def test_size_op(self, gc, dc) -> None:
         X = np.array([[1, 2], [3, 4]]).astype(np.float32)
 
         def size_op(tensor):
@@ -417,7 +417,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             reference=size_op,
         )
 
-    def test_alias_op(self):
+    def test_alias_op(self) -> None:
         """ Don't use hypothesis because there are only 2 cases to check"""
         for size in [0, 5]:
             X = np.arange(size).astype(np.float32)
@@ -434,7 +434,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     @settings(deadline=10000)
-    def test_range(self, gc, dc):
+    def test_range(self, gc, dc) -> None:
         names = [
             ('stop_',),
             ('start_', 'stop_'),

@@ -19,7 +19,7 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_sum(
         self, num_rows, blocksize, weighted, seed, empty_indices, engine, bit_rate
-    ):
+    ) -> None:
         net = core.Net("bench")
 
         np.random.seed(seed)
@@ -117,7 +117,7 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_mean(
         self, num_rows, blocksize, seed, empty_indices, engine, bit_rate
-    ):
+    ) -> None:
         net = core.Net("bench")
 
         np.random.seed(seed)
@@ -199,7 +199,7 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_sum_rowwise_sparse(
         self, num_rows, blocksize, weighted, empty_indices, bit_rate, indices_64bit
-    ):
+    ) -> None:
         net = core.Net("bench")
 
         input_data = np.random.rand(num_rows, blocksize).astype(np.float32)
@@ -323,7 +323,7 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
     )
     def test_sparse_lengths_mean_rowwise_sparse_with_skipped_pruning(
         self, num_rows, blocksize, seed, empty_indices, engine, bit_rate
-    ):
+    ) -> None:
         net = core.Net("bench")
 
         np.random.seed(seed)

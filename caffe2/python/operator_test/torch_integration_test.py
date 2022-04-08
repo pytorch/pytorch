@@ -133,7 +133,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         clip_angle_thresh,
         gc,
         dc,
-    ):
+    ) -> None:
         """
         Test with rois for multiple images in a batch
         """
@@ -187,13 +187,13 @@ class TorchIntegration(hu.HypothesisTestCase):
         self,
         roi_counts,
         num_classes,
-        rotated,
+        rotated: bool,
         angle_bound_on,
         clip_angle_thresh,
         batch_splits_dtype,
         gc,
         dc,
-    ):
+    ) -> None:
         rotated = False  # FIXME remove this after rotation is supported
         rois, deltas, im_info = create_bbox_transform_inputs(
             roi_counts, num_classes, rotated
@@ -275,7 +275,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         dim_2=st.integers(min_value=3, max_value=3),
         dim_3=st.integers(min_value=2, max_value=2),
     )
-    def test_sparse_to_dense_mask(self, dim_1, dim_2, dim_3):
+    def test_sparse_to_dense_mask(self, dim_1, dim_2, dim_3) -> None:
         indices = np.array([i + 1 for i in range(dim_1)]).astype(np.int32)
         values = np.random.rand(dim_1, dim_2, dim_3).astype(np.float32)
         default_value = np.zeros((dim_2, dim_3)).astype(np.float32)
@@ -339,7 +339,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         W=st.integers(min_value=8, max_value=8),
         img_count=st.integers(min_value=3, max_value=3),
     )
-    def test_generate_proposals(self, A, H, W, img_count):
+    def test_generate_proposals(self, A: int, H: int, W: int, img_count) -> None:
         scores = np.ones((img_count, A, H, W)).astype(np.float32)
         bbox_deltas = (
             np.linspace(0, 10, num=img_count * 4 * A * H * W)
@@ -405,7 +405,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         has_biases,
         is_bidirectional,
         batch_first,
-    ):
+    ) -> None:
         num_directions = 2 if is_bidirectional else 1
         hx = np.zeros((num_layers * num_directions, bsz, hidden_size), dtype=np.float32)
 
@@ -474,7 +474,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         W=st.integers(min_value=8, max_value=8),
         img_count=st.integers(min_value=3, max_value=3),
     )
-    def test_generate_proposals_cuda(self, A, H, W, img_count):
+    def test_generate_proposals_cuda(self, A: int, H: int, W: int, img_count) -> None:
         scores = np.ones((img_count, A, H, W)).astype(np.float32)
         bbox_deltas = (
             np.linspace(0, 10, num=img_count * 4 * A * H * W)
@@ -526,7 +526,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         H=st.integers(min_value=10, max_value=10),
         W=st.integers(min_value=8, max_value=8),
     )
-    def _test_roi_align(self, N, C, H, W, device):
+    def _test_roi_align(self, N, C, H: float, W: float, device) -> None:
         def rand_roi():
             return np.array(
                 [
@@ -569,11 +569,11 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
 
-    def test_roi_align_cpu(self):
+    def test_roi_align_cpu(self) -> None:
         self._test_roi_align(device="cpu")
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_roi_align_cuda(self):
+    def test_roi_align_cuda(self) -> None:
         self._test_roi_align(device="cuda")
 
     @given(
@@ -582,7 +582,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         H=st.integers(min_value=10, max_value=10),
         W=st.integers(min_value=8, max_value=8),
     )
-    def _test_roi_align_rotated(self, N, C, H, W, device):
+    def _test_roi_align_rotated(self, N, C, H, W, device) -> None:
         def rand_rotated_roi():
             return np.array(
                 [
@@ -626,15 +626,15 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
 
-    def test_roi_align_rotated_cpu(self):
+    def test_roi_align_rotated_cpu(self) -> None:
         self._test_roi_align_rotated(device="cpu")
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_roi_align_rotated_cuda(self):
+    def test_roi_align_rotated_cuda(self) -> None:
         self._test_roi_align_rotated(device="cuda")
 
     @given(roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10))
-    def test_collect_and_distribute_fpn_rpn_proposals_op(self, roi_counts):
+    def test_collect_and_distribute_fpn_rpn_proposals_op(self, roi_counts) -> None:
         batch_size = len(roi_counts)
         im_dims = np.random.randint(100, 600, batch_size)
         rpn_rois_and_scores = []
@@ -679,7 +679,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.testing.assert_allclose(x, y)
 
     @given(X=hu.tensor(), fast_gelu=st.booleans())
-    def _test_gelu_op(self, X, fast_gelu, device):
+    def _test_gelu_op(self, X, fast_gelu, device) -> None:
         def _gelu_ref(_X):
             return (_X * norm.cdf(_X).astype(np.float32),)
 
@@ -692,11 +692,11 @@ class TorchIntegration(hu.HypothesisTestCase):
             expected_output, actual_output.cpu(), rtol=rtol, atol=atol
         )
 
-    def test_gelu_op(self):
+    def test_gelu_op(self) -> None:
         self._test_gelu_op(device="cpu")
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_gelu_op_cuda(self):
+    def test_gelu_op_cuda(self) -> None:
         self._test_gelu_op(device="cuda")
 
     @given(
@@ -704,7 +704,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             dtype=np.float32, min_value=1, max_value=5, allow_empty=True
         )
     )
-    def _test_lengths_op(self, inputs, ref_op_name, torch_op, device):
+    def _test_lengths_op(self, inputs, ref_op_name, torch_op, device) -> None:
         data, lengths = inputs
 
         def _lengths_ref(X, Y):
@@ -721,37 +721,37 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
-    def _test_lengths_sum_op(self, device):
+    def _test_lengths_sum_op(self, device) -> None:
         self._test_lengths_op("LengthsSum", torch.ops._caffe2.LengthsSum, device)
 
-    def test_lengths_sum_op(self):
+    def test_lengths_sum_op(self) -> None:
         self._test_lengths_sum_op(device="cpu")
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_lengths_sum_op_cuda(self):
+    def test_lengths_sum_op_cuda(self) -> None:
         self._test_lengths_sum_op(device="cuda")
 
-    def _test_lengths_mean_op(self, device):
+    def _test_lengths_mean_op(self, device) -> None:
         self._test_lengths_op("LengthsMean", torch.ops._caffe2.LengthsMean, device)
 
-    def test_lengths_mean_op(self):
+    def test_lengths_mean_op(self) -> None:
         self._test_lengths_mean_op(device="cpu")
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_lengths_mean_op_cuda(self):
+    def test_lengths_mean_op_cuda(self) -> None:
         self._test_lengths_mean_op(device="cuda")
 
-    def _test_lengths_max_op(self, device):
+    def _test_lengths_max_op(self, device) -> None:
         self._test_lengths_op("LengthsMax", torch.ops._caffe2.LengthsMax, device)
 
-    def test_lengths_max_op(self):
+    def test_lengths_max_op(self) -> None:
         self._test_lengths_max_op(device="cpu")
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_lengths_max_op_cuda(self):
+    def test_lengths_max_op_cuda(self) -> None:
         self._test_lengths_max_op(device="cuda")
 
-    def _test_resize_nearest_op(self, device):
+    def _test_resize_nearest_op(self, device) -> None:
         data = np.random.rand(1, 2, 3, 4).astype(np.float32)
 
         def _resize_nearest_ref(X):
@@ -785,7 +785,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         return self._test_resize_nearest_op("cuda")
 
     @given(input_data=hu.tensor(min_dim=2, max_dim=2))
-    def test_Fused8BitRowwiseQuantizedToFloat(self, input_data):
+    def test_Fused8BitRowwiseQuantizedToFloat(self, input_data) -> None:
         QuantizeOp = core.CreateOperator(
             "FloatToFused8BitRowwiseQuantized", ["input_data"], ["quantized_data"]
         )
@@ -803,7 +803,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         np.testing.assert_array_almost_equal(dequantized_data.numpy(), reference)
 
     @given(binary_input=st.booleans())
-    def test_piecewise_linear_op(self, binary_input):
+    def test_piecewise_linear_op(self, binary_input) -> None:
         if binary_input:
             num_dims = 1
         else:
@@ -840,7 +840,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
 
-    def test_alias_with_name_is_in_place(self):
+    def test_alias_with_name_is_in_place(self) -> None:
         device = "cuda" if workspace.has_cuda_support else "cpu"
         x = torch.tensor([3., 42.]).to(device=device)
         y = torch.ops._caffe2.AliasWithName(x, "new_name")
@@ -850,7 +850,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(y, torch.tensor([3., 6.]).to(device=device))
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_copy_between_cpu_and_gpu(self):
+    def test_copy_between_cpu_and_gpu(self) -> None:
         x_cpu_ref = torch.tensor([1., 2., 3.])
         x_gpu_ref = x_cpu_ref.to("cuda")
 
@@ -859,7 +859,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
         torch.testing.assert_allclose(x_cpu, x_cpu_ref)
 
-    def test_index_hash_op(self):
+    def test_index_hash_op(self) -> None:
         data = np.random.randint(low=0, high=1000, size=(4, 4, 4))
 
         def _index_hash_ref(X):
@@ -875,7 +875,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
-    def test_bucketize_op(self):
+    def test_bucketize_op(self) -> None:
         data = np.random.rand(8, 10).astype(np.float32) * 1000
         boundaries = np.array([1, 10, 100, 1000, 100000]).astype(np.float32)
 
@@ -892,7 +892,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
     @given(X=hu.tensor(), eps=st.floats(min_value=1e-4, max_value=1e-2))
-    def test_logit(self, X, eps):
+    def test_logit(self, X, eps) -> None:
         def ref(X, eps):
             ref_op = core.CreateOperator("Logit", ["X"], ["Y"], eps=eps)
             workspace.FeedBlob("X", X)
@@ -903,7 +903,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         actual_output = torch.ops._caffe2.Logit(torch.tensor(X), eps)
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
-    def test_percentile(self):
+    def test_percentile(self) -> None:
         original_values = np.array([[3.0, 5.0, 3], [5.0, 1.0, 6.0]]).astype(np.float32)
         value_to_pct = np.array([[3, 0.2], [5, 0.5], [1, 0.3], [3, 0.6]]).astype(
             np.float32
@@ -928,7 +928,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
-    def test_batch_bucket_one_hot_op(self):
+    def test_batch_bucket_one_hot_op(self) -> None:
         data = np.array([[2, 3], [4, 1], [2, 5]]).astype(np.float32)
         lengths = np.array([2, 3]).astype(np.int32)
         boundaries = np.array([0.1, 2.5, 1, 3.1, 4.5]).astype(np.float32)
@@ -949,7 +949,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
-    def test_gather_ranges_to_dense_op(self):
+    def test_gather_ranges_to_dense_op(self) -> None:
         data = np.array([1, 2, 3, 4, 5, 6, 7, 8])
         ranges = np.array([[[2, 4]], [[0, 0]]])
         key = np.array([0, 1, 3, 2, 1, 0, 1, 0])
@@ -992,7 +992,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
     @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
     @settings(deadline=10000)
-    def test_merge_id_lists(self, lengths_0, lengths_1):
+    def test_merge_id_lists(self, lengths_0, lengths_1) -> None:
         def _merge_id_lists(lengths, values):
             ref_op = core.CreateOperator(
                 "MergeIdLists",
@@ -1036,7 +1036,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
         torch.testing.assert_allclose(expected_merged_values, output_merged_values)
 
-    def test_learning_rate(self):
+    def test_learning_rate(self) -> None:
         base_lr = 0.05
         no_iter = torch.tensor([0])
         one_iter = torch.tensor([1])
@@ -1091,7 +1091,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             ),
         )
 
-    def test_pack_segments(self):
+    def test_pack_segments(self) -> None:
         s = torch.rand(3, 3, 3)
         lengths = torch.tensor([2, 1])
         packed_tensor, _ = torch.ops._caffe2.PackSegments(lengths, s)

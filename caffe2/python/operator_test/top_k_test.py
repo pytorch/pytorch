@@ -14,7 +14,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 
 class TestTopK(serial.SerializedTestCase):
 
-    def top_k_ref(self, X, k, flatten_indices, axis=-1):
+    def top_k_ref(self, X, k, flatten_indices, axis: int=-1):
         in_dims = X.shape
         out_dims = list(in_dims)
         out_dims[axis] = k
@@ -71,7 +71,7 @@ class TestTopK(serial.SerializedTestCase):
         seed=st.integers(0, 10),
         **hu.gcs
     )
-    def test_top_k(self, X, flatten_indices, seed, gc, dc):
+    def test_top_k(self, X, flatten_indices, seed, gc, dc) -> None:
         X = X.astype(dtype=np.float32)
         np.random.seed(seed)
         # `k` can be larger than the total size
@@ -91,7 +91,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(bs=st.integers(1, 3), n=st.integers(1, 1), k=st.integers(1, 1),
            flatten_indices=st.booleans(), **hu.gcs)
-    def test_top_k_1(self, bs, n, k, flatten_indices, gc, dc):
+    def test_top_k_1(self, bs, n, k, flatten_indices, gc, dc) -> None:
         X = np.random.rand(bs, n).astype(dtype=np.float32)
         output_list = ["Values", "Indices"]
         if flatten_indices:
@@ -107,7 +107,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(bs=st.integers(1, 3), n=st.integers(1, 10000), k=st.integers(1, 1),
            flatten_indices=st.booleans(), **hu.gcs)
-    def test_top_k_2(self, bs, n, k, flatten_indices, gc, dc):
+    def test_top_k_2(self, bs, n, k, flatten_indices, gc, dc) -> None:
         X = np.random.rand(bs, n).astype(dtype=np.float32)
 
         output_list = ["Values", "Indices"]
@@ -124,7 +124,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(bs=st.integers(1, 3), n=st.integers(1, 10000),
            k=st.integers(1, 1024), flatten_indices=st.booleans(), **hu.gcs)
-    def test_top_k_3(self, bs, n, k, flatten_indices, gc, dc):
+    def test_top_k_3(self, bs, n, k, flatten_indices, gc, dc) -> None:
         X = np.random.rand(bs, n).astype(dtype=np.float32)
         output_list = ["Values", "Indices"]
         if flatten_indices:
@@ -141,7 +141,7 @@ class TestTopK(serial.SerializedTestCase):
     @given(bs=st.integers(1, 3), n=st.integers(100, 10000),
            flatten_indices=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_top_k_4(self, bs, n, flatten_indices, gc, dc):
+    def test_top_k_4(self, bs, n: int, flatten_indices, gc, dc) -> None:
         k = np.random.randint(n // 3, 3 * n // 4)
         X = np.random.rand(bs, n).astype(dtype=np.float32)
 
@@ -159,7 +159,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(bs=st.integers(1, 3), n=st.integers(1, 1024),
            flatten_indices=st.booleans(), **hu.gcs)
-    def test_top_k_5(self, bs, n, flatten_indices, gc, dc):
+    def test_top_k_5(self, bs, n, flatten_indices, gc, dc) -> None:
         k = n
         X = np.random.rand(bs, n).astype(dtype=np.float32)
 
@@ -178,7 +178,7 @@ class TestTopK(serial.SerializedTestCase):
     @given(bs=st.integers(1, 3), n=st.integers(1, 5000),
            flatten_indices=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_top_k_6(self, bs, n, flatten_indices, gc, dc):
+    def test_top_k_6(self, bs, n, flatten_indices, gc, dc) -> None:
         k = n
         X = np.random.rand(bs, n).astype(dtype=np.float32)
 
@@ -197,7 +197,7 @@ class TestTopK(serial.SerializedTestCase):
     @given(X=hu.tensor(dtype=np.float32), k=st.integers(1, 5),
            axis=st.integers(-1, 5), flatten_indices=st.booleans(),
            **hu.gcs)
-    def test_top_k_axis(self, X, k, axis, flatten_indices, gc, dc):
+    def test_top_k_axis(self, X, k, axis, flatten_indices, gc, dc) -> None:
         dims = X.shape
         if axis >= len(dims):
             axis %= len(dims)
@@ -217,7 +217,7 @@ class TestTopK(serial.SerializedTestCase):
     @given(X=hu.tensor(dtype=np.float32), k=st.integers(1, 5),
            axis=st.integers(-1, 5), **hu.gcs)
     @settings(deadline=10000)
-    def test_top_k_grad(self, X, k, axis, gc, dc):
+    def test_top_k_grad(self, X, k, axis, gc, dc) -> None:
         dims = X.shape
         if axis >= len(dims):
             axis %= len(dims)

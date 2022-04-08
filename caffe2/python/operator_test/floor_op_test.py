@@ -19,7 +19,7 @@ class TestFloor(serial.SerializedTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_floor(self, X, gc, dc, engine):
+    def test_floor(self, X, gc, dc, engine) -> None:
         op = core.CreateOperator("Floor", ["X"], ["Y"], engine=engine)
 
         def floor_ref(X):

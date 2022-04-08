@@ -41,7 +41,7 @@ def _test_loop():
     return y
 
 
-def _test_inner_stop(x):
+def _test_inner_stop(x) -> None:
     ops.stop_if(ops.LT([x, ops.Const(5)]))
 
 
@@ -80,7 +80,7 @@ def _test_if(x):
 
 
 class TestNetBuilder(unittest.TestCase):
-    def test_ops(self):
+    def test_ops(self) -> None:
         with NetBuilder() as nb:
             y = _test_loop()
             z, w, a, b = _test_outer()
@@ -142,7 +142,7 @@ class TestNetBuilder(unittest.TestCase):
             for x in [total, total_large, total_small, total_tiny]
         ]
 
-    def test_net_multi_use(self):
+    def test_net_multi_use(self) -> None:
         with Task() as task:
             total = ops.Const(0)
             net = Net('my_net')
@@ -154,7 +154,7 @@ class TestNetBuilder(unittest.TestCase):
             session.run(task)
             self.assertEquals(2, result.fetch())
 
-    def test_loops(self):
+    def test_loops(self) -> None:
         with Task() as task:
             out_actual = self._actual_loop()
         with LocalSession() as session:
@@ -164,7 +164,7 @@ class TestNetBuilder(unittest.TestCase):
             for e, a in zip(expected, actual):
                 self.assertEquals(e, a)
 
-    def test_setup(self):
+    def test_setup(self) -> None:
         with Task() as task:
             with ops.task_init():
                 one = ops.Const(1)
@@ -188,7 +188,7 @@ class TestNetBuilder(unittest.TestCase):
             self.assertEquals(o7_1.fetch(), 7)
             self.assertEquals(o7_2.fetch(), 7)
 
-    def test_multi_instance_python_op(self):
+    def test_multi_instance_python_op(self) -> None:
         """
         When task instances are created at runtime, C++ concurrently creates
         multiple instances of operators in C++, and concurrently destroys them
@@ -206,7 +206,7 @@ class TestNetBuilder(unittest.TestCase):
             self.assertEquals(PythonOpStats.num_instances, 64)
             self.assertEquals(PythonOpStats.num_calls, 256)
 
-    def test_multi_instance(self):
+    def test_multi_instance(self) -> None:
         NUM_INSTANCES = 10
         NUM_ITERS = 15
         with TaskGroup() as tg:
@@ -246,7 +246,7 @@ class TestNetBuilder(unittest.TestCase):
             self.assertEquals(total2.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
             self.assertEquals(total3.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
 
-    def test_if_net(self):
+    def test_if_net(self) -> None:
         with NetBuilder() as nb:
             x0 = ops.Const(0)
             x1 = ops.Const(1)
@@ -310,7 +310,7 @@ class TestNetBuilder(unittest.TestCase):
         self.assertEquals(y2_value, 108)
         self.assertTrue(str(local_blob) not in ws.blobs)
 
-    def test_while_net(self):
+    def test_while_net(self) -> None:
         with NetBuilder() as nb:
             x = ops.Const(0)
             y = ops.Const(0)

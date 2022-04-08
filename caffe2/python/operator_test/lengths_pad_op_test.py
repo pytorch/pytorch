@@ -23,7 +23,7 @@ class TestLengthsPadOp(serial.SerializedTestCase):
         padding_value=st.floats(-10.0, 10.0),
         **hu.gcs
     )
-    def test_lengths_pad(self, inputs, delta_length, padding_value, gc, dc):
+    def test_lengths_pad(self, inputs, delta_length, padding_value, gc, dc) -> None:
         data, lengths = inputs
         max_length = np.max(lengths) if len(lengths) > 0 else 0
         target_length = max(max_length + delta_length, 1)

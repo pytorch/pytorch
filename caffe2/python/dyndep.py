@@ -11,7 +11,7 @@ from threading import Lock
 from caffe2.python import core, extension_loader
 
 
-def InitOpsLibrary(name, trigger_lazy=True):
+def InitOpsLibrary(name, trigger_lazy: bool=True) -> None:
     """Loads a dynamic library that contains custom operators into Caffe2.
 
     Since Caffe2 uses static variable registration, you can optionally load a
@@ -43,7 +43,7 @@ def GetImportedOpsLibraries():
     return _IMPORTED_DYNDEPS
 
 
-def _init_impl(path, trigger_lazy=True):
+def _init_impl(path, trigger_lazy: bool=True) -> None:
     with dll_lock:
         _IMPORTED_DYNDEPS.add(path)
         with extension_loader.DlopenGuard():

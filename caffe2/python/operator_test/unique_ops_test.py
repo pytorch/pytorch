@@ -47,7 +47,7 @@ class TestUniqueOps(serial.SerializedTestCase):
         **hu.gcs_no_hip
     )
     @settings(deadline=10000)
-    def test_unique_op(self, X, return_remapping, gc, dc):
+    def test_unique_op(self, X, return_remapping, gc, dc) -> None:
         # impl of unique op does not guarantees return order, sort the input
         # so different impl return same outputs
         X = np.sort(X)

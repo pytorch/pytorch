@@ -18,17 +18,19 @@ class ChildMyContext(MyContext):
 
 
 class TestContext(test_util.TestCase):
-    def use_my_context(self):
+    def use_my_context(self) -> None:
         try:
             for _ in range(100):
                 with MyContext() as a:
                     for _ in range(100):
                         self.assertTrue(MyContext.current() == a)
         except Exception as e:
+            # pyre-fixme[16]: `TestContext` has no attribute `_exceptions`.
             self._exceptions.append(e)
 
-    def testMultiThreaded(self):
+    def testMultiThreaded(self) -> None:
         threads = []
+        # pyre-fixme[16]: `TestContext` has no attribute `_exceptions`.
         self._exceptions = []
         for _ in range(8):
             thread = Thread(target=self.use_my_context)
@@ -40,10 +42,10 @@ class TestContext(test_util.TestCase):
             raise e
 
     @MyContext()
-    def testDecorator(self):
+    def testDecorator(self) -> None:
         self.assertIsNotNone(MyContext.current())
 
-    def testNonDefaultCurrent(self):
+    def testNonDefaultCurrent(self) -> None:
         with self.assertRaises(AssertionError):
             MyContext.current()
 
@@ -52,16 +54,16 @@ class TestContext(test_util.TestCase):
 
         self.assertIsNone(MyContext.current(required=False))
 
-    def testDefaultCurrent(self):
+    def testDefaultCurrent(self) -> None:
         self.assertIsInstance(DefaultMyContext.current(), DefaultMyContext)
 
-    def testNestedContexts(self):
+    def testNestedContexts(self) -> None:
         with MyContext() as ctx1:
             with DefaultMyContext() as ctx2:
                 self.assertEqual(DefaultMyContext.current(), ctx2)
                 self.assertEqual(MyContext.current(), ctx1)
 
-    def testChildClasses(self):
+    def testChildClasses(self) -> None:
         with ChildMyContext() as ctx:
             self.assertEqual(ChildMyContext.current(), ctx)
             self.assertEqual(MyContext.current(), ctx)

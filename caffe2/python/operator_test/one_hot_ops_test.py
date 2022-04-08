@@ -32,7 +32,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             min_dim=2, max_dim=2, dtype=np.int32,
             elements=st.integers(min_value=0, max_value=10)),
         **hu.gcs_cpu_only)
-    def test_batch_one_hot(self, x, gc, dc):
+    def test_batch_one_hot(self, x, gc, dc) -> None:
         d = x.shape[1]
         lens = []
         vals = []
@@ -64,7 +64,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         seed=st.integers(min_value=0, max_value=1000),
         **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_batch_bucketized_one_hot(self, x, seed, gc, dc):
+    def test_batch_bucketized_one_hot(self, x, seed, gc, dc) -> None:
         np.random.seed(seed)
         d = x.shape[1]
         lens = np.random.randint(low=1, high=5, size=d)
@@ -116,7 +116,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             elements=st.integers(min_value=0, max_value=42)),
         end_padding=st.integers(min_value=0, max_value=2),
         **hu.gcs)
-    def test_one_hot(self, hot_indices, end_padding, gc, dc):
+    def test_one_hot(self, hot_indices, end_padding, gc, dc) -> None:
 
         def one_hot_ref(hot_indices, size):
             out = np.zeros([len(hot_indices), size], dtype=float)
@@ -137,7 +137,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             input_device_options={'size': core.DeviceOption(caffe2_pb2.CPU)})
 
     @serial.given(hot_indices=_one_hots())
-    def test_segment_one_hot(self, hot_indices):
+    def test_segment_one_hot(self, hot_indices) -> None:
         index_size, lengths, indices = hot_indices
 
         index_size = np.array(index_size, dtype=np.int64)
@@ -169,7 +169,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             elements=st.integers(min_value=-5, max_value=5)),
         seed=st.integers(min_value=0, max_value=1000),
         **hu.gcs_cpu_only)
-    def test_batch_bucket_one_hot_shape_inference(self, x, seed, gc, dc):
+    def test_batch_bucket_one_hot_shape_inference(self, x, seed, gc, dc) -> None:
         np.random.seed(seed)
         d = x.shape[1]
         lens = np.random.randint(low=1, high=5, size=d)

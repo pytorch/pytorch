@@ -36,7 +36,7 @@ def ref_gather(axis):
     return inner
 
 # Gather(..., match_outer==True)
-def ref_gather_match_outer(axis=1):
+def ref_gather_match_outer(axis: int=1):
     def inner(data, ind):
         if ind.size == 0 or data.shape[axis] == 0:
             shape = list(data.shape)
@@ -62,7 +62,7 @@ class TestGatherOps(serial.SerializedTestCase):
            index_num=st.integers(0, 5000),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_gather_ops(self, rows_num, index_num, gc, dc):
+    def test_gather_ops(self, rows_num, index_num, gc, dc) -> None:
         data = np.random.random((rows_num, 10, 20)).astype(np.float32)
 
         if rows_num > 0:
@@ -84,7 +84,7 @@ class TestGatherOps(serial.SerializedTestCase):
            rows_num=st.integers(1, 6),
            index_num=st.integers(1, 20),
            **hu.gcs)
-    def test_gather_ops_axis2(self, batch_num, rows_num, index_num, gc, dc):
+    def test_gather_ops_axis2(self, batch_num, rows_num, index_num, gc, dc) -> None:
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
         ind = np.random.randint(5, size=(index_num, )).astype('int32')
         op = core.CreateOperator(
@@ -103,7 +103,7 @@ class TestGatherOps(serial.SerializedTestCase):
            index_num=st.integers(1, 20),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_gather_ops_match_outer(self, batch_num, rows_num, index_num, gc, dc):
+    def test_gather_ops_match_outer(self, batch_num, rows_num, index_num, gc, dc) -> None:
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(batch_num, index_num)).astype('int32')
         op = core.CreateOperator(
@@ -125,7 +125,7 @@ class TestGatherOps(serial.SerializedTestCase):
            index_num=st.integers(1, 20),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_batch_gather_op_match_outer(self, batch_num, rows_num, index_num, gc, dc):
+    def test_batch_gather_op_match_outer(self, batch_num, rows_num, index_num, gc, dc) -> None:
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(batch_num, index_num)).astype('int32')
         op = core.CreateOperator(
@@ -154,7 +154,7 @@ class TestGatherOps(serial.SerializedTestCase):
     @settings(deadline=None, max_examples=50)
     def test_gather_op_match_outer_axis2_data4D_ind4D(
         self, batch_num, rows_num, axis2_num, index_num, index_num2, gc, dc
-    ):
+    ) -> None:
         data = np.random.random((batch_num, rows_num, axis2_num, 5)).astype(np.float32)
         ind = np.random.randint(axis2_num, size=(batch_num, rows_num, index_num, index_num2)).astype('int32')
         op = core.CreateOperator(
@@ -194,7 +194,7 @@ class TestBatchGatherOps(hu.HypothesisTestCase):
     @given(inputs=_inputs(),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_batch_gather_ops(self, inputs, gc, dc):
+    def test_batch_gather_ops(self, inputs, gc, dc) -> None:
         data, ind = inputs
         op = core.CreateOperator(
             'BatchGather',
@@ -210,7 +210,7 @@ class TestGatherFused8BitRowwise(hu.HypothesisTestCase):
            index_num=st.integers(0, 5000),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_batch_gather_ops(self, rows_num, cols_num, index_num, gc, dc):
+    def test_batch_gather_ops(self, rows_num, cols_num, index_num, gc, dc) -> None:
         data = np.random.random((rows_num, cols_num)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')
 

@@ -42,7 +42,7 @@ def op_builder(name, index, extra):
 
 class PythonOpTest(hu.HypothesisTestCase):
     @given(x=hu.tensor())
-    def test_feed(self, x):
+    def test_feed(self, x) -> None:
         def f(inputs, _):
             self.assertEqual(x.shape, inputs[0].shape)
             self.assertEqual(type(inputs[0].shape), tuple)
@@ -52,18 +52,18 @@ class PythonOpTest(hu.HypothesisTestCase):
         workspace.FeedBlob("x", x)
         workspace.RunOperatorOnce(op)
 
-    def test_exception(self):
+    def test_exception(self) -> None:
         op = CreatePythonOperator(MainOpFunctionThatThrowsCustomError, [], [])
         with self.assertRaisesRegex(CustomError, "This is an intentional exception."):
             workspace.RunOperatorOnce(op)
 
-    def test_exception_builder(self):
+    def test_exception_builder(self) -> None:
         op = CreatePythonOperator(MainOpFunctionThatThrowsCustomErrorInBuilder, [], [])
         with self.assertRaisesRegex(CustomError, "This is an intentional exception in builder."):
             workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())
-    def test_feed_with_helper_function(self, x):
+    def test_feed_with_helper_function(self, x) -> None:
         def f(inputs, _):
             self.assertEqual(x.shape, inputs[0].shape)
             self.assertEqual(type(inputs[0].shape), tuple)
@@ -74,7 +74,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         workspace.FeedBlob("x", x)
         workspace.RunNetOnce(net)
 
-    def test_builder_tuple(self):
+    def test_builder_tuple(self) -> None:
         net = core.Net("builder_template")
         iter_blob = 'iter'
         net.Python((op_builder, ['name', 5], {'extra': 4.2}))([iter_blob], [])
@@ -92,7 +92,7 @@ class PythonOpTest(hu.HypothesisTestCase):
                 workspace.RunNet(cloned_net)
 
     @given(x=hu.tensor())
-    def test_feed_with_gc(self, x):
+    def test_feed_with_gc(self, x) -> None:
         def f(inputs, _):
             self.assertEqual(x.shape, inputs[0].shape)
             np.testing.assert_almost_equal(x, inputs[0].data)
@@ -104,7 +104,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())
-    def test_reshape(self, x):
+    def test_reshape(self, x) -> None:
         def f(inputs, outputs):
             outputs[0].reshape(inputs[0].shape)
             self.assertEqual(x.shape, inputs[0].shape)
@@ -118,7 +118,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(x, y)
 
     @given(x=hu.tensor())
-    def test_workspace_manipulation(self, x):
+    def test_workspace_manipulation(self, x) -> None:
         """
         Verify that python op can manipulate workspace directly
         """
@@ -133,7 +133,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         ws.run(net)
 
     @given(x=hu.tensor())
-    def test_caught_exception_doesnt_terminate(self, x):
+    def test_caught_exception_doesnt_terminate(self, x) -> None:
         def f(inputs, outputs):
             try:
                 raise Exception("Exception in handler")
@@ -148,7 +148,7 @@ class PythonOpTest(hu.HypothesisTestCase):
            n=st.integers(min_value=1, max_value=20),
            w=st.integers(min_value=1, max_value=20))
     @settings(deadline=1000)
-    def test_multithreaded_evaluation(self, x, n, w):
+    def test_multithreaded_evaluation(self, x, n, w) -> None:
         def f(inputs, outputs):
             outputs[0].reshape(inputs[0].shape)
             outputs[0].data[...] = inputs[0].data
@@ -168,7 +168,7 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     @given(x=hu.tensor(), in_place=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_gradient(self, x, in_place, gc, dc):
+    def test_gradient(self, x, in_place, gc, dc) -> None:
         def f(inputs, outputs):
             outputs[0].reshape(inputs[0].shape)
             outputs[0].data[...] = inputs[0].data * 2
@@ -188,7 +188,7 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     @given(inputs=hu.tensors(n=2), **hu.gcs)
     @settings(deadline=10000)
-    def test_gradient_multiple(self, inputs, gc, dc):
+    def test_gradient_multiple(self, inputs, gc, dc) -> None:
         (x1, x2) = inputs
 
         def f(inputs, outputs):
@@ -215,7 +215,7 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     @given(inputs=hu.tensors(n=3), **hu.gcs)
     @settings(deadline=10000)
-    def test_gradient_multiple_with_indices(self, inputs, gc, dc):
+    def test_gradient_multiple_with_indices(self, inputs, gc, dc) -> None:
         (x1, x2, x3) = inputs
 
         def f(inputs, outputs):

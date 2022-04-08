@@ -21,7 +21,7 @@ class MKLFillTest(hu.HypothesisTestCase):
            ),
            seed=st.integers(5, 10),
            **mu.gcs_cpu_mkl)
-    def test_mkl_fill(self, n, c, h, w, filler, seed, gc, dc):
+    def test_mkl_fill(self, n, c, h, w, filler, seed, gc, dc) -> None:
         op = core.CreateOperator(
             filler,
             [],

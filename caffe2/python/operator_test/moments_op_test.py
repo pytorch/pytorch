@@ -13,7 +13,7 @@ import numpy as np
 
 
 class TestMomentsOp(serial.SerializedTestCase):
-    def run_moments_test(self, X, axes, keepdims, gc, dc):
+    def run_moments_test(self, X, axes, keepdims, gc, dc) -> None:
         if axes is None:
             op = core.CreateOperator(
                 "Moments",
@@ -43,7 +43,7 @@ class TestMomentsOp(serial.SerializedTestCase):
 
     @serial.given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
            num_axes=st.integers(1, 4), **hu.gcs)
-    def test_moments(self, X, keepdims, num_axes, gc, dc):
+    def test_moments(self, X, keepdims, num_axes, gc, dc) -> None:
         self.run_moments_test(X, None, keepdims, gc, dc)
         num_dims = len(X.shape)
         if num_dims < num_axes:

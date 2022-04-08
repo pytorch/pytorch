@@ -16,7 +16,7 @@ import unittest
 
 class ParameterSharingTest(unittest.TestCase):
 
-    def test_parameter_sharing_default_scopes(self):
+    def test_parameter_sharing_default_scopes(self) -> None:
         # Test no sharing default scopes
         param_1 = parameter_sharing_context.get_parameter_name('w')
         self.assertEquals(param_1, 'w')
@@ -27,7 +27,7 @@ class ParameterSharingTest(unittest.TestCase):
                 param_3 = parameter_sharing_context.get_parameter_name('w')
                 self.assertEquals(param_3, 'scope/scope_2/w')
 
-    def test_parameter_sharing_nested_scopes(self):
+    def test_parameter_sharing_nested_scopes(self) -> None:
         # Test parameter sharing
         with scope.NameScope('global_scope'):
             with ParameterSharing({'model_b': 'model_a'}):
@@ -54,7 +54,7 @@ class ParameterSharingTest(unittest.TestCase):
                                 get_parameter_name('w')
                             self.assertEquals(param_5, 'global_scope/model_c/w')
 
-    def test_parameter_sharing_subscopes(self):
+    def test_parameter_sharing_subscopes(self) -> None:
         # Sharing only one of the subscopes
         with ParameterSharing({'global_scope/b': 'global_scope/a'}):
             with scope.NameScope('global_scope'):
@@ -70,7 +70,7 @@ class ParameterSharingTest(unittest.TestCase):
                     param_9 = parameter_sharing_context.get_parameter_name('w')
                     self.assertEquals(param_9, 'global_scope/c/w')
 
-    def test_create_param(self):
+    def test_create_param(self) -> None:
         model = model_helper.ModelHelper(name="test")
         # Test no sharing default scopes
         p1 = model.create_param(
@@ -89,7 +89,7 @@ class ParameterSharingTest(unittest.TestCase):
         self.assertNotEqual(model.get_param_info(p1), model.get_param_info(p2))
         model.Validate()
 
-    def test_deep_hierarchy(self):
+    def test_deep_hierarchy(self) -> None:
         model = model_helper.ModelHelper(name="test")
         with ParameterSharing({'a': 'b'}):
             with scope.NameScope('a'):
@@ -105,7 +105,7 @@ class ParameterSharingTest(unittest.TestCase):
         self.assertNotEqual(model.get_param_info(p), None)
 
 
-    def test_parameter_sharing_brew(self):
+    def test_parameter_sharing_brew(self) -> None:
         # Test no sharing default scopes
         model = model_helper.ModelHelper(name="test")
         data = model.net.AddExternalInput("data")

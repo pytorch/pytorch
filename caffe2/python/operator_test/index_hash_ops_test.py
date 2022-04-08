@@ -21,7 +21,7 @@ class TestIndexHashOps(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     @settings(deadline=10000)
-    def test_index_hash_ops(self, indices, seed, modulo, gc, dc):
+    def test_index_hash_ops(self, indices, seed: int, modulo, gc, dc) -> None:
         def index_hash(indices):
             dtype = np.array(indices).dtype
             assert dtype == np.int32 or dtype == np.int64
@@ -50,7 +50,7 @@ class TestIndexHashOps(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [indices], [0])
         self.assertReferenceChecks(gc, op, [indices], index_hash)
 
-    def test_shape_and_type_inference(self):
+    def test_shape_and_type_inference(self) -> None:
         with hu.temp_workspace("shape_type_inf_int64"):
             net = core.Net('test_net')
             net.ConstantFill(

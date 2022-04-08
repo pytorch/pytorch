@@ -14,7 +14,7 @@ class TestBucketizeOp(hu.HypothesisTestCase):
             min_dim=1, max_dim=2, dtype=np.float32,
             elements=hu.floats(min_value=-5, max_value=5)),
         **hu.gcs)
-    def test_bucketize_op(self, x, gc, dc):
+    def test_bucketize_op(self, x, gc, dc) -> None:
         length = np.random.randint(low=1, high=5)
         boundaries = np.random.randn(length) * 5
         boundaries.sort()

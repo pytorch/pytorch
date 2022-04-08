@@ -20,7 +20,7 @@ class TestSparseGradient(hu.HypothesisTestCase):
            sparsity=st.floats(min_value=0.1, max_value=1.0),
            **hu.gcs_cpu_only)
     @settings(deadline=10000)
-    def test_sparse_gradient(self, M, N, K, sparsity, gc, dc):
+    def test_sparse_gradient(self, M, N, K, sparsity, gc, dc) -> None:
         X = np.random.randn(M, K).astype(np.float32)
         X[X > sparsity] = 0
         X_coo = coo_matrix(X)

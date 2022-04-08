@@ -18,7 +18,7 @@ class TestMarginRankingCriterion(serial.SerializedTestCase):
            margin=st.floats(min_value=-0.5, max_value=0.5),
            **hu.gcs)
     @settings(deadline=10000)
-    def test_margin_ranking_criterion(self, N, seed, margin, gc, dc):
+    def test_margin_ranking_criterion(self, N, seed, margin, gc, dc) -> None:
         np.random.seed(seed)
         X1 = np.random.randn(N).astype(np.float32)
         X2 = np.random.randn(N).astype(np.float32)

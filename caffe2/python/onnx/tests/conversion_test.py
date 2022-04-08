@@ -39,7 +39,7 @@ class TestConversion(TestCase):
                    traceback.format_exception(*result.exc_info))))
         return result
 
-    def test_caffe2_to_onnx(self):
+    def test_caffe2_to_onnx(self) -> None:
         caffe2_net = tempfile.NamedTemporaryFile()
         caffe2_init_net = tempfile.NamedTemporaryFile()
         output = tempfile.NamedTemporaryFile()
@@ -71,7 +71,7 @@ class TestConversion(TestCase):
         self.assertEqual(len(onnx_model.graph.initializer), 1)
         self.assertEqual(onnx_model.graph.initializer[0].name, onnx_model.graph.input[0].name)
 
-    def test_caffe2_to_onnx_value_info(self):
+    def test_caffe2_to_onnx_value_info(self) -> None:
         caffe2_net = tempfile.NamedTemporaryFile()
         output = tempfile.NamedTemporaryFile()
 
@@ -88,6 +88,8 @@ class TestConversion(TestCase):
         args.extend([
             '--value-info',
             json.dumps({
+                # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute
+                #  `FLOAT`.
                 'X': (TensorProto.FLOAT, (2, 2)),
             })])
         self._run_command(caffe2_to_onnx, args)
@@ -99,7 +101,7 @@ class TestConversion(TestCase):
         self.assertEqual(len(onnx_model.graph.initializer), 0)
 
     @unittest.skip("Disabled due to onnx optimizer deprecation")
-    def test_onnx_to_caffe2(self):
+    def test_onnx_to_caffe2(self) -> None:
         onnx_model = tempfile.NamedTemporaryFile()
         output = tempfile.NamedTemporaryFile()
         init_net_output = tempfile.NamedTemporaryFile()
@@ -109,6 +111,7 @@ class TestConversion(TestCase):
         graph_def = helper.make_graph(
             [node_def],
             "test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             [helper.make_tensor_value_info("X", TensorProto.FLOAT, (2, 3)),
              helper.make_tensor_value_info("W", TensorProto.FLOAT, (1, 3))],
             [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 3))],
@@ -139,7 +142,7 @@ class TestConversion(TestCase):
                                   for init_op in caffe2_init_net.op], [])),
                          {'W'})
 
-    def test_onnx_to_caffe2_zipfile(self):
+    def test_onnx_to_caffe2_zipfile(self) -> None:
         buf = tempfile.NamedTemporaryFile()
         onnx_model = zipfile.ZipFile(buf, 'w')
 
@@ -150,6 +153,7 @@ class TestConversion(TestCase):
         graph_def = helper.make_graph(
             [node_def],
             "test",
+            # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
             [helper.make_tensor_value_info("X", TensorProto.FLOAT, (2, 3)),
              helper.make_tensor_value_info("W", TensorProto.FLOAT, (3, 2))],
             [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2))],
@@ -187,11 +191,12 @@ class TestConversion(TestCase):
         ]
         return retval_nodes
 
-    def test_onnx_to_caffe2_if(self):
+    def test_onnx_to_caffe2_if(self) -> None:
         true_nodes = [helper.make_node(
             "MatMul", ["X", "W"], ["Y"])]
         false_nodes = [helper.make_node("Slice", ["X"], ["Y"], axes=[0, 1],
                                         starts=[0, 0], ends=[2, 2])]
+        # pyre-fixme[16]: `GeneratedProtocolMessageType` has no attribute `FLOAT`.
         nodes = self._make_fake_if_op(true_nodes, false_nodes, [(TensorProto.FLOAT, (2, 2), "Y")])
         X = np.random.rand(2, 3).astype(np.float32)
         W = np.random.rand(3, 2).flatten().astype(np.float32)
@@ -242,10 +247,13 @@ class TestConversion(TestCase):
         return retval_nodes
 
     @unittest.skip("Disabled due to onnx optimizer deprecation")
-    def test_onnx_to_caffe2_loop(self):
+    def test_onnx_to_caffe2_loop(self) -> None:
         body_nodes = [helper.make_node(
             "MatMul", ["_X", "W"], ["_Y"])]
         nodes = self._make_fake_loop_op(body_nodes,
+                                        # pyre-fixme[16]:
+                                        #  `GeneratedProtocolMessageType` has no
+                                        #  attribute `FLOAT`.
                                         [(TensorProto.FLOAT, (2, 2), "X")],
                                         [(TensorProto.FLOAT, (2, 2), "Y")])
         X = np.random.rand(2, 2).astype(np.float32)
@@ -272,7 +280,7 @@ class TestConversion(TestCase):
     # TODO investigate why this is failing after changing Reshape
     # operator from taking the new shape as attribute to as input
     @unittest.skip('Start failing after Reshape op change')
-    def test_convert_end2end(self):
+    def test_convert_end2end(self) -> None:
         predict_net_f = tempfile.NamedTemporaryFile()
         init_net_f = tempfile.NamedTemporaryFile()
         onnx_model_f = tempfile.NamedTemporaryFile()
@@ -331,6 +339,8 @@ class TestConversion(TestCase):
                     '--output', onnx_model_f.name,
                     '--value-info',
                     json.dumps({
+                        # pyre-fixme[16]: `GeneratedProtocolMessageType` has no
+                        #  attribute `FLOAT`.
                         x: (TensorProto.FLOAT, (1, 3, 2)),
                     }),
                 ],

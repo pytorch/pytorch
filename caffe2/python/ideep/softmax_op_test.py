@@ -18,7 +18,7 @@ class SoftmaxTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            inplace=st.booleans(),
            **mu.gcs)
-    def test_softmax(self, size, input_channels, batch_size, inplace, gc, dc):
+    def test_softmax(self, size, input_channels, batch_size, inplace, gc, dc) -> None:
         op = core.CreateOperator(
             "Softmax",
             ["X"],

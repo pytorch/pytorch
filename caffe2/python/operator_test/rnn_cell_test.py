@@ -64,7 +64,7 @@ def lstm_unit(*args, **kwargs):
     return hidden_t, cell_t
 
 
-def layer_norm_with_scale_and_bias_ref(X, scale, bias, axis=-1, epsilon=1e-4):
+def layer_norm_with_scale_and_bias_ref(X, scale, bias, axis: int=-1, epsilon: float=1e-4):
     left = np.prod(X.shape[:axis])
     reshaped = np.reshape(X, [left, -1])
     mean = np.mean(reshaped, axis=1).reshape([left, 1])
@@ -89,7 +89,7 @@ def layer_norm_lstm_reference(
     gates_t_norm_bias,
     seq_lengths,
     forget_bias,
-    drop_states=False
+    drop_states: bool=False
 ):
     T = input.shape[0]
     N = input.shape[1]
@@ -136,7 +136,7 @@ def layer_norm_lstm_reference(
 
 def lstm_reference(input, hidden_input, cell_input,
                    gates_w, gates_b, seq_lengths, forget_bias,
-                   drop_states=False):
+                   drop_states: bool=False):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -176,7 +176,7 @@ def lstm_reference(input, hidden_input, cell_input,
 
 def multi_lstm_reference(input, hidden_input_list, cell_input_list,
                             i2h_w_list, i2h_b_list, gates_w_list, gates_b_list,
-                            seq_lengths, forget_bias, drop_states=False):
+                            seq_lengths, forget_bias, drop_states: bool=False):
     num_layers = len(hidden_input_list)
     assert len(cell_input_list) == num_layers
     assert len(i2h_w_list) == num_layers
@@ -197,6 +197,10 @@ def multi_lstm_reference(input, hidden_input_list, cell_input_list,
             drop_states=drop_states,
         )
         input = h_all
+    # pyre-fixme[61]: `h_all` is undefined, or not always defined.
+    # pyre-fixme[61]: `h_last` is undefined, or not always defined.
+    # pyre-fixme[61]: `c_all` is undefined, or not always defined.
+    # pyre-fixme[61]: `c_last` is undefined, or not always defined.
     return h_all, h_last, c_all, c_last
 
 
@@ -637,7 +641,7 @@ def milstm_reference(
         b,
         seq_lengths,
         forget_bias,
-        drop_states=False):
+        drop_states: bool=False):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -692,7 +696,7 @@ def layer_norm_milstm_reference(
         gates_t_norm_bias,
         seq_lengths,
         forget_bias,
-        drop_states=False):
+        drop_states: bool=False):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -756,9 +760,9 @@ def lstm_input():
 
 
 def _prepare_attention(t, n, dim_in, encoder_dim,
-                          forward_only=False, T=None,
-                          dim_out=None, residual=False,
-                          final_dropout=False):
+                          forward_only: bool=False, T=None,
+                          dim_out=None, residual: bool=False,
+                          final_dropout: bool=False):
     if dim_out is None:
         dim_out = [dim_in]
     print("Dims: t={} n={} dim_in={} dim_out={}".format(t, n, dim_in, dim_out))
@@ -924,7 +928,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         ),
     )
     @ht_settings(max_examples=10, deadline=None)
-    def test_unroll_mul(self, input_tensor, num_layers, outputs_with_grad):
+    def test_unroll_mul(self, input_tensor, num_layers, outputs_with_grad) -> None:
         outputs = []
         nets = []
         input_blob = None
@@ -959,7 +963,7 @@ class RNNCellTest(hu.HypothesisTestCase):
     @ht_settings(max_examples=10, deadline=None)
     @utils.debug
     def test_unroll_lstm(self, input_tensor, dim_out, outputs_with_grads,
-                         **kwargs):
+                         **kwargs) -> None:
         lstms = [
             _prepare_rnn(
                 *input_tensor.shape,
@@ -994,7 +998,7 @@ class RNNCellTest(hu.HypothesisTestCase):
     def test_unroll_attention(self, input_tensor, encoder_length,
                                     encoder_dim, hidden_units,
                                     num_layers, residual,
-                                    final_dropout):
+                                    final_dropout) -> None:
 
         dim_out = [hidden_units] * num_layers
         encoder_tensor = np.random.random(
@@ -1061,7 +1065,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         drop_states=st.booleans(),
     )
     @ht_settings(max_examples=10, deadline=None)
-    def test_layered_lstm(self, input_tensor, **kwargs):
+    def test_layered_lstm(self, input_tensor, **kwargs) -> None:
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             for memory_optim in [False, True]:
                 _, net, inputs = _prepare_rnn(
@@ -1075,20 +1079,20 @@ class RNNCellTest(hu.HypothesisTestCase):
                 workspace.RunNetOnce(net)
                 workspace.ResetWorkspace()
 
-    def test_lstm(self):
+    def test_lstm(self) -> None:
         self.lstm_base(lstm_type=(rnn_cell.LSTM, lstm_reference))
 
-    def test_milstm(self):
+    def test_milstm(self) -> None:
         self.lstm_base(lstm_type=(rnn_cell.MILSTM, milstm_reference))
 
     @unittest.skip("This is currently numerically unstable")
-    def test_norm_lstm(self):
+    def test_norm_lstm(self) -> None:
         self.lstm_base(
             lstm_type=(rnn_cell.LayerNormLSTM, layer_norm_lstm_reference),
         )
 
     @unittest.skip("This is currently numerically unstable")
-    def test_norm_milstm(self):
+    def test_norm_milstm(self) -> None:
         self.lstm_base(
             lstm_type=(rnn_cell.LayerNormMILSTM, layer_norm_milstm_reference)
         )
@@ -1104,7 +1108,7 @@ class RNNCellTest(hu.HypothesisTestCase):
     )
     @ht_settings(max_examples=10, deadline=None)
     def lstm_base(self, seed, lstm_type, outputs_with_grads, memory_optim,
-                  input_tensor, forget_bias, fwd_only, drop_states):
+                  input_tensor, forget_bias, fwd_only, drop_states) -> None:
         np.random.seed(seed)
         create_lstm, ref = lstm_type
         ref = partial(ref, forget_bias=forget_bias)
@@ -1153,7 +1157,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                     stepsize=0.005,
                 )
 
-    def test_lstm_extract_predictor_net(self):
+    def test_lstm_extract_predictor_net(self) -> None:
         model = ModelHelper(name="lstm_extract_test")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
@@ -1221,7 +1225,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                     elif arg.name == 'backward_step_net':
                         self.assertEqual(caffe2_pb2.NetDef(), arg.n)
 
-    def test_lstm_params(self):
+    def test_lstm_params(self) -> None:
         model = ModelHelper(name="lstm_params_test")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
@@ -1239,7 +1243,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         for param in model.GetParams():
             self.assertNotEqual(model.get_param_info(param), None)
 
-    def test_milstm_params(self):
+    def test_milstm_params(self) -> None:
         model = ModelHelper(name="milstm_params_test")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
@@ -1257,7 +1261,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         for param in model.GetParams():
             self.assertNotEqual(model.get_param_info(param), None)
 
-    def test_layer_norm_lstm_params(self):
+    def test_layer_norm_lstm_params(self) -> None:
         model = ModelHelper(name="layer_norm_lstm_params_test")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
@@ -1291,7 +1295,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         batch_size,
         gc,
         dc,
-    ):
+    ) -> None:
         self.lstm_with_attention(
             partial(
                 rnn_cell.LSTMWithAttention,
@@ -1322,7 +1326,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         batch_size,
         gc,
         dc,
-    ):
+    ) -> None:
         self.lstm_with_attention(
             partial(
                 rnn_cell.LSTMWithAttention,
@@ -1353,7 +1357,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         batch_size,
         gc,
         dc,
-    ):
+    ) -> None:
         self.lstm_with_attention(
             partial(
                 rnn_cell.LSTMWithAttention,
@@ -1384,7 +1388,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         batch_size,
         gc,
         dc,
-    ):
+    ) -> None:
         self.lstm_with_attention(
             partial(
                 rnn_cell.LSTMWithAttention,
@@ -1415,7 +1419,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         batch_size,
         gc,
         dc,
-    ):
+    ) -> None:
         self.lstm_with_attention(
             partial(
                 rnn_cell.LSTMWithAttention,
@@ -1440,7 +1444,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         batch_size,
         ref,
         gc,
-    ):
+    ) -> None:
         model = ModelHelper(name='external')
         with core.DeviceScope(gc):
             (
@@ -1569,7 +1573,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            **hu.gcs)
     @ht_settings(max_examples=10, deadline=None)
     def test_lstm_unit_recurrent_network(
-            self, seed, n, d, t, dtype, dc, use_sequence_lengths, gc):
+            self, seed, n, d: int, t, dtype, dc, use_sequence_lengths, gc) -> None:
         np.random.seed(seed)
         if dtype == np.float16:
             # only supported with CUDA/HIP
@@ -1636,7 +1640,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         max_num_units,
         num_layers,
         batch_size,
-    ):
+    ) -> None:
         model = ModelHelper(name='external')
         (
             input_sequence,

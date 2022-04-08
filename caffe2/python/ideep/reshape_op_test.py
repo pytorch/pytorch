@@ -12,7 +12,7 @@ from caffe2.python import core, workspace
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestReShapeOps(TestCase):
-    def test_reshape_ops(self):
+    def test_reshape_ops(self) -> None:
         device_opt = core.DeviceOption(caffe2_pb2.IDEEP, 0)
         with core.DeviceScope(device_opt):
             workspace.FeedBlob('res', np.array([[0, 0, 0, 0]], dtype=np.float32))
@@ -23,23 +23,23 @@ class TestReShapeOps(TestCase):
             assert ((workspace.FetchBlob('output') ==
                     workspace.FetchBlob('res')).all())
 
-    def test_basic_reshape(self):
+    def test_basic_reshape(self) -> None:
         _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4))
         _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False)
 
-    def test_int64_reshape_input(self):
+    def test_int64_reshape_input(self) -> None:
         _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False, shape_dtype=np.int64)
 
-    def test_missing_dim(self):
+    def test_missing_dim(self) -> None:
         _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8))
         _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), arg_shape=False)
 
-    def test_in_place(self):
+    def test_in_place(self) -> None:
         _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), in_place=True)
         _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8),
                       in_place=True, arg_shape=False)
 
-    def test_zero_dim(self):
+    def test_zero_dim(self) -> None:
         _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
                       expected_shape=(4, 2, 1))
         _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
@@ -49,7 +49,7 @@ class TestReShapeOps(TestCase):
         _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
                       expected_shape=(4, 2, 1), arg_shape=False)
 
-    def test_zero_dim_and_missing_dim(self):
+    def test_zero_dim_and_missing_dim(self) -> None:
         _test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
                       expected_shape=(4, 2, 1))
         _test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
@@ -59,7 +59,7 @@ class TestReShapeOps(TestCase):
         _test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
                       expected_shape=(8, 3), arg_shape=False)
 
-    def test_backprop(self):
+    def test_backprop(self) -> None:
         device_opt = core.DeviceOption(caffe2_pb2.IDEEP, 0)
         with core.DeviceScope(device_opt):
             old_shape = (4, 2, 1)
@@ -91,7 +91,7 @@ class TestReShapeOps(TestCase):
             # Check the gradient
             np.testing.assert_allclose(X_grad, Y.reshape(old_shape), rtol=1e-5)
 
-    def test_input_shape_changes(self):
+    def test_input_shape_changes(self) -> None:
         device_opt = core.DeviceOption(caffe2_pb2.IDEEP, 0)
         with core.DeviceScope(device_opt):
             workspace.FeedBlob(
@@ -109,8 +109,8 @@ class TestReShapeOps(TestCase):
             workspace.RunNet(net)
 
 
-def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
-                  in_place=False, shape_dtype=np.int32):
+def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape: bool=True,
+                  in_place: bool=False, shape_dtype=np.int32) -> None:
     devices = [core.DeviceOption(caffe2_pb2.IDEEP, 0)]
 
     for device_opt in devices:

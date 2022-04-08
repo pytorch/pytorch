@@ -235,7 +235,7 @@ def GetContentFromProtoString(s, function_map):
         raise DecodeError("Cannot find a fit protobuffer class.")
 
 
-def ConvertProtoToBinary(proto_class, filename, out_filename):
+def ConvertProtoToBinary(proto_class, filename, out_filename) -> None:
     """Convert a text file of the given protobuf class to binary."""
     with open(filename) as f:
         proto = TryReadProtoWithClass(proto_class, f.read())
@@ -264,7 +264,7 @@ def GetGPUMemoryUsageStats():
     }
 
 
-def ResetBlobs(blobs):
+def ResetBlobs(blobs) -> None:
     from caffe2.python import workspace, core
     workspace.RunOperatorOnce(
         core.CreateOperator(
@@ -312,7 +312,7 @@ class DebugMode(object):
             raise
 
 
-def raiseIfNotEqual(a, b, msg):
+def raiseIfNotEqual(a, b, msg) -> None:
     if a != b:
         raise Exception("{}. {} != {}".format(msg, a, b))
 
@@ -343,7 +343,7 @@ def BuildUniqueMutexIter(
     net,
     iter=None,
     iter_mutex=None,
-    iter_val=0
+    iter_val: int=0
 ):
     '''
     Often, a mutex guarded iteration counter is needed. This function creates a

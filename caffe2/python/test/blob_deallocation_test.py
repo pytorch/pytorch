@@ -9,7 +9,7 @@ core.GlobalInit(['python'])
 
 
 class BlobDeallocationTest(unittest.TestCase):
-    def test(self):
+    def test(self) -> None:
         net = core.Net('net')
 
         x = net.GivenTensorStringFill([], ['x'], shape=[3], values=['a', 'b', 'c'])

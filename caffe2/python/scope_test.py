@@ -12,7 +12,7 @@ import time
 SUCCESS_COUNT = 0
 
 
-def thread_runner(idx, testobj):
+def thread_runner(idx, testobj) -> None:
     global SUCCESS_COUNT
     testobj.assertEquals(scope.CurrentNameScope(), "")
     testobj.assertEquals(scope.CurrentDeviceScope(), None)
@@ -34,7 +34,7 @@ def thread_runner(idx, testobj):
 
 class TestScope(unittest.TestCase):
 
-    def testNamescopeBasic(self):
+    def testNamescopeBasic(self) -> None:
         self.assertEquals(scope.CurrentNameScope(), "")
 
         with scope.NameScope("test_scope"):
@@ -42,7 +42,7 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentNameScope(), "")
 
-    def testNamescopeAssertion(self):
+    def testNamescopeAssertion(self) -> None:
         self.assertEquals(scope.CurrentNameScope(), "")
 
         try:
@@ -54,7 +54,7 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentNameScope(), "")
 
-    def testEmptyNamescopeBasic(self):
+    def testEmptyNamescopeBasic(self) -> None:
         self.assertEquals(scope.CurrentNameScope(), "")
 
         with scope.NameScope("test_scope"):
@@ -62,7 +62,7 @@ class TestScope(unittest.TestCase):
                 self.assertEquals(scope.CurrentNameScope(), "")
             self.assertEquals(scope.CurrentNameScope(), "test_scope/")
 
-    def testDevicescopeBasic(self):
+    def testDevicescopeBasic(self) -> None:
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
         dsc = core.DeviceOption(workspace.GpuDeviceType, 9)
@@ -71,7 +71,7 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-    def testEmptyDevicescopeBasic(self):
+    def testEmptyDevicescopeBasic(self) -> None:
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
         dsc = core.DeviceOption(workspace.GpuDeviceType, 9)
@@ -82,7 +82,7 @@ class TestScope(unittest.TestCase):
             self.assertEquals(scope.CurrentDeviceScope(), dsc)
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-    def testDevicescopeAssertion(self):
+    def testDevicescopeAssertion(self) -> None:
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
         dsc = core.DeviceOption(workspace.GpuDeviceType, 9)
@@ -96,7 +96,7 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-    def testTags(self):
+    def testTags(self) -> None:
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
         extra_info1 = ["key1:value1"]
@@ -107,6 +107,7 @@ class TestScope(unittest.TestCase):
         extra_info_1_2_3 = ["key1:value1", "key2:value2", "key3:value3"]
 
         with scope.DeviceScope(core.DeviceOption(0, extra_info=extra_info1)):
+            # pyre-fixme[16]: `None` has no attribute `extra_info`.
             self.assertEquals(scope.CurrentDeviceScope().extra_info, extra_info1)
 
             with scope.DeviceScope(core.DeviceOption(0, extra_info=extra_info2)):
@@ -121,7 +122,7 @@ class TestScope(unittest.TestCase):
             self.assertEquals(scope.CurrentDeviceScope().extra_info, extra_info1)
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-    def testMultiThreaded(self):
+    def testMultiThreaded(self) -> None:
         """
         Test that name/device scope are properly local to the thread
         and don't interfere
