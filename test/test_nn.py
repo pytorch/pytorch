@@ -3202,6 +3202,8 @@ class TestNN(NNTestCase):
             B = to_model.weight
             self.assertEqual(id(A), id(B))
 
+            self.assertNotEqual(id(A), id(X))
+
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
         class Identity(nn.Module):
@@ -3274,7 +3276,7 @@ class TestNN(NNTestCase):
         # check that the transfer didn't affect the original value
         self.assertEqual(hold_weight, model.weight)
 
-        # check that changes to one set of parametrizations do not affect the other
+        ## Testing that changes to one set of parametrizations do not affect the other
         parametrize.remove_parametrizations(to_model, "weight")
         self.assertFalse(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
         self.assertTrue(torch.nn.utils.parametrize.is_parametrized(model, "weight"))
@@ -3361,6 +3363,76 @@ class TestNN(NNTestCase):
             to_model.parametrizations.weight.original,
         )
         self.assertTrue("bias" not in to_model.parametrizations)
+
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    # and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
+    def test_transfer_parametrizations_and_params_many_to_one(self):
+        # A parametrization with several outputs
+        class RankOne(nn.Module):
+            def forward(self, x, y):
+                # Form a rank-1 matrix from a pair of vectors
+                return x.unsqueeze(-1) @ y.unsqueeze(-2)
+
+            def right_inverse(self, Y):
+                # We project the given matrix onto the rank 1 matrices
+                U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
+                # S is ordered in a decreasing way.
+                s0_sqrt = S[0].sqrt().unsqueeze(-1)
+                return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
+
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2.0 * x
+
+        model = nn.Linear(3, 3)
+        parametrize.register_parametrization(model, "weight", RankOne())
+        parametrize.register_parametrization(model, "weight", Double())
+        hold_weight = model.weight
+
+        to_model = nn.qat.Linear(
+            3, 3, qconfig=torch.ao.quantization.get_default_qconfig()
+        )
+
+        parametrize.transfer_parametrizations_and_params(model, to_model)
+
+        # checks that final and original value are correct and the to_model is parametrized
+        self.assertTrue(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
+        self.assertEqual(model.weight, to_model.weight)
+        self.assertEqual(
+            model.parametrizations.weight.original0,
+            to_model.parametrizations.weight.original0,
+        )
+        self.assertEqual(
+            model.parametrizations.weight.original1,
+            to_model.parametrizations.weight.original1,
+        )
+
+        # check that the transfer didn't affect the original value
+        self.assertEqual(hold_weight, model.weight)
+
+        ## Testing that changes to one set of parametrizations do not affect the other
+        model.test_param = Parameter(torch.randn(3, 3))
+
+        self.assertTrue(not hasattr(to_model, "test_param"))
+        parametrize.register_parametrization(model, "test_param", RankOne())
+        hold_test_param = model.test_param
+        parametrize.transfer_parametrizations_and_params(model, to_model, "test_param")
+
+        # check that previously missing params got transferred correctly
+        self.assertEqual(model.test_param, to_model.test_param)
+        self.assertEqual(
+            model.parametrizations.test_param.original0,
+            to_model.parametrizations.test_param.original0,
+        )
+        self.assertEqual(
+            model.parametrizations.test_param.original1,
+            to_model.parametrizations.test_param.original1,
+        )
+
+        # check that the new transfer didn't change the value for the from_module
+        self.assertEqual(hold_test_param, model.test_param)
+
 
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
