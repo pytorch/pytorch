@@ -3115,7 +3115,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('nn.functional.embedding_bag'),
         xfail('nonzero'),
-        xfail('nn.functional.glu'),
         xfail('nn.functional.rrelu'),  # random?
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('bernoulli', ''),
@@ -3251,7 +3250,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('stft'),
         xfail('linalg.solve_triangular'),
-        xfail('nn.functional.glu'),
         xfail('isclose'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.bilinear'),
