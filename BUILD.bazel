@@ -96,16 +96,6 @@ generate_aten(
 )
 
 py_library(
-    name = "tools_autograd",
-    srcs = glob(["tools/autograd/*.py"]),
-    data = glob([
-        "tools/autograd/*.yaml",
-        "tools/autograd/templates/*",
-    ]),
-    deps = ["//tools/codegen"],
-)
-
-py_library(
     name = "tools_jit",
     srcs = glob(["tools/jit/*.py"]),
     data = glob(["tools/jit/templates/*"]),
@@ -115,8 +105,8 @@ py_binary(
     name = "generate_code",
     srcs = ["tools/setup_helpers/generate_code.py"],
     deps = [
-        ":tools_autograd",
         ":tools_jit",
+        "//tools/autograd",
     ],
 )
 
@@ -294,6 +284,7 @@ filegroup(
             "aten/src/ATen/native/cuda/linalg/*.cpp",
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
+            "aten/src/ATen/native/nested/cuda/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/THC/*.cpp",
         ],
@@ -306,6 +297,7 @@ filegroup(
         "aten/src/ATen/cuda/*.cu",
         "aten/src/ATen/cuda/detail/*.cu",
         "aten/src/ATen/native/cuda/*.cu",
+        "aten/src/ATen/native/nested/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",
     ]) + aten_ufunc_generated_cuda_sources("aten/src/ATen/{}"),
