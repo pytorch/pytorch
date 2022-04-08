@@ -752,27 +752,25 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     target_float_t = kwargs.pop("target_float_t", "Float")
 
     inputs = list(args)
-    origin_dtype = operands[0].type().scalarType()
+    dtype_0 = inputs[0].type().scalarType()
 
-    require_cast = not sym_help._is_fp(operands[0]) and \
+    require_cast = not sym_help._is_fp(inputs[0]) and \
         (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
 
     if require_cast:
-        for operand in operands:
+        for operand in inputs:
             # we simply assume all input operands are the same type.
             if operand.isCompleteTensor() and operand.type().scalarType() != dtype_0:
                raise RuntimeError(f"Inputs of {op_name} must have same dtype. Got {dtype_0} and {operand.type().scalarType()}")
-                assert operand.type().scalarType() == origin_dtype, \
-                    f"We assume input operands of {op_name} are of the same data type."
-        for i, operand in enumerate(operands):
+        for i, operand in enumerate(inputs):
             if operand.isCompleteTensor() and not sym_help._is_fp(operand):
-                operands[i] = g.op("Cast", operand, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
+                inputs[i] = g.op("Cast", operand, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
 
-    self = g.op(op_name, *operands, **kwargs)
+    self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:
         self = g.op(
-            "Cast", self, to_i=sym_help.cast_pytorch_to_onnx[origin_dtype])
+            "Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype_0])
 
     return self
 
