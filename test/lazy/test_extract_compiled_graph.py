@@ -4,6 +4,7 @@ import unittest
 
 from torch._lazy.ts_backend import init as init_ts_backend
 init_ts_backend()
+from torch._lazy import config
 from torch._lazy.extract_compiled_graph import extract_compiled_graph
 import torch
 from torch import nn
@@ -11,6 +12,7 @@ import dis
 import inspect
 from torch import fx
 import re
+from contextlib import contextmanager
 
 class ModuleConstScale(nn.Module):
     def __init__(self):
@@ -80,19 +82,21 @@ class ModuleReturnDupTensor(nn.Module):
         c = a + b
         return a - b, c, a + 1, c
 
-class ModuleWithLTCFallback(nn.Module):
-    """
-    Cover the case that the Fx graph contains LTC fallbacks. In that case,
-    an exception should be thrown.
-    """
-    def __init__(self):
-        super(ModuleWithLTCFallback, self).__init__()
+@contextmanager
+def force_fallback_ctx_mgr(fallback_op):
+    oldconfig = config.get_force_fallback()
+    config.set_force_fallback(fallback_op)
+    try:
+        yield None
+    finally:
+        config.set_force_fallback(oldconfig)
 
-    def forward(self, a):
-        # torch.nonzero cause ltc fallback
-        # TODO: is there a more stable way to force fallback in case LTC implement
-        # nonzero in future?
-        return torch.nonzero(a)
+@contextmanager
+def nop_ctx_mgr():
+    try:
+        yield None
+    finally:
+        pass
 
 def gen_rand_args(mod):
     args = []
@@ -132,6 +136,9 @@ def verify_reusing_compiled_graph(mod, exception_msg_pattern, ncase=10):
         else:
             # We are done for the test case that expects an exception
             return
+
+    if exception_msg_pattern is not None:
+        raise RuntimeError(f"Expect an exception matching pattern {exception_msg_pattern}")
     print("return value of optimized_mod", optimized_mod(*args))
 
     # check correctness
@@ -148,16 +155,22 @@ def verify_reusing_compiled_graph(mod, exception_msg_pattern, ncase=10):
     if len(failed_index) > 0:
         raise RuntimeError(f"Failed {len(failed_index)}/{ncase} cases")
 
-def maketest(module_cls, exception_msg_pattern=None):
+def maketest(module_cls, exception_msg_pattern=None, ctxmgr=None):
     def wrapper(self):
-        verify_reusing_compiled_graph(module_cls(), exception_msg_pattern)
+        nonlocal ctxmgr
+        if not ctxmgr:
+            ctxmgr = nop_ctx_mgr()
+        with ctxmgr:
+            verify_reusing_compiled_graph(module_cls(), exception_msg_pattern)
 
     return wrapper
 
 class OptimizeTest(unittest.TestCase):
     test_sub = maketest(ModuleSub)
+    # Same as test_sub but force aten::sub to fallback
+    # We expect an exception caught because of LTC fallabck.
+    test_ltc_fallback = maketest(ModuleSub, exception_msg_pattern="fallback.*aten::sub", ctxmgr=force_fallback_ctx_mgr("aten::sub"))
     test_const_scale = maketest(ModuleConstScale)
     test_addcmul = maketest(ModuleAddcmul)
     test_return_multi = maketest(ModuleReturnMulti)
     test_return_dup_tensor = maketest(ModuleReturnDupTensor)
-    test_ltc_fallback = maketest(ModuleWithLTCFallback, "fallback.*aten::nonzero")
