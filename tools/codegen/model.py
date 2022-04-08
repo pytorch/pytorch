@@ -84,6 +84,7 @@ class DispatchKey(Enum):
     HIP = auto()
     XLA = auto()
     Lazy = auto()
+    IPU = auto()
     XPU = auto()
     NestedTensor = auto()
     PrivateUse1 = auto()
@@ -103,6 +104,7 @@ class DispatchKey(Enum):
     AutogradCUDA = auto()
     AutogradXLA = auto()
     AutogradLazy = auto()
+    AutogradIPU = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
     AutogradPrivateUse2 = auto()
@@ -462,6 +464,7 @@ class NativeFunction:
 
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
+        assert python_module is None or Variant.method not in variants, 'functions in modules cannot be methods'
 
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
@@ -1189,6 +1192,7 @@ BaseTy = Enum('BaseTy', (
     'QScheme',
     'Storage',
     'Stream',
+    'SymInt',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
