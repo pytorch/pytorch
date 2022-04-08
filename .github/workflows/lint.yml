@@ -16,8 +16,9 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -123,10 +124,10 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 0 # deep clone, to allow us to use git merge-base
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0 required to use git merge-base)
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Run clang-format
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -163,8 +164,9 @@ jobs:
         with:
           python-version: 2.x
           architecture: x64
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Attempt to run setup.py
         run: |
           if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
@@ -183,8 +185,9 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install requirements
         id: requirements
         run: |
@@ -192,8 +195,9 @@ jobs:
       - name: Install Jinja2
         run: |
           pip3 install Jinja2==3.0.1 --user
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -263,8 +267,9 @@ jobs:
     steps:
       - name: Setup Node
         uses: actions/setup-node@v2
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -300,10 +305,10 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
+      # [see note: pytorch repo ref]
+      # fetch-depth 2 required to allow us to use github.event.pull_request.head.sha
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -363,10 +368,12 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) to allow tools/linter/clang_tidy.py to do its thing
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          fetch-depth: 0 # to allow tools/linter/clang_tidy.py to do its thing
+          no-sudo: true
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -457,8 +464,9 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
         run: |
           set -eux
@@ -480,8 +488,9 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
         run: |
           set -eux
@@ -523,10 +532,10 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 0 # deep clone, to allow us to use git log
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
@@ -553,10 +562,10 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 0 # deep clone, to allow us to use git log
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Install torch
         if: matrix.with_torch == 'with_torch'
         run: |
