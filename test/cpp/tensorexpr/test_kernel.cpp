@@ -771,6 +771,47 @@ TEST_F(Kernel, OptimizeConditionals) {
   getCatWoConditionals() = old_cat_wo_conditionals;
 }
 
+TEST_F(Kernel, Stack) {
+  const auto graph_string =
+      R"IR(graph(%x.1 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu),
+      %y.1 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu)):
+  %1 : int = prim::Constant[value=2]()
+  %5 : Tensor[] = prim::ListConstruct(%x.1, %y.1)
+  %z.2 : Float(5, 3, 2, 3, 6, strides=[108, 36, 18, 6, 1], requires_grad=0, device=cpu) = aten::stack(%5, %1) # local/stack.py:39:12
+  return (%z.2))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+
+  // Check the IR we produced
+  StmtPtr s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_stack)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // Check the correctness
+  auto a = at::rand({5, 3, 3, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({5, 3, 3, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::stack({a, b}, 2);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  ASSERT_EQ(o.sizes(), ref.sizes());
+  ASSERT_EQ(o.dtype(), ref.dtype());
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 namespace {
 
 std::string dtypeConstant(ScalarType scalar_type) {

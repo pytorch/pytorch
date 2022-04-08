@@ -44,9 +44,21 @@ jobs:
       # Use a pytorch/pytorch reference instead of a reference to the local
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-      - uses: ./.github/actions/setup-linux
+      - name: Check for new workflows
+        run: |
+          if [ ! -f "./.github/actions/setup-linux/action.yml" ]; then
+            echo "::error::Your PR is based on a version of master that is too old for our CI to work. Please rebase your PR on latest master and resubmit."
+            exit 1
+          fi
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -57,7 +69,8 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -126,7 +139,8 @@ jobs:
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
-      - uses: ./.github/actions/chown-workspace
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Archive artifacts into zip
@@ -143,5 +157,6 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
-      - uses: ./.github/actions/teardown-linux
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
         if: always()

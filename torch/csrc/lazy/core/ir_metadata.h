@@ -43,7 +43,7 @@ struct TORCH_API ScopePusher {
   static void ResetScopes();
 };
 
-MetaData GetMetaDataIfDebugging();
+TORCH_API MetaData GetMetaDataIfDebugging();
 
 // If python bindings for lazy tensor core are initialized, they should
 // register a function to get python frame info.  Otherwise, frame info

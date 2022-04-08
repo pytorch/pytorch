@@ -1,11 +1,8 @@
 name: Setup Windows
 
-description: Set up Docker workspace on linux
+description: Set up for windows jobs
 
 inputs:
-  github-secret:
-    description: GitHub token
-    required: true
   cuda-version:
     description: which cuda version to install, 'cpu' for none
     required: true
@@ -27,11 +24,6 @@ runs:
         echo "instance-id: $(get_ec2_metadata instance-id)"
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
-
-    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-      uses: seemethere/add-github-ssh-key@v1
-      with:
-        GITHUB_TOKEN: ${{ inputs.github-secret }}
 
     # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
     - name: Enable long paths on Windows
@@ -56,7 +48,7 @@ runs:
         .circleci/scripts/windows_cuda_install.sh
         .circleci/scripts/windows_cudnn_install.sh
 
-    - uses: actions/setup-python@v2
-      name: Setup Python3
+    - name: Setup Python3
+      uses: actions/setup-python@v2
       with:
         python-version: "3.x"

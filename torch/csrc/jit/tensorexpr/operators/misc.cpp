@@ -14,7 +14,7 @@ int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   }
 
   if (idx < 0 || idx >= list_size) {
-    AT_ERROR("Invalid index ", idx, " for list_size", list_size);
+    AT_ERROR("Invalid index ", idx, " for list_size ", list_size);
   }
   return idx;
 }
@@ -636,6 +636,94 @@ Tensor computeCat(
 
           offset = offset + ExprHandle(input.node()->dim(dim));
           newAxes[dim] = axes[dim] - offset;
+        }
+
+        return load;
+      });
+}
+
+static bool checkStackInputShape(const std::vector<BufHandle>& bufList) {
+  TORCH_INTERNAL_ASSERT(
+      bufList.size() != 0,
+      buildErrorMessage("Empty input list is passed to aten::stack"));
+
+  auto buf0 = bufList.at(0);
+  // Check if any of the dims is 0
+  bool hasEmptyDims = false;
+  std::vector<ExprHandle> dims;
+  for (const auto& dim : buf0.dims()) {
+    if (dim.AsNode<LongImm>() && immediateAs<int64_t>(dim) == 0ll) {
+      hasEmptyDims = true;
+    }
+    dims.push_back(IRSimplifier::simplify(dim));
+  }
+
+  // Check if all input bufs have the same size
+  for (int i = 1; i < bufList.size(); i++) {
+    auto buf = bufList.at(i);
+    TORCH_INTERNAL_ASSERT(
+        buf.node()->dims().size() == dims.size(),
+        buildErrorMessage("aten::stack inputs are with different sizes"));
+    auto dims_to_cmp = buf.dims();
+    for (int k = 0; k < dims.size(); k++) {
+      auto diff = IRSimplifier::simplify(
+          alloc<Sub>(dims_to_cmp.at(k).node(), dims.at(k).node()));
+      TORCH_INTERNAL_ASSERT(
+          diff->isConstant() && immediateAs<int>(diff) == 0,
+          buildErrorMessage("aten::stack inputs are with different sizes"));
+    }
+  }
+
+  return hasEmptyDims;
+}
+
+Tensor computeStack(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+  auto inputList = c10::get<BufList>(inputs[0]);
+  auto argDim = inputs[1];
+  auto hasEmptyInputs = checkStackInputShape(inputList);
+  ScalarType highType = inputList[0].dtype().scalar_type();
+  for (const auto& input : inputList) {
+    auto maybe_dtype = input.dtype().scalar_type();
+    highType = promoteTypes(highType, maybe_dtype);
+  }
+
+  return Compute(
+      "aten_stack", outputShape, [&](const std::vector<VarHandle>& axes) {
+        if (hasEmptyInputs) {
+          return ExprHandle(0);
+        }
+
+        int64_t dim_ = c10::get<int64_t>(argDim);
+        auto dim = normalizeAndCheckIndex(dim_, axes.size());
+        auto inputBuf = inputList[0];
+        std::vector<ExprHandle> inputAxes(axes.begin(), axes.begin() + dim);
+        inputAxes.insert(inputAxes.end(), axes.begin() + dim + 1, axes.end());
+        // We construct a tensor expression performing the stacking.
+        // The expression we build here is a cascading compare-select that
+        // essentially represents:
+        //
+        //              inp1[i, j]         if k=0,
+        // out[i,k,j] = inp2[i, j]         if k=1,
+        //              ...
+        //              inpN[i, j]         if k=N-1
+        // where k corresponds to the index of the stacking dimension, and N is
+        // the number of inputs.
+        ExprHandle load =
+            promoteToDtype(tensorOrConstant(inputList[0], inputAxes), highType);
+
+        for (size_t ii = 1; ii < inputList.size(); ++ii) {
+          auto input = inputList[ii];
+          load = CompareSelect::make(
+              axes.at(dim),
+              Cast::make(axes.at(dim).dtype(), int64_t(ii)),
+              promoteToDtype(tensorOrConstant(input, inputAxes), highType),
+              load,
+              kEQ);
         }
 
         return load;

@@ -90,6 +90,11 @@ bool profileNode(const Node* node) {
       getFuserInterface()->fn_profile_n(node);
 }
 
+bool skipNode(const std::string& symbol_str, bool flip) {
+  return getFuserInterface()->fn_skip_n != nullptr &&
+      getFuserInterface()->fn_skip_n(symbol_str, flip);
+}
+
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!
 //! CudaFusionGuard is used to Guard input tensor to `CudaFusionGroup` so that
@@ -133,7 +138,11 @@ bool complyWith(
   // check a. if num_dimension check fails or scalar type check fails
   if (*guard_tensor_type->dim() != static_cast<size_t>(tensor.ndimension()) ||
       (guard_tensor_type->scalarType().has_value() &&
-       (guard_tensor_type->scalarType().value() != tensor.scalar_type()))) {
+       (guard_tensor_type->scalarType().value() != tensor.scalar_type())) ||
+      (guard_tensor_type->device().has_value() &&
+       (guard_tensor_type->device().value() != tensor.device())) ||
+      (guard_tensor_type->requiresGrad().has_value() &&
+       guard_tensor_type->requiresGrad().value() != tensor.requires_grad())) {
     return false;
   }
 

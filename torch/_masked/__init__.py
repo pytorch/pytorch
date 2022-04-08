@@ -166,6 +166,7 @@ Example::
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
+        std=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
@@ -228,7 +229,8 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         amin='minimum',
         mean='mean',
         norm='norm',
-        var='variance')
+        var='variance',
+        std='standard_deviation')
 
     normalization_names = dict(
         softmax='softmax',
@@ -248,7 +250,7 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
     if func.__name__ in {'norm', 'normalize'}:
         example_args = (2.0, example_dim)
         example_input = example_input.to(dtype=torch.float32)
-    elif func.__name__ in {'var'}:
+    elif func.__name__ in {'var', 'std'}:
         example_args = (example_dim, False)
     else:
         example_args = (example_dim,)
@@ -366,7 +368,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             assert torch.is_floating_point(input), input.dtype
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
-    elif op_name == 'var':
+    elif op_name in {'var', 'std'}:
         return None
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
 
@@ -375,6 +377,12 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     """Return dim argument as a tuple of sorted dim values.
     """
     dims: List[int] = []
+    if dim == ():
+        # Currently, `dim=()` in reductions operations means "reduce
+        # over all dimensions" while in future, it will read "no
+        # reduce". See https://github.com/pytorch/pytorch/issues/29137
+        # When gh-29137 is resolved, this if-block must be deleted.
+        dim = None
     if dim is None:
         return tuple(range(ndim))
     ndim = max(ndim, 1)
@@ -388,30 +396,232 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     return tuple(sorted(dims))
 
 
+def _sparse_coo_flatten_indices(indices: Tensor, shape: tuple):
+    # Flatted N-D indices to 1-D indices
+    flat_indices = indices.new_zeros(indices.size(1))
+    for d, sz in enumerate(shape):
+        flat_indices.mul_(sz)
+        flat_indices.add_(indices[d])
+    return flat_indices
+
+
+def _any(input: Tensor, dim: tuple, keepdim: bool):
+    # Support torch.any with tuple dim argument.
+    # Workaround of https://github.com/pytorch/pytorch/issues/56586
+    r = input
+    for d in reversed(dim):
+        r = r.any(dim=d, keepdim=keepdim)
+    return r
+
+
+def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
+    """Sparse variant of torch.where. Supports sparse COO and hybrid sparse COO tensors.
+
+    _sparse_coo_where implements the following invariant:
+
+      _sparse_coo_where(mask, input, fill_value).to_dense(fill_value) ==
+        torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, fill_value))
+
+    where `a == b` means `assertEqual(a, b)`, mask is boolean sparse
+    tensor, and `to_dense(fill_value)` is like `to_dense()` except
+    that the unspecified elements are mapped to `fill_value` rather
+    than to `0`.
+
+    Returns a sparse COO tensor with the following features:
+
+    - all specified elements correspond to masked-in elements that
+      have the values of the input tensor. If there exists a masked-in
+      element (as specified by mask) that is not specified in the
+      input, in the result tensor, the corresponding element has value
+      0. In the dense part of the sparse tensor, the masked-out
+      elements are replaced with fill_value.
+
+    - all unspecified elements correspond to masked-out elements.
+    """
+
+    assert input.layout == torch.sparse_coo
+    assert mask.layout == input.layout
+    assert mask.shape == input.shape
+    assert mask.dense_dim() == input.dense_dim()  # TODO: eliminate this restriction
+
+    input = input.coalesce()
+
+    # For set operations on sparse tensor indices, we'll convert
+    # multi-dimensional indices to 1-D indices for efficiency.
+    input_flat_indices = _sparse_coo_flatten_indices(input.indices(), input.shape[:input.sparse_dim()])
+    mask_flat_indices = _sparse_coo_flatten_indices(mask.indices(), mask.shape[:mask.sparse_dim()])
+
+    # the set of mask flat indices that define masked-in elements:
+    if mask.dense_dim() > 0:
+        mask_values = _any(mask.values(), tuple(range(1, input.sparse_dim() + 1)), False)
+    else:
+        mask_values = mask.values()
+    maskin_flat_indices = mask_flat_indices[mask_values.nonzero()[:, 0]]
+
+    def intersection(i1, i2):
+        union, counts = torch.cat([i1, i2]).unique(return_counts=True)
+        return union, torch.where(counts.gt(1))
+
+    def minus(i1, i2):
+        union, counts = torch.cat([i1, i2]).unique(return_counts=True)
+        return intersection(union[torch.where(counts.eq(1))], i1)
+
+    def _apply(a):
+        obj, w = a
+        return obj[w]
+
+    # the set of input flat indices of specified and masked-in elements:
+    maskin_input_flat_indices = _apply(intersection(maskin_flat_indices, input_flat_indices))
+    _, w = intersection(input_flat_indices, maskin_input_flat_indices)
+
+    # the indices and values of masked-in elements
+    where_input_indices = input.indices()[(slice(None),) + w]
+    where_input_values = input.values()[w]
+
+    if mask.dense_dim() > 0:
+        # apply mask to the dense part of the input values:
+        _, w1 = intersection(mask_flat_indices, maskin_input_flat_indices)
+        where_mask_values = mask.values()[w1]
+        where_input_values = torch.where(where_mask_values, where_input_values,
+                                         where_input_values.new_full([], fill_value.item()))
+
+    # the set of flat indices of unspecified input and masked-in elements:
+    maskin_zero_flat_indices = _apply(minus(maskin_flat_indices, maskin_input_flat_indices))
+
+    # the indices of masked-in zero elements
+    _, w = intersection(mask_flat_indices, maskin_zero_flat_indices)
+    where_zero_indices = mask.indices()[(slice(None),) + w]
+
+    # construct result
+    n = where_zero_indices.size(1)
+    if n == 0:
+        # the input is coalesced, hence input_flat_indices are ordered
+        # and the result is guaranteed to be coalesced:
+        result = torch.sparse_coo_tensor(where_input_indices, where_input_values, input.shape)
+        return result._coalesced_(True)
+
+    where_indices = torch.cat([where_input_indices, where_zero_indices], dim=1)
+    where_values = torch.cat([where_input_values, where_input_values.new_zeros((n,) + where_input_values.shape[1:])])
+    result = torch.sparse_coo_tensor(where_indices, where_values, input.shape)
+
+    # appending zero elements leads to uncoalesced sparse tensor
+    return result.coalesce()
+
+
+def _sparse_csr_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
+    """Sparse variant of torch.where. Supports sparse CSR tensors.
+    """
+    # TODO: implement sparse CSR specific where operator for efficiency
+    return _sparse_coo_where(mask.to_sparse_coo(), input.to_sparse_coo(), fill_value).to_sparse_csr()
+
+
+def _where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
+    """torch.where with sparse inputs support.
+
+    _where implements the following invariant:
+
+      _where(mask, input, fill_value).to_dense(fill_value) ==
+        torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, fill_value))
+
+    where `a == b` means `assertEqual(a, b)`, mask is boolean sparse
+    tensor, and `to_dense(fill_value)` is like `to_dense()` except
+    that the unspecified elements are mapped to `fill_value` rather
+    than to `0`.
+
+    Returns a sparse tensor with the following features:
+
+    - all specified elements correspond to masked-in elements that
+      have the values of the input tensor. If there exists a masked-in
+      element (as specified by mask) that is not specified in the
+      input, in the result tensor, the corresponding element has value
+      0. In the dense part of the sparse tensor, the masked-out
+      elements are replaced with fill_value.
+
+    - all unspecified elements correspond to masked-out elements.
+    """
+    if mask.layout == torch.strided:
+        return torch.where(mask, input, input.new_full([], fill_value.item()))
+    elif mask.layout == torch.sparse_coo:
+        return _sparse_coo_where(mask, input, fill_value)
+    elif mask.layout == torch.sparse_csr:
+        return _sparse_csr_where(mask, input, fill_value)
+    else:
+        raise ValueError(f'_where expects strided or sparse COO or sparse CSR tensor but got {mask.layout}')
+
+
 def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     """Return canonical input mask.
-    Canonical input mask is a boolean tensor with the same shape as
-    input and with (broadcasted) content of mask, if specified.
+
+    A canonical input mask is defined as a boolean mask tensor that
+    shape and layout matches with the shape and the layout of the
+    input.
+
+    The canonical input mask is computed from the :attr:`mask` tensor
+    content to meet the following criteria:
+
+    1. The shape of the canonical input mask is the same as the shape
+       of :attr:`input` tensor. If the mask tensor has a smaller shape
+       than the shape of the :attr:`input`, broadcasting rules will be
+       applied. Downcasting of mask is not supported.
+
+    2. The layout of the canonical input mask is the same as the
+       layout of the :attr:`input` tensor. If the mask has different
+       layout, it will be converted to the expected layout.  In the
+       case of sparse COO layout, the canonical input mask will be
+       coalesced.
+
+    3. The dtype of the canonical input mask is torch.bool. If the
+       mask dtype is not bool then it will be converted to bool dtype
+       using `.to(dtype=bool)` method call.
+
+    4. The elements of the canonical input mask have boolean values
+       copied from the content of the :attr:`mask` tensor (after
+       possible broadcasting and dtype conversion transforms).  In
+       general, the sparsity pattern of the sparse canonical input
+       mask need not to be the same as the sparsity pattern of the
+       sparse :attr:`input` tensor.
+
     """
+    if input.layout not in {torch.strided, torch.sparse_coo}:
+        raise ValueError(f'_input_mask expects strided or sparse COO tensor but got {input.layout}')
+
     mask = kwargs.get('mask')
+
+    # default mask
     if mask is None:
-        inmask = input.new_ones(input.shape, dtype=torch.bool)
-    elif mask.ndim < input.ndim:
-        inmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-    elif mask.ndim > input.ndim:
-        raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
-    elif mask.shape != input.shape:
-        inmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-    else:
-        inmask = mask.to(dtype=torch.bool)
-    return inmask
+        raise ValueError('_input_mask requires explicit mask')
+
+    # mask shape must match with input shape
+    if mask.shape != input.shape:
+        if mask.ndim > input.ndim:
+            raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
+        if mask.layout == torch.strided:
+            mask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
+        else:
+            mask = torch._sparse_broadcast_to(mask, input.shape)
+
+    # mask layout must match with input layout
+    if mask.layout != input.layout:
+        if input.layout == torch.strided:
+            mask = mask.to_dense()
+        else:
+            mask = mask.to_sparse(input.sparse_dim())
+
+    # sparse mask must be coalesced
+    if mask.layout == torch.sparse_coo:
+        mask = mask.coalesce()
+
+    # mask is a boolean tensor
+    mask = mask.to(dtype=torch.bool)
+
+    return mask
 
 
 def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var', 'std'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -421,16 +631,30 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
             outmask = _input_mask(input, *args, **kwargs)
             keepdim = kwargs.get('keepdim', False)
             dim_ = _canonical_dim(dim, input.ndim)
-            # Workaround https://github.com/pytorch/pytorch/issues/56586
-            for d in reversed(dim_):
-                outmask = outmask.any(dim=d, keepdim=bool(keepdim))
-            return outmask
+            return _any(outmask, dim_, bool(keepdim))
         elif is_normalization:
             return _input_mask(input, *args, **kwargs)
         else:
             raise ValueError(f'_output_mask expected masked operation (got callable {op.__module__}.{op.__name__})')
     else:
         raise ValueError(f'_output_mask expected masked operation (got {type(op).__name__} object)')
+
+
+def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
+    """Return input with masked-out elements eliminated for the given operations.
+    """
+    if mask is None:
+        return input
+    canonical_mask = _input_mask(input, mask=mask)
+    if callable(op):
+        fill_value = _reduction_identity(op.__name__, input, *args)
+        if input.layout == torch.strided:
+            return torch.where(canonical_mask, input, fill_value.expand(input.shape))
+        else:
+            assert input.layout == torch.sparse_coo
+            return _sparse_coo_where(canonical_mask, input, fill_value)
+    else:
+        raise ValueError(f'_combine_input_and_mask expected masked operation (got {type(op).__name__} object)')
 
 
 @_apply_docstring_templates
@@ -443,15 +667,40 @@ def sum(input: Tensor,
     # __doc__ is generated by _apply_docstring_templates decorator
     if dtype is None:
         dtype = input.dtype
-    # TODO: What follows is a reference implementation of a masked sum
-    # operation that is to be replaced with an optimized one and
-    # extended to support other layouts.
+    dim_ = _canonical_dim(dim, input.ndim)
+
+    mask_input = _combine_input_and_mask(sum, input, mask)
     if input.layout == torch.strided:
-        mask_input = input if mask is None else torch.where(mask, input, input.new_zeros([]))
-        dim_ = _canonical_dim(dim, input.ndim)
         return torch.sum(mask_input, dim_, bool(keepdim), dtype=dtype)
+
+    elif input.layout == torch.sparse_coo:
+        if mask_input.ndim == 0:
+            # Workaround https://github.com/pytorch/pytorch/issues/65400
+            dim_ = ()
+
+        result = torch.sparse.sum(mask_input, dim=list(dim_), dtype=dtype)
+        if result.dtype != dtype:
+            # https://github.com/pytorch/pytorch/issues/65392
+            # https://github.com/pytorch/pytorch/pull/66153
+            result = result.to(dtype)
+
+        if result.ndim == 0 and result.layout == torch.strided:
+            result = result.to_sparse()
+
+        if keepdim and mask_input.ndim > 0:
+            # torch.sparse.sum does not support keepdim argument, so,
+            # here we restore the squeezed dimensions
+            if mask_input.dense_dim() > 0:
+                raise NotImplementedError('torch._masked.sum on hybrid COO sparse tensor')
+            indices = result._indices().new_zeros((mask_input.ndim, result._nnz()))
+            original_dims = tuple(i for i in range(mask_input.ndim) if i not in dim_)
+            indices[original_dims, ] = result._indices()
+            shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
+            result = torch.sparse_coo_tensor(indices, result._values(), shape, dtype=result.dtype, device=result.device)
+
+        return result
     else:
-        raise ValueError(f'masked sum expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked sum expects strided or sparse_coo tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -462,10 +711,9 @@ def prod(input: Tensor,
          dtype: Optional[DType] = None,
          mask: Optional[Tensor] = None) -> Tensor:
     # __doc__ is generated by _apply_docstring_templates decorator
+    mask_input = _combine_input_and_mask(prod, input, mask)
     if input.layout == torch.strided:
-        mask_input = input if mask is None else torch.where(mask, input, torch.ones_like(input))
         dim_ = _canonical_dim(dim, input.ndim)
-
         # Workaround https://github.com/pytorch/pytorch/issues/56586
         result = mask_input
         for d in reversed(dim_):
@@ -496,12 +744,8 @@ def amax(input: Tensor,
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+    mask_input = _combine_input_and_mask(amax, input, mask)
     if input.layout == torch.strided:
-        if mask is None:
-            mask_input = input
-        else:
-            identity = input.new_full([], _reduction_identity('amax', input))
-            mask_input = torch.where(mask, input, identity)
         dim_ = _canonical_dim(dim, mask_input.ndim)
         return torch.amax(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
     else:
@@ -527,12 +771,8 @@ def amin(input: Tensor,
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+    mask_input = _combine_input_and_mask(amin, input, mask)
     if input.layout == torch.strided:
-        if mask is None:
-            mask_input = input
-        else:
-            identity = input.new_full([], _reduction_identity('amin', input))
-            mask_input = torch.where(mask, input, identity)
         dim_ = _canonical_dim(dim, mask_input.ndim)
         return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
     else:
@@ -564,9 +804,14 @@ elements, have ``nan`` values.
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided:
-        inmask = _input_mask(input, mask=mask)
-        count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=keepdim, mask=inmask)
-        total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
+        if mask is None:
+            # TODO: compute count analytically
+            count = sum(torch.ones(input.shape, dtype=torch.int64, device=input.device), dim, keepdim=keepdim)
+            total = sum(input, dim, keepdim=keepdim, dtype=dtype)
+        else:
+            inmask = _input_mask(input, mask=mask)
+            count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=keepdim, mask=inmask)
+            total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
     else:
         raise ValueError(f'masked sum expects strided tensor (got {input.layout} tensor)')
@@ -594,13 +839,58 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+    mask_input = _combine_input_and_mask(norm, input, mask, ord)
     if input.layout == torch.strided:
-        identity = input.new_full([], _reduction_identity('norm', input, ord))
-        mask_input = input if mask is None else torch.where(mask, input, identity)
         dim_ = _canonical_dim(dim, input.ndim)
         return torch.linalg.vector_norm(mask_input, ord, dim_, bool(keepdim), dtype=dtype)
     else:
         raise ValueError(f'masked norm expects strided tensor (got {input.layout} tensor)')
+
+
+def std_var(input: Tensor,
+            dim: DimOrDims = None,
+            unbiased: Optional[bool] = False,
+            *,
+            keepdim: Optional[bool] = False,
+            dtype: Optional[DType] = None,
+            mask: Optional[Tensor] = None,
+            take_sqrt: Optional[bool] = False) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+        if not (dtype.is_floating_point or dtype.is_complex):
+            dtype = torch.float32
+    compute_dtype = dtype
+    if not (compute_dtype.is_floating_point or compute_dtype.is_complex):
+        compute_dtype = torch.float32
+    if input.layout == torch.strided:
+        if mask is None:
+            # TODO: compute count analytically
+            count = sum(torch.ones(input.shape, dtype=torch.int64, device=input.device), dim, keepdim=True)
+            sample_total = sum(input, dim, keepdim=True, dtype=dtype)
+        else:
+            inmask = _input_mask(input, mask=mask)
+            count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=True, mask=inmask)
+            sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
+        # TODO: replace torch.subtract/divide/square/maximum with
+        # masked subtract/divide/square/maximum when these will be
+        # available.
+        sample_mean = torch.divide(sample_total, count)
+        x = torch.subtract(input, sample_mean)
+        if mask is None:
+            total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
+        else:
+            total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask)
+        if not keepdim:
+            count = count.reshape(total.shape)
+        if unbiased:
+            count = torch.subtract(count, 1)
+            count = torch.maximum(count, count.new_zeros([]))
+        output = torch.divide(total, count).to(dtype=dtype)
+        if take_sqrt:
+            output = torch.sqrt(output)
+        return output
+    else:
+        raise ValueError(f'masked std/var expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -613,41 +903,48 @@ def var(input: Tensor,
         mask: Optional[Tensor] = None) -> Tensor:
     """\
 {reduction_signature}
-
 {reduction_descr}
-
-The identity value of sample variance operation is undefined.  The
+The identity value of sample variance operation is undefined. The
 elements of output tensor with strided layout, that correspond to
 fully masked-out elements, have ``nan`` values.
-
 {reduction_args}
-
 {reduction_example}"""
-    if dtype is None:
-        dtype = input.dtype
-        if not (dtype.is_floating_point or dtype.is_complex):
-            dtype = torch.float32
-    compute_dtype = dtype
-    if not (compute_dtype.is_floating_point or compute_dtype.is_complex):
-        compute_dtype = torch.float32
-    if input.layout == torch.strided:
-        inmask = _input_mask(input, mask=mask)
-        count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=True, mask=inmask)
-        sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
-        # TODO: replace torch.subtract/divide/square/maximum with
-        # masked subtract/divide/square/maximum when these will be
-        # available.
-        sample_mean = torch.divide(sample_total, count)
-        x = torch.subtract(input, sample_mean)
-        total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask)
-        if not keepdim:
-            count = count.reshape(total.shape)
-        if unbiased:
-            count = torch.subtract(count, 1)
-            count = torch.maximum(count, count.new_zeros([]))
-        return torch.divide(total, count).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked var expects strided tensor (got {input.layout} tensor)')
+    return std_var(
+        input=input,
+        dim=dim,
+        unbiased=unbiased,
+        keepdim=keepdim,
+        dtype=dtype,
+        mask=mask,
+        take_sqrt=False,
+    )
+
+
+@_apply_docstring_templates
+def std(input: Tensor,
+        dim: DimOrDims = None,
+        unbiased: Optional[bool] = False,
+        *,
+        keepdim: Optional[bool] = False,
+        dtype: Optional[DType] = None,
+        mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+{reduction_descr}
+The identity value of sample standard deviation operation is undefined. The
+elements of output tensor with strided layout, that correspond to
+fully masked-out elements, have ``nan`` values.
+{reduction_args}
+{reduction_example}"""
+    return std_var(
+        input=input,
+        dim=dim,
+        unbiased=unbiased,
+        keepdim=keepdim,
+        dtype=dtype,
+        mask=mask,
+        take_sqrt=True
+    )
 
 
 @_apply_docstring_templates
@@ -659,10 +956,8 @@ def softmax(input: Tensor,
     if dtype is None:
         dtype = input.dtype
     dim_ = _canonical_dim(dim, input.ndim)[0]
+    mask_input = _combine_input_and_mask(amax, input, mask)
     if input.layout == torch.strided:
-        fill = input.new_full([], _reduction_identity('amax', input))
-        inmask = _input_mask(input, mask=mask)
-        mask_input = torch.where(inmask, input, fill)
         return torch.nn.functional.softmax(mask_input, dim_, dtype=dtype)
     else:
         raise ValueError(f'masked softmax expects strided tensor (got {input.layout} tensor)')
@@ -677,10 +972,8 @@ def log_softmax(input: Tensor,
     if dtype is None:
         dtype = input.dtype
     dim_ = _canonical_dim(dim, input.ndim)[0]
+    mask_input = _combine_input_and_mask(amax, input, mask)
     if input.layout == torch.strided:
-        fill = input.new_full([], _reduction_identity('amax', input))
-        inmask = _input_mask(input, mask=mask)
-        mask_input = torch.where(inmask, input, fill)
         return torch.nn.functional.log_softmax(mask_input, dim_, dtype=dtype)
     else:
         raise ValueError(f'masked log_softmax expects strided tensor (got {input.layout} tensor)')
@@ -695,10 +988,8 @@ def softmin(input: Tensor,
     if dtype is None:
         dtype = input.dtype
     dim_ = _canonical_dim(dim, input.ndim)[0]
+    mask_input = _combine_input_and_mask(amin, input, mask)
     if input.layout == torch.strided:
-        fill = input.new_full([], _reduction_identity('amin', input))
-        inmask = _input_mask(input, mask=mask)
-        mask_input = torch.where(inmask, input, fill)
         return torch.nn.functional.softmin(mask_input, dim_, dtype=dtype)
     else:
         raise ValueError(f'masked softmin expects strided tensor (got {input.layout} tensor)')
@@ -715,13 +1006,12 @@ def normalize(input: Tensor,
     if dtype is None:
         dtype = input.dtype
     dim_ = _canonical_dim(dim, input.ndim)[0]
+    # TODO: eliminate mask_input as unnecessary when using masked divide.
+    mask_input = _combine_input_and_mask(sum, input, mask)
     if input.layout == torch.strided:
         nrm_ = norm(input, ord, dim, keepdim=True, dtype=dtype, mask=mask)
         # TODO: replace torch.maximum with masked maximum when available.
         denom = torch.maximum(nrm_, nrm_.new_full([], eps))
-        # TODO: eliminate mask_input as unnecessary when using masked divide.
-        inmask = _input_mask(input, mask=mask)
-        mask_input = input if mask is None else torch.where(inmask, input, input.new_zeros([]))
         # TODO: replace torch.divide with masked divide when available.
         return torch.divide(mask_input, denom)
     else:
