@@ -1633,14 +1633,14 @@ if(NOT INTERN_BUILD_MOBILE)
     if(CMAKE_VERSION VERSION_LESS "3.1")
       set(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
     else()
-      set(CMAKE_C_STANDARD 11)
+      set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
     endif()
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 14)
+    set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
   endif()
 
   # use cub in a safe manner, see:
