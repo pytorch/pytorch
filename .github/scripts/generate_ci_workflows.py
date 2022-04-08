@@ -6,8 +6,6 @@ from typing import Dict, Set, List, Any
 
 import jinja2
 import json
-import yaml
-from yaml import Loader
 
 import os
 import sys
@@ -1229,7 +1227,7 @@ def main() -> None:
         except Exception as e:
             print(f"Error occurred when deleting file {w}: {e}")
 
-    #ciflow_ruleset = CIFlowRuleset()
+    # ciflow_ruleset = CIFlowRuleset()
     # for template, workflows in template_and_workflows:
     #     # added Iterable check to appease the mypy gods
     #     if not isinstance(workflows, Iterable):
@@ -1237,9 +1235,9 @@ def main() -> None:
     #     for workflow in workflows:
     #         workflow.generate_workflow_file(workflow_template=template)
     #         ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
-    #ciflow_ruleset.generate_json()
+    # ciflow_ruleset.generate_json()
 
-    # check ported workflows for correctness
+    # # check ported workflows for correctness
     # ported_workflows = LINUX_WORKFLOWS + \
     #     XLA_WORKFLOWS + \
     #     WINDOWS_WORKFLOWS + \
@@ -1249,7 +1247,7 @@ def main() -> None:
     #     ANDROID_WORKFLOWS + \
     #     ANDROID_SHORT_WORKFLOWS
 
-    #ciflow_ruleset = CIFlowRuleset()
+    # ciflow_ruleset = CIFlowRuleset()
     # for workflow in ported_workflows:  # type: ignore[assignment]
     #     ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
 

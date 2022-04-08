@@ -135,7 +135,7 @@ VarWithType IRParser::parseVarWithType(bool allow_optional) {
 std::string IRParser::parseVar() {
   L.expect('%');
   std::string name;
-  bool continue_parsing;
+  bool continue_parsing = true;
   do {
     if (L.cur().kind == TK_IDENT) {
       name += L.expect(TK_IDENT).text();
