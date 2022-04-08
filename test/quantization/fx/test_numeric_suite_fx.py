@@ -1607,12 +1607,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # embedding shadowing is not implemented, for now
                 continue
             else:
-                if (
-                    base_op in FUNS_UNMATCHABLE or
-                    base_op in MODS_UNMATCHABLE or
-                    base_op in METHS_UNMATCHABLE
-                ):
-                    continue
                 if qhandler_cls(None, {}).is_general_tensor_value_op():
                     self.assertTrue(
                         (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
@@ -1621,12 +1615,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
                 else:
                     self.assertTrue(
-                        (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
-                        (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
-                        (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
-                        (base_op in FUNS_IO_TYPE_FP32) or
-                        (base_op in MODS_IO_TYPE_FP32) or
-                        (base_op in MODS_IO_TYPE_FP32_OR_INT8),
+                        (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
 
     @skipIfNoFBGEMM

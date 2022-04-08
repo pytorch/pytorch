@@ -311,9 +311,8 @@ void BytecodeDeserializer::parseMethods(
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
-  // version number are seen as version 3 (deprecated).
-  constexpr uint64_t default_version = 0x3L;
-  uint64_t model_version = default_version;
+  // version number don't have to be re-generated.
+  int64_t model_version = 0x3L;
   size_t method_i_start = 0;
   if (vals[0].isInt()) {
     model_version = vals[0].toInt();
@@ -384,7 +383,11 @@ void BytecodeDeserializer::parseMethods(
     }
     init_upgrader(function.get());
     // 1. First pass all operators from models
-    parseOperators(std::move(ops_list), module_load_options_, function.get());
+    parseOperators(
+        std::move(ops_list),
+        model_version,
+        module_load_options_,
+        function.get());
 
     // 2. Decides if upgrader is needed
     bool use_upgrader =
@@ -537,7 +540,6 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  in.seekg(0, in.beg);
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::ZipFileFormat: {

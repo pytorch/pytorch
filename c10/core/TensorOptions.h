@@ -643,9 +643,6 @@ inline DispatchKey computeDispatchKey(
           }
           return DispatchKey::CUDA;
         }
-        case DeviceType::IPU: {
-          return DispatchKey::IPU;
-        }
         case DeviceType::XPU: {
           if (isQIntType(dtype_)) {
             return DispatchKey::QuantizedXPU;
@@ -783,9 +780,6 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::Meta;
 
     // stuff that people are actively developing
-    case DispatchKey::IPU:
-    case DispatchKey::AutogradIPU:
-      return DeviceType::IPU;
     case DispatchKey::XPU:
     case DispatchKey::SparseXPU:
     case DispatchKey::QuantizedXPU:

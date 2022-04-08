@@ -1,17 +1,23 @@
-ir_version: 7
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "onnx::GreaterOrEqual_0"
-    input: "onnx::GreaterOrEqual_1"
-    output: "2"
-    name: "GreaterOrEqual_0"
-    op_type: "GreaterOrEqual"
+    input: "onnx::Less_0"
+    input: "onnx::Less_1"
+    output: "onnx::Not_2"
+    name: "Less_0"
+    op_type: "Less"
+  }
+  node {
+    input: "onnx::Not_2"
+    output: "3"
+    name: "Not_1"
+    op_type: "Not"
   }
   name: "torch_jit"
   input {
-    name: "onnx::GreaterOrEqual_0"
+    name: "onnx::Less_0"
     type {
       tensor_type {
         elem_type: 6
@@ -27,7 +33,7 @@ graph {
     }
   }
   input {
-    name: "onnx::GreaterOrEqual_1"
+    name: "onnx::Less_1"
     type {
       tensor_type {
         elem_type: 6
@@ -43,7 +49,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "3"
     type {
       tensor_type {
         elem_type: 9
@@ -60,5 +66,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 9
 }

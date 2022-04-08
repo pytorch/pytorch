@@ -1,9 +1,9 @@
-ir_version: 7
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::ScatterElements_3"
+    output: "onnx::Scatter_3"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -18,12 +18,12 @@ graph {
     }
   }
   node {
-    input: "onnx::ScatterElements_3"
-    input: "onnx::ScatterElements_1"
-    input: "onnx::ScatterElements_2"
+    input: "onnx::Scatter_3"
+    input: "onnx::Scatter_1"
+    input: "onnx::Scatter_2"
     output: "onnx::Add_4"
-    name: "ScatterElements_1"
-    op_type: "ScatterElements"
+    name: "Scatter_1"
+    op_type: "Scatter"
     attribute {
       name: "axis"
       i: 1
@@ -55,7 +55,7 @@ graph {
     }
   }
   input {
-    name: "onnx::ScatterElements_1"
+    name: "onnx::Scatter_1"
     type {
       tensor_type {
         elem_type: 7
@@ -71,7 +71,7 @@ graph {
     }
   }
   input {
-    name: "onnx::ScatterElements_2"
+    name: "onnx::Scatter_2"
     type {
       tensor_type {
         elem_type: 1
@@ -104,5 +104,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 9
 }

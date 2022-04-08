@@ -1,25 +1,11 @@
-ir_version: 7
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::ReduceSum_1"
-    name: "Constant_0"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "onnx::Cast_0"
-    output: "onnx::ReduceSum_2"
-    name: "Cast_1"
+    output: "onnx::ReduceSum_1"
+    name: "Cast_0"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -28,11 +14,15 @@ graph {
     }
   }
   node {
-    input: "onnx::ReduceSum_2"
     input: "onnx::ReduceSum_1"
-    output: "3"
-    name: "ReduceSum_2"
+    output: "2"
+    name: "ReduceSum_1"
     op_type: "ReduceSum"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
     attribute {
       name: "keepdims"
       i: 0
@@ -63,7 +53,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
         elem_type: 11
@@ -83,5 +73,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 9
 }

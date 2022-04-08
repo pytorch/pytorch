@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -9,59 +9,29 @@ graph {
     op_type: "Shape"
   }
   node {
-    output: "onnx::Slice_2"
-    name: "Constant_1"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    output: "onnx::Slice_3"
-    name: "Constant_2"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    output: "onnx::Slice_4"
-    name: "Constant_3"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "onnx::Slice_1"
-    input: "onnx::Slice_3"
-    input: "onnx::Slice_4"
-    input: "onnx::Slice_2"
-    output: "onnx::Concat_5"
-    name: "Slice_4"
+    output: "onnx::Concat_2"
+    name: "Slice_1"
     op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
   }
   node {
-    output: "onnx::Concat_6"
-    name: "Constant_5"
+    output: "onnx::Concat_3"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -74,10 +44,10 @@ graph {
     }
   }
   node {
-    input: "onnx::Concat_5"
-    input: "onnx::Concat_6"
-    output: "onnx::Reshape_7"
-    name: "Concat_6"
+    input: "onnx::Concat_2"
+    input: "onnx::Concat_3"
+    output: "onnx::Reshape_4"
+    name: "Concat_3"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -87,9 +57,9 @@ graph {
   }
   node {
     input: "onnx::Shape_0"
-    input: "onnx::Reshape_7"
-    output: "8"
-    name: "Reshape_7"
+    input: "onnx::Reshape_4"
+    output: "5"
+    name: "Reshape_4"
     op_type: "Reshape"
   }
   name: "torch_jit"
@@ -116,7 +86,7 @@ graph {
     }
   }
   output {
-    name: "8"
+    name: "5"
     type {
       tensor_type {
         elem_type: 1
@@ -130,5 +100,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 9
 }

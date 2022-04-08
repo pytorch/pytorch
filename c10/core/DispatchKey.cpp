@@ -19,8 +19,6 @@ const char* toString(BackendComponent t) {
       return "LazyBit";
     case BackendComponent::XPUBit:
       return "XPUBit";
-    case BackendComponent::IPUBit:
-      return "IPUBit";
     case BackendComponent::MLCBit:
       return "MLCBit";
     case BackendComponent::HPUBit:
@@ -56,8 +54,6 @@ const char* toString(DispatchKey t) {
       return "FPGA";
     case DispatchKey::XPU:
       return "XPU";
-    case DispatchKey::IPU:
-      return "IPU";
     case DispatchKey::ORT:
       return "ORT";
     case DispatchKey::XLA:
@@ -128,8 +124,6 @@ const char* toString(DispatchKey t) {
       return "Autograd";
     case DispatchKey::AutogradCPU:
       return "AutogradCPU";
-    case DispatchKey::AutogradIPU:
-      return "AutogradIPU";
     case DispatchKey::AutogradXPU:
       return "AutogradXPU";
     case DispatchKey::AutogradCUDA:
@@ -290,7 +284,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"XLA", c10::DispatchKey::XLA},
       {"MLC", c10::DispatchKey::MLC},
       {"XPU", c10::DispatchKey::XPU},
-      {"IPU", c10::DispatchKey::IPU},
       {"HPU", c10::DispatchKey::HPU},
       {"Lazy", c10::DispatchKey::Lazy},
       {"NestedTensor", c10::DispatchKey::NestedTensor},
@@ -312,7 +305,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
       {"AutogradXLA", c10::DispatchKey::AutogradXLA},
       {"AutogradLazy", c10::DispatchKey::AutogradLazy},
-      {"AutogradIPU", c10::DispatchKey::AutogradIPU},
       {"AutogradXPU", c10::DispatchKey::AutogradXPU},
       {"AutogradMLC", c10::DispatchKey::AutogradMLC},
       {"AutogradHPU", c10::DispatchKey::AutogradHPU},
