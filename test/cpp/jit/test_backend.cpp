@@ -276,6 +276,7 @@ TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
   c._save_for_mobile(ss);
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
+  ss.seekg(0, ss.beg);
 
   // check if the methods names are always the same
   // by reloading the script module and saving it back as mobile
