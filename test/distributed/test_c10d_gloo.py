@@ -1136,8 +1136,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [[torch.tensor([i + j]) for j in range(self.world_size)]]
             for i in range(len(inputs))
         ]
+        tmp = {}
         for i in range(len(inputs)):
-            fut = pg.allgather(outputs[i], [fn(inputs[i])]).get_future()
+            tmp[i] = [fn(inputs[i])]
+            fut = pg.allgather(outputs[i], tmp[i]).get_future()
             future_handles.append(fut)
 
         for i, future_handle in enumerate(future_handles):
@@ -1148,6 +1150,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 [result],
                 msg=("Mismatch in iteration %d" % i),
             )
+
+        print(" -- passed --")
 
     @requires_gloo()
     def test_allgather_stress(self):
