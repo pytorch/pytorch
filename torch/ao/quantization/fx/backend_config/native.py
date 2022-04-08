@@ -347,13 +347,12 @@ def _get_conv_configs():
             "fuser_method": reverse3(fuse_conv_bn_relu),
         })
         # conv + bn + relu functional fusion
-        # TODO: enable when fuse method supports F.relu
-        # conv_configs.append({
-        #     "pattern": (F.relu, (convs.bn, convs.root)),
-        #     "dtype_configs": dtype_configs,
-        #     "root_module": convs.root,
-        #     "fuser_method": reverse3(fuse_conv_bn_relu),
-        # })
+        conv_configs.append({
+            "pattern": (F.relu, (convs.bn, convs.root)),
+            "dtype_configs": dtype_configs,
+            "root_module": convs.root,
+            "fuser_method": reverse3(fuse_conv_bn_relu),
+        })
         # TODO: we can add fusion for torch.relu as well
 
         # 3.2 conv + bn (+ relu) quantization
