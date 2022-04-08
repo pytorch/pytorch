@@ -6,6 +6,9 @@ inputs:
   github-token:
     description: GITHUB_TOKEN
     required: true
+  build-environment:
+    description: Job's build environment, which should be part of the job's name.
+    required: true
 
 outputs:
   job-id:
@@ -19,12 +22,14 @@ runs:
       id: get-job-id
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
       with:
         shell: bash
         timeout_minutes: 10
-        max_attempts: 3
+        max_attempts: 5
+        retry_wait_seconds: 30
         command: |
           set -x
           python3 -m pip install requests==2.26.0
-          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}" "${BUILD_ENVIRONMENT}")
           echo "::set-output name=job-id::${GHA_WORKFLOW_JOB_ID}"

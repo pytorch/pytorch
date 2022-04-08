@@ -150,6 +150,7 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          build-environment: ${{ inputs.build-environment }}
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
