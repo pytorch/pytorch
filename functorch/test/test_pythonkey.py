@@ -190,7 +190,6 @@ class TestPythonKey(TestCase):
 
 
 make_fx_failures = {
-    xfail('to_sparse'),
     xfail('allclose'),
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
