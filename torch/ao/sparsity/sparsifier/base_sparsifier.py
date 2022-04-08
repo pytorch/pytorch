@@ -181,7 +181,7 @@ class BaseSparsifier(abc.ABC):
             param = config.get('parametrization', FakeSparsity)
             mask = config.get('mask', torch.ones_like(module.weight))
             self.state[config['fqn']]['mask'] = mask
-            parametrize.register_parametrization(module, 'weight', param(mask), unsafe=True)
+            parametrize.register_parametrization(module, 'weight', param(mask))
 
     def squash_mask(self,
                     params_to_keep: Optional[Tuple[str, ...]] = None,

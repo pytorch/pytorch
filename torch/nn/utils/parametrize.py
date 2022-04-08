@@ -6,7 +6,7 @@ from torch import Tensor
 import collections
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
-
+from copy import deepcopy
 
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
@@ -659,7 +659,7 @@ def type_before_parametrizations(module: Module) -> type:
 def transfer_parametrizations_and_params(from_module: Module, to_module: Module, tensor_name: Optional[str] = None) -> Module:
     r"""Transfers parametrizations and the parameters they parametrize from from_module
     to to_module. If tensor_name is specified, only transfers the specified parameter, otherwise
-    transfers all parametrized parameters.
+    transfers all parametrized parameters. If those parameters do not exist in to_module, it will create them.
 
     Args:
         from_module (nn.Module): module to transfer from
@@ -670,11 +670,22 @@ def transfer_parametrizations_and_params(from_module: Module, to_module: Module,
         Module: to_module
     """
     if is_parametrized(from_module):
-        assert isinstance(from_module.parametrizations, ModuleDict)
-        parameter_list = from_module.parametrizations if tensor_name is None else [tensor_name]
 
-        for parameter_name in parameter_list:
-            setattr(to_module, parameter_name, from_module.parametrizations[parameter_name].original)
+        assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
+        parameters_to_transfer = from_module.parametrizations if tensor_name is None else [tensor_name]
+        assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
+
+        for parameter_name in parameters_to_transfer:
+
+            # need to initialize the param in to_module if it doesn't exist already
+            if not hasattr(to_module, parameter_name):
+                setattr(to_module, parameter_name, deepcopy(from_module.parametrizations[parameter_name].original))
+
+            # apply the parametrization function to to_module
             for param_func in from_module.parametrizations[parameter_name]:
                 register_parametrization(to_module, parameter_name, param_func)
+
+            # make values match
+            to_module.parametrizations[parameter_name].original = from_module.parametrizations[parameter_name].original
+
     return to_module

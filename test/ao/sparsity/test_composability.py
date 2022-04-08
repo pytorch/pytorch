@@ -162,6 +162,9 @@ class TestComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    # This tests whether performing sparse prepare before fusion causes any issues. The
+    # worry was that the link created between the sparsifier and the modules that need to
+    # be sparsified would be broken.
     def test_s_prep_before_fusion(self):
         (
             mod,
@@ -189,6 +192,8 @@ class TestComposability(TestCase):
         self.assertTrue(isinstance(mod[5], torch.nn.intrinsic.quantized.LinearReLU))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
+    # This tests whether performing fusion before sparse prepare causes and issues. The
+    # main worry was that the links to the modules in the sparse config would be broken by fusion.
     def test_fusion_before_s_prep(self):
         (
             mod,
@@ -225,6 +230,10 @@ class TestComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    # This tests whether performing sparse prepare before qat prepare causes issues.
+    # The primary worries were that qat_prep wouldn't recognize the parametrized
+    # modules and that the convert step for qat would remove the paramerizations
+    # from the modules.
     def test_s_prep_before_qat_prep(self):
         (
             mod,
@@ -253,6 +262,7 @@ class TestComposability(TestCase):
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    # This tests whether performing qat prepare before sparse prepare causes issues.
     def test_qat_prep_before_s_prep(self):
         mod, sparsifier, _ = self._get_model_and_sparsifier_and_sparse_config(
             tq.get_default_qat_qconfig("fbgemm")

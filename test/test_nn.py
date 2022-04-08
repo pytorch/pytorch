@@ -3186,11 +3186,11 @@ class TestNN(NNTestCase):
                 Id = torch.eye(X.size(0), device=X.device)
                 return torch.linalg.solve(Id + X, Id - X)
 
-        model = nn.Linear(5,5)
+        model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", Skew())
         parametrize.register_parametrization(model, "weight", Orthogonal())
 
-        to_model = nn.Linear(5,5)
+        to_model = nn.Linear(5, 5)
         parametrize.transfer_parametrizations_and_params(model, to_model)
 
         with parametrize.cached():
@@ -3200,7 +3200,7 @@ class TestNN(NNTestCase):
 
             A = to_model.weight
             B = to_model.weight
-            self.assertEqual(id(X), id(Y))
+            self.assertEqual(id(A), id(B))
 
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
@@ -3219,18 +3219,24 @@ class TestNN(NNTestCase):
 
     def test_type_before_parametrizations(self):
         r"""Test that type_before_parametrizations always retrieves original type"""
+
         class Identity(nn.Module):
             def forward(self, X):
                 return X
 
-        model = nn.Linear(5,5)
+        model = nn.Linear(5, 5)
         original_type = type(model)
-        self.assertTrue(parametrize.type_before_parametrizations(model) == original_type)
+        self.assertTrue(
+            parametrize.type_before_parametrizations(model) == original_type
+        )
         parametrize.register_parametrization(model, "weight", Identity())
-        self.assertTrue(parametrize.type_before_parametrizations(model) == original_type)
+        self.assertTrue(
+            parametrize.type_before_parametrizations(model) == original_type
+        )
 
     def test_transfer_parametrizations_and_params(self):
         r"""Test that all parametrizations and their associated parameters are transfered."""
+
         class AddOne(nn.Module):
             def forward(self, x):
                 return x + 1.0
@@ -3239,23 +3245,90 @@ class TestNN(NNTestCase):
             def forward(self, x):
                 return 2.0 * x
 
+            def right_inverse(self, x):
+                return 0.5 * x
+
         class MinusOne(nn.Module):
             def forward(self, x):
                 return x - 1.0
 
-        model = nn.Linear(5,5)
+        model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", AddOne())
         parametrize.register_parametrization(model, "weight", Double())
         parametrize.register_parametrization(model, "weight", MinusOne())
+        hold_weight = model.weight
 
-        to_model = nn.qat.Linear(5,5, qconfig = torch.ao.quantization.get_default_qconfig())
+        to_model = nn.qat.Linear(
+            5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
+        )
         parametrize.transfer_parametrizations_and_params(model, to_model)
 
+        # checks that final and original value are correct and the to_model is parametrized
+        self.assertTrue(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
         self.assertEqual(model.weight, to_model.weight)
-        self.assertEqual(model.parametrizations.weight.original, to_model.parametrizations.weight.original)
+        self.assertEqual(
+            model.parametrizations.weight.original,
+            to_model.parametrizations.weight.original,
+        )
+
+        # check that the transfer didn't affect the original value
+        self.assertEqual(hold_weight, model.weight)
+
+        # check that changes to one set of parametrizations do not affect the other
+        parametrize.remove_parametrizations(to_model, "weight")
+        self.assertFalse(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
+        self.assertTrue(torch.nn.utils.parametrize.is_parametrized(model, "weight"))
+
+        # test that parameters that don't exist in to_model get transferred
+        model.test_param = Parameter(torch.randn(5, 5))
+
+        self.assertTrue(not hasattr(to_model, "test_param"))
+        parametrize.register_parametrization(model, "test_param", Double())
+        hold_test_param = model.test_param
+        parametrize.transfer_parametrizations_and_params(model, to_model, "test_param")
+
+        # check that previously missing params got transferred correctly
+        self.assertEqual(model.test_param, to_model.test_param)
+        self.assertEqual(
+            model.parametrizations.test_param.original,
+            to_model.parametrizations.test_param.original,
+        )
+
+        # check that the new transfer didn't change the value for the from_module
+        self.assertEqual(hold_test_param, model.test_param)
+
+    def test_transfer_parametrizations_and_params_right_inverse(self):
+        r"""Test that all parametrizations and their associated parameters are transfered."""
+
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2.0 * x
+
+            def right_inverse(self, x):
+                return 0.5 * x
+
+        model = nn.Linear(5, 5)
+        parametrize.register_parametrization(model, "weight", Double())
+        hold_weight = model.weight
+
+        to_model = nn.qat.Linear(
+            5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
+        )
+        parametrize.transfer_parametrizations_and_params(model, to_model)
+
+        # check that transfer occurs successfully
+        self.assertEqual(model.weight, to_model.weight)
+        self.assertEqual(
+            model.parametrizations.weight.original,
+            to_model.parametrizations.weight.original,
+        )
+
+        # check that transfer doesn't affect the from_model weight
+        self.assertEqual(hold_weight, model.weight)
 
     def test_transfer_parametrizations_and_params_single_param(self):
         r"""Test that all parametrizations and their associated parameters are transfered."""
+
         class AddOne(nn.Module):
             def forward(self, x):
                 return x + 1.0
@@ -3268,7 +3341,7 @@ class TestNN(NNTestCase):
             def forward(self, x):
                 return x - 1.0
 
-        model = nn.Linear(5,5, bias=True)
+        model = nn.Linear(5, 5, bias=True)
         parametrize.register_parametrization(model, "weight", AddOne())
         parametrize.register_parametrization(model, "weight", Double())
         parametrize.register_parametrization(model, "weight", MinusOne())
@@ -3276,11 +3349,17 @@ class TestNN(NNTestCase):
         parametrize.register_parametrization(model, "bias", Double())
         parametrize.register_parametrization(model, "bias", MinusOne())
 
-        to_model = nn.qat.Linear(5,5, bias=True, qconfig = torch.ao.quantization.get_default_qconfig())
+        to_model = nn.qat.Linear(
+            5, 5, bias=True, qconfig=torch.ao.quantization.get_default_qconfig()
+        )
         parametrize.transfer_parametrizations_and_params(model, to_model, "weight")
 
+        # check that weight and only weight was transferred
         self.assertEqual(model.weight, to_model.weight)
-        self.assertEqual(model.parametrizations.weight.original, to_model.parametrizations.weight.original)
+        self.assertEqual(
+            model.parametrizations.weight.original,
+            to_model.parametrizations.weight.original,
+        )
         self.assertTrue("bias" not in to_model.parametrizations)
 
     # torch/nn/utils/prune.py
