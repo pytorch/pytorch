@@ -112,7 +112,7 @@ class TestComposability(TestCase):
         self.assertTrue(hasattr(mod[5], "parametrizations"))
 
         # check that correct observers were inserted and that matching
-        # occured succesfully
+        # occured successfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
 
         self._squash_mask_calibrate_and_convert(
@@ -143,7 +143,7 @@ class TestComposability(TestCase):
         self.assertTrue(hasattr(mod[5], "parametrizations"))
 
         # check that correct observers were inserted and that matching
-        # occured succesfully
+        # occured successfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         sparsifier.step()
         sparsity_level = self._calculate_sparsity(mod[5].weight)
@@ -182,7 +182,7 @@ class TestComposability(TestCase):
         self.assertTrue(hasattr(mod[5][0], "parametrizations"))
 
         # check that correct observers were inserted and that matching
-        # occured succesfully
+        # occured successfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
@@ -211,7 +211,7 @@ class TestComposability(TestCase):
         self.assertTrue(hasattr(mod[5][0], "parametrizations"))
 
         # check that correct observers were inserted and that matching
-        # occured succesfully
+        # occured successfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         sparsifier.step()
         sparsity_level = self._calculate_sparsity(mod[5][0].weight)
@@ -248,7 +248,7 @@ class TestComposability(TestCase):
         self.assertTrue(hasattr(mod[5], "parametrizations"))
 
         # check that correct observers were inserted and that matching
-        # occured succesfully
+        # occured successfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self.assertTrue(isinstance(mod[5], torch.nn.qat.Linear))
         self._squash_mask_calibrate_and_convert(
@@ -287,7 +287,7 @@ class TestComposability(TestCase):
         self.assertTrue(hasattr(mod[5], "parametrizations"))
 
         # check that correct observers were inserted and that matching
-        # occured succesfully
+        # occured successfully
         self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self.assertTrue(isinstance(mod[5], torch.nn.qat.Linear))
 

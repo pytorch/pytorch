@@ -3175,7 +3175,7 @@ class TestNN(NNTestCase):
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
     def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
-        r"""Test that transfering parametrizations doesn't cause issues with caching"""
+        r"""Test that transferring parametrizations doesn't cause issues with caching"""
         class Skew(nn.Module):
             def forward(self, X):
                 X = X.tril(-1)
@@ -3238,7 +3238,7 @@ class TestNN(NNTestCase):
         )
 
     def test_transfer_parametrizations_and_params(self):
-        r"""Test that all parametrizations and their associated parameters are transfered."""
+        r"""Test that all parametrizations and their associated parameters are transferred."""
 
         class AddOne(nn.Module):
             def forward(self, x):
@@ -3277,12 +3277,12 @@ class TestNN(NNTestCase):
         # check that the transfer didn't affect the original value
         self.assertEqual(hold_weight, model.weight)
 
-        ## Testing that changes to one set of parametrizations do not affect the other
+        # testing that changes to one set of parametrizations do not affect the other
         parametrize.remove_parametrizations(to_model, "weight")
         self.assertFalse(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
         self.assertTrue(torch.nn.utils.parametrize.is_parametrized(model, "weight"))
 
-        # test that parameters that don't exist in to_model get transferred
+        # also test that parameters that don't exist in to_model get transferred
         model.test_param = Parameter(torch.randn(5, 5))
 
         self.assertTrue(not hasattr(to_model, "test_param"))
@@ -3301,7 +3301,7 @@ class TestNN(NNTestCase):
         self.assertEqual(hold_test_param, model.test_param)
 
     def test_transfer_parametrizations_and_params_right_inverse(self):
-        r"""Test that all parametrizations and their associated parameters are transfered."""
+        r"""Test that all parametrizations and their associated parameters are transferred."""
 
         class Double(nn.Module):
             def forward(self, x):
@@ -3330,7 +3330,7 @@ class TestNN(NNTestCase):
         self.assertEqual(hold_weight, model.weight)
 
     def test_transfer_parametrizations_and_params_single_param(self):
-        r"""Test that all parametrizations and their associated parameters are transfered."""
+        r"""Test that all parametrizations and their associated parameters are transferred."""
 
         class AddOne(nn.Module):
             def forward(self, x):
@@ -3412,7 +3412,7 @@ class TestNN(NNTestCase):
         # check that the transfer didn't affect the original value
         self.assertEqual(hold_weight, model.weight)
 
-        ## Testing that changes to one set of parametrizations do not affect the other
+        # testing that changes to one set of parametrizations do not affect the other
         model.test_param = Parameter(torch.randn(3, 3))
 
         self.assertTrue(not hasattr(to_model, "test_param"))
@@ -3420,7 +3420,7 @@ class TestNN(NNTestCase):
         hold_test_param = model.test_param
         parametrize.transfer_parametrizations_and_params(model, to_model, "test_param")
 
-        # check that previously missing params got transferred correctly
+        # also check that previously missing params got transferred correctly
         self.assertEqual(model.test_param, to_model.test_param)
         self.assertEqual(
             model.parametrizations.test_param.original0,
@@ -3433,7 +3433,6 @@ class TestNN(NNTestCase):
 
         # check that the new transfer didn't change the value for the from_module
         self.assertEqual(hold_test_param, model.test_param)
-
 
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
