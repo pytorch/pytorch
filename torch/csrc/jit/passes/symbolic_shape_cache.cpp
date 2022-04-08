@@ -22,7 +22,7 @@ CanonicalArgVec cannonicalizeVec(
       if (deep_copy) {
         canonical_args.push_back(iv->deepcopy());
       } else {
-        canonical_args.push_back(iv);
+        canonical_args.push_back(*iv);
       }
     } else {
       auto& ss = c10::get<at::SymbolicShape>(arg);
@@ -150,7 +150,7 @@ void CanonicalizedSymbolicShape::init(
     return;
   }
   values_ = std::vector<int64_t>();
-  int64_t cur_symbolic_index = -(int64_t)ss_map.size() - 1;
+  int64_t cur_symbolic_index = -static_cast<int64_t>(ss_map.size()) - 1;
   for (auto& cur_shape : *sizes) {
     if (cur_shape.is_static()) {
       values_->push_back(cur_shape.static_size());
@@ -170,7 +170,7 @@ void CanonicalizedSymbolicShape::init(
 }
 
 c10::SymbolicShape CanonicalizedSymbolicShape::toSymbolicShape(
-    std::unordered_map<int64_t, int64_t> inverse_ss_map) const {
+    std::unordered_map<int64_t, int64_t>& inverse_ss_map) const {
   if (!values_.has_value()) {
     return c10::SymbolicShape();
   }
@@ -189,7 +189,7 @@ c10::SymbolicShape CanonicalizedSymbolicShape::toSymbolicShape(
       sizes.push_back(new_symbol);
     }
   }
-  return c10::SymbolicShape(sizes);
+  return c10::SymbolicShape(std::move(sizes));
 }
 
 size_t CanonicalizedSymbolicShape::hash() const {
@@ -202,13 +202,7 @@ size_t CanonicalizedSymbolicShape::hash() const {
 bool operator==(
     const CanonicalizedSymbolicShape& a,
     const CanonicalizedSymbolicShape& b) {
-  if (a.values_.has_value() != b.values_.has_value()) {
-    return false;
-  }
-  if (!a.values_.has_value()) {
-    return true;
-  }
-  return a.values_.value() == b.values_.value();
+  return a.values_ == b.values_;
 };
 } // namespace jit
 } // namespace torch

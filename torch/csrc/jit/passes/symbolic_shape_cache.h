@@ -7,6 +7,9 @@ namespace torch {
 namespace jit {
 
 struct TORCH_API CanonicalizedSymbolicShape {
+  // TODO: Consider in the future if it is reasonable to
+  // merge code with SymbolicShape or VaryingShape while keeping
+  // the two not implicitly convertable (and cause bugs).
   CanonicalizedSymbolicShape(
       const c10::SymbolicShape& orig_shape,
       std::unordered_map<int64_t, int64_t>& ss_map) {
@@ -21,7 +24,7 @@ struct TORCH_API CanonicalizedSymbolicShape {
   size_t hash() const;
 
   c10::SymbolicShape toSymbolicShape(
-      std::unordered_map<int64_t, int64_t> inverse_ss_map) const;
+      std::unordered_map<int64_t, int64_t>& inverse_ss_map) const;
 
   TORCH_API friend bool operator==(
       const CanonicalizedSymbolicShape& a,
