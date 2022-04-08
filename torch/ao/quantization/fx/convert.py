@@ -16,7 +16,6 @@ from ..utils import (
     get_qparam_dict,
     _parent_name,
     get_swapped_custom_module_class,
-    get_quant_type,
 )
 from ..qconfig import (
     QConfigAny,
@@ -388,7 +387,6 @@ def convert_weighted_module(
 
     # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
     is_weight_quantized = weight_is_quantized(qconfig)
-    quant_type = get_quant_type(qconfig)
 
     # the condition for swapping the module to reference quantized module is:
     # weights need to be quantized
