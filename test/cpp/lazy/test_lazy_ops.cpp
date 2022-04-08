@@ -8681,6 +8681,27 @@ TEST_F(LazyOpsTest, TestDiagonal) {
   }
 }
 
+TEST_F(LazyOpsTest, TestDiagonalUpdate) {
+  int size = 5;
+  // Test all diagonals and out of bounds (must be no-op).
+  for (int diagonal = -size; diagonal <= size; ++diagonal) {
+    auto input = torch::rand({size, size},
+        torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+    auto input_clone = input.clone();
+    auto output = torch::diagonal(input, diagonal);
+    output.add_(1);
+
+    ForEachDevice([&](const torch::Device& device) {
+      torch::Tensor lazy_input = CopyToDevice(input_clone, device);
+      torch::Tensor lazy_output = torch::diagonal(lazy_input, diagonal);
+      lazy_output.add_(1);
+
+      AllClose(output, lazy_output);
+      AllClose(input, lazy_input);
+    });
+  }
+}
+
 TEST_F(LazyOpsTest, TestDiagonalNonSquare) {
   int size = 5;
   torch::Tensor input =
