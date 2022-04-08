@@ -783,7 +783,8 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
       HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
           data_cache, [&fusion]() {
             return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getReductionTvs(fusion));
+                scheduler_utils::getReductionTvs(
+                    fusion /*, ignore_trivial = true */));
           });
 
   auto& reduction_tvs = reduction_tv_entry.get();
@@ -886,7 +887,8 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   // fusion segmentation
   scheduler_utils::clearMemorySpace(fusion);
 
-  auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
+  auto reduction_tvs =
+      scheduler_utils::getReductionTvs(fusion /*, ignore_trivial = true */);
 
   TORCH_INTERNAL_ASSERT(reduction_tvs.size());
 
