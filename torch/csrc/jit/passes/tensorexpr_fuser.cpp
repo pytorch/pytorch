@@ -247,8 +247,26 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
+bool hasTensorTypeSpecialization(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return false;
+  }
+  // Constants & TensorExprGroup will always produce specialized tensor type,
+  // TypeCheck are inserted by this pass and only used by fusion groups that
+  // insert proper guards
+  if (v->node()->kind() == prim::Constant ||
+      v->node()->kind() == prim::TypeCheck ||
+      v->node()->kind() == prim::TensorExprGroup) {
+    return false;
+  }
+  if (v->type() == TensorType::get()) {
+    return false;
+  }
+  return true;
+}
+
 void removeTensorTypeSpecialization(Value* v) {
-  if (tensorexpr::hasTensorTypeSpecialization(v)) {
+  if (hasTensorTypeSpecialization(v)) {
     v->setType(TensorType::get());
   }
 }
@@ -733,6 +751,10 @@ class TensorExprFuser {
     }
     // Cleanup the subgraph from duplicated constants while we're at it.
     ConstantPooling(subgraph);
+
+    if (GRAPH_DEBUG_ENABLED) {
+      GRAPH_EXPORT("", subgraph);
+    }
     return false;
   }
 
