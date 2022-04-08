@@ -2654,7 +2654,7 @@ class FullyShardedDataParallel(nn.Module):
         obj_list = [no_tensor_osd, fsdp_flat_param_ids] if rank == 0 \
             else [None, None]
         dist.broadcast_object_list(obj_list, src=0, group=group)
-        no_tensor_osd, fsdp_flat_param_ids = obj_list
+        no_tensor_osd, fsdp_flat_param_ids = obj_list  # type: ignore[assignment]
         # Broadcast positive-dimension tensor state (both sharded tensors for
         # FSDP parameters and unsharded tensors for non-FSDP parameters)
         sharded_osd = _broadcast_pos_dim_tensor_states(

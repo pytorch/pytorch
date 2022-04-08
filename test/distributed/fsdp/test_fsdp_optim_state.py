@@ -289,9 +289,6 @@ class TestFSDPOptimState(FSDPTest):
             # Check parameter keys are the same
             ref_osd_param_ids = set(ref_osd_state.keys())
             full_osd_param_ids = set(full_osd_state.keys())
-            if ref_osd_param_ids != full_osd_param_ids and self.rank == 0:
-                print("ref_osd:", ref_osd_param_ids)
-                print("full_osd:", full_osd_param_ids)
             self.assertTrue(ref_osd_param_ids == full_osd_param_ids)
             for param_id, param_state in full_osd_state.items():
                 for state_name, value in param_state.items():

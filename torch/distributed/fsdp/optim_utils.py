@@ -699,8 +699,11 @@ def _broadcast_pos_dim_tensor_states(
             is_pos_dim_tensor_state = isinstance(value, _PosDimTensorInfo)
             if not is_pos_dim_tensor_state:
                 continue
-            unsharded_tensor = flat_osd["state"][param_id][state_name] \
-                if rank == 0 else None
+            if rank == 0:
+                assert flat_osd is not None
+                unsharded_tensor = flat_osd["state"][param_id][state_name]
+            else:
+                unsharded_tensor = None
             shape, dtype, on_cpu = value.shape, value.dtype, value.on_cpu
             device = torch.device("cpu") if on_cpu or \
                 not torch.cuda.is_available() else torch.device("cuda")
@@ -743,13 +746,20 @@ def _broadcast_sharded_pos_dim_tensor_state(
     using_nccl = dist.distributed_c10d._check_for_nccl_backend(group)
     assert not using_nccl or torch.cuda.is_available(), \
         "Expects GPU for NCCL backend"
-    get_shard = functools.partial(
-        FSDP.FullyShardedDataParallel._get_shard_functional, unsharded_tensor,
-    ) if rank == 0 else None
+    get_shard: Optional[functools.partial[Tuple[torch.Tensor, int]]] = None
+    if rank == 0:
+        get_shard = functools.partial(
+            FSDP.FullyShardedDataParallel._get_shard_functional,
+            unsharded_tensor,
+        )
     for target_rank in range(1, world_size):
-        sharded_tensor = get_shard(target_rank, world_size)[0] \
-            if rank == 0 else \
-            torch.zeros(shape, requires_grad=False, dtype=dtype, device=device)
+        if rank == 0:
+            assert get_shard is not None
+            sharded_tensor = get_shard(target_rank, world_size)[0]
+        else:
+            sharded_tensor = torch.zeros(
+                shape, requires_grad=False, dtype=dtype, device=device,
+            )
         # NCCL requires broadcast tensors to be on CUDA
         if using_nccl:
             sharded_tensor = sharded_tensor.cuda()
