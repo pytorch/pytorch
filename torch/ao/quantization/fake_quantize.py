@@ -334,7 +334,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         )
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=127,
-                                            dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
+                                            dtype=torch.quint8, qscheme=torch.per_tensor_affine)
 """
 Default fake_quant for activations.
 """
@@ -388,8 +388,7 @@ default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver
                                                       quant_min=0,
                                                       quant_max=127,
                                                       dtype=torch.quint8,
-                                                      qscheme=torch.per_tensor_affine,
-                                                      reduce_range=True)
+                                                      qscheme=torch.per_tensor_affine)
 """
 Fake_quant for activations using a histogram..
 """
