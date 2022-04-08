@@ -75,7 +75,7 @@ runs:
       uses: actions/upload-artifact@v2
       if: inputs.use-gha
       with:
-        name: test-jsons-${{ inputs.file-suffix }}.zip
+        name: test-jsons-${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: warn
         path: test/**/*.json
@@ -84,7 +84,7 @@ runs:
       uses: actions/upload-artifact@v2
       if: inputs.use-gha
       with:
-        name: test-reports-${{ inputs.file-suffix }}.zip
+        name: test-reports-${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: error
         path: test/**/*.xml

@@ -1,11 +1,11 @@
 import argparse
 import os
 import requests
+import shutil
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any
-import datetime
 
 import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
@@ -20,7 +20,9 @@ S3_RESOURCE = boto3.resource("s3")
 TEMP_DIR = Path(os.environ["RUNNER_TEMP"]) / "tmp-test-stats"
 
 
-def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
+def parse_xml_report(
+    report: Path, workflow_id: int, workflow_run_attempt: int
+) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     # Retrieve the job id from the report path. In our GHA workflows, we append
     # the job id to the end of the report name, so `report` looks like:
@@ -35,6 +37,7 @@ def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
     for test_case in root.findall("testcase"):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
+        case["workflow_run_attempt"] = workflow_run_attempt
         case["job_id"] = job_id
         test_cases.append(case)
 
@@ -122,10 +125,12 @@ def download_and_extract_artifact(artifact_name: Path, artifact_url: str) -> Non
     unzip(artifact_name)
 
 
-def download_and_extract_s3_reports(workflow_run_id: int) -> None:
+def download_and_extract_s3_reports(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> None:
     bucket = S3_RESOURCE.Bucket("gha-artifacts")
     objs = bucket.objects.filter(
-        Prefix=f"pytorch/pytorch/{workflow_run_id}/artifact/test-reports"
+        Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/test-reports"
     )
 
     for obj in objs:
@@ -143,7 +148,15 @@ if __name__ == "__main__":
         required=True,
         help="id of the workflow to get artifacts from",
     )
+    parser.add_argument(
+        "--workflow-run-attempt",
+        required=True,
+        help="which retry of the workflow this is",
+    )
     args = parser.parse_args()
+    if TEMP_DIR.exists():
+        print("rm: ", TEMP_DIR)
+        shutil.rmtree(TEMP_DIR)
 
     print("mkdir: ", TEMP_DIR)
     TEMP_DIR.mkdir()
@@ -151,7 +164,7 @@ if __name__ == "__main__":
     os.chdir(TEMP_DIR)
 
     # Download and extract all the reports (both GHA and S3)
-    download_and_extract_s3_reports(args.workflow_run_id)
+    download_and_extract_s3_reports(args.workflow_run_id, args.workflow_run_attempt)
     artifact_urls = get_artifact_urls(args.workflow_run_id)
     for name, url in artifact_urls.items():
         download_and_extract_artifact(Path(name), url)
@@ -159,7 +172,11 @@ if __name__ == "__main__":
     # Parse the reports and transform them to JSON
     test_cases = []
     for xml_report in Path(".").glob("**/*.xml"):
-        test_cases.extend(parse_xml_report(xml_report, int(args.workflow_run_id)))
+        test_cases.extend(
+            parse_xml_report(
+                xml_report, int(args.workflow_run_id), int(args.workflow_run_attempt)
+            )
+        )
 
     # Write the JSON to rockset
     print(f"Writing {len(test_cases)} test cases to Rockset")

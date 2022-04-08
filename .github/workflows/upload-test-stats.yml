@@ -31,4 +31,5 @@ jobs:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-        run: python tools/stats/upload_test_stats.py --workflow-run-id "${WORKFLOW_RUN_ID}"
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: python tools/stats/upload_test_stats.py --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
