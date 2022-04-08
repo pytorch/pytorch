@@ -69,7 +69,16 @@ bool DeduplicateInitializersByDataPtr(at::Tensor& t1, at::Tensor& t2) {
 }
 
 bool DeduplicateInitializersByValue(at::Tensor& t1, at::Tensor& t2) {
-  return t1.dtype() == t2.dtype() && t1.equal(t2);
+  if (t1.dtype() != t2.dtype() || !t1.sizes().equals(t2.sizes()) ||
+      !t1.strides().equals(t2.strides())) {
+    return false;
+  }
+
+  if (t1.device() != t2.device()) {
+    return t1.to("cpu").equal(t2.to("cpu"));
+  }
+
+  return t1.equal(t2);
 }
 
 void DeduplicateInitializers(
