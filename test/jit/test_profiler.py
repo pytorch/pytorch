@@ -127,24 +127,6 @@ class TestProfiler(JitTestCase):
         # other outputs should not be specialized
         FileCheck().check("Tensor = prim::If").run(g)
 
-    def test_specialized_types_in_post_pass(self):
-        torch._C._jit_texpr_add_specialiazation_detection_pass()
-        try:
-            @torch.jit.script
-            def test_fuse(a, b):
-                c = a * b
-                d = c * b
-                return d
-
-            x = torch.tensor([.5])
-            for _ in range(3):
-                test_fuse(x, x)
-
-            self.assertTrue(torch._C._jit_custom_pass_has_specialiazed_tensors())
-
-        finally:
-            torch._C._jit_texpr_remove_specialiazation_detection_pass()
-
     def test_aliasing_merge(self):
         @torch.jit.script
         def foo(a, b):
