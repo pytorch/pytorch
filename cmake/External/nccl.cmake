@@ -16,6 +16,11 @@ if(NOT __NCCL_INCLUDED)
     string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
 
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
+    SET(MAX_JOBS 4)
+    if(NOT ($ENV{MAX_JOBS} STREQUAL ""))
+        set(MAX_JOBS $ENV{MAX_JOBS})
+    endif()
+
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
       BUILD_IN_SOURCE 1
@@ -26,7 +31,8 @@ if(NOT __NCCL_INCLUDED)
         # https://github.com/pytorch/pytorch/issues/13362 is fixed
         "CCACHE_DISABLE=1"
         "SCCACHE_DISABLE=1"
-        $(MAKE)
+        $<IF:$<STREQUAL:"${CMAKE_GENERATOR}","Unix Makefiles">,$(MAKE),make>
+        $<$<NOT:$<STREQUAL:"${CMAKE_GENERATOR}","Unix Makefiles">>:-j${MAX_JOBS}>
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
         "NVCC=${CUDA_NVCC_EXECUTABLE}"
