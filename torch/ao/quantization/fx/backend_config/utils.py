@@ -25,13 +25,15 @@ def get_pattern_to_quantize_handlers(
         num_tensor_args_to_observation_type = config.get("num_tensor_args_to_observation_type", {})
         overwrite_fake_quantizer = config.get("_overwrite_output_fake_quantizer", None)
         overwrite_observer = config.get("_overwrite_output_observer", None)
+        input_output_observed = config.get("_input_output_observed", True)
         pattern_to_quantize_handlers[pattern] = \
             get_quantize_handler_cls(
                 observation_type,
                 dtype_configs,
                 num_tensor_args_to_observation_type,
                 overwrite_fake_quantizer,
-                overwrite_observer)
+                overwrite_observer,
+                input_output_observed)
 
     return pattern_to_quantize_handlers
 
