@@ -305,7 +305,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         at::relu_(const_cast<Tensor&>(*result_));
         break;
       case Activation::GELU:
-        result_ = c10::MaybeOwned<Tensor>::owned(at::gelu(*result_));
+        at::gelu_(const_cast<Tensor&>(*result_));
         break;
       default: break;
     }
@@ -317,7 +317,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // epilogue above.
 #if !0
   if (useLtInterface && activation == Activation::GELU) {
-    result_ = c10::MaybeOwned<Tensor>::owned(at::gelu(*result_));
+    at::gelu_(const_cast<Tensor&>(*result_));
   }
 #endif
 
