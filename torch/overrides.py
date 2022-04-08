@@ -246,6 +246,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj_physical,
         Tensor._neg_view,
         Tensor._is_zerotensor,
+        Tensor._addmm_activation,
     }
 
 
