@@ -2,6 +2,12 @@
 
 import torch
 import unittest
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfCUDA,
+    instantiate_device_type_tests,
+    skipMeta,
+)
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE
 from torch import nested_tensor
 
@@ -192,3 +198,55 @@ class TestNestedTensor(TestCase):
             nested_result = func(nt)
             self.assertTrue(nested_result.is_nested)
             self.assertEqual(func(t), nested_result.unbind()[0])
+
+class TestNestedTensorDeviceType(TestCase):
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half)
+    @skipMeta
+    @torch.inference_mode()
+    def test_layer_norm(self, device, dtype):
+        def _test(size):
+            t0 = torch.randn(2, size, device=device, dtype=dtype, requires_grad=False)
+            t1 = torch.randn(2, size, device=device, dtype=dtype, requires_grad=False)
+            ts = [t0, t1, t0, t1]
+            nt = torch.nested_tensor(ts, device=device, dtype=dtype)
+            layer_norm = torch.nn.LayerNorm(size, device=device, dtype=dtype)
+            nt_result = nt._nested_tensor_layer_norm(
+                layer_norm.weight, layer_norm.bias, 1e-5
+            )
+            for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+                t_result = layer_norm(t.reshape(1, -1, size).squeeze(0))
+                self.assertEqual(nt_subresult, t_result)
+
+        for size in (1024, 1023, 513, 512, 256, 128, 2, 4, 32):
+            _test(size)
+
+    @skipMeta
+    @torch.inference_mode()
+    def test_embedding(self, device):
+        inputs = [
+            torch.randint(100, (L,), device=device, dtype=torch.int64)
+            for L in torch.randint(5, 50, (8,))
+        ]
+        x = torch.nested_tensor(inputs, device=device, dtype=torch.int64)
+        emb = torch.nn.Embedding(100, 8, device=device)
+        y = emb(x)
+        ys = y.unbind()
+        for i, inp in enumerate(inputs):
+            self.assertEqual(emb(inp), ys[i])
+
+    def test_to_padded_tensor_simple(self, device):
+        t = torch.randn(4, 4, 4, device=device)
+        ts = list(torch.unbind(t))
+        ts[0] = ts[0][:-1]
+        nt = torch.nested_tensor(ts, device=device)
+        padded = nt.to_padded_tensor(0)
+
+        correct_output = t.clone()
+        correct_output[0][-1] = torch.zeros_like(correct_output[0][-1])
+
+        self.assertEqual(padded, correct_output)
+        self.assertEqual(padded.device, torch.device(device))
+
+
+instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

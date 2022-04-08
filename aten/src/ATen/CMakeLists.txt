@@ -121,6 +121,8 @@ file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
+file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
+file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
@@ -198,6 +200,7 @@ if(USE_CUDA)
   list(APPEND ATen_CUDA_CU_SRCS
     ${cuda_cu}
     ${native_cuda_cu}
+    ${native_nested_cuda_cu}
     ${native_sparse_cuda_cu}
     ${native_quantized_cuda_cu}
     ${cuda_generated_sources}
@@ -207,6 +210,7 @@ if(USE_CUDA)
     ${native_cuda_cpp}
     ${native_cudnn_cpp}
     ${native_miopen_cpp}
+    ${native_nested_cuda_cpp}
     ${native_quantized_cuda_cpp}
     ${native_quantized_cudnn_cpp}
     ${native_sparse_cuda_cpp}
