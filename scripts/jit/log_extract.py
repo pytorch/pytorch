@@ -6,6 +6,7 @@ import torch
 import traceback
 import time
 import functools
+from torch.utils.benchmark import Timer
 
 '''
 Usage:
@@ -68,17 +69,9 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
     return (func, inputs)
 
 def time_cuda(fn, inputs, test_runs):
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    torch.cuda.synchronize()
-    start_event.record()
-    torch.cuda.synchronize()
-    for i in range(test_runs):
-        fn(*inputs)
-        torch.cuda.synchronize()
-    end_event.record()
-    torch.cuda.synchronize()
-    return start_event.elapsed_time(end_event) / test_runs
+    t = Timer(stmt="fn(*inputs)", globals={"fn": fn, "inputs" : inputs})
+    times = t.blocked_autorange()
+    return times.median * 1000 # time in ms
 
 def time_cpu(fn, inputs, test_runs):
     s = time.perf_counter()
