@@ -18,7 +18,7 @@ def sharded_chunk(types, args=(), kwargs=None, pg=None):
     # Validate types
     if not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be a ShardedTensor")
-    st_size = list(input.size())
+    st_size = list(input.size())  # type: ignore[arg-type]
     local_tensor = input.local_tensor()
     tensor_chunks = torch.chunk(local_tensor, chunks, dim)
     st_size[dim] //= chunks

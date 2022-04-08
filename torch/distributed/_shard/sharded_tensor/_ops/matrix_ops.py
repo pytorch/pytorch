@@ -19,10 +19,10 @@ def sharded_bmm(types, args=(), kwargs=None, pg=None):
     if input.dim() != 3 or mat2.dim() != 3:
         raise TypeError("input or mat2 needs to be a 3D ShardedTensor")
     local_tensor = torch.bmm(input.local_tensor(), mat2.local_tensor())
-    new_st_size = list(input.size())
-    new_sharding_dim = input.sharding_spec().dim
-    mat2_sharding_dim = mat2.sharding_spec().dim
-    new_st_size[-1] = mat2.size()[-1]
+    new_st_size = list(input.size())  # type: ignore[arg-type]
+    new_sharding_dim = input.sharding_spec().dim  # type: ignore[attr-defined]
+    mat2_sharding_dim = mat2.sharding_spec().dim  # type: ignore[attr-defined]
+    new_st_size[-1] = mat2.size()[-1]  # type: ignore[index]
     if new_sharding_dim == -1 or new_sharding_dim == (input.dim() - 1):
         if mat2_sharding_dim != -1 and mat2_sharding_dim != (mat2.dim() - 1):
             new_st_size[-1] *= dist.get_world_size(pg)
@@ -51,7 +51,7 @@ def sharded_softmax(types, args=(), kwargs=None, pg=None):
     return ShardedTensor._init_from_local_tensor(
         local_tensor.contiguous(),
         input.sharding_spec(),
-        input.size(),
+        input.size(),  # type: ignore[arg-type]
         process_group=pg,
     )
 
@@ -71,6 +71,6 @@ def sharded_dropout(types, args=(), kwargs=None, pg=None):
     return ShardedTensor._init_from_local_tensor(
         local_tensor.contiguous(),
         input.sharding_spec(),
-        input.size(),
+        input.size(),  # type: ignore[arg-type]
         process_group=pg,
     )

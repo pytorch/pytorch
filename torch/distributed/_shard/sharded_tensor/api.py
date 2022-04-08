@@ -720,11 +720,11 @@ class ShardedTensor(object):
         local_shards = []
         if mask.size() != self.size():
             raise ValueError('mask size must match with the size of the sharded tensor.')
-        current_rank = dist.get_rank(self._process_group)
+        current_rank = dist.get_rank(self._process_group)  # type: ignore[attr-defined]
         rank_idx = None
         for idx, placement in enumerate(self._sharding_spec.placements):
-            if placement.rank() == current_rank:
-                rank_idx = idx
+            if placement.rank() == current_rank:  # type: ignore[index]
+                rank_idx = idx  # type: ignore[attr-defined]
         shard_metadata = self._metadata.shards_metadata[rank_idx]
         sharding_dim = self._sharding_spec.dim
         local_mask = mask.narrow(
@@ -787,15 +787,15 @@ class ShardedTensor(object):
             A :class:`ShardedTensor` object whose shards have been applied
                 with view to its local tensor.
         """
-        st_size = list(self.size())
-        total_size = math.prod(st_size)
+        st_size = list(self.size())  # type: ignore[arg-type]
+        total_size = math.prod(st_size)  # type: ignore[attr-defined]
         new_st_size = list(shape)
-        new_total_size = math.prod(new_st_size)
+        new_total_size = math.prod(new_st_size)  # type: ignore[attr-defined]
         if (new_total_size < 0):
             pos = new_st_size.index(-1)
             new_st_size[pos] = total_size * -1 // new_total_size
-        st_size = tuple(new_st_size)
-        new_st_size[self.sharding_spec().dim] //= self._process_group.size()
+        st_size = tuple(new_st_size)  # type: ignore[assignment]
+        new_st_size[self.sharding_spec().dim] //= self._process_group.size()  # type: ignore[attr-defined]
         new_local_tensor = self.local_tensor().view(*new_st_size)
         return ShardedTensor._init_from_local_tensor(
             new_local_tensor.contiguous(),
@@ -841,7 +841,7 @@ class ShardedTensor(object):
             _swap_meta_data(shard_metadata.shard_sizes, dim0, dim1)
         st_size = list(st_meta.size)
         _swap_meta_data(st_size, dim0, dim1)
-        st_meta.size = tuple(st_size)
+        st_meta.size = tuple(st_size)  # type: ignore[assignment]
         return ShardedTensor._init_from_local_shards_and_global_metadata(
             local_shards,
             st_meta,
