@@ -20,7 +20,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.6* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
