@@ -3554,8 +3554,12 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_relu_int(self):
         class MyReLUInt(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
             def forward(self, x):
-                return torch.relu(x)
+                return self.relu(x)
         self.run_test(MyReLUInt(), torch.randn(3, 3).to(torch.int32))
 
     def test_pad_int(self):
