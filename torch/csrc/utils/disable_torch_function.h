@@ -15,7 +15,11 @@ namespace torch {
   PyObject* disabled_torch_dispatch_impl();
   void set_disabled_torch_function_impl(PyObject* value);
   void set_disabled_torch_dispatch_impl(PyObject* value);
-  bool check_has_torch_function(PyObject* obj);
+  // Set ignore_mode to true if you're trying to collect overloaded arguments;
+  // using mode here will improperly cause you to add ALL objects to the
+  // overloaded list even if they don't actually have __torch_function__
+  bool check_has_torch_function(PyObject* obj, bool ignore_mode = false);
+
   bool has_torch_function(PyObject* obj);
   bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
