@@ -104,7 +104,6 @@ class PeriodicModelAverager(ModelAverager):
         """
         Args:
             params: average model.parameters() or parameter groups of an optimizer
-            
         Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
