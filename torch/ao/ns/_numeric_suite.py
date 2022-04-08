@@ -114,7 +114,8 @@ def compare_weights(
                 weight_dict[key]["quantized"] = (
                     quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
                 )
-
+    # To match the key name with FX ns
+    weight_dict = { k.replace('.weight', '').replace('._packed_params._packed_params', ''): v for k, v in weight_dict.items()}
     return weight_dict
 
 
