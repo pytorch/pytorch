@@ -175,7 +175,7 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     in a different place rather than not observed.
     """
     node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
-    if isinstance(node.args[0], Node):
+    if len(node.args) > 0 and isinstance(node.args[0], Node):
         if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
             return False
     return True

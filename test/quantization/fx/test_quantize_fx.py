@@ -4254,6 +4254,28 @@ class TestQuantizeFx(QuantizationTestCase):
                             self.assertEqual(mod.quant_min, 0)
                             self.assertEqual(mod.quant_max, 255)
 
+    def test_prepare_mode(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def _test(prepare_fn, qconfig_dict):
+            m = LinearModel()
+            m1 = copy.deepcopy(m)
+            m1.train()
+            prepare_fn(m1, qconfig_dict)
+            m2 = copy.deepcopy(m)
+            m2.eval()
+            prepare_fn(m2, qconfig_dict)
+
+        # Ensure prepare_fx and prepare_qat_fx work in both training and eval modes
+        _test(prepare_fx, get_default_qconfig_dict())
+        _test(prepare_qat_fx, get_default_qat_qconfig_dict())
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
