@@ -672,15 +672,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
 
-  // still legacy b/c this op is weird
-#define TO_BATCHING_RULE(name, ...) \
-  { \
-    using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
-    m.impl(name, unwrap_and_call_method< \
-        to_type, &Tensor::to, __VA_ARGS__>);\
-  }
-  TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
-
   // still legacy because these are ridiculously complicated
   m.impl("as_strided", as_strided_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
