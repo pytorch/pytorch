@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_cache.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
