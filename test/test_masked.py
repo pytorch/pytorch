@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes)
+    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes, precisionOverride)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -161,6 +161,7 @@ def apply_masked_normalization_along_dim(op, input, *args, **kwargs):
 reference_functions = dict(
     norm=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.linalg.vector_norm, *args, **dict(kwargs, dim_position=1)),
     var=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.var, *args, **dict(kwargs, dim_position=0)),
+    std=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.std, *args, **dict(kwargs, dim_position=0)),
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
@@ -242,14 +243,7 @@ class mask_layouts(_TestParametrizer):
                                               kwargs=sample_input_kwargs)
                         if layout != torch.sparse_coo and op.supports_sparse:
                             sample_input_kwargs = sample_input.kwargs.copy()
-                            if mask.layout == torch.sparse_csr:
-                                # TODO: remove this if-block when sparse csr supports to_sparse
-                                mask = torch.sparse_coo_tensor(
-                                    torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
-                                    mask.values(), mask.shape)._coalesced_(True)
-                                sample_input_kwargs.update(mask=mask)
-                            else:
-                                sample_input_kwargs.update(mask=mask.to_sparse())
+                            sample_input_kwargs.update(mask=mask.to_sparse())
                             yield SampleInput(sample_input.input.clone(),
                                               args=sample_input.args,
                                               kwargs=sample_input_kwargs)
@@ -278,14 +272,15 @@ class TestMasked(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_references)
+    @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-4})
     def test_reference_masked(self, device, dtype, op):
         op_name = op.name.rsplit('.', 1)[-1]
         ref_op = reference_functions[op_name]
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            if op_name == 'var' and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
-                # torch.var does not support integer inputs
+            if op_name in {'var', 'std'} and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
+                # torch.var/torch.std does not support integer inputs
                 continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
             expected = ref_op(t_inp, *t_args, **t_kwargs)
@@ -299,6 +294,7 @@ class TestMasked(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_non_strided_support)
+    @precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-3})
     def test_mask_layout(self, layout, device, dtype, op, sample_inputs):
         for sample in sample_inputs:
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
@@ -395,6 +391,7 @@ class TestMasked(TestCase):
                             [F, F, 9, F, F],
                             [Z, 11, F, F, F]])
         tmp = to_sparse(tmp)
+
 
         sparse = torch._masked._where(mask, input,
                                       torch.tensor(fill_value, dtype=input.dtype, device=input.device))
