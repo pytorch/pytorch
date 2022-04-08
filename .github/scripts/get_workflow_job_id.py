@@ -27,10 +27,6 @@ parser.add_argument(
     "runner_name",
     help="The name of the runner to retrieve the job id, should be RUNNER_NAME",
 )
-parser.add_argument(
-    "build_environment",
-    help="The name of the build environment for this job, should be part of the job's name",
-)
 
 args = parser.parse_args()
 
@@ -52,20 +48,12 @@ while "next" in response.links.keys():
     response = requests.get(response.links["next"]["url"], headers=REQUEST_HEADERS)
     jobs.extend(response.json()["jobs"])
 
+# Sort the jobs list by start time, in descending order. We want to get the most
+# recently scheduled job on the runner.
+jobs.sort(key=lambda job: job["started_at"], reverse=True)
+
 for job in jobs:
     if job["runner_name"] == args.runner_name:
-        # Ugh: this is an additional safety check, which relies on the
-        # implementation detail that our job name always includes the build
-        # environment.
-        #
-        # We need this here because sometimes the GitHub API gives stale
-        # results, and shows an older job that was previously using the runner.
-        #
-        # This can theoretically still fail, if, e.g. the older job was happened
-        # to use the same build environment. But it should be good enough.
-        if args.build_environment not in job["name"]:
-            # Just fail in that case, and rely on outer retries to eventually get it right.
-            continue
         print(job["id"])
         exit(0)
 
