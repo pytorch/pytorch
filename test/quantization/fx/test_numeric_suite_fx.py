@@ -697,7 +697,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
                     continue
                 # didn't match explicit quantize handler class, we can check if the
                 # operator is in the related op set directly
-                if not _op_in_base_sets_of_related_ops(base_op):
+                if not (_op_in_base_sets_of_related_ops(base_op) or _op_is_unmatchable(base_op)):
                     raise AssertionError(
                         f"handling for {qhandler_cls} for op {base_op} not implemented")
 
@@ -1607,6 +1607,12 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # embedding shadowing is not implemented, for now
                 continue
             else:
+                if (
+                    base_op in FUNS_UNMATCHABLE or
+                    base_op in MODS_UNMATCHABLE or
+                    base_op in METHS_UNMATCHABLE
+                ):
+                    continue
                 if qhandler_cls(None, {}).is_general_tensor_value_op():
                     self.assertTrue(
                         (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
@@ -1615,7 +1621,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
                 else:
                     self.assertTrue(
-                        (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
+                        (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
+                        (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
+                        (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
+                        (base_op in FUNS_IO_TYPE_FP32) or
+                        (base_op in MODS_IO_TYPE_FP32) or
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
 
     @skipIfNoFBGEMM

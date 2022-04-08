@@ -1,5 +1,6 @@
 from collections import namedtuple
-
+from typing import List, Dict, Any
+import operator
 import torch
 from .observation_type import ObservationType
 import torch.nn.functional as F
@@ -7,7 +8,11 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-
+from ...observer import (
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
+)
+from ...fake_quantize import FixedQParamsFakeQuantize
 from ...fuser_method_mappings import reverse_sequential_wrapper2
 
 _ConvMetadata = namedtuple("_ConvMetadata", ["root", "reference", "qat", "relu", "relu_qat", "bn_qat", "bn_relu_qat", "func"])
@@ -288,6 +293,197 @@ def _get_conv_configs():
         })
     return conv_configs
 
+def _get_binary_op_configs():
+    binary_op_configs: List[Dict[str, Any]] = []
+    num_tensor_args_to_observation_type_mapping = {
+        # TODO: this is not used right now since we have extra check in prepare
+        # will need to change this to NO_OBSERVER later after we implemented
+        # Tensor dtype inference properly
+        0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+        2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+    }
+    dtype_configs = [
+        weighted_op_int8_dtype_config,
+    ]
+    for op_with_quantized_bop_scalar_variant in [
+            operator.add, torch.add, operator.mul, torch.mul]:
+        binary_op_configs.append({
+            "pattern": (torch.nn.ReLU, op_with_quantized_bop_scalar_variant),
+            "num_tensor_args_to_observation_type": num_tensor_args_to_observation_type_mapping,
+            "dtype_configs": dtype_configs,
+        })
+        binary_op_configs.append({
+            "pattern": (torch.nn.functional.relu, op_with_quantized_bop_scalar_variant),
+            "num_tensor_args_to_observation_type": num_tensor_args_to_observation_type_mapping,
+            "dtype_configs": dtype_configs,
+        })
+        binary_op_configs.append({
+            "pattern": (torch.relu, op_with_quantized_bop_scalar_variant),
+            "num_tensor_args_to_observation_type": num_tensor_args_to_observation_type_mapping,
+            "dtype_configs": dtype_configs,
+        })
+        binary_op_configs.append({
+            "pattern": op_with_quantized_bop_scalar_variant,
+            "num_tensor_args_to_observation_type": num_tensor_args_to_observation_type_mapping,
+            "dtype_configs": dtype_configs,
+        })
+    return binary_op_configs
+
+
+def _get_fixed_qparams_op_configs():
+    fixed_qparams_op_configs = []
+    for fixed_qparam_op, output_observer in [
+            (torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer),
+            (torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer),
+            ("hardsigmoid", default_affine_fixed_qparams_observer),
+            ("hardsigmoid_", default_affine_fixed_qparams_observer),
+            (torch.nn.Sigmoid, default_affine_fixed_qparams_observer),
+            (torch.sigmoid, default_affine_fixed_qparams_observer),
+            ("sigmoid", default_affine_fixed_qparams_observer),
+            ("sigmoid_", default_affine_fixed_qparams_observer),
+            (torch.nn.Tanh, default_symmetric_fixed_qparams_observer),
+            (torch.tanh, default_symmetric_fixed_qparams_observer),
+            ("tanh", default_symmetric_fixed_qparams_observer),
+            ("tanh_", default_symmetric_fixed_qparams_observer),
+    ]:
+        fixed_qparams_op_configs.append({
+            "pattern": fixed_qparam_op,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            # TODO: The following two keys are temporary, since we don't want to put observer in the configs
+            # we expect that it's provided by user
+            # What we want to put here is the requirement on observers, in this case dtype,
+            # quant_min, quant_max etc., but we need to first move all configs to
+            # backend_config_dict to do that, we'll remove these keys after we fully migrated
+            # everything to use backend_config_dict
+            "_overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=output_observer),
+            "_overwrite_output_observer": output_observer,
+            "dtype_configs": [
+                weighted_op_int8_dtype_config,
+            ],
+        })
+    return fixed_qparams_op_configs
+
+_CAT_CONFIG = {
+    "pattern": torch.cat,
+    "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+    "dtype_configs": [
+        default_op_quint8_dtype_config,
+    ]
+}
+
+def _get_bn_configs():
+    """ Get configs related to batchnorm
+    """
+    bn_configs = []
+    bn_to_fused_bn = {
+        torch.nn.BatchNorm2d: nni.BNReLU2d,
+        torch.nn.BatchNorm3d: nni.BNReLU3d,
+    }
+    for bn in [torch.nn.BatchNorm2d, torch.nn.BatchNorm3d]:
+        # TODO: enable these and remove entries in fusion_patterns.py
+        # bn_configs.append({
+        #     "pattern": (torch.nn.ReLU, bn),
+        #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        #     "dtype_configs": default_op_quint8_dtype_config,
+        #     "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+        # })
+        # bn_configs.append({
+        #     "pattern": (torch.nn.functional.relu, bn),
+        #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        #     "dtype_configs": default_op_quint8_dtype_config,
+        #     "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+        # })
+        bn_configs.append({
+            "pattern": bn,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": default_op_quint8_dtype_config,
+        })
+
+    for fused_bn in [nni.BNReLU2d, nni.BNReLU3d]:
+        bn_configs.append({
+            "pattern": fused_bn,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": default_op_quint8_dtype_config,
+        })
+    return bn_configs
+
+def _get_share_qparams_op_configs():
+    """ Get the operator config for the operators that works for both float and quantized input
+    if input is quantized, the output Tensor shares the same quantization parameter
+    with input.
+    Example operator: avgpool2d, reshape, transpose, maxpool2d
+    Example observed operator:
+    observer_0 - avgpool2d - observer_0 (same observer instance as input)
+    """
+
+    def _get_share_qprams_op_backend_config(op):
+        return {
+            "pattern": op,
+            "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+            "dtype_configs": [default_op_quint8_dtype_config],
+        }
+
+    share_qparams_ops = [
+        torch.nn.AdaptiveAvgPool1d,
+        torch.nn.AdaptiveAvgPool2d,
+        torch.nn.AdaptiveAvgPool3d,
+        torch.nn.AvgPool1d,
+        torch.nn.AvgPool2d,
+        torch.nn.AvgPool3d,
+        torch.nn.Hardtanh,
+        torch.nn.Identity,
+        torch.nn.MaxPool1d,
+        torch.nn.MaxPool2d,
+        torch.nn.MaxPool3d,
+        torch.nn.ReLU,
+        torch.nn.ReLU6,
+        torch.adaptive_avg_pool1d,
+        torch.nn.functional.adaptive_avg_pool2d,
+        torch.nn.functional.adaptive_avg_pool3d,
+        torch.nn.functional.hardtanh,
+        torch.nn.functional.hardtanh_,
+        torch.nn.functional.interpolate,
+        torch.nn.functional.max_pool1d,
+        torch.nn.functional.max_pool2d,
+        torch.nn.functional.max_pool3d,
+        torch.nn.functional.relu,
+        torch.nn.functional.relu6,
+        torch.avg_pool1d,
+        torch._C._nn.avg_pool2d,
+        torch._C._nn.avg_pool3d,
+        torch.clamp,
+        torch.flatten,
+        torch.mean,
+        torch.repeat_interleave,
+        torch.transpose,
+        torch.squeeze,
+        torch.stack,
+        torch.unsqueeze,
+        operator.floordiv,
+        "contiguous",
+        "clamp",
+        "detach",
+        "detach_",
+        "mean",
+        "permute",
+        "repeat",
+        "repeat_interleave",
+        "reshape",
+        "resize_",
+        "relu",
+        "relu_",
+        "shape",
+        "size",
+        "squeeze",
+        "squeeze_",
+        "transpose",
+        "unsqueeze",
+        "unsqueeze_",
+        "view"
+    ]
+    return [_get_share_qprams_op_backend_config(op) for op in share_qparams_ops]
+
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
@@ -297,5 +493,10 @@ def get_native_backend_config_dict():
             *_DEFAULT_OP_INT8_CONFIGS,
             *_get_linear_configs(),
             *_get_conv_configs(),
+            *_get_binary_op_configs(),
+            *_get_fixed_qparams_op_configs(),
+            _CAT_CONFIG,
+            *_get_bn_configs(),
+            *_get_share_qparams_op_configs(),
         ],
     }
