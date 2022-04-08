@@ -605,13 +605,12 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 static PyObject * THPVariable__to_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({"_to_functional_tensor(Tensor t, *, bool reapply_views=False)"}, /*traceable=*/true);
+  static PythonArgParser parser({"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
 
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
-  auto reapply_views = r.toBool(1);
-  auto wrapped = at::functionalization::impl::to_functional_tensor(self_, reapply_views);
+  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
   return wrap(wrapped);
   END_HANDLE_TH_ERRORS
 }

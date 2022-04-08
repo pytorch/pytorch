@@ -17,7 +17,7 @@ Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims) {
   for(const auto i : c10::irange(ndims)) {
     dims_[at::maybe_wrap_dim(dims[i], ndims)] = i;
   }
-  return self.permute_copy(dims_);
+  return at::permute_copy(self, dims_);
 }
 
 Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef sizes) {
@@ -26,7 +26,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef sizes) {
   int64_t nDims = sizes.size();
   for(const auto dim : c10::irange(nDims)) {
     if (sizes[dim] == 1) {
-      result = result.unsqueeze_copy(dim);
+      result = at::unsqueeze_copy(result, dim);
     }
   }
   return result;
@@ -37,7 +37,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
   // unsqueezing in the backward.
   if (sizes.size() > 0 && sizes[dim] == 1) {
-    return self.unsqueeze_copy(dim);
+    return at::unsqueeze_copy(self, dim);
   }
   return self;
 }
@@ -92,11 +92,11 @@ Tensor FunctionalInverses::view_as_complex_copy_inverse(const Tensor& base, cons
 }
 
 Tensor FunctionalInverses::_conj_copy_inverse(const Tensor& base, const Tensor& mutated_view) {
-    return mutated_view._conj_copy();
+    return at::_conj_copy(mutated_view);
 }
 
 Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tensor& mutated_view) {
-    return mutated_view._neg_view_copy();
+    return at::_neg_view_copy(mutated_view);
 }
 
 Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
@@ -123,7 +123,7 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
     // b = a[0]; c = b.reshape(...); c.add_(1); print(a)
     // When we eventually run the _reshape_alias_inverse() call here, if we were to pass in both sizes and strides,
     // The call would fail because `mutated_view` doesn't have enough bytes of storage.
-    return mutated_view.reshape(base.sizes());
+    return at::_reshape_alias_copy(mutated_view, base.sizes(), base.strides());
 }
 
 Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim, int64_t index) {
@@ -172,15 +172,15 @@ Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Te
 }
 
 Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view) {
-    return mutated_view.t_copy();
+    return at::t_copy(mutated_view);
 }
 
 Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim0, int64_t dim1) {
-    return mutated_view.transpose_copy(dim0, dim1);
+    return transpose_copy(mutated_view, dim0, dim1);
 }
 
 Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim) {
-    return mutated_view.squeeze_copy(dim);
+    return at::squeeze_copy(mutated_view, dim);
 }
 
 Tensor FunctionalInverses::_indices_copy_inverse(const Tensor& base, const Tensor& mutated_view) {
@@ -224,11 +224,11 @@ Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Ten
 }
 
 Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, at::IntArrayRef size) {
-    return mutated_view.view_copy(base.sizes());
+    return at::view_copy(mutated_view, base.sizes());
 }
 
 Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, at::ScalarType dtype) {
-    return mutated_view.view_copy(base.scalar_type());
+    return at::view_copy(mutated_view, base.scalar_type());
 }
 
 Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dimension, int64_t size, int64_t step) {
@@ -238,7 +238,7 @@ Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor&
 }
 
 Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& mutated_view) {
-    return mutated_view.alias_copy();
+    return at::alias_copy(mutated_view);
 }
 
 } // functionalization

@@ -11,7 +11,7 @@
 
 namespace at {
 
-void FunctionalTensorWrapper::set_constructor_metadata(bool include_reapply_views_key) {
+void FunctionalTensorWrapper::set_constructor_metadata() {
   TORCH_INTERNAL_ASSERT(value_.defined());
   // Note: "level" is a concept that we don't know how to compute in core.
   // For now I'm retroactively setting this in functorch,
@@ -23,15 +23,12 @@ void FunctionalTensorWrapper::set_constructor_metadata(bool include_reapply_view
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
-  if (include_reapply_views_key) {
-      key_set_ = key_set_ | c10::DispatchKeySet(c10::DispatchKey::FunctionalizeAddBackViews);
-  }
 }
 
-FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value, bool include_reapply_views_key)
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   : c10::TensorImpl(
       c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value)),
-      c10::DispatchKeySet({DispatchKey::Functionalize, DispatchKey::FunctionalizeAddBackViews}) | value.key_set(),
+      c10::DispatchKeySet(DispatchKey::Functionalize) | value.key_set(),
       value.dtype()
     ),
     value_(value)
@@ -111,8 +108,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value)
 {
-  // If the input tensor wants to add back views, then the output tensor should too.
-  set_constructor_metadata(/*include_reapply_views_key=*/base->key_set().has(c10::DispatchKey::FunctionalizeAddBackViews));
+  set_constructor_metadata();
   // Copy the original tensor's ViewMeta vector and push the current one.
   if (base->view_metas_.size() > 0) {
       view_metas_ = base->view_metas_;  // copy
@@ -218,33 +214,33 @@ const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
 namespace functionalization {
 namespace impl {
 
-Tensor to_functional_tensor(const Tensor& tensor, bool include_reapply_views_key) {
+Tensor to_functional_tensor(const Tensor& tensor) {
   // Note [Wrapped Numbers <> Functionalization]
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       return tensor;
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
-  return at::detail::make_tensor<FunctionalTensorWrapper>(tensor, include_reapply_views_key);
+  return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
-c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list, bool include_reapply_views_key) {
+c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_functional_tensor(t_list[i], include_reapply_views_key));
+    outputs.push_back(to_functional_tensor(t_list[i]));
   }
   return outputs;
 }
-std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list, bool include_reapply_views_key) {
+std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i], include_reapply_views_key);
+    outputs[i] = to_functional_tensor(t_list[i]);
   }
   return outputs;
 }
-TensorList to_functional_tensor(const TensorList& t_list, bool include_reapply_views_key) {
+TensorList to_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i], include_reapply_views_key);
+    outputs[i] = to_functional_tensor(t_list[i]);
   }
   return outputs;
 }

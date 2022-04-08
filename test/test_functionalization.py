@@ -60,7 +60,7 @@ class TestFunctionalization(TestCase):
 
     def get_logs(self, func, inpt, *, reapply_views=False):
         input_clone_logging = LoggingTensor(inpt.clone())
-        input_functional_logging = torch._to_functional_tensor(input_clone_logging, reapply_views=reapply_views)
+        input_functional_logging = torch._to_functional_tensor(input_clone_logging)
 
         with capture_logs() as logs:
             log_input("input", input_clone_logging)
@@ -309,7 +309,7 @@ $4 = torch._ops.aten.mul.Tensor($3, $3)""")
             y.add_(tmp)
             return y, z
 
-        input_functional = torch._to_functional_tensor(torch.ones(4, 2), reapply_views=True)
+        input_functional = torch._to_functional_tensor(torch.ones(4, 2))
         torch._enable_functionalization(reapply_views=True)
         try:
             y, z = f(input_functional)
