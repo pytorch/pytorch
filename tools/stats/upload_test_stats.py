@@ -24,6 +24,7 @@ def parse_xml_report(
     report: Path, workflow_id: int, workflow_run_attempt: int
 ) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
+    # [Job id in artifacts]
     # Retrieve the job id from the report path. In our GHA workflows, we append
     # the job id to the end of the report name, so `report` looks like:
     #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
@@ -117,9 +118,26 @@ def unzip(p: Path) -> None:
         zip.extractall(unzipped_dir)
 
 
-def download_and_extract_artifact(artifact_name: Path, artifact_url: str) -> None:
-    response = requests.get(artifact_url, headers=REQUEST_HEADERS)
+def download_and_extract_artifact(
+    artifact_name: Path, artifact_url: str, workflow_run_attempt: int
+) -> None:
+    # [Artifact run attempt]
+    # All artifacts on a workflow share a single namespace. However, we can
+    # re-run a workflow and produce a new set of artifacts. To avoid name
+    # collisions, we add `-runattempt1<run #>-` somewhere in the artifact name.
+    #
+    # This code parses out the run attempt number from the artifact name. If it
+    # doesn't match the one specified on the command line, skip it.
+    atoms = str(artifact_name).split("-")
+    for atom in atoms:
+        if atom.startswith("runattempt"):
+            found_run_attempt = int(atom[len("runattempt") :])
+            if workflow_run_attempt != found_run_attempt:
+                print(f"Skipping {artifact_name} as it is an invalid run attempt.")
+
     print(f"Downloading and extracting {artifact_name}")
+
+    response = requests.get(artifact_url, headers=REQUEST_HEADERS)
     with open(artifact_name, "wb") as f:
         f.write(response.content)
     unzip(artifact_name)
@@ -154,6 +172,7 @@ if __name__ == "__main__":
         help="which retry of the workflow this is",
     )
     args = parser.parse_args()
+
     if TEMP_DIR.exists():
         print("rm: ", TEMP_DIR)
         shutil.rmtree(TEMP_DIR)
@@ -167,7 +186,7 @@ if __name__ == "__main__":
     download_and_extract_s3_reports(args.workflow_run_id, args.workflow_run_attempt)
     artifact_urls = get_artifact_urls(args.workflow_run_id)
     for name, url in artifact_urls.items():
-        download_and_extract_artifact(Path(name), url)
+        download_and_extract_artifact(Path(name), url, args.workflow_run_attempt)
 
     # Parse the reports and transform them to JSON
     test_cases = []
