@@ -579,7 +579,7 @@ class TestONNXUtils(TestCase):
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
-        from torch.utils.hipify import hipify_python  # noqa: F401
+        from torch.utils.hipify import hipify_python  # type: ignore noqa: F401
 
 
 class TestAssert(TestCase):

@@ -16,7 +16,7 @@ import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python  # type: ignore
-from .hipify.hipify_python import GeneratedFileCleaner # type: ignore
+from .hipify.hipify_python import GeneratedFileCleaner  # type: ignore
 from typing import List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
@@ -1402,7 +1402,7 @@ def _jit_compile(name,
                             output_directory=build_directory,
                             header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
                             extra_files=[os.path.abspath(s) for s in sources],
-                            ignores=[os.path.join(ROCM_HOME, '*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
+                            ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                             show_detailed=verbose,
                             show_progress=verbose,
                             is_pytorch_extension=True,
