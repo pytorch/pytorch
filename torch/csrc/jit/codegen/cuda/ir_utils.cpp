@@ -254,6 +254,21 @@ struct SubstituteInExpr : public OptInDispatch {
         gather_expr->padWidth());
   }
 
+  void handle(ViewDtypeOp* view_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in = reference_->sameAs(view_expr->in())
+        ? substitute_->as<TensorView>()
+        : view_expr->in();
+    auto out = reference_->sameAs(view_expr->out())
+        ? substitute_->as<TensorView>()
+        : view_expr->out();
+    expr_ = IrBuilder::create<ViewDtypeOp>(
+        view_expr->container(), out, in, view_expr->dtype());
+  }
+
   void handle(ViewOp* view_expr) final {
     TORCH_INTERNAL_ASSERT(
         substitute_->isA<TensorView>(),
@@ -309,7 +324,29 @@ struct SubstituteInExpr : public OptInDispatch {
         init_N,
         in_avg,
         in_var,
-        in_N);
+        in_N,
+        welford_expr->isFused());
+  }
+
+  void handle(MmaOp* mma_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to MmaOp must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in_a = reference_->sameAs(mma_expr->inA())
+        ? substitute_->as<TensorView>()
+        : mma_expr->inA();
+    auto in_b = reference_->sameAs(mma_expr->inB())
+        ? substitute_->as<TensorView>()
+        : mma_expr->inB();
+    auto out = reference_->sameAs(mma_expr->out())
+        ? substitute_->as<TensorView>()
+        : mma_expr->out();
+    auto init = reference_->sameAs(mma_expr->init())
+        ? substitute_->as<TensorView>()
+        : mma_expr->init();
+    expr_ = IrBuilder::create<MmaOp>(
+        mma_expr->container(), out, in_a, in_b, init, mma_expr->options());
   }
 
  private:
@@ -434,7 +471,7 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
-std::vector<Expr*> getReductionOps(Fusion* fusion) {
+std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   std::vector<Expr*> red_ops;
   for (auto expr : fusion->exprs()) {
     const Val* out_val = nullptr;
@@ -452,13 +489,81 @@ std::vector<Expr*> getReductionOps(Fusion* fusion) {
     if (std::any_of(
             out_tv->getRootDomain().begin(),
             out_tv->getRootDomain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       red_ops.push_back(expr);
     }
   }
   return red_ops;
+}
+
+namespace {
+
+class ValReplacementMutator : private OptOutMutator {
+ public:
+  ValReplacementMutator(
+      Fusion* fusion,
+      const std::unordered_map<Val*, Val*>& replacement_map)
+      : replacement_map_(replacement_map) {
+    FusionGuard fg(fusion);
+
+    // Welford makes this a little annoying since it holds a count which is
+    // typically not used by anything else. If we don't grab that count, then it
+    // would be a tensorview that doesn't get updated extents. Therefore, first
+    // grab all leaves towards outputs and grab stmts from there.
+    auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
+    for (auto stmt : stmts) {
+      mutate(stmt);
+    }
+  }
+
+ private:
+  using OptOutMutator::mutate;
+  void mutate(Val* val) final {
+    if (replacement_map_.find(val) == replacement_map_.end()) {
+      return OptOutMutator::mutate(val);
+    }
+    auto replaced_val = replacement_map_.at(val);
+    registerMutation(val, replaced_val);
+  }
+
+  std::vector<Val*> allLeafOuts(Fusion* fusion) {
+    auto exprs = StmtSort::getExprs(fusion, true);
+    std::unordered_set<Val*> inputs;
+    std::unordered_set<Val*> outputs;
+    std::vector<Val*> ordered_outputs;
+    for (auto expr : exprs) {
+      inputs.insert(expr->inputs().begin(), expr->inputs().end());
+      outputs.insert(expr->outputs().begin(), expr->outputs().end());
+      ordered_outputs.insert(
+          ordered_outputs.end(),
+          expr->outputs().begin(),
+          expr->outputs().end());
+    }
+    for (auto input : inputs) {
+      outputs.erase(input);
+    }
+
+    std::vector<Val*> ordered_leaf_outs;
+    for (auto out : ordered_outputs) {
+      if (outputs.find(out) != outputs.end()) {
+        ordered_leaf_outs.push_back(out);
+      }
+    }
+    return ordered_leaf_outs;
+  }
+
+  const std::unordered_map<Val*, Val*>& replacement_map_;
+};
+
+} // namespace
+
+void replaceValue(
+    Fusion* fusion,
+    const std::unordered_map<Val*, Val*>& replacement_map) {
+  ValReplacementMutator(fusion, replacement_map);
 }
 
 } // namespace ir_utils
