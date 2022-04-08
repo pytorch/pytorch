@@ -338,7 +338,7 @@ class ShardedTensor(object):
                                "`torch.preserve_format` is supported!")
         all_on_cpu = True
         for meta in self.metadata().shards_metadata:
-            all_on_cpu &= (meta.placement.device().type == "cpu")
+            all_on_cpu &= (meta.placement.device().type == "cpu")  # type: ignore[union-attr]
 
         # if every shard is already on CPU, return the original object
         if all_on_cpu:
@@ -348,17 +348,17 @@ class ShardedTensor(object):
         list_shards: List[Shard] = []
         # move all local shards to cpu, and change metadata
         for shard in self._local_shards:
-            cpu_tensor = shard.tensor.cpu(memory_format=memory_format)
+            cpu_tensor = shard.tensor.cpu(memory_format=memory_format)  # type: ignore[call-arg]
             metadata = copy.deepcopy(shard.metadata)
-            metadata.placement._device = torch.device("cpu")
+            metadata.placement._device = torch.device("cpu")  # type: ignore[union-attr]
             list_shards.append(
                 Shard(cpu_tensor, metadata)
             )
 
         st_meta = copy.deepcopy(self.metadata())
         for meta in st_meta.shards_metadata:
-            if meta.placement.device().type != "cpu":
-                meta.placement._device = torch.device("cpu")
+            if meta.placement.device().type != "cpu":  # type: ignore[union-attr]
+                meta.placement._device = torch.device("cpu")  # type: ignore[union-attr]
 
         pg = self._process_group if process_group is None else process_group
         st_cpu = ShardedTensor._init_from_local_shards_and_global_metadata(
