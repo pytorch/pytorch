@@ -10542,13 +10542,18 @@ class _TestONNXRuntime:
     #       such that inputs and outputs do not always overflow/underflow.
     #       Otherwise test results could be inaccurate.
     @skipIfUnsupportedMinOpsetVersion(10)
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/74501")
     def test_quantized_linear(self):
         model = torch.nn.quantized.Linear(4, 8)
+        # Set fixed weight to avoid flaky test.
+        weight = torch.quantize_per_tensor(
+            torch.arange(32, dtype=torch.float).view(8, 4),
+            0.5, 0, torch.qint8)
         # Set non-zero bias.
-        bias = torch.arange(8).to(torch.float)
-        model.set_weight_bias(model.weight(), bias)
+        bias = torch.arange(8, dtype=torch.float)
+        model.set_weight_bias(weight, bias)
+        # Set fixed input to avoid flaky test.
         input = torch.randn(4, 4)
+        input = torch.arange(16, dtype=torch.float).view(4, 4) - 8
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         # Currently, we need convert the model to ScriptModule before export.
         # The reason is that PackedParams contains int (not tensor).
