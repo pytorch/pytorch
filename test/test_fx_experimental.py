@@ -1525,6 +1525,7 @@ class TestNormalizeOperators(JitTestCase):
             "block_diag",
             "broadcast_tensors",
             "cartesian_prod",
+            "chalf",  # Implemented with a lambda
             "contiguous",
             "einsum",
             "expand",
