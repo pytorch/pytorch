@@ -1759,34 +1759,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           indent() << "// Allocate global tensor " << varName(tv) << "\n";
           break;
         case MemoryType::Shared:
-          if (kir::ExpressionEvaluator::isConst(size)) {
-            // Static shared memory
-            //  Always align to 16B for tensorview buffers
-            //   with any vectorized access.
-            //  TODO:
-            //   This path will be less commonly exercised once we
-            //    start dynamically allocate all the tensors and
-            //    might be removed in a follow up.
-            auto va = kernel_->summary().vectorized_accesses;
-            if (va.count(tv)) {
-              indent() << "__align__(16) ";
-            } else {
-              indent();
-            }
-            code_ << "__shared__ " << buffer_dtype << " " << varName(tv) << "["
-                  << genInline(size) << "];\n";
-          } else {
-            // Align Offset Position
-            indent() << "offset = alignBufferSize(offset, "
-                     << dataTypeSize(buffer_dtype) << ");\n";
-            // Shared Memory Pointer
-            indent() << buffer_dtype << "* " << varName(tv)
-                     << " = reinterpret_cast<" << buffer_dtype << "*>"
-                     << "(array + offset);\n";
-            // Increment Offset Position
-            indent() << "offset += (" << genInline(size) << " * sizeof("
-                     << buffer_dtype << "));\n";
-          }
+          // Align Offset Position
+          indent() << "offset = alignBufferSize(offset, "
+                   // Always align to 128b / 16B
+                   << 16 << ");\n";
+          // Shared Memory Pointer
+          indent() << buffer_dtype << "* " << varName(tv)
+                   << " = reinterpret_cast<" << buffer_dtype << "*>"
+                   << "(array + offset);\n";
+          // Increment Offset Position
+          indent() << "offset += (" << genInline(size) << " * sizeof("
+                   << buffer_dtype << "));\n";
           break;
         case MemoryType::Local: {
           auto va = kernel_->summary().vectorized_accesses;

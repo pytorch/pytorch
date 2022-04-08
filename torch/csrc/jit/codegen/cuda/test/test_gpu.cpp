@@ -21164,6 +21164,124 @@ TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+// Request 48KB of data in shared mem,
+//  should be large enough not to fit in
+//  static allocations, but small enough
+//  to fit in supported devices (sm70+).
+TEST_F(NVFuserTest, FusionLargeSmem_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(2.0));
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 12288);
+  tv2->split(1, 128);
+  tv1->computeAt(tv2, 1);
+  tv1->split(1, 128);
+  tv0->computeAt(tv1, -1);
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+  auto t0 = at::randn({12288 * 4}, options);
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  auto ref = t0 + 1 + 2;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Request a smem allocation that is equal to the device limit
+TEST_F(NVFuserTest, FusionTooLargeSmem_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto properties = at::cuda::getDeviceProperties(
+      c10::Device(c10::DeviceType::CUDA, 0).index());
+  int device_limit = properties->sharedMemPerBlockOptin;
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(2.0));
+  fusion.addOutput(tv2);
+
+  // 4 byte per float
+  tv2->split(0, device_limit / 4);
+  tv2->split(1, 128);
+  tv1->computeAt(tv2, 1);
+  tv1->split(1, 128);
+  tv0->computeAt(tv1, -1);
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+  auto t0 = at::randn({12288 * 4}, options);
+  FusionExecutor fe;
+
+  // First compile gets a compiled kernel
+  fe.compileFusion(&fusion, {t0});
+
+  // Should be throwing because the kernel
+  //  requested absolute device limit
+  ASSERT_ANY_THROW(fe.runFusion({t0}));
+}
+
+// Try to test alignment when multiple tensors are
+//  in shared mem.
+TEST_F(NVFuserTest, FusionSmemAlignment_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({3, 4, 7, 2, 5});
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {4});
+  auto tv2 = sum(tv1, {3});
+  auto tv3 = sum(tv2, {2});
+  auto tv4 = sum(tv3, {1});
+  fusion.addOutput(tv4);
+
+  auto tv0c = tv0->cache_after();
+  auto tv1bc = tv1->cache_before();
+  auto tv2bc = tv2->cache_before();
+  auto tv3bc = tv3->cache_before();
+  auto tv4bc = tv4->cache_before();
+
+  tv0c->setMemoryType(MemoryType::Shared);
+  tv1bc->setMemoryType(MemoryType::Shared);
+  tv2bc->setMemoryType(MemoryType::Shared);
+  tv3bc->setMemoryType(MemoryType::Shared);
+  tv4bc->setMemoryType(MemoryType::Shared);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv3->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv0->computeAt(tv4, 0);
+  tv0->computeAt(tv2, 2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+  auto t0 = at::randn({3, 4, 7, 2, 5}, options);
+  FusionExecutor fe;
+
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  auto tref = t0.sum({1, 2, 3, 4});
+
+  testValidate(&fusion, cg_outputs, {t0}, {tref}, __LINE__, __FILE__);
+}
+
 // Repro of #1521
 TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
   Fusion fusion;

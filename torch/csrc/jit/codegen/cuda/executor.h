@@ -181,7 +181,23 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
  private:
   CompileOptions options_;
-  size_t max_device_smem = std::numeric_limits<size_t>().max();
+
+  //! Current configured total shared mem size from cudaDeviceProp
+  size_t configured_device_smem_ = std::numeric_limits<size_t>().max();
+
+  //! Available shared memory space for dynamic allocation for the current
+  //!  compiled kernel at the current shared memory/L1 configuration
+  c10::optional<size_t> maybe_available_dynamic_smem_ = c10::nullopt;
+
+  //! Absolute limit of all available shared mem space from cudaDeviceProp
+  size_t device_smem_limit_ = std::numeric_limits<size_t>().max();
+
+  // Assuming sm70 or above:
+  //  limit of statically allocated smem is 48 KB:
+  // See:
+  // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory-7-x
+  // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory-8-x
+  const int max_static_smem_ = 48 << 10;
   int warp_size_ = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 

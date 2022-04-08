@@ -147,7 +147,7 @@ void FusionExecutor::debugCompileFusionFromStr(
     const auto static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
-        static_smem_size < max_device_smem,
+        static_smem_size < max_static_smem_,
         "The static shared memory allocation is larger than available memory.");
   }
 
@@ -184,7 +184,8 @@ void FusionExecutor::compileFusion(
   TORCH_INTERNAL_ASSERT(
       options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
   auto properties = at::cuda::getDeviceProperties(options_.device.index());
-  max_device_smem = properties->sharedMemPerBlock;
+  configured_device_smem_ = properties->sharedMemPerBlock;
+  device_smem_limit_ = properties->sharedMemPerBlockOptin;
   warp_size_ = properties->warpSize;
 
   lowered_ = std::make_unique<GpuLower>(
@@ -206,13 +207,16 @@ void FusionExecutor::compileFusion(
 
   const auto& kernel_summary = kernel->summary();
 
+  // We currently shouldn't allocate any more shared mem
+  //  tensors statically but could keep this path if
+  //  needed in later development.
   if (!kernel_summary.static_smem_allocations.empty()) {
     kir::ExpressionEvaluator static_evaluator;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const auto static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
-        static_smem_size < max_device_smem,
+        static_smem_size < max_static_smem_,
         "The static shared memory allocation is larger than available memory.");
   }
 
@@ -246,6 +250,14 @@ void FusionExecutor::compileFusion(
       block_size);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
+
+  // The driver API call requires an int argument.
+  int max_dynamic_smem = 0;
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncGetAttribute(
+      &max_dynamic_smem,
+      CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+      compiled_kernel_.function));
+  maybe_available_dynamic_smem_ = max_dynamic_smem;
 }
 
 namespace {
@@ -330,7 +342,8 @@ uint64_t FusionExecutor::computeSharedMemory(
         const uint64_t data_size = dataTypeSize(smem_alloc->buffer()->dtype());
         // Add padding to align dynamic shared memory
         if (align_padding) {
-          total = ceilDiv(total, data_size) * data_size;
+          const int align_size = 16; // always align to 16B/128b.
+          total = ceilDiv(total, align_size) * align_size;
         }
         total += inferred_val.value() * data_size;
       } else {
@@ -529,15 +542,35 @@ LaunchParams FusionExecutor::computeLaunchParams(
   const uint64_t static_smem_size =
       computeSharedMemory(expr_eval, kernel_summary.static_smem_allocations);
 
-  TORCH_INTERNAL_ASSERT(
-      (dynamic_smem_size + static_smem_size) < max_device_smem,
-      "The total shared memory allocation is larger than available memory.",
-      " Dynamic size: ",
-      dynamic_smem_size,
-      ". Static size: ",
-      static_smem_size,
-      ". Available size: ",
-      max_device_smem);
+  // Check that requested smem size can be dynamically allocated.
+  //  This check is only done once a kernel has been compiled, since
+  //  maybe_available_dynamic_smem_ needs to be evaluated on
+  //  a compiled kernel.
+  if (maybe_available_dynamic_smem_.has_value()) {
+    // Dynamic shared memory space that we can allocate without
+    //  carving more space from L1.
+    const uint64_t available_dynamic_smem_without_reconfiguration =
+        maybe_available_dynamic_smem_.value();
+    // Maximum additional shared memory size we could request
+    //  if we do re-configuration.
+    const uint64_t additional_dynamic_smem_available_through_reconfiguration =
+        device_smem_limit_ - configured_device_smem_;
+
+    TORCH_INTERNAL_ASSERT(
+        (dynamic_smem_size) <
+            (available_dynamic_smem_without_reconfiguration +
+             additional_dynamic_smem_available_through_reconfiguration),
+        "The total shared memory allocation is larger than available memory.",
+        " Dynamic size: ",
+        dynamic_smem_size,
+        ". Available size: ",
+        maybe_available_dynamic_smem_.value(),
+        ". Configured smem size: ",
+        configured_device_smem_,
+        ". Device limit size: ",
+        device_smem_limit_);
+  }
+
   launch_params.setSmem(dynamic_smem_size);
 
   return launch_params;
@@ -914,6 +947,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   if (execute_kernel_) {
+    if (maybe_available_dynamic_smem_.has_value() &&
+        launch_params.smem() > maybe_available_dynamic_smem_.value()) {
+      // Increase limit of dynamic shared memory if needed.
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncSetAttribute(
+          compiled_kernel_.function,
+          CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+          launch_params.smem()));
+    }
     if (!kernel()->summary().has_cooperative_grid_reduction) {
       FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
