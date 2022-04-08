@@ -1136,7 +1136,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [[torch.tensor([i + j]) for j in range(self.world_size)]]
             for i in range(len(inputs))
         ]
-        tmp = {}
         input_holder = {}
         for i in range(len(inputs)):
             # Note that this works around the data race discussed in
@@ -1155,8 +1154,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 [result],
                 msg=("Mismatch in iteration %d" % i),
             )
-
-        print(" -- passed --")
 
     @requires_gloo()
     def test_allgather_stress(self):
