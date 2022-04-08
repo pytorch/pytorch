@@ -667,6 +667,13 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+        # args that are used to create this graph
+        concrete_args = ()
+        if 'historic_concrete_args' in dict_without_graph["_graph"].__dict__:
+            concrete_args = dict_without_graph["_graph"].__dict__['historic_concrete_args']
+        # attach concrete args to the serializable dict so that when we torch.load,
+        # we can use it to recreate the FX graph
+        dict_without_graph['historic_concrete_args'] = concrete_args
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
