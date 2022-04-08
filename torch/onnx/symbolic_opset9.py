@@ -12,7 +12,12 @@ from functools import partial
 from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType, quantized_args
+from torch.onnx.symbolic_helper import (parse_args,
+                                        _parse_arg,
+                                        _unimplemented,
+                                        ScalarType,
+                                        quantized_args,
+                                        args_have_same_dtype)
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -1358,6 +1363,14 @@ def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, gr
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     sym_help.check_training_mode(training, "batch_norm")
+
+    if torch.is_autocast_enabled() and \
+            not args_have_same_dtype([input, weight, bias, running_mean, running_var]) and \
+            sym_help._export_onnx_opset_version < 15:
+        return sym_help._onnx_opset_unsupported_detailed("BatchNormalization", 9, 15,
+                                                         "All input tensors must have the same `dtype`."
+                                                         " Turn off Autocast or export using opset version 15.")
+
     weight, bias, running_mean, running_var = sym_help._batchnorm_helper(g, input, weight, bias, running_mean, running_var)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
@@ -1699,6 +1712,16 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
+
+
+@parse_args("v", "is", "i")
+def amax(g, self, dim, keepdim):
+    return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
+
+
+@parse_args("v", "is", "i")
+def amin(g, self, dim, keepdim):
+    return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
 def exp(g, self):

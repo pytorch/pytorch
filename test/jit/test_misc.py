@@ -228,6 +228,14 @@ class TestMisc(JitTestCase):
         self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
+    def test_math_inf(self):
+        from math import inf
+
+        def foo():
+            return inf
+
+        self.checkScript(foo, ())
+
     def test_list_literal_infer(self):
         def expects_intlist(x: List[int]):
             x.append(3)
