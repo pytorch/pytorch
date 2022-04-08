@@ -54,26 +54,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -90,9 +74,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -197,26 +178,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -233,9 +198,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -335,26 +297,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -371,9 +317,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -447,26 +390,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -483,9 +410,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -591,26 +515,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -627,9 +535,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -741,26 +646,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -777,9 +666,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -853,26 +739,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -889,9 +759,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1000,26 +867,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1036,9 +887,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -1150,26 +998,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1186,9 +1018,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -1262,26 +1091,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1298,9 +1111,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1409,26 +1219,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1445,9 +1239,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -1559,26 +1350,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1595,9 +1370,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -1671,26 +1443,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1707,9 +1463,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1818,26 +1571,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1854,9 +1591,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -1968,26 +1702,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2004,9 +1722,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -2080,26 +1795,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2116,9 +1815,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2224,26 +1920,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2260,9 +1940,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -2363,26 +2040,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2399,9 +2060,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -2475,26 +2133,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2511,9 +2153,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2619,26 +2258,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2655,9 +2278,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -2758,26 +2378,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2794,9 +2398,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -2869,26 +2470,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2905,9 +2490,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3012,26 +2594,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3048,9 +2614,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -3150,26 +2713,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3186,9 +2733,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -3262,26 +2806,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3298,9 +2826,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3406,26 +2931,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3442,9 +2951,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -3556,26 +3062,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3592,9 +3082,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -3668,26 +3155,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3704,9 +3175,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3815,26 +3283,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3851,9 +3303,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -3965,26 +3414,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4001,9 +3434,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -4077,26 +3507,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4113,9 +3527,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -4224,26 +3635,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4260,9 +3655,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -4374,26 +3766,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4410,9 +3786,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -4486,26 +3859,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4522,9 +3879,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -4633,26 +3987,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4669,9 +4007,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -4783,26 +4118,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4819,9 +4138,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -4895,26 +4211,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4931,9 +4231,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -5039,26 +4336,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5075,9 +4356,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -5178,26 +4456,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5214,9 +4476,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -5290,26 +4549,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5326,9 +4569,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -5434,26 +4674,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5470,9 +4694,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -5573,26 +4794,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5609,9 +4814,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -5684,26 +4886,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5720,9 +4906,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -5827,26 +5010,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5863,9 +5030,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -5965,26 +5129,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6001,9 +5149,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -6077,26 +5222,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6113,9 +5242,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -6221,26 +5347,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6257,9 +5367,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -6371,26 +5478,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6407,9 +5498,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -6483,26 +5571,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6519,9 +5591,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -6630,26 +5699,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6666,9 +5719,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -6780,26 +5830,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6816,9 +5850,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -6892,26 +5923,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6928,9 +5943,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -7039,26 +6051,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7075,9 +6071,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -7189,26 +6182,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7225,9 +6202,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -7301,26 +6275,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7337,9 +6295,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -7448,26 +6403,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7484,9 +6423,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -7598,26 +6534,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7634,9 +6554,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -7710,26 +6627,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7746,9 +6647,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -7854,26 +6752,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -7890,9 +6772,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -7993,26 +6872,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8029,9 +6892,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -8105,26 +6965,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8141,9 +6985,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -8249,26 +7090,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8285,9 +7110,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -8388,26 +7210,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8424,9 +7230,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -8499,26 +7302,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8535,9 +7322,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -8642,26 +7426,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8678,9 +7446,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -8780,26 +7545,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8816,9 +7565,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -8892,26 +7638,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -8928,9 +7658,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -9036,26 +7763,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9072,9 +7783,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -9186,26 +7894,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9222,9 +7914,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -9298,26 +7987,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9334,9 +8007,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -9445,26 +8115,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9481,9 +8135,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -9595,26 +8246,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9631,9 +8266,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -9707,26 +8339,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9743,9 +8359,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -9854,26 +8467,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -9890,9 +8487,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -10004,26 +8598,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10040,9 +8618,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -10116,26 +8691,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10152,9 +8711,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -10263,26 +8819,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10299,9 +8839,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -10413,26 +8950,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10449,9 +8970,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -10525,26 +9043,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10561,9 +9063,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -10669,26 +9168,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10705,9 +9188,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -10808,26 +9288,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10844,9 +9308,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
@@ -10920,26 +9381,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -10956,9 +9401,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -11064,26 +9506,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -11100,9 +9526,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -11203,26 +9626,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Display EC2 information
-        uses: ./.github/actions/display-ec2-information
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -11239,9 +9646,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v3
