@@ -2440,11 +2440,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 
 #ifdef USE_NCCL_WITH_UCC
 std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
+#endif
 
 bool ProcessGroupNCCL::isUCCAvailable() const {
+#ifdef USE_NCCL_WITH_UCC
   return (uccPG_ != nullptr);
+#else
+  return false;
+#ifdef USE_NCCL_WITH_UCC
 }
-#endif
 
 } // namespace c10d
 
