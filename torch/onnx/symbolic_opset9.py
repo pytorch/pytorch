@@ -751,7 +751,7 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     opset_before = kwargs.pop("opset_before", None)
     target_float_t = kwargs.pop("target_float_t", "Float")
 
-    operands = list(args)
+    inputs = list(args)
     origin_dtype = operands[0].type().scalarType()
 
     require_cast = not sym_help._is_fp(operands[0]) and \
@@ -760,7 +760,8 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     if require_cast:
         for operand in operands:
             # we simply assume all input operands are the same type.
-            if operand.isCompleteTensor():
+            if operand.isCompleteTensor() and operand.type().scalarType() != dtype_0:
+               raise RuntimeError(f"Inputs of {op_name} must have same dtype. Got {dtype_0} and {operand.type().scalarType()}")
                 assert operand.type().scalarType() == origin_dtype, \
                     f"We assume input operands of {op_name} are of the same data type."
         for i, operand in enumerate(operands):
