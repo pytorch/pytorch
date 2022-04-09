@@ -35,7 +35,7 @@ from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
 )
-from torch.distributed._sharded_tensor import (
+from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
     ShardMetadata,
@@ -1219,7 +1219,7 @@ class FullyShardedDataParallel(nn.Module):
             flattened_param_offsets.append(ParamOffset(begin, end))
 
         (
-            new_shard_begin, 
+            new_shard_begin,
             new_shard_end
         ) = flat_param.get_global_offset_from_param_offsets(flattened_param_offsets)
         # placement is not used, any valid str is acceptable.
@@ -1284,6 +1284,9 @@ class FullyShardedDataParallel(nn.Module):
                     local_shards, *shape, process_group=self.process_group
                 )
             )
+            sharded_tensor = new_params[-1]
+            tensor = torch.empty(sharded_tensor.shape).cuda() if self.rank == 0 else None
+            sharded_tensor.gather(0, tensor)
         return new_params
 
     def _sharded_post_state_dict_hook(
@@ -1293,11 +1296,23 @@ class FullyShardedDataParallel(nn.Module):
     ) -> "OrderedDict[str, torch.Tensor]":
         # Reshard the flat param to unflattend, sharded parameters.
         flat_param_key = f"{prefix}{FSDP_WRAPPED_MODULE}.{FLAT_PARAM}"
-        state_dict.pop(flat_param_key)
+        try:
+            state_dict.pop(flat_param_key)
+        except KeyError:
+            assert self.module.flat_param is None, (
+                f"{flat_param_key} is not in state_dict, "
+                "but the flat_param exists (not None)."
+            )
+            _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+            return state_dict
+
         flat_param = self.module.flat_param
+        if self.cpu_offload.offload_params:
+            flat_param.data = flat_param.data.to(self.compute_device, non_blocking=True)
         sharded_orig_params = self._reshard_params_to_convex(
             self.module.flat_param.metadata(), flat_param
         )
+        self._use_param_local_shard()
 
         # Return the unflattended, sharded parameters in the state_dict.
         orig_param_keys = []
@@ -1400,11 +1415,12 @@ class FullyShardedDataParallel(nn.Module):
             StateDictType.LOCAL_STATE_DICT,
             StateDictType.SHARDED_STATE_DICT
         ):
-            if not self.module.flat_param._is_sharded:
-                raise RuntimeError(
-                    "local_state_dict/sharded_state_dict can only be called "
-                    "when parameters are flatten and sharded."
-                )
+            if self.module.flat_param is not None:
+                if not self.module.flat_param._is_sharded:
+                    raise RuntimeError(
+                        "local_state_dict/sharded_state_dict can only be called "
+                        "when parameters are flatten and sharded."
+                    )
             return super().state_dict(*args, **kwargs)
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
@@ -1474,6 +1490,9 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
         prefix: str,
     ) -> None:
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
+        if self.module.flat_param is None:
+            return
         if not self.module.flat_param._is_sharded:
             raise RuntimeError(
                 "load_sharded_state_dict can only be called when parameters "
@@ -1486,19 +1505,14 @@ class FullyShardedDataParallel(nn.Module):
             module_name = module_name.replace(f"{FPW_MODULE}", "")
             if module_name:
                 module_name = f"{module_name}."
-            _key_prefix = prefix.replace(f"{FPW_MODULE}.", "").replace(
-                f"{FSDP_WRAPPED_MODULE}.", ""
-            )
-            key = f"{_key_prefix}{module_name}{param_name}"
+            key = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
             param_keys.append(key)
-            params.append(state_dict[key])
+            params.append(state_dict.pop(key))
         flat_param = self._shuffle_sharded_state_dict(
             params,
             self.module.flat_param.numel(),
             self.module.flat_param.num_padded,
         )
-        for key in param_keys:
-            del state_dict[key]
         state_dict[f"{prefix}_fsdp_wrapped_module.flat_param"] = flat_param
 
     @staticmethod
@@ -1568,7 +1582,7 @@ class FullyShardedDataParallel(nn.Module):
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            return super().load_state_dict(state_dict, strict=False)
+            return super().load_state_dict(state_dict, *args)
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
@@ -2689,11 +2703,11 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
-                state for ``model`` 's original unflattened parameters and
-                including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict` if on
-                rank 0, and an empty :class:`dict` otherwise.
+            Dict[str, Any]: A :class:`dict` containing the optimizer state for
+            ``model`` 's original unflattened parameters and including keys
+            "state" and "param_groups" following the convention of
+            :meth:`torch.optim.Optimizer.state_dict` if on rank 0, and an empty
+            :class:`dict` otherwise.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2819,10 +2833,9 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            sharded_optim_state_dict (Dict[str, Any]): The full optimizer
-                state dict remapped to flattened parameters instead of
-                unflattened parameters and restricted to only include this
-                rank's part of the optimizer state.
+            Dict[str, Any]: The full optimizer state dict remapped to flattened
+            parameters instead of unflattened parameters and restricted to only
+            include this rank's part of the optimizer state.
         """
         full_osd = full_optim_state_dict  # alias
         if "state" not in full_osd or "param_groups" not in full_osd:
@@ -2921,8 +2934,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> wrapped_optim.load_state_dict(sharded_osd)
 
         Returns:
-            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
-                using the parameter keys specified by ``optim_state_key_type``.
+            Dict[str, Any]: The optimizer state dict re-keyed using the
+            parameter keys specified by ``optim_state_key_type``.
         """
         assert optim_state_key_type in \
             (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)

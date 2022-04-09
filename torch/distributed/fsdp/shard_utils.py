@@ -2,7 +2,7 @@ import bisect
 import itertools
 import math
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 import torch
 from torch.distributed import ProcessGroup
@@ -152,3 +152,19 @@ def reshard_flatten_tensor(
         group=process_group,
     )
     return local_shard
+
+
+def gather_state_dict(
+    state_dict: Dict[str, Any], curr_rank: int, output_rank: int = 0
+) -> Dict[str, Any]:
+    new_state_dict = {}
+    for key, tensor in state_dict.items():
+        if isinstance(tensor, ShardedTensor):
+            new_state_dict[key] = tensor
+            output_tensor = (
+                torch.empty(tensor.shape).cuda() if curr_rank == output_rank else None
+            )
+            tensor.gather(0, output_tensor)
+            tensor = output_tensor
+        new_state_dict[key] = tensor
+    return new_state_dict
