@@ -225,7 +225,7 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
   }
 }
 
-std::vector<Tensor> foreach_tensor_norm_per_tensor_slow(TensorList tensors, const Scalar& ord) {
+std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
   TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm_per_tensor supports int and float ord");
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
@@ -235,7 +235,7 @@ std::vector<Tensor> foreach_tensor_norm_per_tensor_slow(TensorList tensors, cons
   return result;
 }
 
-Tensor foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
+Tensor foreach_tensor_global_norm_slow(TensorList tensors, const Scalar& ord) {
   TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm supports int and float ord");
   double p;
   if (ord.isIntegral(false)) {
