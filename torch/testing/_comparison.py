@@ -6,8 +6,6 @@ from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tu
 
 import torch
 
-from ._core import _unravel_index
-
 try:
     import numpy as np
 
@@ -217,6 +215,18 @@ def make_tensor_mismatch_msg(
             as callable in which case it will be called by the default value to create the description at runtime.
             Defaults to "Tensor-likes".
     """
+    def unravel_flat_index(flat_index: int) -> Tuple[int, ...]:
+        if not mismatches.shape:
+            return ()
+
+        inverse_index = []
+        for size in mismatches.shape[::-1]:
+            div, mod = divmod(flat_index, size)
+            flat_index = div
+            inverse_index.append(mod)
+
+        return tuple(inverse_index[::-1])
+
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
     extra = (
@@ -242,10 +252,10 @@ def make_tensor_mismatch_msg(
         identifier=identifier,
         extra=extra,
         abs_diff=max_abs_diff.item(),
-        abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
+        abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
         atol=atol,
         rel_diff=max_rel_diff.item(),
-        rel_diff_idx=_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape),
+        rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
     )
 
@@ -598,29 +608,12 @@ class TensorLikePair(Pair):
     def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
-        with self._handle_meta_tensor_data_access():
-            self._compare_attributes(actual, expected)
-            actual, expected = self._equalize_attributes(actual, expected)
+        self._compare_attributes(actual, expected)
+        if any(input.device.type == "meta" for input in (actual, expected)):
+            return
 
-            self._compare_values(actual, expected)
-
-    @contextlib.contextmanager
-    def _handle_meta_tensor_data_access(self):
-        """Turns a vanilla :class:`NotImplementedError` stemming from data access on a meta tensor into an expressive
-        :class:`ErrorMeta`.
-
-        Although it looks like meta tensors could be handled upfront, we need to do it lazily: there are use cases
-        where a meta tensor wraps a data tensors and dispatches all operator calls to it. Thus, although the tensor is
-        a meta tensor, it behaves like a regular one.
-        """
-        try:
-            yield
-        except NotImplementedError as error:
-            if "meta" not in str(error).lower():
-                raise error
-
-            # TODO: See https://github.com/pytorch/pytorch/issues/68592
-            raise self._make_error_meta(NotImplementedError, "Comparing meta tensors is currently not supported.")
+        actual, expected = self._equalize_attributes(actual, expected)
+        self._compare_values(actual, expected)
 
     def _compare_attributes(
         self,
@@ -783,11 +776,21 @@ class TensorLikePair(Pair):
     ) -> None:
         """Compares sparse CSR tensors by comparing
 
+        - the shape
         - the number of non-zero elements (nnz) for equality,
         - the col_indices for equality,
         - the crow_indices for equality, and
         - the values for closeness.
         """
+        def raise_mismatch_error(attribute_name: str, actual_value: Any, expected_value: Any) -> NoReturn:
+            raise self._make_error_meta(
+                AssertionError,
+                f"The values for attribute '{attribute_name}' do not match: {actual_value} != {expected_value}.",
+            )
+
+        if actual.shape != expected.shape:
+            raise_mismatch_error("shape", actual.shape, expected.shape)
+
         if actual._nnz() != expected._nnz():
             raise self._make_error_meta(
                 AssertionError,
@@ -1103,10 +1106,15 @@ def assert_close(
 
         \lvert \text{actual} - \text{expected} \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert \text{expected} \rvert
 
-    and they have the same :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``), same ``dtype`` (if
-    ``check_dtype`` is ``True``), and the same stride (if ``check_stride`` is ``True``). Non-finite values
-    (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are only considered equal
-    to each other if ``equal_nan`` is ``True``.
+    Non-finite values (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are
+    only considered equal to each other if ``equal_nan`` is ``True``.
+
+    In addition, they are only considered close if they have the same
+    - :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``),
+    - ``dtype`` (if ``check_dtype`` is ``True``),
+    - ``layout`` (if ``check_layout`` is ``True``), and
+    - stride (if ``check_stride`` is ``True``).
+    If either ``actual`` or ``expected`` is a meta tensor, only the attribute checks will be performed.
 
     If ``actual`` and ``expected`` are sparse (either having COO or CSR layout), their strided members are
     checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,

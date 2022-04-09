@@ -5,7 +5,8 @@ from typing import Union, Callable, Tuple, Dict, Optional, Type
 from torch.ao.quantization.utils import Pattern
 
 from torch.ao.quantization.utils import get_combined_dict
-
+from torch.ao.quantization.utils import MatchAllNode
+import itertools
 
 def fuse_conv_bn(is_qat, conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -32,8 +33,6 @@ def fuse_conv_bn(is_qat, conv, bn):
     }
 
     if is_qat:
-        # TODO: remove the assert later
-        assert conv.training, "qat is only supported when conv.training is True currently"
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
@@ -65,8 +64,6 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         "Conv and BN both must be in the same mode (train or eval)."
     fused_module : Optional[Type[nn.Sequential]] = None
     if is_qat:
-        # TODO: remove the assert later
-        assert conv.training, "qat is only supported when conv.training is True currently"
         map_to_fused_module_train = {
             nn.Conv1d: nni.ConvBnReLU1d,
             nn.Conv2d: nni.ConvBnReLU2d,
@@ -112,9 +109,12 @@ def fuse_linear_bn(is_qat, linear, bn):
         "Linear and BN both must be in the same mode (train or eval)."
 
     if is_qat:
-        # TODO: remove the assert later
-        assert linear.training, "qat is only supported when linear.training is True currently"
-        raise Exception("Fusing Linear+BatchNorm not yet supported in training.")
+        assert bn.num_features == linear.out_features,\
+            "Output features of Linear must match num_features of BatchNorm1d"
+        assert bn.affine, "Only support fusing BatchNorm1d with affine set to True"
+        assert bn.track_running_stats,\
+            "Only support fusing BatchNorm1d with tracking_running_stats set to True"
+        return nni.LinearBn1d(linear, bn)
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
@@ -136,8 +136,7 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
         "ConvTranspose and BN both must be in the same mode (train or eval)."
 
     if is_qat:
-        assert convt.training, "qat is only supported when convt.training is True currently"
-        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in training.")
+        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in QAT.")
     else:
         return nn.utils.fusion.fuse_conv_bn_eval(convt, bn, transpose=True)
 
@@ -221,6 +220,37 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.BatchNorm3d, nn.ConvTranspose3d): reverse2(fuse_convtranspose_bn),
 }
 
+def get_valid_patterns(op_pattern):
+    """
+    Returns a list of valid patterns generated from the op_pattern,
+    since MatchAllNode can match all types of nodes,
+    e.g. pattern (torch.nn.Conv2d, torch.add) should also be able to match keys like
+    (MatchAllNode, torch.add) and (torch.nn.Conv2d, MatchAllNode)
+
+    Example Input:
+    (torch.add, (torch.nn.ReLU, torch.nn.Conv2d))
+
+    Example Output:
+    [(torch.add, (torch.nn.ReLU, torch.nn.Conv2d)),
+     (torch.add, (torch.nn.ReLU, MatchAllNode)),
+     (torch.add, (MatchAllNode, torch.nn.Conv2d)),
+     (torch.add, (MatchAllNode, MatchAllNode)),
+     (MatchAllNode, (torch.nn.ReLU, torch.nn.Conv2d)),
+     (MatchAllNode, (torch.nn.ReLU, MatchAllNode)),
+     (MatchAllNode, (MatchAllNode, torch.nn.Conv2d)),
+     (MatchAllNode, (MatchAllNode, MatchAllNode)),
+    ]
+    """
+    result = []
+    if isinstance(op_pattern, (tuple, list)):
+        sub_combs = []
+        for sub_pattern in op_pattern:
+            sub_combs.append(get_valid_patterns(sub_pattern))
+        result = list(itertools.product(*sub_combs))
+    else:
+        result = [op_pattern, MatchAllNode]
+    return result
+
 def get_fuser_method_new(
         op_pattern: Pattern,
         fuser_method_mapping: Optional[Dict[Pattern, Union[nn.Sequential, Callable]]] = None):
@@ -230,6 +260,11 @@ def get_fuser_method_new(
     if fuser_method_mapping is None:
         fuser_method_mapping = DEFAULT_PATTERN_TO_FUSER_METHOD
 
-    fuser_method = fuser_method_mapping.get(op_pattern, None)
+    op_patterns = get_valid_patterns(op_pattern)
+    fuser_method = None
+    for op_pattern in op_patterns:
+        fuser_method = fuser_method_mapping.get(op_pattern, None)
+        if fuser_method is not None:
+            break
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_pattern)
     return fuser_method
