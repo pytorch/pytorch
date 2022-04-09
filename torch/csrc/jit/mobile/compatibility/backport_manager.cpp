@@ -28,6 +28,7 @@ constexpr int64_t kBytecodeVersionV5 = 0x5L;
 constexpr int64_t kBytecodeVersionV6 = 0x6L;
 constexpr int64_t kBytecodeVersionV7 = 0x7L;
 constexpr int64_t kBytecodeVersionV8 = 0x8L;
+constexpr int64_t kBytecodeVersionV9 = 0x9L;
 } // namespace
 
 /********************** Utility Functions **********************/
@@ -515,6 +516,32 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   return output_model_stream;
 }
 
+std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
+  ExtraFilesMap extra_files;
+  Module torch_script =
+      torch::jit::load(input_model_stream, c10::nullopt, extra_files);
+  std::stringstream intermediate_model_stream;
+  // TODO(@pavithran) : Check if debug info is available and use load/save while
+  // backporting hardcode debaug info to be false untill supported.
+  bool hasBytecodeDebug = false;
+  {
+    BytecodeEmitModeGuard argNumGuard(
+        false /*emit_default_input_instructions*/,
+        true /*enable_defaults_args_with_out_args*/,
+        true /*enable_emit_promoted_ops*/);
+    torch_script._save_for_mobile(
+        intermediate_model_stream,
+        extra_files,
+        hasBytecodeDebug,
+        /*use_flatbuffer=*/false);
+  }
+  // Update the bytecode version (from 9 to 8)
+  std::stringstream output_model_stream =
+      update_bytecode_version(intermediate_model_stream, kBytecodeVersionV8);
+
+  return output_model_stream;
+}
+
 std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
@@ -565,6 +592,7 @@ BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
   registerBytecodeBackportFunction(kBytecodeVersionV7, backport_v7_to_v6);
   registerBytecodeBackportFunction(kBytecodeVersionV8, backport_v8_to_v7);
+  registerBytecodeBackportFunction(kBytecodeVersionV9, backport_v9_to_v8);
 }
 
 std::unordered_map<
@@ -599,12 +627,10 @@ void BackportManager::registerBytecodeBackportFunction(
 // istream_adapter has access to it. During the backport process,
 // the intermediate result will be stored with stream.
 bool BackportManager::backport(
-    std::shared_ptr<IStreamAdapter> istream_adapter,
+    std::istream& oss,
     PyTorchStreamWriter& final_writer,
     int64_t from_version,
     int64_t to_version) const {
-  PyTorchStreamReader start_reader(istream_adapter);
-
   if (from_version <= to_version) {
     TORCH_WARN(
         "backport donesn't support backporting model to new version. It's trying to backport from version ",
@@ -619,9 +645,9 @@ bool BackportManager::backport(
   // 1) Given an istream_adapter (an adapter with access to the input model, the
   // model can be from istream, file and etc), copy all model content to
   // stringstream
-  std::stringstream oss;
-  get_model_stream(start_reader, oss);
-  std::stringstream input_model_stream(oss.str());
+  oss.seekg(0, std::ios::beg);
+  std::stringstream input_model_stream;
+  input_model_stream << oss.rdbuf();
   std::stringstream output_model_stream;
 
   // 2) backport model, backport_v{i}_to_v{i-1} function's argurment is
@@ -639,6 +665,7 @@ bool BackportManager::backport(
       return false;
     }
 
+    input_model_stream.seekg(0, input_model_stream.beg);
     auto input_model_stream_version =
         _get_model_bytecode_version(input_model_stream);
 
@@ -656,6 +683,7 @@ bool BackportManager::backport(
         bytecodeBackportFunctions()[bytecode_version--](input_model_stream);
 
     output_model_stream.swap(backport_model_stream);
+    output_model_stream.seekg(0, output_model_stream.beg);
     auto output_model_stream_version =
         _get_model_bytecode_version(output_model_stream);
 
