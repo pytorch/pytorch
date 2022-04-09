@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/Tensor.h>
