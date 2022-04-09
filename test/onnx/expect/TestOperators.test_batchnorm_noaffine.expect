@@ -1,4 +1,4 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -50,7 +50,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 128
     data_type: 1
@@ -135,5 +135,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

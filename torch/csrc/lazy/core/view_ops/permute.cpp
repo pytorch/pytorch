@@ -13,7 +13,7 @@ Permute::Permute(const Value& input, std::vector<int64_t> dims)
           MHash(dims)),
       dims_(std::move(dims)) {
   SetShapeDeferred([&]() {
-    return MakePermuteShape(GetShapeFromTsOutput(operand(0)), dims_);
+    return MakePermuteShape(operand(0).shape(), dims_);
   });
 }
 

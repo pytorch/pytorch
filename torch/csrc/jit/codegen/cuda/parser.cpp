@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
@@ -11,6 +12,8 @@
 
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>
+
+#include <ATen/native/Activation.h>
 
 #include <unordered_map>
 #include <utility>
@@ -31,24 +34,21 @@ constexpr auto kNumBinaryFloatOps = 3;
 constexpr auto kNumBinaryComparisonOps = 12;
 constexpr auto kNumBinaryCastOps = 14;
 
-constexpr auto kNumBinaryOpsWithAlpha = 4;
+constexpr auto kNumBinaryOpsWithAlpha = 6;
 constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
+constexpr auto kNumBatchnormBwd = 2;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
 constexpr auto kNumAutocastOps = 2;
-// constexpr auto kNumViewSize = 2;
+constexpr auto kNumAliasDimOps = 2;
+constexpr auto kNumViewOps = 2;
+constexpr auto kNumVarOps = 2;
+constexpr auto kNumSoftmaxFwd = 2;
+constexpr auto kNumSoftmaxBwd = 2;
 
 namespace {
-
-std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
-  TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
-  auto optional_sizes = tensor_type->sizes().concrete_sizes();
-  TORCH_INTERNAL_ASSERT(
-      optional_sizes.has_value(), "Missing size information for the tensor.");
-  return optional_sizes.value();
-}
 
 #define REGISTER_PARSE_RULE(op, func_body, ...)                                \
   registerParseRule(                                                           \
@@ -57,14 +57,31 @@ std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
           -> void func_body,                                                   \
       __VA_ARGS__)
 
-const auto& sizeAttr = Symbol::attr("profiled_size");
+const auto& reductionSizeAttr = Symbol::attr("profiled_reduction_size");
+const auto& viewSizeAttr = Symbol::attr("profiled_view_size");
 const auto& intListAttr = Symbol::attr("profiled_int_list");
 const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
+const auto& strAttr = Symbol::attr("profiled_str");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
+
+bool isReductionNonCompatibleTensor(
+    const std::shared_ptr<c10::TensorType>& tensor_type) {
+  return is_zero_dim_tensor(tensor_type) || is_zero_sized_tensor(tensor_type);
+}
+
+bool isInputNonSizeZeroTensor(const Node* node) {
+  for (const auto& val : node->inputs()) {
+    auto tensor_type = val->type()->cast<TensorType>();
+    if (tensor_type && is_zero_sized_tensor(tensor_type)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // Note [ Permutation Bookkeeping and Propagation in Parser ]
 //
@@ -280,8 +297,9 @@ class ValueHolder {
     if (iter_val != vals_.end()) {
       return iter_val->second;
     }
-    // patching scalar value, because memory format doesn't carry real meaning.
-    if (!is_tensor_view_) {
+    // patching scalar (tensor), memory format doesn't carry meaning and should
+    // just return the value as-is.
+    if (!is_tensor_view_ || rank() == 0) {
       return std::get<1>(getEntry());
     }
     MemoryFormat format_s;
@@ -502,7 +520,7 @@ class IrParser {
           "Failure when register value: ",
           *(val->node()),
           " with type: ",
-          val->type());
+          val->type()->repr_str());
       MemoryFormat format;
       Val* operand = nullptr;
       std::tie(format, operand) = value_map_[val->unique()].getEntry();
@@ -520,7 +538,6 @@ class IrParser {
           (opt_dtype.value() == DataType::Half ||
            opt_dtype.value() == DataType::BFloat16)) {
         Val* promoted_val = castOp(DataType::Float, operand);
-        // value_map_.emplace(val->unique(), ValueHolder(promoted_val, format));
         value_map_[val->unique()] = ValueHolder(promoted_val, format);
       }
     }
@@ -579,6 +596,9 @@ class IrParser {
 
   // return nullptr if entry does not exist
   static const RegistrationEntry* lookupInRegistry(const Node* node) {
+    if (parser_skip_set_.count(node->kind()) != 0) {
+      return nullptr;
+    }
     // we need to use maybeSchema for nodes like prim::Constant, which doesn't
     // have a schema
     auto schema_ptr = node->maybeSchema();
@@ -600,6 +620,20 @@ class IrParser {
       }
     }
     return nullptr;
+  }
+
+  static bool querySkipSymbolSet(c10::Symbol symbol, bool flip) {
+    // no need to init registry here (unlike `lookupInSymbolSet`, as
+    // `parser_skip_set_` is not initialized via initialization
+    bool ret = parser_skip_set_.count(symbol) != 0;
+    if (flip) {
+      if (ret) {
+        parser_skip_set_.erase(symbol);
+      } else {
+        parser_skip_set_.insert(symbol);
+      }
+    }
+    return ret;
   }
 
   static void initRegistry() {
@@ -685,7 +719,9 @@ class IrParser {
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
         "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
+        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+        "aten::rsub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+        "aten::rsub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
@@ -701,6 +737,10 @@ class IrParser {
                           BinaryOpType::Add,
                           static_cast<BinaryOpWithAlphaType>(&add_alpha))},
                      {aten::sub,
+                      std::make_pair(
+                          BinaryOpType::Sub,
+                          static_cast<BinaryOpWithAlphaType>(&sub_alpha))},
+                     {aten::rsub,
                       std::make_pair(
                           BinaryOpType::Sub,
                           static_cast<BinaryOpWithAlphaType>(&sub_alpha))}});
@@ -720,14 +760,16 @@ class IrParser {
             auto out = alpha->isOneInt()
                 ? binaryOp(
                       op_mapping[node->kind()].first,
-                      lhs,
-                      rhs,
+                      node->kind() == aten::rsub ? rhs : lhs,
+                      node->kind() == aten::rsub ? lhs : rhs,
                       TypePromotion::default_op_config)
-                : op_mapping[node->kind()].second(lhs, rhs, alpha);
+                : (node->kind() == aten::rsub
+                       ? op_mapping[node->kind()].second(rhs, lhs, alpha)
+                       : op_mapping[node->kind()].second(lhs, rhs, alpha));
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -763,7 +805,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -819,7 +861,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -868,7 +910,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -911,7 +953,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -982,7 +1024,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1003,7 +1045,7 @@ class IrParser {
             auto out = randlike(operand);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1018,14 +1060,14 @@ class IrParser {
             std::tie(format, list_val) = getConsistentValues(
                 MemoryFormat::Contiguous(),
                 value_map[node->inputs()[0]->unique()]);
-            auto operand = list_val.front();
+            auto operand = list_val.front()->as<TensorView>();
             list_val.pop_front();
             auto& beta = value_map[node->inputs()[1]->unique()];
             auto& threshold = value_map[node->inputs()[2]->unique()];
             auto out = softplus(operand, beta, threshold);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1048,7 +1090,7 @@ class IrParser {
             auto out = threshold(operand, th, value);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1080,7 +1122,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1098,15 +1140,15 @@ class IrParser {
             list_val.pop_front();
             Val* low = value_map.count(node->inputs()[1]->unique()) != 0
                 ? *value_map[node->inputs()[1]->unique()]
-                : new Double(std::numeric_limits<float>::min());
+                : IrBuilder::create<Double>(std::numeric_limits<float>::min());
             Val* high = value_map.count(node->inputs()[2]->unique()) != 0
                 ? *value_map[node->inputs()[2]->unique()]
-                : new Double(std::numeric_limits<float>::max());
+                : IrBuilder::create<Double>(std::numeric_limits<float>::max());
 
             auto out = clamp(operand, low, high);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1134,7 +1176,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1165,7 +1207,7 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            nullptr,
+            isInputNonSizeZeroTensor,
             nullptr);
       }
     }
@@ -1197,7 +1239,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1234,7 +1276,7 @@ class IrParser {
                   ValueHolder(TensorViewBuilder().build(), format));
             }
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1267,7 +1309,7 @@ class IrParser {
               value_map.emplace(node->output()->unique(), input);
             }
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1295,7 +1337,7 @@ class IrParser {
                 grad->as<TensorView>(), mask->as<TensorView>(), scale);
             value_map.emplace(node->output()->unique(), output);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1336,9 +1378,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    fusion->hasInput(running_mean),
-                    "IO_tensor `instance_norm::running_mean` can only be input tensor to fusion");
               }
 
               TensorView* running_var = nullptr;
@@ -1346,9 +1385,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    fusion->hasInput(running_var),
-                    "IO_tensor `instance_norm::running_var` can only be input tensor to fusion");
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1361,7 +1397,7 @@ class IrParser {
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto momentum = constant_as<float>(node->input(6))) {
-                momentum_ptr = new Double(momentum.value());
+                momentum_ptr = IrBuilder::create<Double>(momentum.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 momentum_ptr = value_map[node->input(6)->unique()];
@@ -1370,7 +1406,7 @@ class IrParser {
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto eps = constant_as<float>(node->input(7))) {
-                eps_ptr = new Double(eps.value());
+                eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 eps_ptr = value_map[node->input(7)->unique()];
@@ -1391,7 +1427,13 @@ class IrParser {
                 value_map.emplace(node->output()->unique(), result.output);
               }
             },
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1455,7 +1497,7 @@ class IrParser {
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto momentum = constant_as<float>(node->input(6))) {
-                momentum_ptr = new Double(momentum.value());
+                momentum_ptr = IrBuilder::create<Double>(momentum.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 momentum_ptr = value_map[node->input(6)->unique()];
@@ -1464,7 +1506,7 @@ class IrParser {
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto eps = constant_as<float>(node->input(7))) {
-                eps_ptr = new Double(eps.value());
+                eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 eps_ptr = value_map[node->input(7)->unique()];
@@ -1502,7 +1544,13 @@ class IrParser {
                     ValueHolder(result.output, format));
               }
             },
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1510,156 +1558,208 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            // discard impl_index and reservedSpace since we don't use them
-            MemoryFormat format;
-            std::list<Val*> list_val;
-            std::tie(format, list_val) = getConsistentValues(
-                c10::nullopt,
-                value_map[node->inputs()[1]->unique()],
-                value_map[node->inputs()[2]->unique()]);
-            if (format.hasPermutation() && !format.isChannelsLast()) {
+      std::array<const char*, kNumBatchnormBwd> BatchNormBwd = {
+          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)",
+          "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)"};
+      for (auto signature : BatchNormBwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              JitValue* ts_input = nullptr;
+              JitValue* ts_grad_output;
+              JitValue* ts_weight = nullptr;
+              JitValue* ts_r_mean = nullptr;
+              JitValue* ts_r_var = nullptr;
+              JitValue* ts_save_mean = nullptr;
+              JitValue* ts_save_invstd = nullptr;
+              JitValue* ts_train = nullptr;
+              JitValue* ts_eps = nullptr;
+              JitValue* ts_mask = nullptr;
+              if (node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::_batch_norm_impl_index_backward")) {
+                ts_input = node->input(1);
+                ts_grad_output = node->input(2);
+                ts_weight = node->input(3);
+                ts_r_mean = node->input(4);
+                ts_r_var = node->input(5);
+                ts_save_mean = node->input(6);
+                ts_save_invstd = node->input(7);
+                ts_train = node->input(8);
+                ts_eps = node->input(9);
+                ts_mask = node->input(10);
+              } else if (
+                  node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::native_batch_norm_backward")) {
+                ts_grad_output = node->input(0);
+                ts_input = node->input(1);
+                ts_weight = node->input(2);
+                ts_r_mean = node->input(3);
+                ts_r_var = node->input(4);
+                ts_save_mean = node->input(5);
+                ts_save_invstd = node->input(6);
+                ts_train = node->input(7);
+                ts_eps = node->input(8);
+                ts_mask = node->input(9);
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false,
+                    "Forgot to register the key for BN variation: ",
+                    node->kind().toDisplayString());
+              }
+
+              // discard impl_index and reservedSpace since we don't use them
+              MemoryFormat format;
+              std::list<Val*> list_val;
               std::tie(format, list_val) = getConsistentValues(
-                  MemoryFormat::Contiguous(),
-                  value_map[node->inputs()[1]->unique()],
-                  value_map[node->inputs()[2]->unique()]);
-            }
-            auto operand0 = list_val.front();
-            list_val.pop_front();
-            auto operand1 = list_val.front();
-            list_val.pop_front();
-            auto input = operand0->as<TensorView>();
-            auto grad_out = operand1->as<TensorView>();
+                  c10::nullopt,
+                  value_map[ts_input->unique()],
+                  value_map[ts_grad_output->unique()]);
+              if (format.hasPermutation() && !format.isChannelsLast()) {
+                std::tie(format, list_val) = getConsistentValues(
+                    MemoryFormat::Contiguous(),
+                    value_map[ts_input->unique()],
+                    value_map[ts_grad_output->unique()]);
+              }
+              auto operand0 = list_val.front();
+              list_val.pop_front();
+              auto operand1 = list_val.front();
+              list_val.pop_front();
+              auto input = operand0->as<TensorView>();
+              auto grad_out = operand1->as<TensorView>();
 
-            TensorView* weight = nullptr;
-            if (!node->input(3)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              weight = value_map[node->input(3)->unique()]->as<TensorView>();
-            }
+              TensorView* weight = nullptr;
+              if (!ts_weight->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                weight = value_map[ts_weight->unique()]->as<TensorView>();
+              }
 
-            TensorView* running_mean = nullptr;
-            if (!node->input(4)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              running_mean =
-                  value_map[node->input(4)->unique()]->as<TensorView>();
-            }
+              TensorView* running_mean = nullptr;
+              if (!ts_r_mean->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                running_mean = value_map[ts_r_mean->unique()]->as<TensorView>();
+              }
 
-            TensorView* running_var = nullptr;
-            if (!node->input(5)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              running_var =
-                  value_map[node->input(5)->unique()]->as<TensorView>();
-            }
+              TensorView* running_var = nullptr;
+              if (!ts_r_var->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                running_var = value_map[ts_r_var->unique()]->as<TensorView>();
+              }
 
-            TensorView* save_mean = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (!node->input(6)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              TensorView* save_mean = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              save_mean = value_map[node->input(6)->unique()]->as<TensorView>();
-            }
+              if (!ts_save_mean->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                save_mean = value_map[ts_save_mean->unique()]->as<TensorView>();
+              }
 
-            TensorView* save_invstd = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (!node->input(7)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              save_invstd =
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                  value_map[node->input(7)->unique()]->as<TensorView>();
-            }
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto training = constant_as<bool>(node->input(8));
-            TORCH_INTERNAL_ASSERT(
-                training.has_value(),
-                "The training (bool) parameter is required.");
-            const bool kTraining = training.value();
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            Val* eps_ptr = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (auto eps = constant_as<float>(node->input(9))) {
-              eps_ptr = new Double(eps.value());
-            } else {
+              TensorView* save_invstd = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              eps_ptr = value_map[node->input(7)->unique()];
-            }
+              if (!ts_save_invstd->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                save_invstd =
+                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                    value_map[ts_save_invstd->unique()]->as<TensorView>();
+              }
 
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto out_mask_list = constant_as<c10::List<bool>>(node->input(10));
-            TORCH_INTERNAL_ASSERT(
-                out_mask_list.has_value(),
-                "output mask for batch_norm_backward");
-            std::vector<bool> output_mask;
-            for (const auto value : out_mask_list->vec()) {
-              output_mask.emplace_back(static_cast<bool>(value));
-            }
-
-            // TODO: merge this loop below.
-            if (kTraining) {
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              auto training = constant_as<bool>(ts_train);
               TORCH_INTERNAL_ASSERT(
-                  save_mean != nullptr && save_invstd != nullptr,
-                  "When training=True, save_mean and save_invstd are required.");
-            } else {
-              // TODO: this is not a legit assumption? Can't we run with
-              // track_running_stats == false && training == false
-              // which should just run through the case above.
+                  training.has_value(),
+                  "The training (bool) parameter is required.");
+              const bool kTraining = training.value();
+
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              Val* eps_ptr = nullptr;
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              if (auto eps = constant_as<float>(ts_eps)) {
+                eps_ptr = IrBuilder::create<Double>(eps.value());
+              } else {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                eps_ptr = value_map[ts_eps->unique()];
+              }
+
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              auto out_mask_list = constant_as<c10::List<bool>>(ts_mask);
               TORCH_INTERNAL_ASSERT(
-                  running_mean != nullptr && running_var != nullptr,
-                  "When training=False, running_mean and running_invstd are required.");
-            }
+                  out_mask_list.has_value(),
+                  "output mask for batch_norm_backward");
+              std::vector<bool> output_mask;
+              for (const auto value : out_mask_list->vec()) {
+                output_mask.emplace_back(static_cast<bool>(value));
+              }
 
-            auto grads = batch_norm_backward(
-                input,
-                grad_out,
-                weight,
-                running_mean,
-                running_var,
-                save_mean,
-                save_invstd,
-                kTraining,
-                eps_ptr,
-                output_mask,
-                format.isChannelsLast());
+              // TODO: merge this loop below.
+              if (kTraining) {
+                TORCH_INTERNAL_ASSERT(
+                    save_mean != nullptr && save_invstd != nullptr,
+                    "When training=True, save_mean and save_invstd are required.");
+              } else {
+                // TODO: this is not a legit assumption? Can't we run with
+                // track_running_stats == false && training == false
+                // which should just run through the case above.
+                TORCH_INTERNAL_ASSERT(
+                    running_mean != nullptr && running_var != nullptr,
+                    "When training=False, running_mean and running_invstd are required.");
+              }
 
-            if (output_mask[0]) {
-              TORCH_INTERNAL_ASSERT(grads.grad_input != nullptr);
-              value_map.emplace(
-                  node->output(0)->unique(),
-                  ValueHolder(grads.grad_input, format));
-            } else {
-              TORCH_INTERNAL_ASSERT(grads.grad_input == nullptr);
-              value_map.emplace(
-                  node->output(0)->unique(),
-                  ValueHolder(TensorViewBuilder().build(), format));
-            }
+              auto grads = batch_norm_backward(
+                  input,
+                  grad_out,
+                  weight,
+                  running_mean,
+                  running_var,
+                  save_mean,
+                  save_invstd,
+                  kTraining,
+                  eps_ptr,
+                  output_mask,
+                  format.isChannelsLast());
 
-            if (output_mask[1]) {
-              TORCH_INTERNAL_ASSERT(grads.grad_weight != nullptr);
-              value_map.emplace(node->output(1)->unique(), grads.grad_weight);
-            } else {
-              TORCH_INTERNAL_ASSERT(grads.grad_weight == nullptr);
-              value_map.emplace(
-                  node->output(1)->unique(), TensorViewBuilder().build());
-            }
+              if (output_mask[0]) {
+                TORCH_INTERNAL_ASSERT(grads.grad_input != nullptr);
+                value_map.emplace(
+                    node->output(0)->unique(),
+                    ValueHolder(grads.grad_input, format));
+              } else {
+                TORCH_INTERNAL_ASSERT(grads.grad_input == nullptr);
+                value_map.emplace(
+                    node->output(0)->unique(),
+                    ValueHolder(TensorViewBuilder().build(), format));
+              }
 
-            if (output_mask[2]) {
-              TORCH_INTERNAL_ASSERT(grads.grad_bias != nullptr);
-              value_map.emplace(node->output(2)->unique(), grads.grad_bias);
-            } else {
-              TORCH_INTERNAL_ASSERT(grads.grad_bias == nullptr);
-              value_map.emplace(
-                  node->output(2)->unique(), TensorViewBuilder().build());
-            }
-          },
-          [](const Node* node) -> bool { return true; },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
+              if (output_mask[1]) {
+                TORCH_INTERNAL_ASSERT(grads.grad_weight != nullptr);
+                value_map.emplace(node->output(1)->unique(), grads.grad_weight);
+              } else {
+                TORCH_INTERNAL_ASSERT(grads.grad_weight == nullptr);
+                value_map.emplace(
+                    node->output(1)->unique(), TensorViewBuilder().build());
+              }
+
+              if (output_mask[2]) {
+                TORCH_INTERNAL_ASSERT(grads.grad_bias != nullptr);
+                value_map.emplace(node->output(2)->unique(), grads.grad_bias);
+              } else {
+                TORCH_INTERNAL_ASSERT(grads.grad_bias == nullptr);
+                value_map.emplace(
+                    node->output(2)->unique(), TensorViewBuilder().build());
+              }
+            },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(1)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     {
@@ -1701,7 +1801,7 @@ class IrParser {
 
               Val* eps_ptr = nullptr;
               if (auto eps = constant_as<float>(node->input(4))) {
-                eps_ptr = new Double(eps.value());
+                eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 eps_ptr = value_map[node->input(4)->unique()];
               }
@@ -1721,7 +1821,13 @@ class IrParser {
               }
             },
             // TODO: #ProfileIValue List should update this
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1819,42 +1925,9 @@ class IrParser {
             }
           },
           // TODO: #ProfileIValue List should update this
-          [](const Node* node) -> bool { return true; },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::softmax.int(Tensor self, int dim, int? dtype) -> Tensor");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            MemoryFormat format;
-            std::list<Val*> list_val;
-            std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
-            auto input_t = list_val.front();
-            list_val.pop_front();
-            auto input = input_t->as<TensorView>();
-
-            auto dim_value = constant_as<int>(node->input(1));
-            TORCH_INTERNAL_ASSERT(
-                dim_value.has_value(), "dim in softmax is not valid");
-
-            auto output = softmax(input, dim_value.value());
-            value_map.emplace(node->output()->unique(), output);
-          },
           [](const Node* node) -> bool {
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            // TODO: support dynamic input by profiling it
-            if (!node->inputs()[2]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get())) &&
-                node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (isReductionNonCompatibleTensor(
+                    node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
             return true;
@@ -1862,6 +1935,58 @@ class IrParser {
           [](const Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
+    }
+
+    {
+      std::array<const char*, kNumSoftmaxFwd> SoftmaxFwd = {
+          "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
+          "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"};
+      for (auto signature : SoftmaxFwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto input_t = list_val.front();
+              list_val.pop_front();
+              auto input = input_t->as<TensorView>();
+
+              auto dim_value = constant_as<int>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  dim_value.has_value(), "dim in softmax is not valid");
+
+              bool is_log_softmax = node->kind() ==
+                  c10::Symbol::fromQualString("aten::log_softmax");
+
+              auto output = (is_log_softmax)
+                  ? log_softmax(input, dim_value.value())
+                  : softmax(input, dim_value.value());
+              value_map.emplace(node->output()->unique(), output);
+            },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              // TODO: support dynamic input by profiling it
+              if (!node->inputs()[2]->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get())) &&
+                  node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     { // LTC uses this op for softmax
@@ -1887,6 +2012,10 @@ class IrParser {
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
+            if (isReductionNonCompatibleTensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
               return false;
             }
@@ -1911,35 +2040,104 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto grad_output =
-                value_map[node->input(0)->unique()]->as<TensorView>();
+      std::array<const char*, kNumSoftmaxBwd> SoftmaxBwd = {
+          "aten::_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor",
+          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor"};
+      for (auto signature : SoftmaxBwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto grad_output =
+                  value_map[node->input(0)->unique()]->as<TensorView>();
 
-            auto output = value_map[node->input(1)->unique()]->as<TensorView>();
+              auto output =
+                  value_map[node->input(1)->unique()]->as<TensorView>();
 
-            auto dim_value = constant_as<int>(node->input(2));
-            TORCH_INTERNAL_ASSERT(
-                dim_value.has_value(), "dim in softmax is not valid");
+              auto dim_value = constant_as<int>(node->input(2));
+              TORCH_INTERNAL_ASSERT(
+                  dim_value.has_value(), "dim in softmax is not valid");
 
-            // input_dtype here is ignored! type_inference handles it
-            auto grad_input =
-                softmax_backward(grad_output, output, dim_value.value());
+              // input_dtype here is ignored! type_inference handles it
+              bool is_log_softmax = node->kind() ==
+                  c10::Symbol::fromQualString(
+                                        "aten::_log_softmax_backward_data");
+              auto grad_input = (is_log_softmax)
+                  ? log_softmax_backward(grad_output, output, dim_value.value())
+                  : softmax_backward(grad_output, output, dim_value.value());
 
-            value_map.emplace(node->output()->unique(), grad_input);
-          },
-          [](const Node* node) -> bool {
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            return true;
-          },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
+              value_map.emplace(node->output()->unique(), grad_input);
+            },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              if (node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
+    }
+
+    {
+      std::array<const char*, kNumVarOps> Variance = {
+          "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
+          "aten::std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
+      for (auto signature : Variance) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto input_t = list_val.front();
+              list_val.pop_front();
+              auto input = input_t->as<TensorView>();
+
+              bool is_variance =
+                  node->kind() == c10::Symbol::fromQualString("aten::var");
+
+              auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  dims_list.has_value(), "Cannot fuse with dynamic axes");
+              std::vector<int> dims;
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+
+              auto unbiased = constant_as<bool>(node->input(2));
+              TORCH_INTERNAL_ASSERT(
+                  unbiased.has_value(), "Cannot fuse with dynamic unbiased");
+
+              auto keepdim = constant_as<bool>(node->input(3));
+              TORCH_INTERNAL_ASSERT(
+                  keepdim.has_value(), "Cannot fuse with dynamic keepdim");
+
+              auto output = (is_variance)
+                  ? variance(input, dims, unbiased.value(), keepdim.value())
+                  : standard_deviation(
+                        input, dims, unbiased.value(), keepdim.value());
+              value_map.emplace(node->output()->unique(), output);
+            },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     {
@@ -1961,8 +2159,13 @@ class IrParser {
                 dims_list.has_value(),
                 "aten::sum cannot be fused with dynamic axes");
             std::vector<int> dims;
-            for (const auto dim : dims_list->vec()) {
-              dims.emplace_back(static_cast<int>(dim));
+            if (!dims_list->empty()) {
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+            } else {
+              dims.resize(self->as<TensorView>()->nDims());
+              std::iota(dims.begin(), dims.end(), 0);
             }
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
@@ -1972,20 +2175,20 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
+            if (isReductionNonCompatibleTensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
-                if (scalar_type == at::ScalarType::Double ||
-                    scalar_type == at::ScalarType::Float ||
-                    scalar_type == at::ScalarType::BFloat16 ||
-                    scalar_type == at::ScalarType::Half) {
-                  return true;
+                if (!at::isFloatingType(scalar_type)) {
+                  return false;
                 }
               }
-              return false;
             }
             // we don't support dynamic reduction axes;
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
@@ -2021,15 +2224,20 @@ class IrParser {
                 dims_list.has_value(),
                 "aten::mean cannot be fused with dynamic axes");
             std::vector<int> dims;
-            for (const auto dim : dims_list->vec()) {
-              dims.emplace_back(static_cast<int>(dim));
+            if (!dims_list->empty()) {
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+            } else {
+              dims.resize(self->as<TensorView>()->nDims());
+              std::iota(dims.begin(), dims.end(), 0);
             }
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 keepdim.has_value(),
                 "aten::mean cannot be fused with dynamic keepdim");
             auto o_sum = sum(self, dims, keepdim.value());
-            Val* num_features = new Double(1);
+            Val* num_features = IrBuilder::create<Double>(1);
             for (auto axis : dims) {
               if (axis < 0) {
                 axis += int(self->nDims());
@@ -2041,20 +2249,20 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
+            if (isReductionNonCompatibleTensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
-                if (scalar_type == at::ScalarType::Double ||
-                    scalar_type == at::ScalarType::Float ||
-                    scalar_type == at::ScalarType::BFloat16 ||
-                    scalar_type == at::ScalarType::Half) {
-                  return true;
+                if (!at::isFloatingType(scalar_type)) {
+                  return false;
                 }
               }
-              return false;
             }
             // we don't support dynamic reduction axes;
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
@@ -2099,13 +2307,15 @@ class IrParser {
               }
             },
             [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
               // we don't support dynamic reduction axes;
               if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
               return true;
-              // auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
-              // return size_to.has_value() && !size_to->empty();
             },
             [](const Node* node) -> OperatorType {
               auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
@@ -2140,7 +2350,7 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            nullptr,
+            isInputNonSizeZeroTensor,
             nullptr);
       }
     }
@@ -2178,7 +2388,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2207,7 +2417,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2268,12 +2478,13 @@ class IrParser {
                   node->output()->unique(), ValueHolder(out, format));
             }
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
     {
-      auto ptr_op = getOperatorForLiteral("aten::gelu(Tensor self) -> Tensor");
+      auto ptr_op = getOperatorForLiteral(
+          "aten::gelu(Tensor self, *, str approximate='none') -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2281,19 +2492,28 @@ class IrParser {
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
-            auto self = list_val.front();
+            auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
-            auto out = gelu(self);
+
+            auto approximate = constant_as<std::string>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                approximate.has_value(),
+                "The approximate parameter is required.");
+            const auto kTanhGelu =
+                at::native::get_gelutype_enum(approximate.value()) ==
+                at::native::GeluType::Tanh;
+
+            auto out = (kTanhGelu) ? tanh_gelu(self) : gelu(self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad, Tensor self) -> Tensor");
+          "aten::gelu_backward(Tensor grad_output, Tensor self, *, str approximate='none') -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2303,16 +2523,50 @@ class IrParser {
                 c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
-            auto grad_out = list_val.front();
+            auto grad_out = list_val.front()->as<TensorView>();
             list_val.pop_front();
-            auto self = list_val.front();
+            auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
-            auto grad_in = gelu_backward(grad_out, self);
+            auto approximate = constant_as<std::string>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                approximate.has_value(),
+                "The approximate parameter is required.");
+            const auto kTanhGelu =
+                at::native::get_gelutype_enum(approximate.value()) ==
+                at::native::GeluType::Tanh;
+
+            auto grad_in = (kTanhGelu) ? tanh_gelu_backward(grad_out, self)
+                                       : gelu_backward(grad_out, self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::tanh_backward(Tensor grad_output, Tensor output) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto grad_out = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto grad_in = tanh_backward(grad_out, self);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(grad_in, format));
+          },
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2334,8 +2588,13 @@ class IrParser {
                 dims_list.has_value(),
                 "aten::amax cannot be fused with dynamic axes");
             std::vector<int> dims;
-            for (const auto dim : dims_list->vec()) {
-              dims.emplace_back(static_cast<int>(dim));
+            if (!dims_list->empty()) {
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+            } else {
+              dims.resize(self->as<TensorView>()->nDims());
+              std::iota(dims.begin(), dims.end(), 0);
             }
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
@@ -2346,6 +2605,10 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
+            if (isReductionNonCompatibleTensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             // we don't support dynamic reduction axes;
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
               return false;
@@ -2361,37 +2624,150 @@ class IrParser {
           });
     }
 
-    /*
-    // TODO: Enable view in parser by detecting non-alias view operation
     {
-      std::array<const char*, kNumViewSize> View = {
-          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
-          "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)"};
-      for (auto signature : View) {
+      std::array<const char*, kNumViewOps> ViewOps = {
+          "prim::reshape_copy(Tensor self, int[] shape) -> Tensor",
+          "prim::view_copy(Tensor self, int[] size) -> Tensor"};
+      for (auto signature : ViewOps) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
               auto self_value = node->inputs()[0];
-              auto self = value_map[self_value->unique()]->as<TensorView>();
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+              auto self = list_val.front()->as<TensorView>();
+              list_val.pop_front();
 
               auto self_type = self_value->type()->cast<c10::TensorType>();
               TORCH_INTERNAL_ASSERT(self_type != nullptr);
               auto self_sizes = getTensorSizes(self_type);
 
-              auto size_optional =
-                  constant_as<c10::List<int64_t>>(node->input(1));
+              auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
-                  size_optional.has_value(), "The size parameter is required.");
+                  view_sizes.has_value(), "The size parameter is required.");
 
-              auto output = view(self, self_sizes, size_optional->vec());
+              auto output = view(self, self_sizes, view_sizes->vec());
               value_map.emplace(node->output()->unique(), output);
             },
-            nullptr,
+            [](const Node* node) -> bool {
+              auto self_value = node->inputs()[0];
+              auto tensor_type = self_value->type()->cast<c10::TensorType>();
+              if (tensor_type == nullptr) {
+                return false;
+              }
+              if (!tensor_type->sizes().concrete_sizes().has_value()) {
+                // Shape information for input tensor is required.
+                return false;
+              }
+
+              if (!isInputNonSizeZeroTensor(node)) {
+                return false;
+              }
+              // Reject fusing node if view_sizes contains an inferred dimension
+              auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+              if (!view_sizes.has_value()) {
+                // The size parameter is required.
+                return false;
+              }
+
+              for (auto axis_size : view_sizes->vec()) {
+                if (axis_size == -1) {
+                  return false;
+                }
+              }
+              return true;
+            },
             nullptr);
       }
     }
-    */
+
+    {
+      auto ptr_op =
+          getOperatorForLiteral("prim::squeeze_copy(Tensor self) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto self_type = self_value->type()->cast<c10::TensorType>();
+            TORCH_INTERNAL_ASSERT(self_type != nullptr);
+            auto self_sizes = getTensorSizes(self_type);
+
+            auto output = squeeze(self, self_sizes);
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            // Shape information for input tensor is required.
+            auto self_value = node->inputs()[0];
+            auto tensor_type = self_value->type()->cast<c10::TensorType>();
+            if (tensor_type == nullptr) {
+              return false;
+            }
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            return tensor_type->sizes().concrete_sizes().has_value();
+          },
+          nullptr);
+    }
+
+    {
+      std::array<const char*, kNumAliasDimOps> AliasOpWithDim = {
+          "prim::squeeze_copy.dim(Tensor self, int dim) -> Tensor",
+          "prim::unsqueeze_copy(Tensor self, int dim) -> Tensor"};
+      for (auto signature : AliasOpWithDim) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto self_value = node->inputs()[0];
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto self = list_val.front()->as<TensorView>();
+              list_val.pop_front();
+
+              auto dim_value = constant_as<int>(node->input(1));
+              TORCH_INTERNAL_ASSERT(dim_value.has_value(), "dim is not valid");
+
+              TensorView* output = nullptr;
+              if (node->kind() == prim::unsqueeze_copy) {
+                output = unsqueeze(self, dim_value.value());
+              } else {
+                auto self_type = self_value->type()->cast<c10::TensorType>();
+                TORCH_INTERNAL_ASSERT(self_type != nullptr);
+                auto self_sizes = getTensorSizes(self_type);
+                output = squeeze(self, self_sizes, dim_value.value());
+              }
+              value_map.emplace(node->output()->unique(), output);
+            },
+            [](const Node* node) -> bool {
+              // Shape information for input tensor is required.
+              auto self_value = node->inputs()[0];
+              auto tensor_type = self_value->type()->cast<c10::TensorType>();
+              if (tensor_type == nullptr) {
+                return false;
+              }
+              if (!isInputNonSizeZeroTensor(node)) {
+                return false;
+              }
+              auto optional_sizes = tensor_type->sizes().concrete_sizes();
+              return tensor_type->sizes().concrete_sizes().has_value();
+            },
+            nullptr);
+      }
+    }
   }
 
   void processJitNode(const JitOp* node) {
@@ -2425,9 +2801,9 @@ class IrParser {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<double>(val)) {
-        cg_val = new Double(ival.value());
+        cg_val = IrBuilder::create<Double>(ival.value());
       } else {
-        cg_val = new Double();
+        cg_val = IrBuilder::create<Double>();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
@@ -2436,9 +2812,9 @@ class IrParser {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<int64_t>(val)) {
-        cg_val = new Int(ival.value());
+        cg_val = IrBuilder::create<Int>(ival.value());
       } else {
-        cg_val = new Int();
+        cg_val = IrBuilder::create<Int>();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
@@ -2447,21 +2823,29 @@ class IrParser {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<bool>(val)) {
-        cg_val = new Bool(ival.value());
+        cg_val = IrBuilder::create<Bool>(ival.value());
       } else {
-        cg_val = new Bool();
+        cg_val = IrBuilder::create<Bool>();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
-    } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(NoneType::get()))) {
+    } else if (
+        val->type()->isSubtypeOf(
+            static_cast<c10::TypePtr>(StringType::get())) ||
+        val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
+      // String scalars are only used in parsing rules;
+      // Do not register string with codegen IR.
       return true;
     } else if (val->type()->cast<ListType>()) {
       // TODO: we don't support list type in codegen yet;
       // This is a WAR to allow axes of reduction to be passed as constant list;
       // We simply ignore conversion if the scalar value is a constant;
-      return toIValue(val).has_value();
+      auto ivalue = toIValue(val);
+      TORCH_INTERNAL_ASSERT(
+          ivalue.has_value(),
+          "List[T] is not supported as an argument by NvFuser. Use a Constant List.");
+      return true;
     }
     return false;
   }
@@ -2521,7 +2905,6 @@ class IrParser {
           nhwc_stride_vec[i]->stride_index_ = n_dim - i - 1;
         }
 
-        // auto updated_tensor_type = c10::TensorType::create(
         tensor_type = c10::TensorType::create(
             tensor_type->scalarType(),
             tensor_type->device(),
@@ -2531,7 +2914,10 @@ class IrParser {
             tensor_type->undefined());
       }
 
-      cg_val = new TensorView(tensor_type);
+      cg_val = IrBuilder::create<TensorView>(tensor_type);
+      if (is_cpu_scalar(*tensor_type)) {
+        cg_val->as<TensorView>()->setCpuScalar(true);
+      }
       value_map_.emplace(val->unique(), ValueHolder(cg_val, format));
       return true;
     }
@@ -2544,6 +2930,7 @@ class IrParser {
   std::unordered_map<size_t, ValueHolder> value_map_;
 
   static std::unordered_set<Symbol> parser_symbol_set_;
+  static std::unordered_set<Symbol> parser_skip_set_;
 
   // parsing rule registry.
   static std::unordered_map<std::string, RegistrationEntry>
@@ -2557,6 +2944,7 @@ class IrParser {
   static bool init_registry_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
+std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
 std::unordered_map<std::string, IrParser::RegistrationEntry>
     IrParser::jit_operator_registry_; // NOLINT
 std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
@@ -2576,7 +2964,7 @@ ProfileIValueOp* insertProfileIValueOp(
   return pn;
 }
 
-void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
   const auto ivalue_profiler = [pr, pn](Stack& stack) {
@@ -2596,12 +2984,14 @@ void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
       size_vec.clear();
     } else {
       TORCH_INTERNAL_ASSERT(
-          false, "profileSize does not support data type: ", value.tagKind());
+          false,
+          "profileReductionSize does not support data type: ",
+          value.tagKind());
     }
-    if (!pn->hasAttribute(sizeAttr)) {
-      pn->is_(sizeAttr, size_vec);
+    if (!pn->hasAttribute(reductionSizeAttr)) {
+      pn->is_(reductionSizeAttr, size_vec);
     } else {
-      auto profiled_ints = pn->is(sizeAttr);
+      auto profiled_ints = pn->is(reductionSizeAttr);
       TORCH_INTERNAL_ASSERT(
           profiled_ints.size() == size_vec.size() &&
               std::equal(
@@ -2610,6 +3000,39 @@ void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
     }
     push(stack, value);
   };
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isIntList(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(viewSizeAttr)) {
+      pn->is_(viewSizeAttr, value.toIntVector());
+    } else {
+      auto profiled_ints = pn->is(viewSizeAttr);
+      auto input_ints = value.toIntList();
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_ints.size() &&
+              std::equal(
+                  profiled_ints.begin(),
+                  profiled_ints.end(),
+                  input_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
   pn->setCallback(ivalue_profiler);
 }
 
@@ -2639,6 +3062,34 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
                   profiled_ints.end(),
                   input_ints.begin()),
           "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isString(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(strAttr)) {
+      pn->s_(strAttr, value.toStringRef());
+    } else {
+      const auto& profiled_str = pn->s(strAttr);
+      const auto& input_str = value.toStringRef();
+      TORCH_INTERNAL_ASSERT(
+          input_str == profiled_str, "profiling ivalue doesn't support merge");
     }
     push(stack, value);
   };
@@ -2788,6 +3239,11 @@ bool shouldProfileNode(const Node* node) {
   return IrParser::lookupInSymbolSet(node);
 }
 
+bool skipNodeKind(const std::string& symbol_str, bool flip) {
+  return IrParser::querySkipSymbolSet(
+      c10::Symbol::fromQualString(symbol_str), flip);
+}
+
 bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   // is skip constant necessary?
   if (node->input(offset)->node()->kind() == prim::Constant) {
@@ -2880,7 +3336,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // argument 1: reduction sizes;
       case 1:
         // TODO(profile_size): double check optional[size]?
-        profileSize(pr, node, offset);
+        profileReductionSize(pr, node, offset);
         break;
       default:
         return false;
@@ -2888,28 +3344,52 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
-  /*
-  // TODO: Enable view in parser by detecting non-alias view operation
-  static auto view_schema =
-      getOperatorForLiteral(
-          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)")
-          ->schema();
   static auto reshape_schema =
-      getOperatorForLiteral(
-          "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)")
+      getOperatorForLiteral("aten::reshape(Tensor self, int[] shape) -> Tensor")
           ->schema();
-  if (node->matches(view_schema) || node->matches(reshape_schema)) {
+  static auto reshape_copy_schema =
+      getOperatorForLiteral(
+          "prim::reshape_copy(Tensor self, int[] shape) -> Tensor")
+          ->schema();
+  static auto view_schema =
+      getOperatorForLiteral("aten::view(Tensor self, int[] size) -> Tensor")
+          ->schema();
+  static auto view_copy_schema =
+      getOperatorForLiteral(
+          "prim::view_copy(Tensor self, int[] size) -> Tensor")
+          ->schema();
+  if (node->matches(reshape_schema) || node->matches(reshape_copy_schema) ||
+      node->matches(view_schema) || node->matches(view_copy_schema)) {
     switch (offset) {
       // argument 1: new tensor size;
       case 1:
-        profileSize(pr, node, offset);
+        profileViewSize(pr, node, offset);
         break;
       default:
         return false;
     }
     return true;
   }
-  */
+
+  static auto squeeze_dim_schema =
+      getOperatorForLiteral(
+          "prim::squeeze_copy.dim(Tensor self, int dim) -> Tensor")
+          ->schema();
+  static auto unsqueeze_schema =
+      getOperatorForLiteral(
+          "prim::unsqueeze_copy(Tensor self, int dim) -> Tensor")
+          ->schema();
+  if (node->matches(squeeze_dim_schema) || node->matches(unsqueeze_schema)) {
+    switch (offset) {
+      // argument 1: unsqueeze dim;
+      case 1:
+        profileInt(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
 
   static auto batch_norm_impl_index_schema =
       getOperatorForLiteral(
@@ -2934,6 +3414,38 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // argument 5: training;
       case 5:
         profileBool(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto gelu_schema =
+      getOperatorForLiteral(
+          "aten::gelu(Tensor self, *, str approximate='none') -> Tensor")
+          ->schema();
+  if (node->matches(gelu_schema)) {
+    switch (offset) {
+      // argument 1: approximate;
+      case 1:
+        profileString(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto gelu_backward_schema =
+      getOperatorForLiteral(
+          "aten::gelu_backward(Tensor grad_output, Tensor self, *, str approximate='none') -> Tensor")
+          ->schema();
+  if (node->matches(gelu_backward_schema)) {
+    switch (offset) {
+      // argument 2: approximate;
+      case 2:
+        profileString(pr, node, offset);
         break;
       default:
         return false;
@@ -2982,6 +3494,26 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
+  static auto batch_norm_backward_schema =
+      getOperatorForLiteral(
+          "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
+          ->schema();
+  if (node->matches(batch_norm_backward_schema)) {
+    switch (offset) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      case 7: // argument 8: training;
+        profileBool(pr, node, offset);
+        break;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      case 9:
+        profileBoolList(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
   static auto native_layer_norm_backward_schema =
       getOperatorForLiteral(
           "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
@@ -3015,11 +3547,16 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
   }
 
+  static auto log_softmax_backward_data_schema =
+      getOperatorForLiteral(
+          "aten::_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
+          ->schema();
   static auto softmax_backward_data_schema =
       getOperatorForLiteral(
           "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
           ->schema();
-  if (node->matches(softmax_backward_data_schema)) {
+  if (node->matches(log_softmax_backward_data_schema) ||
+      node->matches(softmax_backward_data_schema)) {
     switch (offset) {
       case 3:
         profileInt(pr, node, offset);

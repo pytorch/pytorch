@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -26,7 +27,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
       "Expected shape of indices to be same as that of the input tensor (", self_.sizes(),
       ") but got indices tensor with shape: ", indices_.sizes());
 
-  for (int64_t i = 1; i < self_.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, self_.ndimension())) {
     TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cpu(): ",
                 "Expected input to have non-zero size for non-batch dimensions, but got ",
                 self_.sizes(), " with dimension ", i , " being empty.");
@@ -93,7 +94,7 @@ static void max_unpooling3d_shape_check(
       "Expected shape of indices to be same as that of the input tensor (", input.sizes(),
       ") but got indices tensor with shape: ", indices.sizes());
 
-  for (int64_t i = 1; i < input.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input.ndimension())) {
     TORCH_CHECK(input.size(i) > 0, fn_name,
                 ": Expected input to have non-zero size for non-batch dimensions, but got ",
                 input.sizes(), " with dimension ", i , " being empty.");
