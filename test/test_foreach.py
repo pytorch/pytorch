@@ -49,8 +49,8 @@ class RegularFuncWrapper:
         self.func = func
 
     def __call__(self, inputs, values=None, **kwargs):
-        # `is_foreach_norm` is a test specific keyword argument
-        is_foreach_norm = kwargs.pop("is_foreach_norm", False)
+        # `is_foreach_global_norm` is a test specific keyword argument
+        is_foreach_global_norm = kwargs.pop("is_foreach_global_norm", False)
         if values is not None:
             assert len(inputs) == 3
             if isinstance(values, Number):
@@ -60,7 +60,7 @@ class RegularFuncWrapper:
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
         ret = [self.func(*i, **kwargs) for i in zip(*inputs)]
-        if not is_foreach_norm:
+        if not is_foreach_global_norm:
             return ret
         else:
             dtype = inputs[0][0].dtype
@@ -438,7 +438,7 @@ class TestForeach(TestCase):
                         n_expected_cudaLaunchKernels = N
 =======
 
-        def calc_n_expected_cudaLaunchKernels(n, ord, dtype, is_fastpath, is_foreach_norm):
+        def calc_n_expected_cudaLaunchKernels(n, ord, dtype, is_fastpath, is_foreach_global_norm):
             if not is_fastpath:
                 return 0
             # note (mkozuki): Currently, only `ord` of 1 & 2 can go to the fast path, a.k.a. multi tensor apply
@@ -448,7 +448,7 @@ class TestForeach(TestCase):
                 return 3
 >>>>>>> f99dc87d53... fix n_expected_cudaLaunchKernels
             else:
-                if opinfo.name == "_foreach_norm":
+                if is_foreach_global_norm:
                     # for each tensor, slow path generally calculates the norm, applies power of ord, and accumulates before
                     # the epilogue, i.e. taking the summation and root (and do optional type cast).
                     # If ord is either 0 or 1, power operation for each input and root operation of the epilogue are skipped.
@@ -461,16 +461,16 @@ class TestForeach(TestCase):
                     n_expected_cudaLaunchKernels = n
                 return n_expected_cudaLaunchKernels
 
-        is_foreach_norm = opinfo.name == "_foreach_norm"
+        is_foreach_global_norm = opinfo.name == "_foreach_global_norm"
         for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
             low, high = (1.0, 2.0) if ord == -2 else (0, 0.1)
             num_tensors = N
             inputs = opinfo.sample_inputs(device, dtype, num_tensors, noncontiguous=not is_fastpath, low=low, high=high),
             if dtype == torch.float16 and ord == 0:
                 inputs = [[(t > high - 1e-2).to(dtype) for t in tensors] for tensors in inputs]
-            n_expected_cudaLaunchKernels = calc_n_expected_cudaLaunchKernels(num_tensors, ord, dtype, is_fastpath, is_foreach_norm)
+            n_expected_cudaLaunchKernels = calc_n_expected_cudaLaunchKernels(num_tensors, ord, dtype, is_fastpath, is_foreach_global_norm)
             op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-            ref_output = ref(inputs, ord=ord, is_foreach_norm=opinfo.name == "_foreach_norm")
+            ref_output = ref(inputs, ord=ord, is_foreach_global_norm=is_foreach_global_norm)
             actual_output = op(inputs, self.is_cuda, is_fastpath, ord=ord)
             self.assertEqual(ref_output, actual_output)
 
@@ -703,7 +703,7 @@ class TestForeach(TestCase):
     @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=(torch.half, torch.bfloat16))
     def test_foreach_l2_large_value_input(self, device, dtype, op):
-        is_foreach_norm = op.name == "_foreach_norm"
+        is_foreach_global_norm = op.name == "_foreach_global_norm"
         ord, N = 2, 10
         max_value = torch.finfo(dtype).max
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
@@ -712,24 +712,22 @@ class TestForeach(TestCase):
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op, 3)
         actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord)
-        if is_foreach_norm:
+        if is_foreach_global_norm:
             expect = ref_fn.func(torch.cat([t.view(-1) for t in inputs[0]]), ord=ord)
         else:
-            expect = ref_fn(inputs, ord=ord, is_foreach_norm=is_foreach_norm)
+            expect = ref_fn(inputs, ord=ord, is_foreach_global_norm=is_foreach_global_norm)
 
         if dtype == torch.float16:
             # making sure the reference L2 norm values are in the range of FP16.
-            if not is_foreach_norm:
+            if not is_foreach_global_norm:
                 self.assertFalse(any(torch.isinf(e) for e in expect))
             else:
                 self.assertFalse(torch.isinf(expect))
         else:
-            if not is_foreach_norm:
+            if not is_foreach_global_norm:
                 self.assertTrue(all(torch.isinf(e) for e in expect))
             else:
                 self.assertTrue(torch.isinf(expect))
-        if is_foreach_norm:
-            print(expect, actual)
         self.assertEqual(expect, actual, equal_nan=False)
 
 

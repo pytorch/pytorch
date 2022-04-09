@@ -6661,7 +6661,7 @@ class ForeachFuncInfo(OpInfo):
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
 
-        if name in ("norm_per_tensor", "norm"):
+        if name in ("norm", "global_norm"):
             self.ref = torch.linalg.vector_norm
 
 
@@ -10085,15 +10085,11 @@ foreach_minmax_op_db: List[ForeachFuncInfo] = [
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "norm",
-        dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
     ),
     ForeachFuncInfo(
-        "norm",
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-    ),
-    ForeachFuncInfo(
-        "norm_per_tensor",
+        "global_norm",
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
     ),
