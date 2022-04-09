@@ -1,9 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/WrapDimUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
-#include <c10/core/DispatchKey.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/gelu.h>
+#include <ATen/ops/nested_tensor_native.h>
+#include <ATen/ops/ones_native.h>
+#include <ATen/ops/relu.h>
+#include <ATen/ops/split_with_sizes.h>
+#include <ATen/ops/stack_native.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/unbind_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 namespace at {
 namespace native {

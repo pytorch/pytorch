@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex.h>
 #include <c10/macros/Macros.h>
 
 namespace at {

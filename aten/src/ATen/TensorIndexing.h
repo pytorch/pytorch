@@ -2,14 +2,19 @@
 
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <ATen/core/TensorBody.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/Functions.h>
 #include <ATen/ScalarOps.h>
 
-// TODO: try to remove this
-// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/alias.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <ATen/core/List.h>
 

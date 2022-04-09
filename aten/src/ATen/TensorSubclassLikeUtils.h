@@ -1,5 +1,6 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 
 namespace at {
 
