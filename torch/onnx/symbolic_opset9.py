@@ -12,7 +12,12 @@ from functools import partial
 from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType, quantized_args
+from torch.onnx.symbolic_helper import (parse_args,
+                                        _parse_arg,
+                                        _unimplemented,
+                                        ScalarType,
+                                        quantized_args,
+                                        args_have_same_dtype)
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -1285,7 +1290,7 @@ def log_softmax(g, input, dim, dtype=None):
 
 @parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i")
 def _convolution(g, input, weight, bias, stride, padding, dilation,
-                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32):
+                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32=None):
     weight_size = sym_help._get_tensor_sizes(weight)
     try:
         kernel_shape = weight_size[2:]
@@ -1358,6 +1363,14 @@ def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, gr
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     sym_help.check_training_mode(training, "batch_norm")
+
+    if torch.is_autocast_enabled() and \
+            not args_have_same_dtype([input, weight, bias, running_mean, running_var]) and \
+            sym_help._export_onnx_opset_version < 15:
+        return sym_help._onnx_opset_unsupported_detailed("BatchNormalization", 9, 15,
+                                                         "All input tensors must have the same `dtype`."
+                                                         " Turn off Autocast or export using opset version 15.")
+
     weight, bias, running_mean, running_var = sym_help._batchnorm_helper(g, input, weight, bias, running_mean, running_var)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
@@ -1529,6 +1542,36 @@ def index_copy(g, self, dim, index, source):
     return scatter(g, self, dim, expanded_index, source)
 
 
+@parse_args("v", "v", "b", "b")
+def bucketize(g, self, boundaries, out_int32=False, right=False):
+    out_type = torch.onnx.TensorProtoDataType.INT64
+    if out_int32:
+        out_type = torch.onnx.TensorProtoDataType.INT32
+    # A tensor expanded_boundaries is created such that it
+    # contains a copy of boundaries for each element of self.
+    new_shape = g.op("Concat",
+                     g.op("Shape", boundaries), g.op("Shape", self),
+                     axis_i=0)
+    # Unsqueeze step is performed to respect ONNX's numpy style broadcasting for comparison ops
+    # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
+    unsqueeze_axes = list(range(1, sym_help._get_tensor_rank(self) + 1))
+    expanded_boundaries = expand(g, sym_help._unsqueeze_helper(g, boundaries, unsqueeze_axes),
+                                 new_shape, None)
+    # Compare each element of self to boundaries to get a tensor
+    # with leading 1s and trailing 0s.
+    # e.g., 4 > [1, 3, 4] = [1, 1, 0]
+    # The index of the last 1 is the bucket where the element should go.
+    if right:
+        cond = ge(g, self, expanded_boundaries)
+    else:
+        cond = gt(g, self, expanded_boundaries)
+    cond_out = g.op("Cast", cond, to_i=out_type)
+    # Sum to get the number of 1s corresponding to each element,
+    # which is the same as the bucket index.
+    # e.g., sum(4 > [1, 3, 4]) = sum([1, 1, 0]) = 2
+    return sym_help._reducesum_helper(g, cond_out, axes_i=[0], keepdims_i=0)
+
+
 def type_as(g, self, other):
     self_dtype = sym_help._try_get_scalar_type(self)
     other_dtype = sym_help._try_get_scalar_type(other)
@@ -1669,6 +1712,16 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
+
+
+@parse_args("v", "is", "i")
+def amax(g, self, dim, keepdim):
+    return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
+
+
+@parse_args("v", "is", "i")
+def amin(g, self, dim, keepdim):
+    return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
 def exp(g, self):
