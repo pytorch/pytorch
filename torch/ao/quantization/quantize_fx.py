@@ -449,12 +449,6 @@ def prepare_fx(
                torch.nn.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
             },
 
-            # Additional quantization patterns
-            "additional_quant_pattern": {
-               torch.nn.Conv2d: ConvReluQuantizeHandler,
-               (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
-            }
-
             # By default, inputs and outputs of the graph are assumed to be in
             # fp32. Providing `input_quantized_idxs` will set the inputs with the
             # corresponding indices to be quantized. Providing
