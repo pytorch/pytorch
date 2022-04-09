@@ -11,6 +11,7 @@
 
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <c10/util/MathConstants.h>
 
