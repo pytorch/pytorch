@@ -120,7 +120,7 @@ struct _cuda_scatter_gather_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
-    int64_t numel,
+    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
@@ -342,7 +342,7 @@ struct _cuda_scatter_fill_internal_kernel {
     scalar_t src_val,
     int64_t index_size,
     int64_t index_stride,
-    int64_t numel,
+    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
