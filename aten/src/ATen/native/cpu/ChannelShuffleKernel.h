@@ -1,10 +1,10 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#pragma once
 #include <ATen/native/DispatchStub.h>
 
-#pragma once
+namespace at {
+class Tensor;
 
-namespace at { namespace native {
+namespace native {
 
 using channel_shuffle_fn = void(*)(Tensor&, const Tensor&, int64_t);
 DECLARE_DISPATCH(channel_shuffle_fn, channel_shuffle_kernel);

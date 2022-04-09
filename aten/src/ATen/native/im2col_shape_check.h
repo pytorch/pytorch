@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/div_rtn.h>
 
 namespace at {
 namespace native {
