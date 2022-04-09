@@ -1,7 +1,33 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_autocast_to_full_precision_native.h>
+#include <ATen/ops/_autocast_to_reduced_precision_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_to_copy.h>
+#include <ATen/ops/_to_copy_native.h>
+#include <ATen/ops/_to_cpu_native.h>
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/to_dense_backward_native.h>
+#include <ATen/ops/to_dense_native.h>
+#include <ATen/ops/to_mkldnn_backward_native.h>
+#include <ATen/ops/to_native.h>
+#include <ATen/ops/to_sparse_csr_native.h>
+#include <ATen/ops/view_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+
+#endif
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
