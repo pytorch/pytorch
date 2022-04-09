@@ -48,6 +48,10 @@ while "next" in response.links.keys():
     response = requests.get(response.links["next"]["url"], headers=REQUEST_HEADERS)
     jobs.extend(response.json()["jobs"])
 
+# Sort the jobs list by start time, in descending order. We want to get the most
+# recently scheduled job on the runner.
+jobs.sort(key=lambda job: job["started_at"], reverse=True)
+
 for job in jobs:
     if job["runner_name"] == args.runner_name:
         print(job["id"])
