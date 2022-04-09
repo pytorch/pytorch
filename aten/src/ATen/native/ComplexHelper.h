@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
 // WARNING: this header contains non-inline functions and should be only
