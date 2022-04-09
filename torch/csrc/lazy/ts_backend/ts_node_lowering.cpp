@@ -14,6 +14,8 @@
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
+#include <torch/csrc/lazy/core/view_ops/diagonal.h>
+#include <torch/csrc/lazy/core/view_ops/diagonal_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/narrow.h>
 #include <torch/csrc/lazy/core/view_ops/narrow_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/permute.h>
@@ -132,6 +134,14 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     if (node->op().op == at::aten::view) {
       return LowerView(torch::lazy::NodeCast<torch::lazy::View>(
           node, torch::lazy::OpKind(at::aten::view)));
+    }
+    if (node->op().op == at::aten::diagonal) {
+      return LowerDiagonal(torch::lazy::NodeCast<torch::lazy::Diagonal>(
+          node, torch::lazy::OpKind(at::aten::diagonal)));
+    }
+    if (node->op() == *torch::lazy::ltc_diagonal_view_update) {
+      return LowerDiagonalViewUpdate(torch::lazy::NodeCast<torch::lazy::DiagonalViewUpdate>(
+          node, *torch::lazy::ltc_diagonal_view_update));
     }
     if (node->op() == *torch::lazy::ltc_device_data) {
       const torch::lazy::DeviceData* device_data_node =
@@ -344,6 +354,39 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->output_size());
     return LowerBuiltin(at::aten::reshape, arguments);
+  }
+
+  TSOpVector LowerDiagonal(const Diagonal* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(node->offset());
+    arguments.emplace_back(node->dim1());
+    arguments.emplace_back(node->dim2());
+    return LowerBuiltin(node, arguments);
+  }
+
+  // FIXME(alanwaketan): One day we should code-gen all view ops, or at
+  // least move the lowering to the IR nodes.
+  TSOpVector LowerDiagonalViewUpdate(const DiagonalViewUpdate* node) {
+    // Since we promise the backends that we never generate any aliased
+    // inplace update IR, therefore we clone the target first and then
+    // update the clone inplace instead. Since the clone is transient,
+    // it will never be aliased, and therefore it's safe.
+    auto* destination = GenerateClone(loctx()->GetOutputOp(node->operand(0)));
+
+    // Replay the diagonal.
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(destination);
+    arguments.emplace_back(node->offset());
+    arguments.emplace_back(node->dim1());
+    arguments.emplace_back(node->dim2());
+    auto diag = LowerBuiltin(at::aten::diagonal, arguments);
+
+    // Update the replayed diagonal view with the input.
+    GenerateCopy(diag.front(), loctx()->GetOutputOp(node->operand(1)));
+
+    // Destination's diag view should be updated.
+    return {destination};
   }
 
   torch::jit::Value* GenerateClone(torch::jit::Value* val) {
