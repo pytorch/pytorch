@@ -77,8 +77,8 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
-          # Convert refs/tags/v1.12.0rc3 into 1.12
-          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
+          # Convert refs/tags/v1.12.0rc3 into 1.12.0rc3
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v(.*) ]]; then
             target="${BASH_REMATCH[1]}"
           else
             target="master"
