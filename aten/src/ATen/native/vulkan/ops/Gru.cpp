@@ -1,6 +1,17 @@
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/gru.h>
+#include <ATen/ops/sigmoid.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/tanh.h>
+#endif
+
 namespace at {
 namespace native {
 namespace vulkan {
