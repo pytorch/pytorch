@@ -4439,6 +4439,27 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertGraphContainsExactly(t_jit_3.graph_for(x, y), FUSION_GUARD, 0)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_clamp(self):
+        x = torch.tensor([1.,float('inf'), 2., float('nan'), float('-inf')], device="cuda")
+
+        def clamp_max(x):
+            return x.clamp(max = 1.5)
+
+        def clamp_min_max(x):
+            return x.clamp(min=1.5)
+
+        def clamp_min(x):
+            return x.clamp(min=1., max = 3.)
+
+        with nvfuser_singleton_fusion(True):
+            for t in [clamp_max, clamp_min, clamp_min_max]:
+                t_jit = torch.jit.script(t)
+                self._run_helper(t_jit, t, x)
+                print(t_jit.graph_for(x))
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     def test_register_fuser(self):
         self.assertFalse(torch._C._jit_set_nvfuser_enabled(True))
         self.assertTrue(torch._C._jit_nvfuser_enabled())

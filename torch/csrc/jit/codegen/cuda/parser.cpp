@@ -1138,14 +1138,34 @@ class IrParser {
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
-            Val* low = value_map.count(node->inputs()[1]->unique()) != 0
+            bool has_low = value_map.count(node->inputs()[1]->unique()) != 0;
+            Val* low = has_low
                 ? *value_map[node->inputs()[1]->unique()]
                 : IrBuilder::create<Double>(std::numeric_limits<float>::min());
-            Val* high = value_map.count(node->inputs()[2]->unique()) != 0
+            bool has_high = value_map.count(node->inputs()[2]->unique()) != 0;
+            Val* high = has_high
                 ? *value_map[node->inputs()[2]->unique()]
                 : IrBuilder::create<Double>(std::numeric_limits<float>::max());
 
-            auto out = clamp(operand, low, high);
+            Val* out = nullptr;
+            if (has_low && has_high) {
+              out = clamp(operand, low, high);
+            } else if (has_low) {
+              out = binaryOp(
+                  BinaryOpType::Max,
+                  operand,
+                  low,
+                  TypePromotion::default_op_config);
+            } else if (has_high) {
+              out = binaryOp(
+                  BinaryOpType::Min,
+                  operand,
+                  high,
+                  TypePromotion::default_op_config);
+            } else {
+              TORCH_INTERNAL_ASSERT(false,
+                  "clamp: At least one of 'min' or 'max' must not be None");
+            }
             value_map.emplace(node->output()->unique(), out);
           },
           isInputNonSizeZeroTensor,
