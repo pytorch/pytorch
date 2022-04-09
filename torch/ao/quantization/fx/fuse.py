@@ -16,12 +16,14 @@ from .match_utils import (
 )
 from .pattern_utils import (
     get_default_fusion_patterns,
+    sorted_patterns_dict,
 )
 
 from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
 from .backend_config.utils import get_fuser_method_mapping
 from .backend_config.utils import get_fusion_pattern_to_root_node_getter
 from .backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
+from .backend_config import get_native_backend_config_dict
 
 from .fusion_patterns import *  # noqa: F401,F403
 
@@ -52,11 +54,16 @@ def fuse(
         fuser_method_mapping = None
         fusion_pattern_to_root_node_getter = {}
         fusion_pattern_to_extra_inputs_getter = {}
+        for pattern, fuse_handler_cls in get_fusion_pattern_to_fuse_handler_cls(get_native_backend_config_dict()).items():
+            fusion_pattern_to_fuse_handler_cls[pattern] = fuse_handler_cls
     else:
         fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
         fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
         fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
         fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
+
+    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(fusion_pattern_to_fuse_handler_cls)
+
     # find fusion
     fusion_pairs = _find_matches(
         input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
