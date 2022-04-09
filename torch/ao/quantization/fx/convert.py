@@ -358,7 +358,7 @@ def convert_weighted_module(
         this conversion if the node is not observed
     """
     original_module = modules[str(node.target)]
-    qconfig = original_module.qconfig
+    qconfig: QConfigAny = original_module.qconfig  # type: ignore[assignment]
     weight_post_process = None
     qat_module_classes = get_qat_module_classes(backend_config_dict)
 
@@ -421,8 +421,8 @@ def convert_weighted_module(
             if hasattr(float_module, wn) and wn.startswith("weight"):
                 weight = getattr(float_module, wn)
                 weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
-                if weight_post_process.dtype == torch.qint8:
-                    weight_post_process(weight)
+                if weight_post_process.dtype == torch.qint8:  # type: ignore[union-attr]
+                    weight_post_process(weight)  # type: ignore[operator, misc]
                 wq_or_wq_dict[wn] = get_qparam_dict(weight_post_process)
     else:
         # weight_post_process is None means the original module is not a QAT module
@@ -444,7 +444,7 @@ def convert_weighted_module(
     assert ref_qmodule_cls is not None, f"No reference quantized module class configured for {type(float_module)}"
     ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
-        fused_module[0] = ref_qmodule
+        fused_module[0] = ref_qmodule  # type: ignore[operator]
     else:
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, ref_qmodule)
