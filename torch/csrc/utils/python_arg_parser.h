@@ -63,6 +63,7 @@
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -272,7 +273,9 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function(){
-  return !this->signature.overloaded_args.empty();
+  return !this->signature.overloaded_args.empty() ||
+      (torch::torch_function_enabled() &&
+       at::impl::PythonTorchFunctionTLS::get_mode());
 }
 
 inline std::string PythonArgs::get_func_name(){
@@ -797,7 +800,17 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* kwargs=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
 
 // Used for functions created in C++, e.g., C++ custom op, which doesn't use PythonArgParser to get overloaded_args.
-auto TORCH_API handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name = "__torch_function__") -> PyObject*;
+enum class TorchFunctionName { TorchFunction, TorchDispatch };
+
+auto TORCH_API handle_torch_function_no_python_arg_parser(
+    at::ArrayRef<py::handle> overloaded_args,
+    PyObject* args,
+    PyObject* kwargs,
+    const char* func_name,
+    PyObject* torch_api_function,
+    const char* module_name,
+    TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
+    -> PyObject*;
 
 // Used for getters of Tensor properties
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;
