@@ -778,7 +778,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v,
             add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None,
             need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None,
-            v_proj_weight=None, static_k=None, static_v=None: -1),
+            v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None: -1),
         torch.nn.functional.multi_margin_loss: (lambda input, target, p=1, margin=1.0, weight=None, size_average=None,
                                                 reduce=None, reduction='mean': -1),
         torch.nn.functional.multilabel_margin_loss: (lambda input, target, size_average=None, reduce=None,
@@ -1314,6 +1314,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
+    # If torch function is not enabled, there are no overloaded types
+    if not torch._C._is_torch_function_enabled():
+        return []
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types: Set[Type] = set()
     overloaded_args: List[Any] = []
@@ -1425,8 +1428,11 @@ def handle_torch_function(
 
 has_torch_function = _add_docstr(
     _has_torch_function,
-    r"""Check for __torch_function__ implementations in the elements of an iterable.
-    Considers exact ``Tensor`` s and ``Parameter`` s non-dispatchable.
+    r"""Check for __torch_function__ implementations in the elements of an iterable
+    or if a __torch_function__ mode is enabled.  Considers exact ``Tensor`` s
+    and ``Parameter`` s non-dispatchable.  Use this to guard a call to
+    :func:`handle_torch_function`; don't use it to test if something
+    is Tensor-like, use :func:`is_tensor_like` instead.
     Arguments
     ---------
     relevant_args : iterable
