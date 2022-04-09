@@ -449,11 +449,6 @@ def prepare_fx(
                torch.nn.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
             },
 
-            # Additional fusion patterns
-            "additional_fusion_pattern": {
-               (torch.nn.BatchNorm2d, torch.nn.Conv2d): ConvReluFusionhandler
-            },
-
             # Additional quantization patterns
             "additional_quant_pattern": {
                torch.nn.Conv2d: ConvReluQuantizeHandler,
