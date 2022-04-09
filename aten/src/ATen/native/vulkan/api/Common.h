@@ -2,7 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <utility>
+#include <c10/util/Exception.h>
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
