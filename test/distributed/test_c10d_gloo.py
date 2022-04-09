@@ -1136,8 +1136,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [[torch.tensor([i + j]) for j in range(self.world_size)]]
             for i in range(len(inputs))
         ]
+        input_holder = {}
         for i in range(len(inputs)):
-            fut = pg.allgather(outputs[i], [fn(inputs[i])]).get_future()
+            # Note that this works around the data race discussed in
+            # https://github.com/pytorch/pytorch/issues/75529, but we should
+            # actually be able to pass the list directly into allgather when
+            # that race is fixed.
+            input_holder[i] = [fn(inputs[i])]
+            fut = pg.allgather(outputs[i], input_holder[i]).get_future()
             future_handles.append(fut)
 
         for i, future_handle in enumerate(future_handles):
