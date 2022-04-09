@@ -1372,8 +1372,6 @@ def prepare(
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
 
-    additional_quant_patterns = \
-        prepare_custom_config_dict.get("additional_quant_pattern", {})
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
     # {
@@ -1387,7 +1385,7 @@ def prepare(
     # TODO: rename to pattern_to_quantize_handler
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
-        patterns = get_native_quant_patterns(additional_quant_patterns)
+        patterns = get_native_quant_patterns({})
         root_node_getter_mapping = {}
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
