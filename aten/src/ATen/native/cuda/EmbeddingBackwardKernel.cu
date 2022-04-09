@@ -1,17 +1,24 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
-#include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/cuda/SortingCommon.cuh>
-
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <c10/macros/Macros.h>
 
 #if CUB_SUPPORTS_UNIQUE_BY_KEY()
 #include <thrust/iterator/counting_iterator.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at {
