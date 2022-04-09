@@ -18,7 +18,7 @@ from torch.overrides import (
 import torch.utils.hooks as hooks
 
 
-def _handle_torch_function_and_handle_torch_function_and_wrap_type_error_to_not_implemented(f):
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
     # functools.wraps doesn't work well with methods in python 2
     method_assignments = ('__name__', '__doc__')
     assigned = functools.WRAPPER_ASSIGNMENTS
