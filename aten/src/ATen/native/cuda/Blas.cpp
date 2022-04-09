@@ -1,8 +1,31 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/baddbmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/vdot_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -106,7 +129,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]

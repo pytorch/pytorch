@@ -1,12 +1,15 @@
 # Owner(s): ["module: nn"]
 
 from functools import partial
-from itertools import product
+from itertools import product, chain
 import unittest
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn import CrossEntropyLoss
 from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
@@ -159,7 +162,7 @@ class TestExpandedWeightFunctional(TestCase):
             for (result_grad, expected_grad) in zip(expanded_weight_grad, per_sample_grad):
                 if result_grad is None:
                     result_grad = torch.zeros_like(expected_grad)
-                assert torch.allclose(result_grad, expected_grad), f"Got {result_grad}, expected {expected_grad}"
+                self.assertEqual(result_grad, expected_grad)
 
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_unsupported_expand_weights(self, device, dtype, op):
@@ -185,10 +188,16 @@ class TestExpandedWeightFunctional(TestCase):
     def test_expanded_weight_forward(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in supported_inputs(op, sample_inputs):
+            if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
+                sample_input = SampleInput(sample_input.args[0].clone(),
+                                           args=(sample_input.input.clone(),),
+                                           kwargs=sample_input.kwargs)
+                if "cuda" in device and "max_norm" in sample_input.kwargs and "padding_idx" in sample_input.kwargs:
+                    self.skipTest("embedding is non-determinstic in this case, see issue #74679")
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
-            expanded_weight_result = op(ew_input, *ew_args, **ew_kwargs)
-            normal_result = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
+            normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result)
 
     def test_expanded_weight_error(self, device):
@@ -198,10 +207,63 @@ class TestExpandedWeightFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Expanded Weights encountered but cannot handle function"):
             torch.add(sample_input, ExpandedWeight(sample_weight, batch_size))
 
+    def test_small_model(self, device):
+        def convnet(num_classes):
+            return nn.Sequential(
+                nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(128, num_classes, bias=True),
+            )
+
+        batch_size = 32
+        model = convnet(10).to(device)
+        input = torch.randn([batch_size, 3, 28, 28], device=device)
+        targets = torch.randint(0, 10, (batch_size,), device=device)
+        criterion = CrossEntropyLoss(reduction='sum')  # use a loss that doesn't average across the batch to test in a for loop
+        result = call_for_per_sample_grads(model, batch_size, input)
+        loss = criterion(result, targets)
+        loss.backward()
+        result = []
+        for weight in model.parameters():
+            result.append(weight.grad_sample)
+            del weight.grad_sample
+
+        expected = []
+        for i in range(batch_size):
+            loss = criterion(model(input[i].unsqueeze(0)), targets[i].unsqueeze(0))
+            expected.append(torch.autograd.grad(loss, model.parameters(), torch.ones_like(loss)))
+
+        expected = [torch.stack(grad) for grad in zip(*expected)]
+        for (res, exp) in zip(result, expected):
+            self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
+
+    def test_group_norm_error(self, device):
+        # group norm has to call native_group_norm. This checks that it hits the same errors
+        # that normal group norm would
+
+        N = 3
+        C = 5
+        inp = torch.randn(N, C)
+        with self.assertRaisesRegex(RuntimeError, r"Expected number of channels in input to be divisible"):
+            F.group_norm(inp, 2)  # 5 is not divisible by 2
 
 class TestExpandedWeightModule(TestCase):
     def _do_test(self, module, input):
         batch_size = input.shape[0]
+        diff_input = input.dtype == torch.float or input.dtype == torch.double
+        if diff_input:
+            input.requires_grad_()
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager
             actual_res = call_for_per_sample_grads(module, batch_size, input).sum()
@@ -210,17 +272,25 @@ class TestExpandedWeightModule(TestCase):
             for param in module.parameters():
                 actual_grads.append(param.grad_sample)
                 del param.grad_sample
+            if diff_input:
+                actual_grads.append(input.grad.clone())
+                input.grad = torch.zeros_like(input.grad)
 
             # get per sample grads with a for loop
-            expected_res = torch.tensor(0.)
+            expected_res = torch.tensor(0., device=input.device, dtype=torch.double)
             expected_grads = []
             for i in range(batch_size):
-                res = module(input[i].unsqueeze(0)).sum()
-                expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
+                input_slice = input[i]
+                diff_params = module.parameters()
+                if diff_input:
+                    diff_params = chain(diff_params, (input_slice,))
+                res = module(input_slice.unsqueeze(0)).sum()
+                out_grads = torch.autograd.grad(res, diff_params, torch.ones_like(res), allow_unused=True)
+                expected_grads.append(out_grads)
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
         self.assertEqual(actual_res, expected_res)
-        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        [self.assertEqual(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def _do_test_multi_input(self, module, input):
         class TestModule(nn.Module):
@@ -232,6 +302,9 @@ class TestExpandedWeightModule(TestCase):
                 return self.module(input) + self.module(input)
 
         batch_size = input.shape[0]
+        diff_input = input.dtype == torch.float or input.dtype == torch.double
+        if diff_input:
+            input.requires_grad_()
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager, calling .backward() twice
             test_module = TestModule(module)
@@ -241,14 +314,24 @@ class TestExpandedWeightModule(TestCase):
             for param in module.parameters():
                 actual_grads.append(param.grad_sample)
                 del param.grad_sample
+            if diff_input:
+                actual_grads.append(input.grad.clone())
+                input.grad = torch.zeros_like(input.grad)
+
 
             # get per sample grads with a for loop, running over the input twice
             expected_grads = []
             for i in range(batch_size):
-                res = module(input[i].unsqueeze(0)).sum()
-                expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
-            expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        assert [torch.allclose(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+                input_slice = input[i]
+                diff_params = module.parameters()
+                if diff_input:
+                    diff_params = chain(diff_params, (input_slice,))
+                res = module(input_slice.unsqueeze(0)).sum()
+                out_grads = torch.autograd.grad(res, diff_params, torch.ones_like(res), allow_unused=True)
+                expected_grads.append(out_grads)
+        expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
+        expected_grads = tuple(expected_grad for expected_grad in expected_grads if expected_grad is not None)
+        assert [self.assertEqual(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def test_per_sample_api_failing(self):
         module = nn.Linear(10, 10)
@@ -266,23 +349,28 @@ class TestExpandedWeightModule(TestCase):
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
+        self.test_cpu = kwargs.get('test_cpu', True)
+        self.test_cuda = kwargs.get('test_cuda', True)
         super().__init__(*args, **kwargs)
 
     @property
     def constructor_args(self):
         return self._get_arg('constructor_args', False)
 
-    def test_context_manager(self, test_case):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
+    def test_context_manager(self, test_case, device):
+        kwargs = {'device': device, 'dtype': torch.double}
+        module = self.constructor(*self.constructor_args).to(**kwargs)
+        if 'Embedding' in self.get_name():
+            kwargs['dtype'] = torch.long
+        input = self._get_input().to(**kwargs)
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest("Can't get per sample gradients when no batch dim or batch dim is 0")
         if self.constructor == torch.nn.Linear and len(input.shape) == 1:
             raise unittest.SkipTest("Can't get per sample gradients for input of rank 1")
         test_case._do_test(module, input)
 
-    def test_context_manager_multiple_inputs(self, test_case):
-        module = self.constructor(*self.constructor_args)
+    def test_context_manager_multiple_inputs(self, test_case, device):
+        module = self.constructor(*self.constructor_args).to(device)
         input = self._get_input()
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest("Can't get per sample gradients when no batch dim or batch dim is 0")
@@ -292,7 +380,7 @@ class ContextManagerTests(TestBase):
 
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
-supported_modules = ['Linear']
+supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding', 'LayerNorm', 'GroupNorm']
 supported_tests = [t for t in module_tests + new_module_tests if 'module_name' in t and t['module_name'] in supported_modules]
 for test_param in supported_tests:
     if 'constructor' not in test_param:
@@ -308,9 +396,14 @@ for test_param in supported_tests:
         raise RuntimeError('Found two tests with the same name: ' + test_name)
     if decorator is not None:
         fn = decorator(fn)
-    setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self))
-    setattr(TestExpandedWeightModule, test_name_multi_input,
-            lambda self, test=test: test.test_context_manager_multiple_inputs(self))
+    if test.test_cpu:
+        setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
+        setattr(TestExpandedWeightModule, test_name_multi_input,
+                lambda self, test=test: test.test_context_manager_multiple_inputs(self, 'cpu'))
+    if TEST_CUDA and test.test_cuda:
+        # since this checks derivatives, only use double for precision
+        setattr(TestExpandedWeightModule, test_name + '_cuda_double',
+                lambda self, test=test: test.test_context_manager(self, 'cuda'))
 
 # ------------- HELPER FUNCTIONS -----------------
 
@@ -340,12 +433,13 @@ def supported_inputs(op, sample_inputs, supported_inputs=True):
     operations that would cause inter-batch operations. Removes all of the cases it cannot deal with
     """
     def filter_fn(input):
+        convolutions = ["nn.functional.conv1d", "nn.functional.conv2d", "nn.functional.conv3d"]
         if op.name == "nn.functional.linear":
             is_supported_input = len(input.input.shape) > 1  # input of rank 1 means no batch dim
         elif op.name == "nn.functional.layer_norm":
             normalized_shape = input.args[0]
             is_supported_input = input.input.shape != normalized_shape  # would cause inter-batch operations
-        elif op.name == "nn.functional.conv2d":
+        elif op.name in convolutions:
             # currently can't deal with padding computation on Python level
             is_supported_input = 'padding' not in input.kwargs or not isinstance(input.kwargs['padding'], str)
         elif op.name == "nn.functional.embedding":

@@ -711,6 +711,7 @@ static PyMethodDef TorchMethods[] = {
   {"_unset_default_mobile_cpu_allocator", THPModule_unsetDefaultMobileCPUAllocator, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", THPModule_disable_torch_function, METH_VARARGS, nullptr},
+  {"_disabled_torch_dispatch_impl", THPModule_disable_torch_dispatch, METH_VARARGS, nullptr},
   {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
   {"_has_torch_function_unary", THPModule_has_torch_function_unary, METH_O, nullptr},
   {"_has_torch_function_variadic", MAYBE_WRAP_FASTCALL(THPModule_has_torch_function_variadic), MAYBE_METH_FASTCALL, nullptr},
@@ -1067,6 +1068,8 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("DisableTorchFunction", (PyObject*)THPModule_DisableTorchFunctionType(), /* incref= */ false));
   torch::set_disabled_torch_function_impl(PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
+  torch::set_disabled_torch_dispatch_impl(PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
+  ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
   return module;
   END_HANDLE_TH_ERRORS
 }

@@ -46,7 +46,7 @@ class TestApply(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     def check_weights(self, fsdp, expected_tensor_fn, check):
-        with fsdp._summon_full_params(recurse=True):
+        with fsdp.summon_full_params(recurse=True):
             linear_modules = [
                 module for module in fsdp.modules() if type(module) == nn.Linear
             ]
@@ -95,7 +95,7 @@ class TestApply(FSDPTest):
         summon context, appropriate error is raised.
         """
         transformer = self._get_wrapped_model(group=self.process_group).cuda(self.rank)
-        with transformer._summon_full_params(recurse=True):
+        with transformer.summon_full_params(recurse=True):
             with self.assertRaisesRegex(ValueError, "expected to be in states"):
                 transformer.apply(self._init_linear_weights)
 

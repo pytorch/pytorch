@@ -48,20 +48,13 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
         return text[text.startswith(prefix) and len(prefix):]
 
     # Find the line and line number containing the function definition
-    idx = None
     for i, l in enumerate(sourcelines):
         if l.lstrip().startswith("def"):
             idx = i
             break
-
-    # This will happen when the function is a lambda- we won't find "def" anywhere in the source
-    # lines in that case. Currently trying to JIT compile a lambda will throw an error up in
-    # `parse_def()`, but we might want to handle this case in the future.
-    if idx is None:
-        return sourcelines
+    fn_def = sourcelines[idx]
 
     # Get a string representing the amount of leading whitespace
-    fn_def = sourcelines[idx]
     whitespace = fn_def.split("def")[0]
 
     # Add this leading whitespace to all lines before and after the `def`
@@ -105,10 +98,8 @@ def parse_def(fn):
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
-
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
-
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, True, fn.__name__)
     return ParsedDef(py_ast, ctx, source, filename, file_lineno)

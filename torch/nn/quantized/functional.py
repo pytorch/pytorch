@@ -376,7 +376,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool1d(input, kernel_size, stride, padding,
-                                          dilation, ceil_mode, return_indices)
+                                          dilation, ceil_mode=ceil_mode, return_indices=return_indices)
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
@@ -392,7 +392,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
-                                          dilation, ceil_mode, return_indices)
+                                          dilation, ceil_mode=ceil_mode, return_indices=return_indices)
 
 def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
     r"""celu(input, scale, zero_point, alpha=1.) -> Tensor

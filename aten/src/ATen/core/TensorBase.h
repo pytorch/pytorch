@@ -370,6 +370,12 @@ class TORCH_API TensorBase {
     return impl_->is_cuda();
   }
 
+  /// Returns if a `Tensor` has IPU backend.
+  bool is_ipu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ipu();
+  }
+
   /// Returns if a `Tensor` has XPU backend.
   bool is_xpu() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -460,6 +466,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
+  }
+
+  // Returns if a `Tensor` is a NestedTensor.
+  bool is_nested() const {
+    return impl_->is_nested();
   }
 
   /// If a tensor is a quantized tensor, returns its quantizer
@@ -866,7 +877,7 @@ struct MaybeOwnedTraits<at::TensorBase> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

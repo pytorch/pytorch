@@ -37,9 +37,7 @@ class TORCH_API Function : public torch::jit::Function {
   bool append_operator(
       const std::string& name,
       const std::string& overload_name,
-      const c10::optional<int>& num_specified_args,
-      int64_t model_version); /* TODO: T90339189 deprecate all v3 when v3 models
-                                are removed */
+      const c10::optional<int>& num_specified_args);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
   void append_function(mobile::Function& func);
@@ -73,8 +71,7 @@ class TORCH_API Function : public torch::jit::Function {
 
 c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
     c10::OperatorName opname,
-    c10::optional<int> num_specified_args,
-    int64_t model_version);
+    c10::optional<int> num_specified_args);
 
 } // namespace mobile
 } // namespace jit

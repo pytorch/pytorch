@@ -1,10 +1,16 @@
 #pragma once
 
-#include <ATen/Functions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 // Different combinations of row, col, and offset can lead to two cases:
@@ -95,7 +101,7 @@ struct ZeroTensorAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t /*nbytes*/) const override {
     return {nullptr, nullptr, &deleter, device_};
   }
   DeleterFnPtr raw_deleter() const override {
