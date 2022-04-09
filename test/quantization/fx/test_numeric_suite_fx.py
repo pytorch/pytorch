@@ -693,11 +693,17 @@ class TestFXGraphMatcher(QuantizationTestCase):
                     f"{base_op} not in sets of related ops")
             else:
                 # torch.sum does not have quantized equivalents
-                if base_op == torch.sum:
+                if base_op in [
+                        torch.sum,
+                        nn.GRUCell,
+                        nn.GRU,
+                        nn.LSTMCell,
+                        nn.RNNCell,
+                ]:
                     continue
                 # didn't match explicit quantize handler class, we can check if the
                 # operator is in the related op set directly
-                if not _op_in_base_sets_of_related_ops(base_op):
+                if not (_op_in_base_sets_of_related_ops(base_op) or _op_is_unmatchable(base_op)):
                     raise AssertionError(
                         f"handling for {qhandler_cls} for op {base_op} not implemented")
 
@@ -1626,7 +1632,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                         (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
                         (base_op in FUNS_IO_TYPE_FP32) or
                         (base_op in MODS_IO_TYPE_FP32) or
-                        (base_op in MODS_IO_TYPE_FP32_OR_INT8),
                         f"missing IO type handling for {base_op} using {qhandler_cls}")
 
     @skipIfNoFBGEMM

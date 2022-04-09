@@ -312,16 +312,19 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_summon_from_non_fsdp(self):
         class FSDPContainer(nn.Module):
-            def __init__(self, fsdp_1, fsdp_2):
+            def __init__(self, fsdp_1, fsdp_2, fsdp_3):
                 super().__init__()
                 self.fsdp_1 = fsdp_1
                 self.fsdp_2 = fsdp_2
+                self.fsdp_3 = fsdp_3
 
         model_fsdp = FSDPContainer(
             FSDP(DeterministicModel(wrap_fsdp=True)),
-            FSDP(DeterministicModel(wrap_fsdp=True))
+            FSDP(DeterministicModel(wrap_fsdp=True)),
+            FSDP(DeterministicModel(wrap_fsdp=False)),
         )
         model_no_fsdp = FSDPContainer(
+            DeterministicModel(wrap_fsdp=False),
             DeterministicModel(wrap_fsdp=False),
             DeterministicModel(wrap_fsdp=False),
         )

@@ -38,9 +38,7 @@ on:
   {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
     tags:
   {%- endif %}
-  {%- if label != "ciflow/default" %}
       - '!{{ label }}/*'
-  {%- endif %}
 {%- endfor %}
 {%- if not is_scheduled %}
     branches:
