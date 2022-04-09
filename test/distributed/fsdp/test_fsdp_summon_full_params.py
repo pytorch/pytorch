@@ -321,7 +321,7 @@ class TestSummonFullParams(FSDPTest):
         model_fsdp = FSDPContainer(
             FSDP(DeterministicModel(wrap_fsdp=True)),
             FSDP(DeterministicModel(wrap_fsdp=True)),
-            FSDP(DeterministicModel(wrap_fsdp=False)),
+            DeterministicModel(wrap_fsdp=False),
         )
         model_no_fsdp = FSDPContainer(
             DeterministicModel(wrap_fsdp=False),
