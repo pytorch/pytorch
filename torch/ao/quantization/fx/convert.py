@@ -52,7 +52,6 @@ from .utils import (
     graph_module_from_producer_nodes,
     WEIGHT_INDEX_DICT,
 )
-from .quantization_types import Pattern
 
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
