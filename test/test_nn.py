@@ -13897,6 +13897,20 @@ class TestNNDeviceType(NNTestCase):
         if layout is torch._mkldnn:
             return
 
+        if backend_actual != torch._C._ConvBackend.Empty:  # FIXME: forward AD fails
+            # Forward AD and forward-over-reverse AD smoke test in float32
+            # TODO: remove this if we introduce per-op gradient tests for float32
+            with fwAD.dual_level():
+                dual_inputs = [(fwAD.make_dual(i, torch.rand_like(i)) if isinstance(i, torch.Tensor) else i) for i in inputs]
+                # Forward AD
+                output = convolution(*dual_inputs)
+                # Forward over reverse AD
+                grad_output_d = fwAD.make_dual(torch.rand_like(output), torch.rand_like(output))
+                if has_bias:
+                    torch.autograd.grad(output, [x, weight, bias], grad_output_d)
+                else:
+                    torch.autograd.grad(output, [x, weight], grad_output_d)
+
         # Convert to float64 for gradcheck.
         x = x.to(torch.float64).detach().requires_grad_(True)
         weight = weight.to(torch.float64).detach().requires_grad_(True)
