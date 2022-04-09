@@ -342,7 +342,7 @@ auto handle_torch_function_no_python_arg_parser(
 auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(
     torch_api,
-    const_cast<char*>(
+    (char*)(
       func_name_override ? func_name_override : r.get_func_name().c_str()
     )
   );
