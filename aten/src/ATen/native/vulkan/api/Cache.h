@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace at {
 namespace native {
