@@ -47,7 +47,7 @@ def get_pattern_to_dtype_configs(
     return pattern_to_dtype_configs
 
 def get_qat_module_classes(
-        backend_config_dict: Dict[str, Any]) -> Tuple[Callable, ...]:
+        backend_config_dict: Dict[str, Any]) -> Tuple[type, ...]:
     qat_module_classes = []
     for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
@@ -57,7 +57,7 @@ def get_qat_module_classes(
     return tuple(set(qat_module_classes))
 
 def get_fused_module_classes(
-        backend_config_dict: Dict[str, Any]) -> Tuple[Callable, ...]:
+        backend_config_dict: Dict[str, Any]) -> Tuple[type, ...]:
     fused_module_classes = []
     for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]

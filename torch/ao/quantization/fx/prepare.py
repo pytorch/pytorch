@@ -198,7 +198,7 @@ def is_pattern_dtype_config_supported_by_backend(
         return True
     assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
-    dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
+    dtype_configs: List[Dict[str, Any]] = pattern_to_dtype_configs.get(pattern, [])
 
     # TODO: this only works for one input and one output patterns, need to generalize to multiple
     # inputs/output
