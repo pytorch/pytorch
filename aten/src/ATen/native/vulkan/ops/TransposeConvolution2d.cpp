@@ -5,6 +5,12 @@
 #include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/permute.h>
+#endif
+
 namespace at {
 namespace native {
 namespace vulkan {
