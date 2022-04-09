@@ -1,6 +1,7 @@
 #define TORCH_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/native/ConvUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -45,7 +46,6 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/ConvUtils.h>
 
 namespace at { namespace native {
 
