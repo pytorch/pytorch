@@ -1,7 +1,29 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/align_as_native.h>
+#include <ATen/ops/align_tensors_native.h>
+#include <ATen/ops/align_to_native.h>
+#include <ATen/ops/gather_native.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_native.h>
+#include <ATen/ops/index_fill.h>
+#include <ATen/ops/index_fill_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/refine_names_native.h>
+#include <ATen/ops/rename_native.h>
+#include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_native.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <c10/util/irange.h>
 
