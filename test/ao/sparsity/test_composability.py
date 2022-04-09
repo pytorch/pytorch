@@ -5,7 +5,7 @@
 import logging
 
 import torch
-import torch.quantization as tq
+import torch.ao.quantization as tq
 from torch import nn
 from torch.ao import sparsity
 from torch.testing._internal.common_utils import TestCase
@@ -30,12 +30,11 @@ class TestComposability(TestCase):
             nn.ReLU(),
             tq.QuantStub(),
             nn.Linear(4, 4),  # 5
-            nn.Identity(),
-            # nn.ReLU(), not testing fusion yet
+            nn.ReLU(),
             tq.DeQuantStub(),
         )
-        model[5].qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
-        model[4].qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model[4].qconfig = tq.get_default_qconfig("fbgemm")
+        model[5].qconfig = tq.get_default_qconfig("fbgemm")
 
         sparsifier = sparsity.WeightNormSparsifier(**sparse_defaults)
 
@@ -49,11 +48,6 @@ class TestComposability(TestCase):
             model[0],
         ]
         return model, sparsifier, sparse_config
-
-    def _check_parametrizations_and_observers(self, model):
-        self.assertTrue(hasattr(model[0], "parametrizations"))
-        self.assertTrue(hasattr(model[5], "parametrizations"))
-        self.assertTrue(hasattr(model[5], "activation_post_process"))
 
     def _squash_mask_calibrate_and_convert(self, model, sparsifier, input):
         sparsifier.step()
@@ -73,7 +67,9 @@ class TestComposability(TestCase):
 
         tq.prepare(mod, inplace=True)
         sparsifier.prepare(mod, config=sparse_config)
-        self._check_parametrizations_and_observers(mod)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
@@ -88,8 +84,10 @@ class TestComposability(TestCase):
         ) = self._get_model_and_sparsifier_and_sparse_config()
 
         sparsifier.prepare(mod, config=sparse_config)
-        torch.quantization.prepare(mod, inplace=True)
-        self._check_parametrizations_and_observers(mod)
+        tq.prepare(mod, inplace=True)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
         self._squash_mask_calibrate_and_convert(
             mod, sparsifier, torch.randn(1, 4, 4, 4)
         )
@@ -104,13 +102,61 @@ class TestComposability(TestCase):
         ) = self._get_model_and_sparsifier_and_sparse_config()
 
         sparsifier.prepare(mod, config=sparse_config)
-        torch.quantization.prepare(mod, inplace=True)
-        self._check_parametrizations_and_observers(mod)
+        tq.prepare(mod, inplace=True)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
         sparsifier.step()
-        mod(torch.randn(1, 4, 4, 4))
         sparsity_level = self._calculate_sparsity(mod[5].weight)
+        mod(torch.randn(1, 4, 4, 4))
         tq.convert(mod, inplace=True)
         self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
+        self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
+
+        cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
+        self.assertGreaterAlmostEqual(cur_sparsity, sparsity_level)
+        self.assertGreaterAlmostEqual(
+            sparsity_level, sparse_config[0]["sparsity_level"]
+        )
+        self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
+
+    def test_s_prep_before_fusion(self):
+        (
+            mod,
+            sparsifier,
+            sparse_config,
+        ) = self._get_model_and_sparsifier_and_sparse_config()
+        sparsifier.prepare(mod, config=sparse_config)
+        tq.fuse_modules(mod, [["5", "6"]], inplace=True)
+        mod[5].qconfig = tq.get_default_qconfig("fbgemm")
+        tq.prepare(mod, inplace=True)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5][0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
+        self._squash_mask_calibrate_and_convert(
+            mod, sparsifier, torch.randn(1, 4, 4, 4)
+        )
+        self.assertTrue(isinstance(mod[5], torch.nn.intrinsic.quantized.LinearReLU))
+        self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
+
+    def test_fusion_before_s_prep(self):
+        (
+            mod,
+            sparsifier,
+            sparse_config,
+        ) = self._get_model_and_sparsifier_and_sparse_config()
+        tq.fuse_modules(mod, [["5", "6"]], inplace=True)
+        sparsifier.prepare(mod, config=sparse_config)
+        mod[5].qconfig = tq.get_default_qconfig("fbgemm")
+        tq.prepare(mod, inplace=True)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5][0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
+        sparsifier.step()
+        sparsity_level = self._calculate_sparsity(mod[5][0].weight)
+        mod(torch.randn(1, 4, 4, 4))
+        tq.convert(mod, inplace=True)
+        self.assertTrue(isinstance(mod[5], torch.nn.intrinsic.quantized.LinearReLU))
         self.assertEqual(mod(torch.randn(1, 4, 4, 4)).shape, torch.Size([1, 4, 4, 4]))
 
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])

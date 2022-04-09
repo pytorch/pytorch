@@ -39,8 +39,8 @@ class TestShardUtils(TestCase):
                 res_in_split_sizes, res_out_split_sizes = _offsets_to_split_sizes(
                     in_offsets, out_offsets, tensor_numel, world_size, my_rank
                 )
-                self.assertEquals(_in_split_sizes, res_in_split_sizes)
-                self.assertEquals(_out_split_sizes, res_out_split_sizes)
+                self.assertEqual(_in_split_sizes, res_in_split_sizes)
+                self.assertEqual(_out_split_sizes, res_out_split_sizes)
 
         # The tensor size can be evenly divided by the world size.
         world_size = 4
