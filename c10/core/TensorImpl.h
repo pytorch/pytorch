@@ -1561,6 +1561,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // we are the ONLY thread that can have gotten to this point.  It is not
     // possible to conflict with another zero interpreter as access is protected
     // by GIL
+    // NB: owns_pyobj tag is initially false
     pyobj_ = pyobj;
   }
 
@@ -1568,6 +1569,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // interpreter.  This is racy!
   impl::PyInterpreter* pyobj_interpreter() {
     return pyobj_interpreter_.load(std::memory_order_acquire);
+  }
+
+  PyObject* _unchecked_untagged_pyobj() const {
+    return static_cast<PyObject*>(static_cast<uintptr_t>(pyobj_) & ~0x1ULL);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
@@ -1589,7 +1594,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      return c10::make_optional(pyobj_);
+      return c10::make_optional(_unchecked_untagged_pyobj());
     } else {
       TORCH_CHECK(
           false,
@@ -2282,11 +2287,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool owns_pyobj() {
-    return owns_pyobj_;
+    return static_cast<uintptr_t>(pyobj_) & 1;
   }
 
   void set_owns_pyobj(bool b) {
-    owns_pyobj_ = b;
+    pyobj_ = static_cast<PyObject*>(static_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
  protected:
@@ -2385,6 +2390,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // When a PyObject dies, you are obligated to clear this field
   // (otherwise, you will try to use-after-free the pyobj); this currently
   // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
+  //
+  // NB: this has a single pointer tag indicating whether or not the
+  // C++ object owns the PyObject (the common case, zero, means PyObject
+  // owns the C++ object); see _unchecked_untagged_pyobj for raw access
+  // or check_pyobj for checked access
   PyObject* pyobj_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
@@ -2437,7 +2447,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
-    owns_pyobj_ = false;
     sizes_customization_policy_ =
         static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
@@ -2492,13 +2501,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
-
-  // If pyobj_ is nullptr, this is always false.
-  // Otherwise, this indicates whether or not TensorImpl owns the pyobj_
-  // or vice versa.  Ordinarily, pyobj_ owns TensorImpl, but if the
-  // Python object's refcount goes to zero, we flip the ownership
-  // direction (to make sure the pyobj stays live).
-  bool owns_pyobj_ : 1;
 
   // Customization policy for the sizes() virtual method.
   /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;
