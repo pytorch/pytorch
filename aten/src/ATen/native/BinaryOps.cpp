@@ -21,8 +21,7 @@
 #include <ATen/ops/_test_serialization_subcmul_native.h>
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/add.h>
-#include <ATen/ops/add_meta.h>
-#include <ATen/ops/add_meta_dispatch.h>
+#include <ATen/ops/add_ops.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/and_native.h>
 #include <ATen/ops/arctan2_native.h>
@@ -49,7 +48,7 @@
 #include <ATen/ops/copysign_native.h>
 #include <ATen/ops/div.h>
 #include <ATen/ops/div_meta.h>
-#include <ATen/ops/div_meta_dispatch.h>
+#include <ATen/ops/div_ops.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/divide_native.h>
 #include <ATen/ops/empty.h>
@@ -120,7 +119,7 @@
 #include <ATen/ops/minimum_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_meta.h>
-#include <ATen/ops/mul_meta_dispatch.h>
+#include <ATen/ops/mul_ops.h>
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/multiply_native.h>
 #include <ATen/ops/ne.h>
@@ -784,7 +783,8 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::meta::mul(self.to(device_), other.to(device_));
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
@@ -794,7 +794,8 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::meta::div(self.to(device_), other.to(device_));
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
@@ -822,7 +823,9 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::meta::add(self.to(device_), other.to(device_));
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::add_Tensor::redispatch(
+      meta_dks, self.to(device_), other.to(device_), alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
