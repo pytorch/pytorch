@@ -1,15 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Parallel.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/group_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_group_norm.h>
+#include <ATen/ops/native_group_norm_backward_native.h>
+#include <ATen/ops/native_group_norm_native.h>
+#endif
 
 #include <array>
 #include <functional>
-#include <numeric>
 #include <tuple>
 #include <vector>
 

@@ -1,6 +1,26 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/UpSample.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_nearest_exact1d.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward_meta.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact1d_meta.h>
+#include <ATen/ops/_upsample_nearest_exact1d_native.h>
+#include <ATen/ops/upsample_nearest1d.h>
+#include <ATen/ops/upsample_nearest1d_backward.h>
+#include <ATen/ops/upsample_nearest1d_backward_meta.h>
+#include <ATen/ops/upsample_nearest1d_backward_native.h>
+#include <ATen/ops/upsample_nearest1d_meta.h>
+#include <ATen/ops/upsample_nearest1d_native.h>
+#endif
 
 namespace at {
 namespace meta {
