@@ -569,8 +569,8 @@ class TestTorchFunctionOverride(TestCase):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 inputs, outputs = args
-                self.assertIs(inputs[0], x)
-                self.assertIs(outputs[0], x)
+                self.assertIs(inputs, x)
+                self.assertIs(outputs, x)
                 return -1
 
         x = Dummy()
@@ -783,7 +783,8 @@ class Wrapper:
             elif isinstance(a, collections.abc.Sequence):
                 args_of_this_cls.extend(el for el in a if isinstance(el, cls))
         assert len(args_of_this_cls) > 0
-        args_of_this_cls[0].used_calls.add(func)
+        for a in args_of_this_cls:
+            a.used_calls.add(func)
         args = unwrap(tuple(args))
         kwargs = {k: unwrap(v) for k, v in kwargs.items()}
 

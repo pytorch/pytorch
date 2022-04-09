@@ -235,9 +235,9 @@ def grad(
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
     """
-    outputs = (outputs,) if is_tensor_like(outputs) else tuple(outputs)
-    inputs = (inputs,) if is_tensor_like(inputs) else tuple(inputs)
-    overridable_args = outputs + inputs
+    tupled_outputs = (outputs,) if is_tensor_like(outputs) else tuple(outputs)
+    tupled_inputs = (inputs,) if is_tensor_like(inputs) else tuple(inputs)
+    overridable_args = tupled_outputs + tupled_inputs
     if has_torch_function(overridable_args):
         return handle_torch_function(
             grad,
@@ -251,6 +251,9 @@ def grad(
             allow_unused=allow_unused,
             is_grads_batched=is_grads_batched,
         )
+
+    outputs = tupled_outputs
+    inputs = tupled_inputs
 
     if not only_inputs:
         warnings.warn("only_inputs argument is deprecated and is ignored now "
