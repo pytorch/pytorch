@@ -468,7 +468,8 @@ class TestForeach(TestCase):
             inputs = opinfo.sample_inputs(device, dtype, num_tensors, noncontiguous=not is_fastpath, low=low, high=high),
             if dtype == torch.float16 and ord == 0:
                 inputs = [[(t > high - 1e-2).to(dtype) for t in tensors] for tensors in inputs]
-            n_expected_cudaLaunchKernels = calc_n_expected_cudaLaunchKernels(num_tensors, ord, dtype, is_fastpath, is_foreach_global_norm)
+            n_expected_cudaLaunchKernels = calc_n_expected_cudaLaunchKernels(
+                num_tensors, ord, dtype, is_fastpath, is_foreach_global_norm)
             op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
             ref_output = ref(inputs, ord=ord, is_foreach_global_norm=is_foreach_global_norm)
             actual_output = op(inputs, self.is_cuda, is_fastpath, ord=ord)
