@@ -31,6 +31,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nniqat.ConvBnReLU1d,
             nniqat.ConvReLU1d,
             nniq.ConvReLU1d,
+            nni.ConvBn1d,
+            nni.ConvBnReLU1d,
             nni.ConvReLU1d,
         ]),
         set([
@@ -42,6 +44,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nniqat.ConvBnReLU2d,
             nniqat.ConvReLU2d,
             nniq.ConvReLU2d,
+            nni.ConvBn2d,
+            nni.ConvBnReLU2d,
             nni.ConvReLU2d,
         ]),
         set([
@@ -53,6 +57,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nniqat.ConvBnReLU3d,
             nniqat.ConvReLU3d,
             nniq.ConvReLU3d,
+            nni.ConvBn3d,
+            nni.ConvBnReLU3d,
             nni.ConvReLU3d,
         ]),
         # conv functionals
