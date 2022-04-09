@@ -4928,6 +4928,11 @@
     SparseCsrCPU: _sparse_csr_sum_cpu
     SparseCsrCUDA: _sparse_csr_sum_cuda
 
+- func: _sparse_csr_prod.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  dispatch:
+    SparseCsrCPU: _sparse_csr_prod_cpu
+    SparseCsrCUDA: _sparse_csr_prod_cuda
+
 - func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   python_module: sparse
   variants: function
