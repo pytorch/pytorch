@@ -70,6 +70,8 @@ class TRTTestCase(TestCase):
                 outputs = [outputs]
 
             for out, ref in zip(outputs, ref_outputs):
+                if not isinstance(ref, torch.Tensor):
+                    ref = torch.tensor([ref])
                 torch.testing.assert_allclose(out.cpu(), ref, rtol=rtol, atol=atol)
 
     def run_test_custom_compare_results(

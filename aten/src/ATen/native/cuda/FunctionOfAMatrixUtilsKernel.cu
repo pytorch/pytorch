@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/FunctionOfAMatrixUtils.h>
 
 #include <ATen/Dispatch.h>
