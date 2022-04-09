@@ -466,6 +466,9 @@ def orthogonal_(tensor, gain=1):
         raise ValueError("Only tensors with 2 or more dimensions are supported")
 
     rows = tensor.size(0)
+    if rows == 0:
+        # no-op
+        return tensor
     cols = tensor.numel() // rows
     flattened = tensor.new(rows, cols).normal_(0, 1)
 
