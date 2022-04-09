@@ -329,7 +329,6 @@ def fuse_fx(
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
-    assert not model.training, "fuse_fx only works on models in eval mode"
     check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict)
     graph_module = torch.fx.symbolic_trace(model)
     preserved_attributes: Set[str] = set()
@@ -512,7 +511,6 @@ def prepare_fx(
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
-    assert not model.training, "prepare_fx only works for models in " + "eval mode"
     return _prepare_fx(
         model,
         qconfig_dict,
@@ -561,7 +559,6 @@ def prepare_qat_fx(
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_qat_fx")
-    assert model.training, "prepare_qat_fx only works for models in  " + "train mode"
     return _prepare_fx(
         model,
         qconfig_dict,
