@@ -12,7 +12,6 @@ from .match_utils import (
     MatchAllNode,
 )
 from .pattern_utils import (
-    get_default_fusion_patterns,
     sorted_patterns_dict,
 )
 
@@ -41,22 +40,13 @@ def fuse(
     input_graph = model.graph
     named_modules = dict(input_root.named_modules())
 
-    # TODO: remove this branch after we define the configurations for the
-    # default/native backend
     if backend_config_dict is None:
-        fusion_pattern_to_fuse_handler_cls = get_default_fusion_patterns()
-        fuser_method_mapping = None
-        fusion_pattern_to_root_node_getter = {}
-        fusion_pattern_to_extra_inputs_getter = {}
-        for pattern, fuse_handler_cls in get_fusion_pattern_to_fuse_handler_cls(get_native_backend_config_dict()).items():
-            fusion_pattern_to_fuse_handler_cls[pattern] = fuse_handler_cls
-    else:
-        fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
-        fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
-        fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
-        fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
+        backend_config_dict = get_native_backend_config_dict()
 
-    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(fusion_pattern_to_fuse_handler_cls)
+    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(get_fusion_pattern_to_fuse_handler_cls(backend_config_dict))
+    fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
+    fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
+    fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
 
     # find fusion
     fusion_pairs = _find_matches(

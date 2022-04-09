@@ -164,19 +164,21 @@ def _get_linear_configs():
 
     # (2) Linear + relu
     # -------------------
-    # 2.1 linear relu fusion
+    # 2.1 linear module + relu fusion config
+    # linear relu, linear module + relu module
     linear_configs.append({
         "pattern": (torch.nn.ReLU, torch.nn.Linear),
         "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     })
+    # linear relu, linear module + functional relu
     linear_configs.append({
         "pattern": (torch.nn.functional.relu, torch.nn.Linear),
         "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     })
 
-    # 2.2 linear relu quantization
+    # 2.2 linear module + relu, fused module configs
     # linear relu, fused module
     linear_configs.append({
         "pattern": nni.LinearReLU,
@@ -194,20 +196,7 @@ def _get_linear_configs():
         "root_module": torch.nn.Linear,
         "reference_quantized_module_for_root": nnqr.Linear,
     })
-    # linear relu, linear module + relu module
-    linear_configs.append({
-        "pattern": (torch.nn.ReLU, torch.nn.Linear),
-        "observation_type": observation_type,
-        "dtype_configs": dtype_configs,
-        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
-    })
-    # linear relu, linear module + functional relu
-    linear_configs.append({
-        "pattern": (F.relu, torch.nn.Linear),
-        "observation_type": observation_type,
-        "dtype_configs": dtype_configs,
-        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
-    })
+    # 2.3 functional linear + relu configs
     # linear relu, functional linear + relu module
     linear_configs.append({
         "pattern": (torch.nn.ReLU, F.linear),
@@ -287,7 +276,7 @@ def _get_conv_configs():
 
         # (2) Conv + relu
         # -----------------
-        # 2.1 Conv + relu fusion
+        # 2.1 conv module + relu fusion configs
         # conv relu fusion, conv module + relu module
         conv_configs.append({
             "pattern": (torch.nn.ReLU, convs.root),
@@ -300,7 +289,7 @@ def _get_conv_configs():
             "dtype_configs": dtype_configs,
             "fuser_method": reverse_sequential_wrapper2(convs.relu),
         })
-        # 2.2 Conv + relu quantization
+        # 2.2 conv module + relu fused module configs
         # conv relu, fused module
         conv_configs.append({
             "pattern": convs.relu,
@@ -318,6 +307,7 @@ def _get_conv_configs():
             "root_module": convs.root,
             "reference_quantized_module_for_root": convs.reference,
         })
+        # 2.3 functional conv + relu configs
         # conv relu, functional conv + relu module
         conv_configs.append({
             "pattern": (torch.nn.ReLU, convs.func),
@@ -333,7 +323,7 @@ def _get_conv_configs():
 
         # (3) Conv + batchnorm (+ relu)
         # -------------------------------
-        # 3.1 conv bn fusion
+        # 3.1 conv bn fusion configs
         # conv + bn fusion
         conv_configs.append({
             "pattern": (convs.bn, convs.root),
@@ -355,7 +345,7 @@ def _get_conv_configs():
         })
         # TODO: we can add fusion for torch.relu as well
 
-        # 3.2 conv + bn (+ relu) quantization
+        # 3.2 conv + bn (+ relu) fused module configs
         # conv bn, qat fused module
         conv_configs.append({
             "pattern": convs.bn_qat,
@@ -470,12 +460,13 @@ def _get_bn_configs():
         torch.nn.BatchNorm3d: nni.BNReLU3d,
     }
     for bn in bn_to_fused_bn.keys():
-        # TODO: enable these and remove entries in fusion_patterns.py
+        # bn module + relu module fusion config
         bn_configs.append({
             "pattern": (torch.nn.ReLU, bn),
             "dtype_configs": default_op_quint8_dtype_config,
             "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
         })
+        # bn module + F.relu fusion config
         bn_configs.append({
             "pattern": (torch.nn.functional.relu, bn),
             "dtype_configs": default_op_quint8_dtype_config,
@@ -487,6 +478,7 @@ def _get_bn_configs():
             "dtype_configs": default_op_quint8_dtype_config,
         })
 
+    # fused bn configs
     for fused_bn in bn_to_fused_bn.values():
         bn_configs.append({
             "pattern": fused_bn,
