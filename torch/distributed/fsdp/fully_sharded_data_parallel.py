@@ -1568,7 +1568,9 @@ class FullyShardedDataParallel(nn.Module):
     ) -> Generator:
         r""" A context manager to expose full params for FSDP instances.
         Can be useful *after* forward/backward for a model to get
-        the params for additional processing or checking.
+        the params for additional processing or checking. It can take a non-FSDP
+        module and will summon full params for all contained FSDP modules as
+        well as their children, depending on the ``recurse`` argument.
 
         .. note:: This can be used on inner FSDPs.
         .. note:: This can *not* be used within a forward or backward pass. Nor
