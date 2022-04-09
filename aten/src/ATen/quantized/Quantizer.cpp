@@ -429,7 +429,7 @@ Tensor& UnknownQuantizer::dequantize_out(Tensor& rtensor, const Tensor& qtensor)
 QScheme UnknownQuantizer::qscheme() const {
   TORCH_INTERNAL_ASSERT(false, "cannot call qscheme on UnknownQuantizer");
 }
-bool UnknownQuantizer::equalTo(QuantizerPtr other) {
+bool UnknownQuantizer::equalTo(QuantizerPtr other) const{
   TORCH_INTERNAL_ASSERT(false, "cannot call equalTo on UnknownQuantizer");
 }
 QuantizerPtr make_unknown_quantizer(ScalarType scalar_type) {
