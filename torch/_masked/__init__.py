@@ -737,7 +737,7 @@ def prod(input: Tensor,
     if dtype is None:
         # promote integer types to int64 when output dtype is not specified
         if input.layout == torch.sparse_csr:
-            if input.dtype == torch.uint8:
+            if input.dtype in {torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32}:
                 # csr.to(dtype=torch.int64) is not implemented, so
                 # using coo.to on input to ensure the promoted dtype
                 input = input.to_sparse_coo().to(dtype=torch.int64).to_sparse_csr()
@@ -745,7 +745,7 @@ def prod(input: Tensor,
                 dtype = input.dtype
         else:
             dtype = input.dtype
-            if dtype == torch.uint8:
+            if input.dtype in {torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32}:
                 dtype = torch.int64
     dim_ = _canonical_dim(dim, input.ndim)
     mask_input = _combine_input_and_mask(prod, input, mask)
