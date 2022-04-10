@@ -17,7 +17,7 @@ SelectViewUpdate::SelectViewUpdate(
     : TsNode(
           ltc_select_view_update,
           {target, source},
-          {GetShapeFromTsValue(target)},
+          {target.shape()},
           /*num_outputs=*/1,
           MHash(dim, start, end, stride)),
       dim_(dim),

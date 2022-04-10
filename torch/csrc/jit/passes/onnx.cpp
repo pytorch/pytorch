@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
@@ -167,7 +168,14 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
-  BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  try {
+    BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  } catch (std::runtime_error& ex) {
+    ONNX_LOG(
+        "ONNX graph being constructed during exception:\n",
+        new_graph->toString());
+    throw;
+  }
   GRAPH_DUMP("after ToONNX: ", new_graph);
   ConstantValueMap::ClearMaps();
   return new_graph;

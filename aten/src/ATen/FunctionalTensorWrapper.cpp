@@ -296,6 +296,33 @@ void sync(const c10::List<c10::optional<Tensor>> t_list) {
   }
 }
 
+bool isFunctionalTensor(const at::Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+}
+
+bool isFunctionalTensor(const c10::optional<Tensor>& t) {
+  if (t.has_value()) {
+    return isFunctionalTensor(*t);
+  } else {
+    return false;
+  }
+}
+
+template <typename T>
+bool isFunctionalTensor(const c10::IListRef<t>& list) {
+  if (list.size() == 0) return false;
+  auto it = list.begin();
+  bool any_functional = isFunctionalTensor(*it++);
+  while (it != list.end()) {
+    auto curr_functional = isFunctionalTensor(*it++);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
+}
+
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(view_to_wrap));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));

@@ -11,6 +11,8 @@ namespace lazy {
 
 TORCH_API std::function<std::vector<SourceLocation>()>& GetPythonFramesFunction();
 
+TORCH_API std::string GetFirstUserFrameInPython();
+
 class TORCH_API DebugUtil {
  public:
   enum GraphFormat {
