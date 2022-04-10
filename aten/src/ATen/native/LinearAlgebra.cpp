@@ -1110,35 +1110,21 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
   return self.reshape({self.size(0), 1}) * vec2;
 }
 
-void check_addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2){
-  // beta and alpha values can't error out addmm
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix, got ", self.dim(), "-D tensor");
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  const auto self_sizes = self.sizes();
-  const auto mat1_strides = mat1.strides();
-  const auto mat1_sizes = mat1.sizes();
-  const auto mat2_strides = mat2.strides();
-  const auto mat2_sizes = mat2.sizes();
-  TORCH_CHECK(
-      self_sizes[0] == mat1_sizes[0] && self_sizes[1] == mat2_sizes[1],
-      "input shape is incompatible with matrix multiplication (",
-      mat1_sizes[0], "x", mat1_sizes[1], " @ ", mat2_sizes[0], "x", mat2_sizes[1], " != ",
-      self_sizes[0], "x", self_sizes[1], ")");
-  TORCH_CHECK(
-    mat1_sizes[1] == mat2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
-    mat1_sizes[0], "x", mat1_sizes[1], " and ", mat2_sizes[0], "x", mat2_sizes[1], ")");
-}
-
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
-  check_addmm(self, m1, m2);
+  TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
   auto m1_sizes = m1.sizes();
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
+
+  TORCH_CHECK(
+      self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
+      "input shape is incompatible with matrix multiplication (",
+      m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
+      self_sizes[0], "x", self_sizes[1], ")");
 
   at::native::resize_output(result, self_sizes);
   const auto result_strides = result.strides();
@@ -1253,30 +1239,6 @@ static void addmm_impl_cpu_(
 
   if (!c.is_same(result)) {
     result.copy_(c);
-  }
-}
-
-Tensor addmm_zerotensor(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha){
-  check_addmm(self, mat1, mat2);
-  const auto self_sizes = self.sizes();
-  Tensor result;
-  // beta*self + alpha*(mat1@mat2) = 0
-  if ((mat1._is_zerotensor() || mat2._is_zerotensor() || alpha.equal(0)) &&
-      (self._is_zerotensor() || beta.equal(0))) {
-    result = at::_efficientzerotensor(self_sizes, self.options());
-    return result;
-  }
-  // beta*self
-  else if (mat1._is_zerotensor() || mat2._is_zerotensor() || alpha.equal(0)){
-    return beta.equal(1) ? self.clone() : self * beta;
-  }
-  // alpha*(mat1@mat2)
-  else if (self._is_zerotensor() || beta.equal(0)){
-    result = at::mm(mat1, mat2);
-    return alpha.equal(1) ? result : result * alpha;
-  } else {
-    /* never reached */
-    TORCH_INTERNAL_ASSERT(false);
   }
 }
 
