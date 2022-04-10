@@ -1105,6 +1105,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
+  m.impl("split.sizes", split_with_sizes_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);

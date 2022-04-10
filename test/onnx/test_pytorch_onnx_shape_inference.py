@@ -6,6 +6,7 @@ import numpy as np
 from torch.onnx.symbolic_helper import (_set_onnx_shape_inference,
                                         _onnx_main_opset,
                                         _set_opset_version)
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -118,6 +119,15 @@ class TestONNXShapeInference(unittest.TestCase):
         constant = self.insert_tensor_constant(g, torch.tensor([0, 0, -1]))
         output = g.op("Reshape", input, constant)
         self.run_test(g, output.node(), expect_tensor(None, shape=(None, None, 16)))
+
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_reshape_allowzero(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_sizes([3, 4, 0]))
+        constant = self.insert_tensor_constant(g, torch.tensor([0, 4, 3]))
+        output = g.op("Reshape", input, constant, allowzero_i=1)
+        self.run_test(g, output.node(), expect_tensor(None, shape=(0, 4, 3)))
 
     def test_slice(self):
         g = self.create_empty_graph()
