@@ -1633,146 +1633,99 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       };
 
-      const auto nnz_grain_size = at::internal::GRAIN_SIZE;
-      // 1 <= n_threads_nnz <= min(ceil(nnz / nnz_grain), max_threads)
-      const auto n_threads_nnz = std::max<int64_t>(
-          1, std::min<int64_t>((nnz + nnz_grain_size - 1) / nnz_grain_size, at::get_num_threads())
-      );
+      const auto offset_counts_per_thread = [&get_counts, size](
+          const Tensor& idx,
+          bool is_sorted = false,
+          int64_t grain_size = at::internal::GRAIN_SIZE
+      ) -> Tensor {
+        const auto idx_len = idx.numel();
+        // 1 <= n_threads <= min(ceil(len / grain_size), max_threads)
+        const auto n_threads = std::max<int64_t>(
+            1, std::min<int64_t>((idx_len + grain_size - 1) / grain_size, at::get_num_threads())
+        );
 
-      const auto size_grain_size = at::internal::GRAIN_SIZE;
-      // 1 <= n_threads_size <= min(ceil(size / size_grain), max_threads)
-      const auto n_threads_size = std::max<int64_t>(
-          1, std::min<int64_t>((size + size_grain_size - 1) / size_grain_size, at::get_num_threads())
-      );
-
-      auto dim_indices_offset_counts_per_thread = [&](void) -> Tensor {
-        // We avoid allocating more elements than this value,
-        // and we definitely do not want to allocate more than nnz.
-        const int64_t MEMORY_ALLOC_THRESHOLD = std::min<int64_t>(1e+7, nnz);
-
-        // No matter what the value of MEMORY_ALLOC_THRESHOLD is,
-        // we cannot avoid this step of allocating
-        // n_threads_nnz * size * sizeof(int64_t) bytes of memory
-        // for a no-sync count table computation.
-        auto dim_indices_counts_per_threads = at::zeros({n_threads_nnz, size}, index.options());
-        at::parallel_for(0, nnz, nnz_grain_size, [&](int64_t start, int64_t end) {
-            const auto tid = at::get_thread_num();
-            const auto tid_dim_indices = dim_indices.slice(0, start, end);
-            auto tid_dim_indices_counts = dim_indices_counts_per_threads.select(0, tid);
-            // When self is coalesced and dim == 0, indices[dim] is sorted.
-            get_counts(tid_dim_indices_counts, tid_dim_indices, /*bins=*/size,
-                // Mark sorted for better cache alighment, but do not run in parallel
-                // as we are in the parallel loop already.
-                /*is_sorted=*/self.is_coalesced() && dim == 0,
-                /*run_in_parallel=*/false);
+        auto counts_per_thread = at::zeros({n_threads, size}, idx.options());
+        at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end) {
+          const auto tid = at::get_thread_num();
+          const auto tid_idx = idx.slice(0, start, end);
+          auto tid_counts = counts_per_thread.select(0, tid);
+          get_counts(tid_counts, tid_idx, /*bins=*/size,
+              /*is_sorted=*/is_sorted, /*run_in_parallel=*/false);
         });
 
-        // We want to compute a cumulative count table across per-thread count tables.
-        // At this step we can benefit from MEMORY_ALLOC_THRESHOLD and compute the
-        // cumulative table in-place while reusing the memory of dim_indices_counts_per_threads.
+        return counts_per_thread.cumsum_(/*dim=*/0);
+      };
 
-        // Faster, but new memory is allocated
-        if (dim_indices_counts_per_threads.numel() < MEMORY_ALLOC_THRESHOLD) {
-          return dim_indices_counts_per_threads.cumsum(/*dim=*/0);
-        }
-        // Slower, but potentially no huge memory allocations
-        // depending on how size_grain_size is defined.
-        // NOTE: it could be that size <= n_threads_size * size_grain_size,
-        // so it makes sense to benchmark for optimal size_grain_size.
-        else {
-          auto counts_buffer = at::empty({n_threads_size, size_grain_size, n_threads_nnz}, index.options());
-          auto cumsum_buffer = at::empty_like(counts_buffer);
-          at::parallel_for(0, size, size_grain_size, [&](int64_t start, int64_t end) {
-              const auto tid = at::get_thread_num();
-              auto tid_counts_buffer = counts_buffer.select(0, tid).slice(0, 0, end - start);
-              auto tid_cumsum_buffer = cumsum_buffer.select(0, tid).slice(0, 0, end - start);
-              auto tid_counts = dim_indices_counts_per_threads.slice(1, start, end);
-              tid_counts_buffer.copy_(tid_counts.transpose(-1, -2));
-              at::cumsum_out(tid_cumsum_buffer, tid_counts_buffer, /*dim=*/-1);
-              tid_counts.copy_(tid_cumsum_buffer.transpose(-1, -2));
-          });
-          return dim_indices_counts_per_threads;
-        }
-      }();
+      auto dim_indices_offset_counts_per_thread = offset_counts_per_thread(
+          dim_indices,
+          /*is_sorted=*/self.is_coalesced() && dim == 0
+          /*grain_size = at::internal::GRAIN_SIZE*/
+      );
 
-      auto index_counts = at::zeros({size}, index.options());
-      const auto index_sorted = [&get_counts, &index_counts](
-          const Tensor& index, int64_t size) -> Tensor {
-        int64_t index_len = index.numel();
-        Tensor index_sorted;
-        // TODO: find a better threshold based on actual runtime benchmarking.
-        // Here we switch between count sort and merge/quick sort based on
-        // algorithmic complexity.
-        if (size < std::log2(index_len) * index_len) {
-          // no assumptions on sorted index in general
-          get_counts(index_counts, index, /*bins=*/size, /*is_sorted=*/false);
-          const auto perm = at::arange(size, index.options());
-          // do count sort in O(size)
-          index_sorted = at::repeat_interleave(perm, index_counts);
-        }
-        else {
-          // do merge/quick sort in O(index_len * log(index_len))
-          index_sorted = std::get<0>(index.sort());
-          get_counts(index_counts, index_sorted, /*bins=*/size, /*is_sorted=*/true);
-        }
-        return index_sorted;
-      }(nneg_index, size);
+      auto index_offset_counts_per_thread = offset_counts_per_thread(
+          index,
+          /*is_sorted=*/false
+          /*grain_size = at::internal::GRAIN_SIZE*/
+      );
 
-      // find res_dim_indices
-      const auto res_dim_indices = [
-          &dim_indices_offset_counts_per_thread,
-          &index_sorted, index_len
-      ](void) -> Tensor {
-        const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
-        const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
-        const auto perm = at::arange(index_len, index_sorted.options());
-        return at::repeat_interleave(perm, selected_dim_indices_counts);
-      }();
+      const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1).clone();
+      const auto index_counts = index_offset_counts_per_thread.select(0, -1).clone();
+      const auto intersection_counts = dim_indices_counts.mul(index_counts);
+      const auto intersection_offsets = intersection_counts.cumsum(0);
+      const auto res_nnz = intersection_counts.sum().item<int64_t>();
 
-      const auto selected_dim_indices = [
-          &res_dim_indices,
-          &dim_indices_offset_counts_per_thread,
-          &index_counts,
-          &dim_indices,
-          nnz
-      ](void) -> Tensor {
-        // stores the result
-        auto selected_dim_indices = at::empty_like(res_dim_indices);
-        // used to store locations for threads to write into
-        auto selected_dim_indices_offsets_per_thread =
-          dim_indices_offset_counts_per_thread.mul_(index_counts);
-        // defines the number of copies per unique intersection
-        const auto intersection_counts = selected_dim_indices_offsets_per_thread
-          .select(0, -1).clone();
-        // defines offsets per each unique intersection
-        const auto intersection_offsets = intersection_counts.cumsum(/*dim=*/0);
+      const auto index_from_intersection = [
+        &intersection_counts,
+        &intersection_offsets,
+        res_nnz
+      ](
+          const Tensor& idx,
+          Tensor& idx_offset_counts_per_thread,
+          const Tensor& other_idx_counts,
+          int64_t grain_size = at::internal::GRAIN_SIZE
+      ) -> Tensor {
+        auto res_index = at::empty({res_nnz}, idx.options());
+        auto idx_offsets_per_thread = idx_offset_counts_per_thread.mul_(other_idx_counts);
 
-        const auto* ptr_dim_indices = dim_indices.data_ptr<int64_t>();
+        const auto idx_len = idx.numel();
+        const auto* ptr_idx = idx.data_ptr<int64_t>();
         const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
         const auto* ptr_intersection_offsets = intersection_offsets.data_ptr<int64_t>();
-        const auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
-        auto* ptr_selected_dim_indices = selected_dim_indices.data_ptr<int64_t>();
+        const auto* ptr_other_idx_counts = other_idx_counts.data_ptr<int64_t>();
+        auto* ptr_res_index = res_index.data_ptr<int64_t>();
 
-        at::parallel_for(0, nnz, nnz_grain_size, [&](int64_t start, int64_t end) {
+        at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end){
             const auto tid = at::get_thread_num();
-            const auto* ptr_tid_dim_indices = ptr_dim_indices + start;
-            auto* tid_offsets = selected_dim_indices_offsets_per_thread.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_idx = ptr_idx + start;
+            auto* tid_offsets = idx_offsets_per_thread.select(0, tid).data_ptr<int64_t>();
             for (const auto i : c10::irange(start, end)) {
-              const auto idx = *ptr_tid_dim_indices++;
-              const auto intersection_counts = ptr_intersection_counts[idx];
-              const auto intersection_offset = ptr_intersection_offsets[idx];
-              const auto idx_index_count = ptr_index_counts[idx];
-              auto& idx_tid_offset = tid_offsets[idx];
-              idx_tid_offset -= idx_index_count;
-              auto* out_location = ptr_selected_dim_indices
+              const auto val = *ptr_tid_idx++;
+              const auto intersection_counts = ptr_intersection_counts[val];
+              const auto intersection_offset = ptr_intersection_offsets[val];
+              const auto val_count = ptr_other_idx_counts[val];
+              auto& val_tid_offset = tid_offsets[val];
+              val_tid_offset -= val_count;
+              auto* out_location = ptr_res_index
                 + (intersection_offset - intersection_counts)
-                + idx_tid_offset;
-              std::fill_n(out_location, idx_index_count, i);
+                + val_tid_offset;
+              std::fill_n(out_location, val_count, i);
             }
         });
 
-        return selected_dim_indices;
-      }();
+        return res_index;
+      };
+
+      const auto selected_dim_indices = index_from_intersection(
+          dim_indices,
+          dim_indices_offset_counts_per_thread,
+          index_counts
+      );
+
+      const auto res_dim_indices = index_from_intersection(
+          index,
+          index_offset_counts_per_thread,
+          dim_indices_counts
+      );
 
       return std::make_tuple(selected_dim_indices, res_dim_indices);
     };
