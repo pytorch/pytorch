@@ -133,14 +133,15 @@ class TestNestedTensor(TestCase):
                 RuntimeError, "numel is disabled", lambda: a1.numel(),
             )
 
-    @unittest.skipIf(IS_FBCODE, "size is not virtual in fbcode.")
     @torch.inference_mode()
     def test_size(self):
         for constructor in _iter_constructors():
             a1 = constructor([])
             self.assertRaisesRegex(
                 RuntimeError,
-                "NestedTensorImpl doesn't support sizes",
+                "Tensors of type NestedTensorImpl do not have sizes"
+                if IS_FBCODE
+                else "NestedTensorImpl doesn't support sizes",
                 lambda: a1.size(),
             )
 
@@ -182,3 +183,12 @@ class TestNestedTensor(TestCase):
         )
         self.assertEqual(str(a), expected)
         self.assertEqual(repr(a), expected)
+
+    @torch.inference_mode()
+    def test_activations(self):
+        for func in (torch.nn.functional.relu, torch.nn.functional.relu_, torch.nn.functional.gelu, torch._C._nn.gelu_):
+            t = torch.tensor([-1, 0, 1], dtype=torch.float)
+            nt = nested_tensor([t])
+            nested_result = func(nt)
+            self.assertTrue(nested_result.is_nested)
+            self.assertEqual(func(t), nested_result.unbind()[0])

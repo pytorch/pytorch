@@ -65,6 +65,28 @@ DebugUtil::GraphFormat DebugUtil::GetDefaultGraphFormat() {
   return format;
 }
 
+std::string GetFirstUserFrameInPython() {
+
+  std::string empty;
+  if (!torch::lazy::GetPythonFramesFunction()) {
+    return empty;
+  }
+
+  auto frames = torch::lazy::GetPythonFramesFunction()();
+
+  for (auto i = frames.size(); i > 0; i--) {
+    auto& loc = frames[i - 1];
+    if (loc.file.find("site-packages") == std::string::npos) {
+      std::stringstream ss;
+      ss << loc.file << " "
+        << loc.function << " "
+        << loc.line;
+      return ss.str();
+    }
+  }
+  return empty;
+}
+
 std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
                                            const std::vector<size_t>* indices,
                                            GraphFormat format) {
