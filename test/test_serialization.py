@@ -23,7 +23,7 @@ from torch.serialization import check_module_version_greater_or_equal
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -414,7 +414,7 @@ class SerializationMixin(object):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
                 x = torch.save(torch.nn.Linear(2, 3), checkpoint)
-                self.assertEquals(len(warns), 0)
+                self.assertEqual(len(warns), 0)
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -616,10 +616,11 @@ class SerializationMixin(object):
             self.assertEqual(a, a_loaded)
             self.assertEqual(b, b_loaded)
 
-        for device, dtype in product(devices, get_all_dtypes()):
+        for device, dtype in product(devices, all_types_and_complex_and(torch.half,
+                                                                        torch.bfloat16, torch.bool)):
             a = torch.tensor([], dtype=dtype, device=device)
 
-            for other_dtype in get_all_dtypes():
+            for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
                 s = torch._TypedStorage(
                     wrap_storage=a.storage()._untyped(),
                     dtype=other_dtype)
@@ -726,7 +727,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEquals(len(w), 0)
+                    self.assertEqual(len(w), 0)
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -737,7 +738,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEquals(len(w), 1)
+                    self.assertEqual(len(w), 1)
                     self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):

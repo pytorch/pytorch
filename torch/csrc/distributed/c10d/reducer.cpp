@@ -2052,6 +2052,47 @@ void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+
+  // First verify number of parameters to avoid inconsistent inputs into
+  // broadcast which can cause a crash.
+  // See https://github.com/pytorch/pytorch/issues/73547
+
+  at::TensorOptions param_size_options;
+  param_size_options = param_size_options.dtype(at::kLong);
+  param_size_options = param_size_options.device(params[0].device());
+  // Note: Not using tensor building API because of
+  // https://github.com/pytorch/pytorch/issues/74114
+  at::Tensor param_size_tensor = at::tensor(
+    {static_cast<int64_t>(params.size())}, param_size_options);
+
+  // Allgather and verify parameter size.
+  std::vector<std::vector<at::Tensor>> param_size_output_tensors;
+  param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
+  auto world_size = process_group->getSize();
+  for (size_t i = 0 ; i < world_size ; ++i) {
+    param_size_output_tensors.front().emplace_back(
+      at::empty_like(param_size_tensor)
+    );
+  }
+
+  std::vector<at::Tensor> param_size_vec{param_size_tensor};
+  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
+  auto result_size_tensors = param_size_output_tensors.front();
+  for (size_t i = 0; i < world_size ; ++i ) {
+    auto param_size_for_rank = result_size_tensors[i][0].item<int>();
+    TORCH_CHECK(
+      param_size_for_rank == params.size(),
+      c10::str(
+        "DDP expects same model across all ranks, but Rank ",
+        process_group->getRank(),
+        " has ", params.size(), " params, while rank ", i,
+        " has inconsistent ", param_size_for_rank,
+        " params."
+      )
+    );
+  }
+
+  // Continue with parameter shape verification.
   size_t i = 0;
   for (const auto& t : params) {
     i += 2 * t.dim();
@@ -2085,10 +2126,9 @@ void verify_params_across_processes(
   i = 0;
   for (const auto p : c10::irange(params.size())) {
     const auto& t = params[p];
-    // I'd like to include which process we are in the message,
-    // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      auto msg = c10::str("params[", p, "] in this process",
+      auto msg = c10::str("[", process_group->getRank(),
+                        "]: params[", p, "] in this process",
                         " with sizes ",
                         t.sizes(),
                         " appears not to match sizes of the same param in process 0.");

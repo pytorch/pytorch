@@ -1,6 +1,7 @@
 from collections import defaultdict
 
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
 from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 

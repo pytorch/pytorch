@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -182,7 +183,6 @@ void compileCudaFusionGroup(Node* fusion_node) {
     // node only insert meta information after itself).
     PropagateShapesOnGraph(graph);
     TypePropagate(graph);
-    PropagateShapesOnGraph(graph);
 
     int32_t fusion_cache_id =
         CudaFusionManager::getManager().registerOrGetCacheId(graph);
@@ -209,13 +209,31 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
 
   // Fallback to use if anything goes wrong
-  auto take_fallback = [&]() {
+  auto take_fallback = [&](Stack& stack) {
     // copying graph here since we are eliminating shape information;
     auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
     EraseShapeInformation(copied_graph);
     enableAliasCopyNodes(copied_graph, copied_graph->block());
     InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
   };
+
+  c10::optional<Stack> stack_copy;
+  auto compare_callback = getCudaFuserComparisonCallback();
+  if (compare_callback.run_fallback) {
+    // make a copy of the stack
+    int64_t inputs_size =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->inputs().size());
+    TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
+    stack_copy = Stack();
+    stack_copy->insert(
+        stack_copy->end(), stack.begin(), stack.end() - inputs_size);
+    // deepcopy the last (inputs_size) stack items
+    std::transform(
+        stack.end() - inputs_size,
+        stack.end(),
+        std::back_inserter(*stack_copy),
+        [](const c10::IValue& ivalue) { return ivalue.deepcopy(); });
+  }
 
   auto run_fusion = [&]() {
     TORCH_CHECK(
@@ -253,10 +271,44 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
           "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
-      take_fallback();
+      take_fallback(stack);
     }
   } else {
     run_fusion();
+  }
+
+  if (compare_callback.callback != nullptr) {
+    Stack fused_outputs;
+    Stack fallback_outputs;
+    int64_t output_count =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->outputs().size());
+    TORCH_CHECK(
+        output_count <= stack.size(),
+        "Expected ",
+        output_count,
+        " outputs but found only ",
+        stack.size(),
+        " items on the stack");
+
+    fused_outputs.insert(
+        fused_outputs.begin(), stack.end() - output_count, stack.end());
+
+    if (stack_copy) {
+      take_fallback(*stack_copy);
+      TORCH_CHECK(
+          stack_copy->size() == stack.size(),
+          "Fused graph returns stack with ",
+          stack.size(),
+          " items, compared to ",
+          stack_copy->size(),
+          " from unfused graph");
+      fallback_outputs.insert(
+          fallback_outputs.begin(),
+          stack_copy->end() - output_count,
+          stack_copy->end());
+    }
+    auto graph_str = fusion_node->g(attr::Subgraph)->toString();
+    compare_callback.callback(fused_outputs, fallback_outputs, graph_str);
   }
 }
 
