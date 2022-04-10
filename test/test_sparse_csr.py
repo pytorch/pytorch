@@ -489,7 +489,8 @@ class TestSparseCSR(TestCase):
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"All batch dimensions of the provided size \(\[2\]\), indices \(\[2\], \[3\]\), and values \(\[4\]\) must be the same"):
+                                    r"All batch dimensions of the provided size \(\[2\]\), indices \(\[2\], \[3\]\),"
+                                    r" and values \(\[4\]\) must be the same"):
             torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(3, 1), values.repeat(4, 1), (2, 2, 10),
                                     layout=torch.sparse_csr,
                                     device=device)
