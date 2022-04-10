@@ -1194,7 +1194,7 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             summon_ctx = (
-                self.summon_full_params(recurse=False, writeback=False)
+                self._summon_full_params(recurse=False, writeback=False)
                 if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
                 contextlib.suppress()
             )
@@ -1583,7 +1583,7 @@ class FullyShardedDataParallel(nn.Module):
             changes will be discarded). In the case where FSDP does not shard
             the parameters, currently only when ``world_size == 1``, the
             modification is persisted regardless of ``writeback``.
-        ..note:: This method works on modules which are not FSDP themselves but
+        .. note:: This method works on modules which are not FSDP themselves but
             may contain multiple independent FSDP units. In that case, the given
             arguments will apply to all contained FSDP units.
 
