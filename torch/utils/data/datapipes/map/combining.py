@@ -1,4 +1,5 @@
-from torch.utils.data import MapDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe
 from typing import Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)

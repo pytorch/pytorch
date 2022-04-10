@@ -180,6 +180,13 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 };
 
 // Utils to convert at::Tensor to LazyTensor, and vice versa.
+
+// Section 0: c10::Tensorlist ==> lazy::TensorList
+// note: GetTensorList is not totally parallel to GetLtcTensor; A TensorList skips
+//       the LazyTensor wrappers, assuming that the list of underlying IR nodes is
+//       actually more useful for downstream computations.  TBD.
+TORCH_API torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors);
+
 // Section 1: at::Tensor => LazyTensor.
 // Extracts the LazyTensor out of an at::Tensor. Returns a null LazyTensor
 // if the tensor is not a lazy tensor.

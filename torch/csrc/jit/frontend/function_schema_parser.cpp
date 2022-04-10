@@ -350,12 +350,12 @@ struct SchemaParser {
 };
 } // namespace
 
-C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
+either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
   return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
-C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
+FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
   TORCH_CHECK(
       parsed.is_right(),
@@ -363,7 +363,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   return std::move(parsed.right());
 }
 
-C10_EXPORT OperatorName parseName(const std::string& name) {
+OperatorName parseName(const std::string& name) {
   auto parsed = parseSchemaOrName(name);
   TORCH_CHECK(
       parsed.is_left(),

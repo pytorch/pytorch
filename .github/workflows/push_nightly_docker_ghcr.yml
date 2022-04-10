@@ -35,5 +35,5 @@ jobs:
             bash .github/scripts/build_publish_nightly_docker.sh
 
 concurrency:
-  group: push-nightly-docker-ghcr-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

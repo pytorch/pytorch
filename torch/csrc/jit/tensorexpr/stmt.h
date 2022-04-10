@@ -449,6 +449,24 @@ class TORCH_API Free : public StmtNode<Free> {
   BufPtr buf_;
 };
 
+class TORCH_API FreeExt : public StmtNode<FreeExt> {
+ public:
+  static FreeExtPtr make(const std::vector<BufHandle>& bufs);
+
+  std::vector<BufPtr> bufs() const {
+    return bufs_;
+  }
+
+  void set_bufs(std::vector<BufPtr> bufs) {
+    bufs_ = std::move(bufs);
+  }
+
+  explicit FreeExt(std::vector<BufPtr> bufs) : bufs_(std::move(bufs)) {}
+
+ private:
+  std::vector<BufPtr> bufs_;
+};
+
 class TORCH_API Let : public StmtNode<Let> {
  public:
   static LetPtr make(const VarHandle& var, const ExprHandle& val) {
@@ -936,6 +954,60 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
  private:
   BufPtr buf_;
   std::string func_name_;
+  std::vector<BufPtr> buf_args_;
+  std::vector<ExprPtr> args_;
+};
+
+class TORCH_API ExternalCallWithAlloc : public StmtNode<ExternalCallWithAlloc> {
+ public:
+  static ExternalCallWithAllocPtr make(
+      const std::string& func_name,
+      const std::vector<BufHandle>& buf_out_args,
+      const std::vector<BufHandle>& buf_args,
+      const std::vector<ExprHandle>& args);
+
+  std::vector<BufPtr> buf_out_args() const {
+    return buf_out_args_;
+  }
+
+  std::string func_name() const {
+    return func_name_;
+  }
+
+  std::vector<BufPtr> buf_args() const {
+    return buf_args_;
+  }
+
+  std::vector<ExprPtr> args() const {
+    return args_;
+  }
+
+  void set_buf_out_args(std::vector<BufPtr> buf_out_args) {
+    buf_out_args_ = std::move(buf_out_args);
+  }
+
+  void set_buf_args(std::vector<BufPtr> buf_args) {
+    buf_args_ = std::move(buf_args);
+  }
+
+  void set_args(std::vector<ExprPtr> args) {
+    args_ = std::move(args);
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  ExternalCallWithAlloc(
+      std::string func_name,
+      std::vector<BufPtr> buf_out_args,
+      std::vector<BufPtr> buf_args,
+      std::vector<ExprPtr> args)
+      : func_name_(std::move(func_name)),
+        buf_out_args_(std::move(buf_out_args)),
+        buf_args_(std::move(buf_args)),
+        args_(std::move(args)) {}
+
+ private:
+  std::string func_name_;
+  std::vector<BufPtr> buf_out_args_;
   std::vector<BufPtr> buf_args_;
   std::vector<ExprPtr> args_;
 };
