@@ -13433,24 +13433,28 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv3d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
         # Compare F.conv3d padding='same' output against manual padding
         # Without strides/dilation
         x = torch.rand(1, 1, 10, 11, 12, device=device, dtype=dtype)
         y = torch.rand(1, 1, 1, 2, 5, device=device, dtype=dtype)
         expect = F.conv3d(x, y, padding=(0, 1, 2))[..., :, 1:, :]
         actual = F.conv3d(x, y, padding='same')
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # With dilation
         expect = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
         actual = F.conv3d(x, y, padding='same', dilation=2)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # Dilation with asymmetric padding
         y = torch.rand(1, 1, 4, 4, 4, device=device, dtype=dtype)
         expect = F.conv3d(x, y, padding=5, dilation=3)[..., 1:, 1:, 1:]
         actual = F.conv3d(x, y, padding='same', dilation=3)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv1d_valid_padding(self, device, dtype):
@@ -18731,7 +18735,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(8005)
-    @dtypes(torch.half, torch.float, torch.cfloat)
+    @dtypes(torch.half, torch.float)
     def test_conv_cudnn_ndhwc(self, device, dtype):
         def helper(n, c, d, h, w, out_channels, kernel_size, groups):
             input = torch.randint(-2, 2, (n, c, d, h, w), dtype=dtype, device=device)\
