@@ -8219,12 +8219,12 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
 
-- func: argsort.stable(Tensor self, *, bool stable=True, int dim=-1, bool descending=False) -> Tensor
+- func: argsort.stable(Tensor self, *, bool stable, int dim=-1, bool descending=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
     CPU: argsort_cpu_stable
-    CUDA: argsort_stable_cuda
+    CUDA: argsort_cuda_stable
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
