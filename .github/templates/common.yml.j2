@@ -38,9 +38,7 @@ on:
   {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
     tags:
   {%- endif %}
-  {%- if label != "ciflow/default" %}
       - '!{{ label }}/*'
-  {%- endif %}
 {%- endfor %}
 {%- if not is_scheduled %}
     branches:
@@ -131,6 +129,10 @@ on:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}
