@@ -181,6 +181,19 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
   if (&result != &self) {
+
+    // beta*self + alpha*(mat1@mat2) = 0
+    if ((mat1._is_zerotensor() || mat2._is_zerotensor() || alpha.equal(0.0)) &&
+        (self._is_zerotensor() || beta.equal(0.0))) {
+      result = at::_efficientzerotensor(self_sizes, self.options());
+      return result;
+    }
+
+    // beta*self
+    if (mat1._is_zerotensor() || mat2._is_zerotensor() || alpha.equal(0.0)){
+      return beta.equal(1) ? self.clone() : self * beta;
+    }
+
     at::native::resize_output(result, {mat1_sizes[0], mat2_sizes[1]});
     if (beta.toComplexDouble() != 0.0 && !useLtInterface) {
       at::native::copy_(result, *self_);
