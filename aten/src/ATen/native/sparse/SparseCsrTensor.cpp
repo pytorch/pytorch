@@ -9,6 +9,7 @@
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -72,20 +73,20 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
   case kSparseCsr:
   case kSparseCsc:
     TORCH_CHECK(
-                size.size() == 2,
-                "size of a ", LAYOUT, " tensor must be of length 2, but got: ",
+                size.size() >= 2,
+                "size of a batched ", LAYOUT, " tensor must have length >= 2, but got: ",
                 size.size());
     TORCH_CHECK(
-                crow_indices.dim() == 1,
-                CROW_INDICES, " must have dim=1 but got crow_indices.dim()=",
+                crow_indices.dim() >= 1,
+                CROW_INDICES, " must have dim >= 1 but got crow_indices.dim() = ",
                 crow_indices.dim());
     TORCH_CHECK(
-                col_indices.dim() == 1,
-                COL_INDICES, " must have dim=1 but got col_indices.dim()=",
+                col_indices.dim() >= 1,
+                COL_INDICES, " must have dim >= 1 but got col_indices.dim() = ",
                 col_indices.dim());
     TORCH_CHECK(
-                values.dim() == 1,
-                "values must have dim=1 but got values.dim()=",
+                values.dim() >= 1,
+                "values must have dim >= 1 but got values.dim() = ",
                 values.dim());
     break;
   case kSparseBsr:
@@ -96,15 +97,36 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
     TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout_, " is not supported");
   }
 
-  // Note, this check also enforces `crow_indices.numel() >= 1`
-  // TODO: for BSR|BSC we cannot use numel
   TORCH_CHECK(
-      crow_indices.numel() == (size[0] + 1),
-      CROW_INDICES, ".numel() must be size(0) + 1, but got: ",
-      crow_indices.numel());
+      crow_indices.dim() == col_indices.dim(),
+      "Number of dimensions of crow_indices and col_indices must be the same.");
+  TORCH_CHECK(
+      crow_indices.dim() == values.dim(),
+      "Number of dimensions of indices and values must be the same.");
+  TORCH_CHECK(
+      static_cast<size_t>(crow_indices.dim()) == size.size() - 1,
+      "Number of dimensions of indices must be one less than the number of dimensions of the provided size.");
+
+  // All batch sizes must be the same
+  auto batch_size = size.slice(0, size.size() - 2);
+  auto crow_indices_batch_size = crow_indices.sizes().slice(0, crow_indices.dim() - 1);
+  auto col_indices_batch_size = col_indices.sizes().slice(0, col_indices.dim() - 1);
+  auto values_batch_size = values.sizes().slice(0, values.dim() - 1);
+  TORCH_CHECK(
+      batch_size == crow_indices_batch_size &&
+      batch_size == col_indices_batch_size &&
+      batch_size == values_batch_size,
+      "All batch dimensions of the provided size (", batch_size, "), indices (",
+      crow_indices_batch_size,", ", col_indices_batch_size, "), and values (",
+      values_batch_size,") must be the same.");
+  // Note, this check also enforces `crow_indices.size(-1) >= 1`
+  TORCH_CHECK(
+              crow_indices.size(-1) == (size[size.size() - 2] + 1),  // TODO: BSR/BSC
+              CROW_INDICES, ".size(-1) must be equal to size[-2] + 1 (that is ", size[size.size() - 2] + 1, "), but got: ",
+              crow_indices.size(-1));
   TORCH_CHECK(
       col_indices.numel() == values.numel(),
-      COL_INDICES, " and values must have equal sizes, but got col_indices.numel(): ",
+      COL_INDICES, " and values must have the same number of elements, but got ", COL_INDICES, ".numel(): ",
       col_indices.numel(),
       ", values.numel(): ",
       values.numel());
@@ -112,23 +134,30 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
   // Indices invariants
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
     Tensor crow_indices_cpu = crow_indices.to(kCPU);
-    auto crow_indices_accessor = crow_indices_cpu.accessor<index_t, 1>();
+    auto crow_indices_data_ptr = crow_indices_cpu.data_ptr<index_t>();
+    auto batch_stride = crow_indices_cpu.dim() >= 2 ? crow_indices_cpu.stride(-2) : 0;
     switch (layout_) {
     case kSparseCsr:
     case kSparseCsc:
-      TORCH_CHECK(
-                  crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
-      TORCH_CHECK(
-                  crow_indices_accessor[crow_indices.numel() - 1] == col_indices.numel(),
-                  "last value of ", CROW_INDICES, " should be equal to the length of col_indices.");
-      for (int i =  1; i <= size[0]; i++) {
+      for (const auto batch_id : c10::irange(batchCount(crow_indices_cpu))) {
         TORCH_CHECK(
-                    crow_indices_accessor[i - 1] <= crow_indices_accessor[i],
-                    "at position i = ", i, ", this condition ", CROW_INDICES, "[i - 1] <= ", CROW_INDICES, "[i] fails");
+                    crow_indices_data_ptr[batch_id*batch_stride] == 0,
+                    "(Batch element ", batch_id, ") ",
+                    ": 0th value of ", CROW_INDICES, " must be 0, but it is ", crow_indices_data_ptr[batch_id*batch_stride]);
+        TORCH_CHECK(
+                    crow_indices_data_ptr[batch_id*batch_stride + crow_indices.size(-1) - 1] == col_indices.size(-1),
+                    "(Batch element ", batch_id, ") ",
+                    "last value of ", CROW_INDICES, " should be equal to the length of col_indices.");
+        for (int i =  1; i <= size[size.size() - 2]; i++) {
+          TORCH_CHECK(
+                      crow_indices_data_ptr[batch_id*batch_stride + i - 1] <= crow_indices_data_ptr[batch_id*batch_stride + i],
+                      "(Batch element ", batch_id, ") ",
+                      "at position i = ", i, ", the condition ", CROW_INDICES, "[i - 1] <= ", CROW_INDICES, "[i] fails");
+        }
       }
       if (col_indices.numel() > 0) {
         TORCH_CHECK(0 <= col_indices.min().item<index_t>(), COL_INDICES, ".min() should be greater or equal to zero");
-        TORCH_CHECK(size[1] > col_indices.max().item<index_t>(), "size(1) should be greater than ", COL_INDICES, ".max()");
+        TORCH_CHECK(size[size.size() - 1] > col_indices.max().item<index_t>(), "size[-1] should be greater than ", COL_INDICES, ".max()");
       }
       break;
     case kSparseBsr:
@@ -249,22 +278,29 @@ Tensor sparse_csr_tensor(
   Layout layout_ = layout.value_or(get_layout_from_members(crow_indices, col_indices, values));
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  std::array<int64_t, 2> size = {0, 0};  // TODO: extend for BSR|BSC
+  // TODO: extend size for BSR|BSC
+  auto size = DimVector(IntArrayRef(col_indices.sizes().data(), col_indices.dim() - 1));
   switch (layout_) {
   case kSparseCsr:
-    if (col_indices.numel() > 0) {
-      AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
-                                                                                  size[0] = crow_indices.numel() - 1;
-                                                                                  size[1] = col_indices.max().item<index_t>() + 1;
-                                                                                });
+    if (col_indices.size(-1) > 0) {
+      size.push_back(crow_indices.size(-1) - 1);
+
+    } else {
+      size.push_back(0);
     }
+    AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
+                                                                                size.push_back(col_indices.max().item<index_t>() + 1);
+                                                                              });
     break;
   case kSparseCsc:
-    if (col_indices.numel() > 0) {
-      AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csc_construct_check", [&] {
-                                                                                  size[1] = crow_indices.numel() - 1;
-                                                                                  size[0] = col_indices.max().item<index_t>() + 1;
-                                                                                });
+    AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
+                                                                                size.push_back(col_indices.max().item<index_t>() + 1);
+                                                                              });
+    if (col_indices.size(-1) > 0) {
+      size.push_back(crow_indices.size(-1) - 1);
+
+    } else {
+      size.push_back(0);
     }
     break;
   case kSparseBsr:
@@ -296,7 +332,7 @@ Tensor empty_sparse_csr(
     c10::optional<bool> pin_memory,
     c10::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
-  Layout layout_ = layout.value_or((size.size() == 2 ? kSparseCsr : kSparseBsr));
+  Layout layout_ = layout.value_or((size.size() == 2 ? kSparseCsr : kSparseBsr));  // TODO: this is wrong..
   const char* LAYOUT = (layout_ == kSparseCsr ? "CSR" : (layout_ == kSparseCsc ? "CSC" : (layout_ == kSparseBsr ? "BSR" : "BSC")));
 
   TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
@@ -308,11 +344,16 @@ Tensor empty_sparse_csr(
   case kSparseCsr:
   case kSparseCsc:
     {
-      TORCH_CHECK(size.size() == 2, "torch.empty: Only 2D sparse ", LAYOUT, " tensors are supported.");
-      auto rows = size[(layout == kSparseCsr) ? 0 : 1];
-      crow_indices = at::empty({rows + 1}, options);
-      col_indices = at::empty({0}, options);
-      values = at::empty({0}, options.dtype(dtype));
+      TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse ", LAYOUT, " matrices are supported, but got size ", size);
+      auto rows = size[size.size() - ((layout == kSparseCsr) ?  2 : 1)];
+      auto crow_indices_size = DimVector(size.slice(0, size.size() - 2));
+      crow_indices_size.push_back(rows + 1);
+      auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
+      int64_t nnz = 0;
+      col_indices_values_size.push_back(nnz);
+      crow_indices = at::empty(crow_indices_size, options);
+      col_indices = at::empty(col_indices_values_size, options);
+      values = at::empty(col_indices_values_size, options.dtype(dtype));
     }
     break;
   case kSparseBsr:
@@ -345,11 +386,11 @@ const Tensor& resize_sparse_csr_(
   switch (layout_) {
   case kSparseCsr:
   case kSparseCsc:
-    TORCH_CHECK(size.size() == 2, "torch.resize_: Only 2D sparse ", LAYOUT, " tensors are supported.");
+    TORCH_CHECK(size.size() >= 2, "torch.resize_: Only batched sparse ", LAYOUT, " tensors are supported, but got size ", size);
     break;
   case kSparseBsr:
   case kSparseBsc:
-    TORCH_CHECK(size.size() >= 2, "torch.resize_: At least 2D sparse ", LAYOUT, " tensors are supported.");
+    TORCH_CHECK(size.size() >= 2, "torch.resize_: At least 2D sparse ", LAYOUT, " tensors are supported, but got size ", size);  // FIXME
     break;
   default:
     TORCH_CHECK(false, "resize_sparse_csr_: layout ", layout_, " is not supported");
