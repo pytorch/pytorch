@@ -45,7 +45,7 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
         });
       });
 #endif
-  } else { 
+  } else {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       dtype, "lerp_cuda",
