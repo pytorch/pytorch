@@ -37,6 +37,7 @@ concurrency:
 
 jobs:
   libtorch-cpu-shared-with-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -77,6 +78,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -117,7 +122,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -180,6 +185,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -189,7 +198,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -271,6 +280,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -303,7 +319,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -360,6 +376,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-shared-without-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -400,6 +417,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -440,7 +461,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cpu-shared-without-deps-debug
@@ -503,6 +524,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -512,7 +537,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-debug
@@ -594,6 +619,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -626,7 +658,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-debug
@@ -683,6 +715,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-static-with-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -723,6 +756,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -763,7 +800,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cpu-static-with-deps-debug
@@ -826,6 +863,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -835,7 +876,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-debug
@@ -917,6 +958,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -949,7 +997,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-debug
@@ -1006,6 +1054,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-static-without-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1046,6 +1095,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1086,7 +1139,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cpu-static-without-deps-debug
@@ -1149,6 +1202,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1158,7 +1215,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-debug
@@ -1240,6 +1297,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -1272,7 +1336,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-debug
@@ -1329,6 +1393,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-shared-with-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1370,6 +1435,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1410,7 +1479,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_3-shared-with-deps-debug
@@ -1474,6 +1543,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1483,7 +1556,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-debug
@@ -1566,6 +1639,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -1598,7 +1678,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-debug
@@ -1655,6 +1735,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-shared-without-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1696,6 +1777,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1736,7 +1821,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_3-shared-without-deps-debug
@@ -1800,6 +1885,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1809,7 +1898,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-debug
@@ -1892,6 +1981,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -1924,7 +2020,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-debug
@@ -1981,6 +2077,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-static-with-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2022,6 +2119,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2062,7 +2163,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_3-static-with-deps-debug
@@ -2126,6 +2227,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2135,7 +2240,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-debug
@@ -2218,6 +2323,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -2250,7 +2362,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-debug
@@ -2307,6 +2419,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-static-without-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2348,6 +2461,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2388,7 +2505,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_3-static-without-deps-debug
@@ -2452,6 +2569,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2461,7 +2582,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-debug
@@ -2544,6 +2665,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -2576,7 +2704,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-debug
@@ -2633,6 +2761,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-shared-with-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2674,6 +2803,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2714,7 +2847,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_5-shared-with-deps-debug
@@ -2778,6 +2911,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2787,7 +2924,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-shared-with-deps-debug
@@ -2870,6 +3007,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -2902,7 +3046,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-shared-with-deps-debug
@@ -2959,6 +3103,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-shared-without-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3000,6 +3145,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3040,7 +3189,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_5-shared-without-deps-debug
@@ -3104,6 +3253,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3113,7 +3266,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-shared-without-deps-debug
@@ -3196,6 +3349,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -3228,7 +3388,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-shared-without-deps-debug
@@ -3285,6 +3445,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-static-with-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3326,6 +3487,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3366,7 +3531,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_5-static-with-deps-debug
@@ -3430,6 +3595,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3439,7 +3608,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-static-with-deps-debug
@@ -3522,6 +3691,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -3554,7 +3730,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-static-with-deps-debug
@@ -3611,6 +3787,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-static-without-deps-debug-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3652,6 +3829,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3692,7 +3873,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: libtorch-cuda11_5-static-without-deps-debug
@@ -3756,6 +3937,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3765,7 +3950,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-static-without-deps-debug
@@ -3848,6 +4033,13 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -3880,7 +4072,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_5-static-without-deps-debug
