@@ -110,6 +110,34 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
 } // namespace meta
 namespace native {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr_orthogonalization ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DEFINE_DISPATCH(qr_orthogonalization_stub);
+
+Tensor& qr_orthogonalization(const Tensor& A, Tensor& out, const float epsilon){
+    TORCH_CHECK(A.device().is_cuda(), "Input tensor device must be CUDA")
+    TORCH_CHECK(A.is_contiguous(), "Input must be contiguous")
+    TORCH_CHECK(A.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
+    
+    const uint m = A.size(0);
+    const uint n = A.size(1);
+
+    if (out.size(0) == 0) {
+      out = at::empty({m, n}, A.options());
+    }
+    else{
+        TORCH_CHECK(out.device().is_cuda(), "Output tensor device must be CUDA")
+        TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
+        TORCH_CHECK(A.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
+    }
+        
+    qr_orthogonalization_stub(A.device().type(), A, out, epsilon);
+
+    return out;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 DEFINE_DISPATCH(addr_stub);
 DEFINE_DISPATCH(linalg_vector_norm_stub);
 

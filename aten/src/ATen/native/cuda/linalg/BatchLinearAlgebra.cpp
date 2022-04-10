@@ -16,7 +16,6 @@
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
-#include <ATen/native/cuda/linalg/QROrthogonalization.cpp>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -2367,37 +2366,6 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::stri
 #else
   return linalg_qr_helper_magma(input, mode);
 #endif
-}
-
-Tensor& qr_orthogonalization_cuda(const Tensor& A, Tensor& Q, const float epsilon){
-    TORCH_CHECK(A.device().is_cuda(), "Input tensor device must be CUDA")
-    TORCH_CHECK(A.is_contiguous(), "Input must be contiguous")
-    TORCH_CHECK(A.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
-    
-    const uint m = A.size(0);
-    const uint n = A.size(1);
-
-    if (Q.size(0) == 0) {
-      Q = at::empty({m, n}, A.options());
-    }
-    else{
-        TORCH_CHECK(Q.device().is_cuda(), "Output tensor device must be CUDA")
-        TORCH_CHECK(Q.is_contiguous(), "Output tensor must be contiguous")
-        TORCH_CHECK(A.sizes() == Q.sizes(), "Output and input tensors must have same sizes.");
-    }
-        
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-    A.scalar_type(), "qr_orthogonalization_cuda", ([&] {
-        if (n < 512)
-            qr_main<256, scalar_t>(A, Q, m, n, epsilon);
-        else if (n < 1024)
-            qr_main<512, scalar_t>(A, Q, m, n, epsilon);
-        else
-            qr_main<1024, scalar_t>(A, Q, m, n, epsilon);
-    })
-    );
-
-    return Q;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

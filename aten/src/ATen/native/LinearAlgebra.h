@@ -9,9 +9,13 @@ class Scalar;
 
 namespace at {
 struct TensorIterator;
+struct Tensor;
 }
 
 namespace at { namespace native {
+
+using qr_orthogonalization_fn = void(*)(const Tensor&, Tensor&, float);
+DECLARE_DISPATCH(qr_orthogonalization_fn, qr_orthogonalization_stub);
 
 using addr_fn = void (*)(TensorIterator &, const Scalar& beta, const Scalar& alpha);
 DECLARE_DISPATCH(addr_fn, addr_stub);

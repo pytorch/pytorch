@@ -165,7 +165,13 @@ void unpack_pivots_cpu_kernel(
   iter.for_each(loop);
 }
 
+void qr_orthogonalization_cpu(const Tensor& A, Tensor& out, const float epsilon){  
+  //TODO
+}
+
 } // anonymous namespace
+
+REGISTER_DISPATCH(qr_orthogonalization_stub, &qr_orthogonalization_cpu);
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
 REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cpu);
