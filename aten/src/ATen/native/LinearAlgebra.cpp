@@ -1134,18 +1134,20 @@ static void addmm_impl_cpu_(
     return;
   }
 
-  // beta*self + alpha*(mat1@mat2) = 0
-  // Note that alpha*(mat1@mat2) calls into mm so is not special cased
-  if ((m1._is_zerotensor() || m2._is_zerotensor() || alpha.equal(0.0)) &&
-      (self._is_zerotensor() || beta.equal(0.0))) {
-    result = at::_efficientzerotensor(self_sizes, self.options());
-    return;
-  }
+  if (!result._is_zerotensor() and (m1._is_zerotensor() or m2._is_zerotensor())){
+    // Note that alpha*(mat1@mat2) calls into mm so is not special cased
+    // beta*self + alpha*(mat1@mat2) = 0
+    if (self._is_zerotensor()) {
+      result = at::_efficientzerotensor(self_sizes, self.options());
+      return;
+    }
 
-  // beta*self
-  if (m1._is_zerotensor() || m2._is_zerotensor() || alpha.equal(0.0)){
-    result = beta.equal(1) ? self.clone() : self * beta;
-    return;
+    // beta*self
+    if (alpha.toComplexDouble() == 0.0) {
+      result = self * beta;
+      return;
+    }
+
   }
 
   // Some paths in the code below do not handle multiplications of the form [a, 0] x [0, b]
