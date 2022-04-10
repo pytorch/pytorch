@@ -687,19 +687,7 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.parameters_to_ignore = []
 
-        # Create a parametrized module without copying tensors. Avoid
-        # registering '_parametrized_module' as a submodule by directly
-        # adding to self.__dict__.
-        self.__dict__['_parametrized_module'] = replicate_module(self.module, True)
-        to_parametrize = []
-        for module_name, module in self._parametrized_module.named_modules():
-            for param_name, param in module.named_parameters(recurse=False):
-                if (param.requires_grad and f'{module_name}.{param_name}' not in self.parameters_to_ignore):
-                    to_parametrize.append((module, param_name))
-
-        from torch.distributed._shard.replicated_tensor import ReplicatedTensorParametrization
-        for module, param_name in to_parametrize:
-            P.register_parametrization(module, param_name, ReplicatedTensorParametrization(self.process_group))
+        self._build_parametrized_module()
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -744,6 +732,21 @@ class DistributedDataParallel(Module, Joinable):
 
         if static_graph:
             self._set_static_graph()
+
+    def _build_parametrized_module(self):
+        # Create a parametrized module without copying tensors. Avoid
+        # registering '_parametrized_module' as a submodule by directly
+        # adding to self.__dict__.
+        self.__dict__['_parametrized_module'] = replicate_module(self.module, True)
+        to_parametrize = []
+        for module_name, module in self._parametrized_module.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if (param.requires_grad and f'{module_name}.{param_name}' not in self.parameters_to_ignore):
+                    to_parametrize.append((module, param_name))
+
+        from torch.distributed._shard.replicated_tensor import ReplicatedTensorParametrization
+        for module, param_name in to_parametrize:
+            P.register_parametrization(module, param_name, ReplicatedTensorParametrization(self.process_group))
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -860,6 +863,7 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        del attrs["_parametrized_module"]
         return attrs
 
     def __setstate__(self, state):
@@ -868,6 +872,7 @@ class DistributedDataParallel(Module, Joinable):
         super(DistributedDataParallel, self).__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
+        self._build_parametrized_module()
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
