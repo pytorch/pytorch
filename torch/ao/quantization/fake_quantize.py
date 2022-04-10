@@ -6,11 +6,9 @@ during QAT.
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
-    MinMaxObserver,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
-    PerChannelMinMaxObserver,
     FixedQParamsObserver,
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
@@ -123,15 +121,25 @@ class FakeQuantize(FakeQuantizeBase):
     scale: torch.Tensor
     zero_point: torch.Tensor
 
-    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=None, quant_max=None, **observer_kwargs):
         super().__init__()
-        assert quant_min <= quant_max, \
-            'quant_min must be less than or equal to quant_max'
-        self.quant_min = quant_min
-        self.quant_max = quant_max
+        # Populate quant_min/quant_max to observer_kwargs if valid
+        if quant_min is not None and quant_max is not None:
+            assert quant_min <= quant_max, \
+                'quant_min must be less than or equal to quant_max'
+            dtype = observer_kwargs.get("dtype", torch.quint8)
+            if hasattr(observer, "p"):
+                # In case observer is _PartialWrapper, dtype can be stored in
+                # observer.p.keywords["dtype"]
+                dtype = getattr(getattr(observer, "p", {}), "keywords", {}).get(
+                    "dtype", dtype
+                )
+            assert torch.iinfo(dtype).min <= quant_min, 'quant_min out of bound'
+            assert quant_max <= torch.iinfo(dtype).max, 'quant_max out of bound'
+            observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
         self.activation_post_process = observer(**observer_kwargs)
-        assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
-        assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
+        self.quant_min = self.activation_post_process.quant_min
+        self.quant_max = self.activation_post_process.quant_max
         if _is_float_qparams(self.activation_post_process.qscheme):
             zero_point_dtype = torch.float
         else:
@@ -335,10 +343,11 @@ default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxO
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 """
 Default fake_quant for weights.
+Observer is memoryless since averaging_constant is 1.
 """
 
-default_dynamic_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
-                                                    dtype=torch.quint8, memoryless=True)
+default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
+                                                    dtype=torch.quint8, averaging_constant=1)
 """
 Default dynamic fake_quant for activations.
 """
@@ -355,23 +364,25 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                ch_axis=0)
 """
 Default fake_quant for per-channel weights.
+Observer is memoryless since averaging_constant is 1.
 """
-default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+default_embedding_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
                                                       dtype=torch.quint8,
                                                       quant_min=0,
                                                       quant_max=255,
                                                       ch_axis=0,
-                                                      memoryless=True)
+                                                      averaging_constant=1)
 """
 Default fake_quant for embeddings.
+Observer is memoryless since averaging_constant is 1.
 """
 
-default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                            qscheme=torch.per_channel_affine_float_qparams,
                                                            ch_axis=0,
                                                            dtype=torch.quint4x2,
-                                                           memoryless=True)
+                                                           averaging_constant=1)
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,
@@ -410,6 +421,27 @@ default_fused_per_channel_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_arg
 """
 Fused version of `default_per_channel_weight_fake_quant`, with improved performance.
 """
+
+fused_wt_fake_quant_range_neg_127_to_127 = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                   quant_min=-127,
+                                                                                   quant_max=127,
+                                                                                   dtype=torch.qint8,
+                                                                                   qscheme=torch.per_tensor_symmetric,
+                                                                                   eps=2 ** -12)
+"""
+Fused version of `default_weight_fake_quant`, with the 8-bit values restricted to [-127, +127], excluding -128.
+"""
+
+fused_per_channel_wt_fake_quant_range_neg_127_to_127 = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                               quant_min=-127,
+                                                                                               quant_max=127,
+                                                                                               dtype=torch.qint8,
+                                                                                               qscheme=torch.per_channel_symmetric,
+                                                                                               eps=2 ** -12)
+"""
+Fused version of `default_per_channel_weight_fake_quant`, with the 8-bit values restricted to [-127, +127], excluding -128.
+"""
+
 
 def _is_fake_quant_script_module(mod):
     ''' Returns true if given mod is an instance of FakeQuantize script module.

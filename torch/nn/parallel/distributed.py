@@ -410,11 +410,6 @@ class DistributedDataParallel(Module, Joinable):
         likely experience deadlocks if you don't change this setting.
 
     .. warning::
-        Forward and backward hooks defined on :attr:`module` and its submodules
-        won't be invoked anymore, unless the hooks are initialized in the
-        :meth:`forward` method.
-
-    .. warning::
         You should never try to change your model's parameters after wrapping
         up your model with ``DistributedDataParallel``. Because, when
         wrapping up your model with ``DistributedDataParallel``, the constructor

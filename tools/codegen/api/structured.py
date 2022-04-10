@@ -6,7 +6,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
                                      tensorT, scalarT, intArrayRefT, dimnameListT,
                                      optionalTensorRefT, optionalScalarRefT,
-                                     iTensorListRefT)
+                                     optionalIntArrayRefT, iTensorListRefT)
 
 from tools.codegen.api import cpp
 from tools.codegen.utils import assert_never
@@ -38,6 +38,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
             return NamedCType(binds, BaseCType(optionalTensorRefT))
         elif t.elem == BaseType(BaseTy.Scalar):
             return NamedCType(binds, BaseCType(optionalScalarRefT))
+        elif isinstance(t.elem, ListType) and str(t.elem.elem) == 'int':
+            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
