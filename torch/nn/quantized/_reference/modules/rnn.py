@@ -2,12 +2,38 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from .utils import _quantize_and_dequantize_weight
+from .utils import _quantize_weight
 from typing import Optional, Dict, Any, Tuple
 from torch import _VF
 from torch.nn.utils.rnn import PackedSequence
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
+
+def get_weight_and_quantization_params(module, wn):
+    weight = getattr(module, wn)
+    params = [weight]
+    for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis"]]:
+        if hasattr(module, param_name):
+            param = getattr(module, param_name)
+        else:
+            param = None
+        params.append(param)
+    return params
+
+def get_quantized_weight(module, wn):
+    if not hasattr(module, wn):
+        return None
+    params = get_weight_and_quantization_params(module, wn)
+    weight = _quantize_weight(*params)
+    return weight
+
+def get_quantize_and_dequantized_weight(module, wn):
+    if not hasattr(module, wn):
+        return None
+    params = get_weight_and_quantization_params(module, wn)
+    weight = _quantize_and_dequantize_weight(*params)
+    return weight
 
 class RNNCellBase(nn.RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
@@ -56,27 +82,17 @@ class RNNCellBase(nn.RNNCellBase):
     def _get_name(self):
         return "QuantizedRNNCellBase(Reference)"
 
+    def get_quantized_weight_ih(self):
+        return get_quantized_weight(self, "weight_ih")
+
+    def get_quantized_weight_hh(self):
+        return get_quantized_weight(self, "weight_hh")
+
     def get_weight_ih(self):
-        wn = "weight_ih"
-        weight = self.weight_ih
-        weight_qscheme = getattr(self, wn + "_qscheme")
-        weight_dtype = getattr(self, wn + "_dtype")
-        weight_scale = getattr(self, wn + "_scale")
-        weight_zero_point = getattr(self, wn + "_zero_point")
-        weight_axis = getattr(self, wn + "_axis")
-        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
-        return weight
+        return get_quantize_and_dequantized_weight(self, "weight_ih")
 
     def get_weight_hh(self):
-        wn = "weight_hh"
-        weight = self.weight_hh
-        weight_qscheme = getattr(self, wn + "_qscheme")
-        weight_dtype = getattr(self, wn + "_dtype")
-        weight_scale = getattr(self, wn + "_scale")
-        weight_zero_point = getattr(self, wn + "_zero_point")
-        weight_axis = getattr(self, wn + "_axis")
-        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
-        return weight
+        return get_quantize_and_dequantized_weight(self, "weight_hh")
 
 class RNNCell(RNNCellBase):
     """
@@ -129,6 +145,21 @@ class RNNCell(RNNCellBase):
 
         return ret
 
+    @classmethod
+    def from_float(cls, mod, weight_qparams_dict):
+        ref_mod = cls(
+            mod.input_size,
+            mod.hidden_size,
+            mod.bias,
+            mod.nonlinearity,
+            mod.weight_ih.device,
+            mod.weight_ih.dtype,
+            weight_qparams_dict)
+        ref_mod.weight_ih = mod.weight_ih
+        ref_mod.weight_hh = mod.weight_hh
+        ref_mod.bias_ih = mod.bias_ih
+        ref_mod.bias_hh = mod.bias_hh
+        return ref_mod
 
 class LSTMCell(RNNCellBase):
     """
@@ -136,11 +167,10 @@ class LSTMCell(RNNCellBase):
     we need to pass in a `weight_qparams_dict` that maps from weight name,
     e.g. weight_ih, to the weight_qparams for that weight
     """
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
                  device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
-        self.nonlinearity = nonlinearity
 
     def _get_name(self):
         return "QuantizedLSTMCell(Reference)"
@@ -168,7 +198,20 @@ class LSTMCell(RNNCellBase):
             ret = (ret[0].squeeze(0), ret[1].squeeze(0))
         return ret
 
-
+    @classmethod
+    def from_float(cls, mod, weight_qparams_dict):
+        ref_mod = cls(
+            mod.input_size,
+            mod.hidden_size,
+            mod.bias,
+            mod.weight_ih.device,
+            mod.weight_ih.dtype,
+            weight_qparams_dict)
+        ref_mod.weight_ih = mod.weight_ih
+        ref_mod.weight_hh = mod.weight_hh
+        ref_mod.bias_ih = mod.bias_ih
+        ref_mod.bias_hh = mod.bias_hh
+        return ref_mod
 
 class GRUCell(RNNCellBase):
     """
@@ -176,11 +219,10 @@ class GRUCell(RNNCellBase):
     we need to pass in a `weight_qparams_dict` that maps from weight name,
     e.g. weight_ih, to the weight_qparams for that weight
     """
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
                  device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
-        self.nonlinearity = nonlinearity
 
     def _get_name(self):
         return "QuantizedGRUCell(Reference)"
@@ -208,6 +250,20 @@ class GRUCell(RNNCellBase):
 
         return ret
 
+    @classmethod
+    def from_float(cls, mod, weight_qparams_dict):
+        ref_mod = cls(
+            mod.input_size,
+            mod.hidden_size,
+            mod.bias,
+            mod.weight_ih.device,
+            mod.weight_ih.dtype,
+            weight_qparams_dict)
+        ref_mod.weight_ih = mod.weight_ih
+        ref_mod.weight_hh = mod.weight_hh
+        ref_mod.bias_ih = mod.bias_ih
+        ref_mod.bias_hh = mod.bias_hh
+        return ref_mod
 
 class RNNBase(nn.RNNBase):
     def __init__(self, mode: str, input_size: int, hidden_size: int,
@@ -228,8 +284,8 @@ class RNNBase(nn.RNNBase):
             }
             weight_qparams_dict = dict()
             for wn in self._flat_weights_names:
-                weight_qparams_dict[wn] = weight_qparams
-
+                if wn.startswith("weight"):
+                    weight_qparams_dict[wn] = weight_qparams
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
@@ -263,8 +319,7 @@ class LSTM(RNNBase):
     to the weight_qparams for that weight
     """
     def __init__(self, *args, **kwargs):
-        assert "weight_qparams_dict" in kwargs
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     def permute_hidden(self,  # type: ignore[override]
@@ -298,19 +353,35 @@ class LSTM(RNNBase):
         self.check_hidden_size(hidden[1], self.get_expected_cell_size(input, batch_sizes),
                                'Expected hidden[1] size {}, got {}')
 
+    def get_quantized_weight_bias_dict(self):
+        """ dictionary from flat_weight_name to quantized weight or (unquantized) bias
+        e.g.
+        {
+          "weight_ih_l0": quantized_weight,
+          "bias_ih_l0": unquantized_bias,
+          ...
+        }
+        """
+        quantized_weight_bias_dict = {}
+        for wn in self._flat_weights_names:
+            if hasattr(self, wn):
+                if wn.startswith("weight"):
+                    weight_or_bias = get_quantized_weight(self, wn)
+                else:
+                    weight_or_bias = getattr(self, wn)
+            else:
+                weight_or_bias = None
+            quantized_weight_bias_dict[wn] = weight_or_bias
+        return quantized_weight_bias_dict
+
     def get_flat_weights(self):
         flat_weights = []
         for wn in self._flat_weights_names:
             if hasattr(self, wn):
                 weight = getattr(self, wn)
-                weight_qscheme = getattr(self, wn + "_qscheme")
-                weight_dtype = getattr(self, wn + "_dtype")
-                weight_scale = getattr(self, wn + "_scale")
-                weight_zero_point = getattr(self, wn + "_zero_point")
-                weight_axis = getattr(self, wn + "_axis")
-                weight = _quantize_and_dequantize_weight(
-                    weight, weight_qscheme, weight_dtype, weight_scale,
-                    weight_zero_point, weight_axis)
+                if wn.startswith("weight"):
+                    params = get_weight_and_quantization_params(self, wn)
+                    weight = _quantize_and_dequantize_weight(*params)
             else:
                 weight = None
             flat_weights.append(weight)
@@ -383,3 +454,18 @@ class LSTM(RNNBase):
 
     def _get_name(self):
         return "QuantizedLSTM(Reference)"
+
+    @classmethod
+    def from_float(cls, mod, weight_qparams_dict):
+        ref_mod = cls(
+            mod.input_size,
+            mod.hidden_size,
+            mod.num_layers,
+            mod.bias,
+            mod.batch_first,
+            mod.dropout,
+            mod.bidirectional,
+            weight_qparams_dict=weight_qparams_dict)
+        for wn in mod._flat_weights_names:
+            setattr(ref_mod, wn, getattr(mod, wn))
+        return ref_mod

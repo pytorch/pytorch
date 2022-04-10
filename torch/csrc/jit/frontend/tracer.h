@@ -235,6 +235,7 @@ TORCH_API void abandon();
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node* n, const char* name, int64_t value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymInt value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -264,6 +265,10 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<ArrayRef<int64_t>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalIntArrayRef& opt_value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

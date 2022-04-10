@@ -26,13 +26,7 @@ class TORCH_API CodeGen {
       StmtPtr stmt,
       std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
-      std::string kernel_func_name = "func")
-      : stmt_(stmt),
-        buffer_args_(std::move(buffer_args)),
-        device_(device),
-        kernel_func_name_(std::move(kernel_func_name)) {
-    allocIntermediateBufs();
-  }
+      std::string kernel_func_name = "func");
 
   virtual ~CodeGen() = default;
 
@@ -111,6 +105,20 @@ class TORCH_API CodeGen {
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
   std::string kernel_func_name_ = "func";
+};
+
+class TORCH_API ExtCallMemoryReuse : public IRMutator {
+  static std::unordered_map<std::string, std::string> makeExtCallFuncNameMap();
+  static const std::unordered_map<std::string, std::string> extCallFuncNameMap_;
+
+ public:
+  explicit ExtCallMemoryReuse(
+      const std::vector<CodeGen::BufferArg>& bufferArgs);
+  ~ExtCallMemoryReuse() override = default;
+  StmtPtr mutate(ExternalCallPtr v) override;
+
+ private:
+  std::unordered_set<BufPtr> bufferArgs_;
 };
 
 class CodeGen::BufferArg {

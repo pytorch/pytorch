@@ -6,8 +6,8 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType,
                                      MutRefCType, ArrayCType, ListCType, VectorCType, ArrayRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
                                      tensorListT, dimnameListT, tensorT, voidT, longT,
-                                     BaseTypeToCppMapping, intArrayRefT, tensorOptionsT,
-                                     iTensorListRefT, iOptTensorListRefT)
+                                     BaseTypeToCppMapping, intArrayRefT, optionalIntArrayRefT,
+                                     tensorOptionsT, iTensorListRefT, iOptTensorListRefT)
 from tools.codegen import local
 from tools.codegen.utils import assert_never
 from typing import Optional, Sequence, Union, List, Set
@@ -100,6 +100,8 @@ def argumenttype_type(
                 return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
         elif str(t.elem) == 'Scalar':
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
+        elif isinstance(t.elem, ListType) and str(t.elem.elem) == 'int':
+            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, structured_type_override=structured_type_override)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):

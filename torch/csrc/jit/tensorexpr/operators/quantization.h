@@ -124,6 +124,12 @@ TORCH_API Tensor computeUpsampleNearest2d(
     const c10::optional<ScalarType>& outputType,
     at::Device device);
 
+TORCH_API Tensor computeUpsampleNearest2dExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+
 TORCH_API Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,

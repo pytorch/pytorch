@@ -47,6 +47,10 @@ void _dim_apply(
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
 
+        if(values_data_bytes==nullptr || indices_data_bytes==nullptr){
+          return;
+        }
+
         for (const auto i : c10::irange(n)) {
           (void)i; //Suppress unused variable warning
           f(
