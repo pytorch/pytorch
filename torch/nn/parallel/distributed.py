@@ -2,7 +2,7 @@ import sys
 import collections.abc
 import copy
 from dataclasses import dataclass
-from typing import Callable, Any, Type
+from typing import Callable, Any, Type, OrderedDict
 from enum import Enum, auto
 import inspect
 import itertools
@@ -33,6 +33,7 @@ from torch._utils import _get_device_index
 from ..modules import Module
 from ._functions import _get_stream
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
+import torch.nn.utils.parametrize as P
 
 
 logger = logging.getLogger(__name__)
@@ -230,6 +231,86 @@ class _DDPJoinHook(JoinHook):
         processes.
         """
         self.ddp._sync_final_model(is_last_joiner)
+
+
+def replicate_module(network, detach=False):
+    from torch.nn.parallel.replicate import _replicatable_module
+    if not _replicatable_module(network):
+        raise RuntimeError("Cannot replicate network where python modules are "
+                           "childrens of ScriptModule")
+
+    params = list(network.parameters())
+    param_indices = {param: idx for idx, param in enumerate(params)}
+    param_copies = params
+
+    buffers = list(network.buffers())
+    buffers_rg = []
+    buffers_not_rg = []
+    for buf in buffers:
+        if buf.requires_grad and not detach:
+            buffers_rg.append(buf)
+        else:
+            buffers_not_rg.append(buf)
+
+    buffer_indices_rg = {buf: idx for idx, buf in enumerate(buffers_rg)}
+    buffer_indices_not_rg = {buf: idx for idx, buf in enumerate(buffers_not_rg)}
+
+    buffer_copies_rg = buffers_rg
+    buffer_copies_not_rg = buffers_not_rg
+
+    modules = list(network.modules())
+    module_copies = []
+    module_indices = {}
+
+    for i, module in enumerate(modules):
+        module_indices[module] = i
+        replica = module._replicate_for_data_parallel()
+        # This is a temporary fix for DDP. DDP needs to access the
+        # replicated model parameters. It used to do so through
+        # `mode.parameters()`. The fix added in #33907 for DP stops the
+        # `parameters()` API from exposing the replicated parameters.
+        # Hence, we add a `_former_parameters` dict here to support DDP.
+        replica._former_parameters = OrderedDict()
+
+        module_copies.append(replica)
+
+    for i, module in enumerate(modules):
+        for key, child in module._modules.items():
+            if child is None:
+                replica = module_copies[i]
+                replica._modules[key] = None
+            else:
+                module_idx = module_indices[child]
+                replica = module_copies[i]
+                setattr(replica, key, module_copies[module_idx])
+        for key, param in module._parameters.items():
+            if param is None:
+                replica = module_copies[i]
+                replica._parameters[key] = None
+            else:
+                param_idx = param_indices[param]
+                replica = module_copies[i]
+                param = param_copies[param_idx]
+                # parameters in replicas are no longer leaves,
+                # so setattr them as non-parameter attributes
+                setattr(replica, key, param)
+                # expose the parameter for DDP
+                replica._former_parameters[key] = param
+        for key, buf in module._buffers.items():
+            if buf is None:
+                replica = module_copies[i]
+                replica._buffers[key] = None
+            else:
+                if buf.requires_grad and not detach:
+                    buffer_copies = buffer_copies_rg
+                    buffer_idx = buffer_indices_rg[buf]
+                else:
+                    buffer_copies = buffer_copies_not_rg
+                    buffer_idx = buffer_indices_not_rg[buf]
+                replica = module_copies[i]
+                setattr(replica, key, buffer_copies[buffer_idx])
+
+    return module_copies[0]
 
 
 class DistributedDataParallel(Module, Joinable):
@@ -605,6 +686,20 @@ class DistributedDataParallel(Module, Joinable):
             self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
         else:
             self.parameters_to_ignore = []
+
+        # Create a parametrized module without copying tensors. Avoid
+        # registering '_parametrized_module' as a submodule by directly
+        # adding to self.__dict__.
+        self.__dict__['_parametrized_module'] = replicate_module(self.module, True)
+        to_parametrize = []
+        for module_name, module in self._parametrized_module.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if (param.requires_grad and f'{module_name}.{param_name}' not in self.parameters_to_ignore):
+                    to_parametrize.append((module, param_name))
+
+        from torch.distributed._shard.replicated_tensor import ReplicatedTensorParametrization
+        for module, param_name in to_parametrize:
+            P.register_parametrization(module, param_name, ReplicatedTensorParametrization(self.process_group))
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -984,9 +1079,9 @@ class DistributedDataParallel(Module, Joinable):
 
             if self.device_ids:
                 inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
+                output = self._parametrized_module(*inputs[0], **kwargs[0])
             else:
-                output = self.module(*inputs, **kwargs)
+                output = self._parametrized_module(*inputs, **kwargs)
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.

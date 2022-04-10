@@ -154,7 +154,8 @@ class ParametrizationList(ModuleList):
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():
-                original.set_(new)  # type: ignore[call-overload]
+                if original is not new:
+                    original.set_(new)  # type: ignore[call-overload]
             _register_parameter_or_buffer(self, "original", original)
         else:
             for i, originali in enumerate(new):
