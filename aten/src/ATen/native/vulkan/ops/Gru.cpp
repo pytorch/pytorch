@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Gru.h>
+#include <ATen/TensorOperators.h>
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
