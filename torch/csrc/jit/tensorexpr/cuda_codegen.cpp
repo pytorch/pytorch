@@ -1160,7 +1160,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   std::vector<void*> extent_args;
   size_t raw_args_size = raw_args.size();
   extent_args.reserve(raw_args_size);
-  for (size_t i = 0 ; i < raw_args_size; ++i) {
+  for (size_t i = 0; i < raw_args_size; ++i) {
     if (arg_pos_in_extents_[i]) {
       extent_args.push_back(raw_args[i]);
     }
@@ -1170,14 +1170,24 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
       gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
       continue;
     }
-    gpu_block_extents_v[i] = block_extents_eval_[i].value<int64_t>(extent_args);
+    {
+      // invocation of block_extents_eval_ isn't thread safe and this function
+      // may be invoked by multiple threads
+      std::lock_guard<std::mutex> guard(eval_lock_);
+      gpu_block_extents_v[i] =
+          block_extents_eval_[i].value<int64_t>(extent_args);
+    }
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (gpu_thread_extents[i]->isConstant()) {
       gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
-    gpu_thread_extents_v[i] = thread_extents_eval_[i].value<int64_t>(extent_args);
+    {
+      std::lock_guard<std::mutex> guard(eval_lock_);
+      gpu_thread_extents_v[i] =
+          thread_extents_eval_[i].value<int64_t>(extent_args);
+    }
   }
 
   // Skip launching the kernel if there are no elements to process.

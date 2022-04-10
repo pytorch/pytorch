@@ -323,6 +323,9 @@ class _RemoteModule(nn.Module):
     def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
         _raise_not_supported(self.cuda.__name__)
 
+    def ipu(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
+        _raise_not_supported(self.ipu.__name__)
+
     def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
         _raise_not_supported(self.xpu.__name__)
 
@@ -374,7 +377,7 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -382,7 +385,7 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 

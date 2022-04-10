@@ -265,6 +265,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             # Don't re-add anything we already added
             continue
 
+        isoverloadpacket = isinstance(value, torch._ops.OpOverloadPacket)
+        if isoverloadpacket:
+            value = value.op
         # Handle Python function attributes
         if inspect.isfunction(value):
             try:

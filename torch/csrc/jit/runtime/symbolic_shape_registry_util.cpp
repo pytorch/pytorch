@@ -29,6 +29,8 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor", "unary"},
       {"aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)", "unary"},
       {"aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)", "unary"},
+      {"aten::_autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)", "unary"},
+      {"aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)", "unary"},
       {"aten::isnan(Tensor self) -> Tensor", "unary"},
       {"aten::lgamma(Tensor self) -> Tensor", "unary"},
       {"aten::log10(Tensor self) -> Tensor", "unary"},
@@ -74,7 +76,7 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor", "unary"},
       {"aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor", "unary"},
       {"aten::relu6(Tensor self) -> Tensor", "unary"},
-      {"aten::gelu(Tensor self) -> Tensor", "unary"},
+      {"aten::gelu(Tensor self, *, str approximate='none') -> Tensor", "unary"},
       {"aten::neg(Tensor self) -> Tensor", "unary"},
       {"aten::reciprocal(Tensor self) -> Tensor", "unary"},
       {"aten::expm1(Tensor self) -> Tensor", "unary"},
@@ -116,8 +118,9 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  // clang-format on
   return tensorexpr_elementwise_set;
 }
 
-}
-}
+} // namespace jit
+} // namespace torch

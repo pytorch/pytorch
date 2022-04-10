@@ -10,6 +10,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 
@@ -288,7 +289,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output(1, sizes, {}, A.options().dtype(c10::toValueType(A.scalar_type())), {});
+  set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
 } // namespace meta
 
@@ -791,6 +792,11 @@ void _linalg_check_errors(
   }
 }
 
+bool _requires_fw_or_bw_grad(const Tensor& input) {
+  return ((at::GradMode::is_enabled() && input.requires_grad())
+          || input._fw_grad(/*level */ 0).defined());
+}
+
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 
@@ -946,8 +952,8 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
 
   // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
   // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
-  Tensor other_broadcasted, input_broadcasted;
-  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg.solve");
+  Tensor other_broadcasted;
+  std::tie(other_broadcasted, std::ignore) = _linalg_broadcast_batch_dims(other_, input, "linalg.solve");
 
   auto squeezed_other_broadcasted = at::squeeze(other_broadcasted, -1);
   auto squeezed_result_shape = squeezed_other_broadcasted.sizes();
@@ -983,18 +989,17 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   // lu_factor_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
   result.copy_(other_broadcasted);
 
-  auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
-
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos.device() == input.device());
-  infos.resize_({std::max<int64_t>(1, batchCount(input_broadcasted))});
+  infos.resize_({std::max<int64_t>(1, batchCount(input))});
   // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
   if (input.numel() == 0) {
     infos.fill_(0);
   }
 
   // compute the LU factorization of 'input_working_copy'
-  auto pivots_shape = IntArrayRef(input_broadcasted.sizes().data(), input_broadcasted.dim() - 2).vec(); // input_broadcasted.shape[:-2]
+  auto input_working_copy = cloneBatchedColumnMajor(input);
+  auto pivots_shape = IntArrayRef(input.sizes().data(), input.dim() - 2).vec(); // input.shape[:-2]
   pivots_shape.push_back(std::min(input.size(-2), input.size(-1)));
   Tensor pivots = at::empty(pivots_shape, input.options().dtype(kInt));
   lu_factor_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
@@ -1017,8 +1022,7 @@ Tensor& linalg_solve_out(const Tensor& input, const Tensor& other, Tensor& resul
 
   // Now check LAPACK/MAGMA error codes
   // _linalg_check_errors calls 'infos = infos.to(kCPU)'
-  bool vector_case = linalg_solve_is_vector_rhs(input, other);
-  at::_linalg_check_errors(infos, "linalg.solve", vector_case ? result.dim() == 1 : result.dim() == 2);
+  at::_linalg_check_errors(infos, "linalg.solve", input.dim() == 2);
   return result;
 }
 
@@ -2301,7 +2305,7 @@ void linalg_eigh_out_info(
 
   // eigenvalues are always real-valued
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.scalar_type() == real_dtype);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == vectors.scalar_type());
 
@@ -2348,7 +2352,7 @@ void linalg_eigh_out_info(
 std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view uplo) {
   squareCheckInputs(input, "linalg.eigh");
   checkUplo(uplo);
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
   Tensor vectors = at::empty({0}, input.options());
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
@@ -2364,7 +2368,7 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, c10::string_vi
   checkLinalgCompatibleDtype("torch.linalg.eigh", eigvecs, input, "eigenvectors");
 
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor eigvals_tmp, eigvecs_tmp;
@@ -2381,20 +2385,20 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, c10::string_vi
 Tensor linalg_eigvalsh(const Tensor& input, c10::string_view uplo) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (at::GradMode::is_enabled() && input.requires_grad()) {
+  if (_requires_fw_or_bw_grad(input)) {
     Tensor values;
     std::tie(values, std::ignore) = at::linalg_eigh(input, uplo);
     return values;
   }
 
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
   values = at::linalg_eigvalsh_outf(input, uplo, values);
   return values;
 }
 
 Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& result) {
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
 
   squareCheckInputs(input, "linalg.eigvalsh");
@@ -2455,7 +2459,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
     int64_t lrwork = std::max(int64_t(1), 3 * n - 2);
-    ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     rwork = at::empty({lrwork}, self.options().dtype(dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -2483,7 +2487,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
 
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
-  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
   auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
 
   if (self.numel() == 0) {
@@ -2543,7 +2547,7 @@ std::tuple<Tensor&, Tensor&> symeig_out(const Tensor& self, bool eigenvectors, b
   checkSameDevice("symeig", vecs, self, "eigenvectors");
   checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(self.scalar_type());
+  ScalarType real_dtype = toRealValueType(self.scalar_type());
   checkLinalgCompatibleDtype("symeig", vals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor vals_tmp, vecs_tmp;
@@ -2877,7 +2881,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 Tensor linalg_eigvals(const Tensor& input) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (at::GradMode::is_enabled() && input.requires_grad()) {
+  if (_requires_fw_or_bw_grad(input)) {
     return std::get<0>(at::linalg_eig(input));
   }
 
@@ -3062,8 +3066,11 @@ Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
 }
 
 Tensor linalg_svdvals(const Tensor& A) {
-  const bool A_requires_grad = (at::GradMode::is_enabled() && A.requires_grad());
-  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false, /*comptue_uv=*/A_requires_grad));
+  // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
+  //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
+  //     a TensorWrapper requiring fw or bw grad.
+  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
+                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
@@ -3190,7 +3197,7 @@ static void linalg_lstsq_out_info(
   TORCH_INTERNAL_ASSERT(rank.scalar_type() == at::kLong);
   TORCH_INTERNAL_ASSERT(rank.device() == input.device());
 
-  auto real_dtype = toValueType(input.scalar_type());
+  auto real_dtype = toRealValueType(input.scalar_type());
   TORCH_INTERNAL_ASSERT(singular_values.scalar_type() == real_dtype);
   TORCH_INTERNAL_ASSERT(singular_values.device() == input.device());
 
@@ -3388,7 +3395,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   checkLinalgCompatibleDtype("torch.linalg.lstsq", solution, input, "solution");
 
   // 'residuals' is expected to have real float dtype
-  ScalarType real_dtype = c10::toValueType(input.scalar_type());
+  ScalarType real_dtype = c10::toRealValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.lstsq", residuals.scalar_type(), real_dtype, "solution");
 
   // 'rank' is expected to have integer dtype
@@ -3405,7 +3412,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // set default rcond value
   double rcond_value = rcond.has_value()
     ? rcond.value()
-    : _get_epsilon(c10::toValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
+    : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
@@ -3519,9 +3526,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     c10::optional<double> rcond,
     c10::optional<c10::string_view> driver) {
   Tensor solution = at::empty({0}, input.options());
-  Tensor residuals = at::empty({0}, input.options().dtype(toValueType(input.scalar_type())));
+  Tensor residuals = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   Tensor rank = at::empty({0}, input.options().dtype(at::kLong));
-  Tensor singular_values = at::empty({0}, input.options().dtype(toValueType(input.scalar_type())));
+  Tensor singular_values = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   std::tie(solution, residuals, rank, singular_values) =
       at::linalg_lstsq_outf(input, other, rcond, driver, solution, residuals, rank, singular_values);
   return std::make_tuple(solution, residuals, rank, singular_values);
@@ -3695,7 +3702,7 @@ Tensor _det_lu_based_helper_backward_helper(
   const Tensor& lu,
   const Tensor& pivs
 ) {
-  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
   auto n = self.size(-1);
   auto eps_tensor = at::tensor(eps, self.options());
   auto condition_diagonal = [&](const Tensor& x) {

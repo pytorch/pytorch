@@ -68,11 +68,11 @@ def get_repo_labels() -> List[str]:
         page_labels = list(map(lambda x: str(x["name"]), response))
         if not page_labels:
             break
-            collected_labels += page_labels
+        collected_labels += page_labels
     return collected_labels
 
 def post_pytorch_comment(pr_number: int, merger: str) -> Any:
-    message = {'body' : f"Hey {merger}." + """
+    message = {'body' : f"Hey @{merger}." + """
 You've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. \
 Please add one of each to the PR. The 'release notes: ...' label should represent the part of \
 PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should \

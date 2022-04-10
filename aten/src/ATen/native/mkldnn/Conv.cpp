@@ -35,7 +35,7 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -199,9 +199,9 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
       mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight),
                                               optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                               grad_output.options().device_opt())),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias),
+      bias_defined ? mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias),
                                               optTypeMetaToScalarType(grad_output.options().dtype_opt()),
-                                              grad_output.options().device_opt())));
+                                              grad_output.options().device_opt())) : Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(

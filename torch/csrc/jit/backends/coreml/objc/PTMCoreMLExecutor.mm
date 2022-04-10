@@ -168,30 +168,32 @@ static NSString* gModelCacheDirectory = @"";
 
 - (id<MLFeatureProvider>)forwardWithInputs:
     (const std::vector<PTMCoreMLFeatureSpecs>&)inputs {
-  NSError* error = nil;
-  PTMCoreMLFeatureProvider* inputFeature = [[PTMCoreMLFeatureProvider alloc]
-      initWithFeatureSpecs:inputs
-             CoreMLVersion:self.coreMLVersion];
-  if (inputFeature == nil) {
-    return nil;
-  }
-  if (@available(iOS 11.0, macOS 10.13, *)) {
-    MLPredictionOptions* options = [[MLPredictionOptions alloc] init];
-    id<MLFeatureProvider> outputFeature =
-        [_mlModel predictionFromFeatures:inputFeature
-                                 options:options
-                                   error:&error];
-    if (error) {
-      TORCH_CHECK(
-          false,
-          "Error running the prediction",
-          error.localizedDescription.UTF8String);
+  @autoreleasepool {
+    NSError* error = nil;
+    PTMCoreMLFeatureProvider* inputFeature = [[PTMCoreMLFeatureProvider alloc]
+        initWithFeatureSpecs:inputs
+               CoreMLVersion:self.coreMLVersion];
+    if (inputFeature == nil) {
+      return nil;
     }
+    if (@available(iOS 11.0, macOS 10.13, *)) {
+      MLPredictionOptions* options = [[MLPredictionOptions alloc] init];
+      id<MLFeatureProvider> outputFeature =
+          [_mlModel predictionFromFeatures:inputFeature
+                                   options:options
+                                     error:&error];
+      if (error) {
+        TORCH_CHECK(
+            false,
+            "Error running the prediction",
+            error.localizedDescription.UTF8String);
+      }
 
-    return outputFeature;
-  } else {
-    TORCH_CHECK(false, "Core ML is not available on your device");
-    return nil;
+      return outputFeature;
+    } else {
+      TORCH_CHECK(false, "Core ML is not available on your device");
+      return nil;
+    }
   }
 }
 

@@ -1,7 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/macros/Macros.h>
 
@@ -12,6 +14,18 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_masked_softmax_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/softmax.h>
+#endif
 
 namespace at {
 namespace native {
@@ -87,7 +101,7 @@ struct SoftMaxBackwardEpilogue {
 // The 2d grid is used to parallelize inner dimension over y axis and outer over x.
 inline dim3 SpatialSoftMax_getGridSize(
     dim3 block, uint32_t max_active_blocks,
-    uint64_t outer_size, uint64_t dim_size, uint64_t inner_size) {
+    uint64_t outer_size, uint64_t inner_size) {
   // First, tile as many blocks as we can over the y axis
   uint32_t inner_blocks = (inner_size + block.y - 1) / block.y;
   if (inner_blocks > max_active_blocks)
@@ -102,7 +116,7 @@ inline dim3 SpatialSoftMax_getGridSize(
 const int max_threads = 1024;
 
 inline dim3 SpatialSoftMax_getBlockSize(
-  uint64_t outer_size, uint64_t dim_size, uint64_t inner_size) {
+  uint64_t dim_size, uint64_t inner_size) {
   uint32_t inner_threads = inner_size;
   inner_threads = std::min(inner_threads, static_cast<uint32_t>(max_threads));
   uint32_t dim_threads = 1;
@@ -120,7 +134,7 @@ void SpatialSoftMax_getLaunchSizes(
     Kernel k,
     uint64_t outer_size, uint64_t dim_size, uint64_t inner_size,
     dim3& grid, dim3& block, uint32_t& smem_size) {
-  block = SpatialSoftMax_getBlockSize(outer_size, dim_size, inner_size);
+  block = SpatialSoftMax_getBlockSize(dim_size, inner_size);
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
@@ -135,7 +149,7 @@ void SpatialSoftMax_getLaunchSizes(
                                                 k, block_threads, smem_size);
 #endif
   max_active_blocks *= at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, dim_size, inner_size);
+  grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, inner_size);
 }
 
 inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
@@ -153,7 +167,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
 
   while (block_size < (max_block_size)) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
-  block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
+  block_size = std::max(block_size, static_cast<uint64_t>(at::cuda::warp_size()));
   return dim3(block_size);
 }
 
@@ -959,8 +973,7 @@ Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
           input.scalar_type(),
           "masked_softmax",
           [&] {
-            Tensor mask_not = mask.logical_not();
-            output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), -1);
+            output = at::softmax(input.masked_fill(mask, -std::numeric_limits<scalar_t>::infinity()), -1);
           });
         return output;
     }

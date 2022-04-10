@@ -38,6 +38,8 @@ CONSTANT_LIST = CodeTemplate("""std::vector<c10::IValue>({
         ${constant_list}
     }), // constants list""")
 
+CONSTANTS_LIST_EMPTY = """std::vector<c10::IValue>(), // constants list"""
+
 ONE_TYPE = CodeTemplate("""c10::parseType("${type_str}"),""")
 
 TYPE_LIST = CodeTemplate("""std::vector<c10::TypePtr>({
@@ -117,8 +119,7 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
         upgrader_function.function.append_operator(
             op.name,
             op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.num_specified_args);
       }
     }
     return upgrader_function_list;
@@ -181,6 +182,8 @@ def construct_constants(constants_list_from_yaml: List[Any]) -> str:
                 constant=convert_constant
             )
         )
+    if len(constants_list_part) == 0:
+        return CONSTANTS_LIST_EMPTY
     return CONSTANT_LIST.substitute(constant_list="".join(constants_list_part).lstrip("\n"))
 
 def construct_operators(operator_list_from_yaml: List[Any]) -> str:

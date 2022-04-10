@@ -30,6 +30,8 @@ struct TORCH_API FuncTorchTLSBase {
   // This is a hook to get into functorch -- functorch will determine
   // if it should raise an error message
   virtual int64_t checkSupportsAutogradFunction() const = 0;
+  virtual void checkSupportsInplaceRequiresGrad() const = 0;
+  virtual void checkSupportsRetainGrad() const = 0;
 };
 
 // returns deepcopy of the functorch tls
