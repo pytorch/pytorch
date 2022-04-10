@@ -1193,20 +1193,12 @@ class FullyShardedDataParallel(nn.Module):
 
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
-                with self.summon_full_params(recurse=False, writeback=False):
-                    # Since buffers are not sharded and stay casted, restore them to their
-                    # original user module specified types for checkpoint. We take care to
-                    # recast in post_state_dict_hook for consistency with the fact that
-                    # buffers stay casted after forward/backward. We must have the
-                    # call here instead of above because summon_full_params itself
-                    # calls _lazy_init() which would cast the buffers.
-                    if self.mixed_precision is not None and self._is_root:
-                        self._cast_buffers(
-                            dtype=self._orig_buffer_dtypes, recurse=False
-                        )
-                    state_dict = super().state_dict(*args, **kwargs)
-            else:
+            summon_ctx = (
+                self.summon_full_params(recurse=False, writeback=False)
+                if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
+                contextlib.suppress()
+            )
+            with summon_ctx:
                 # Since buffers are not sharded and stay casted, restore them to their
                 # original user module specified types for checkpoint. We take care to
                 # recast in post_state_dict_hook for consistency with the fact that
@@ -2413,11 +2405,11 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
-                state for ``model`` 's original unflattened parameters and
-                including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict` if on
-                rank 0, and an empty :class:`dict` otherwise.
+            Dict[str, Any]: A :class:`dict` containing the optimizer state for
+            ``model`` 's original unflattened parameters and including keys
+            "state" and "param_groups" following the convention of
+            :meth:`torch.optim.Optimizer.state_dict` if on rank 0, and an empty
+            :class:`dict` otherwise.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2543,10 +2535,9 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            sharded_optim_state_dict (Dict[str, Any]): The full optimizer
-                state dict remapped to flattened parameters instead of
-                unflattened parameters and restricted to only include this
-                rank's part of the optimizer state.
+            Dict[str, Any]: The full optimizer state dict remapped to flattened
+            parameters instead of unflattened parameters and restricted to only
+            include this rank's part of the optimizer state.
         """
         full_osd = full_optim_state_dict  # alias
         if "state" not in full_osd or "param_groups" not in full_osd:
@@ -2645,8 +2636,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> wrapped_optim.load_state_dict(sharded_osd)
 
         Returns:
-            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
-                using the parameter keys specified by ``optim_state_key_type``.
+            Dict[str, Any]: The optimizer state dict re-keyed using the
+            parameter keys specified by ``optim_state_key_type``.
         """
         assert optim_state_key_type in \
             (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)
