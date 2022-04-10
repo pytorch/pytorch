@@ -1998,7 +1998,7 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype, layout=torch.sparse_csr):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
@@ -2028,7 +2028,7 @@ class TestCase(expecttest.TestCase):
 
         return torch.sparse_csr_tensor(crow_indices,
                                        col_indices,
-                                       values, size=size, dtype=dtype, layout=torch.sparse_csr, device=device)
+                                       values, size=size, dtype=dtype, layout=layout, device=device)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
