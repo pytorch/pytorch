@@ -3,6 +3,7 @@
 #include <ATen/ScalarOps.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
@@ -17,6 +18,8 @@
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
+
+#include <ATen/ScalarOps.h>
 
 namespace torch {
 namespace lazy {
@@ -748,6 +751,10 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   if (cached_computation == nullptr) {
     return nullptr;
   }
+  if (GRAPH_DUMP_ENABLED) {
+    auto* tscomp = (TSComputation*) cached_computation->computation.get();
+    LOG(ERROR) << "Run a cached graph: " << *tscomp->graph() << std::endl;
+  }
   TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
@@ -903,6 +910,11 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   }
 
   CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
+  if (GRAPH_DUMP_ENABLED) {
+    auto* tscomp = (TSComputation*) compile_result.computation.get();
+    LOG(ERROR) << "Add a cached computation with hash " << coll.hash << std::endl;
+    LOG(ERROR) << "Add a graph to cache: " << *tscomp->graph() << std::endl;
+  }
 
   TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
   VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;
@@ -1082,6 +1094,16 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
     }
   }
   return result_tensors_data;
+}
+
+hash_t LazyGraphExecutor::GetGraphHash(const std::vector<LazyTensorPtr>& tensors) {
+  SyncTensorsConfig config;
+  config.sync_ltc_data = false;
+
+  auto coll = CollectSyncTensors(tensors, config);
+  auto po_data = RunPostOrder(tensors, coll.indices);
+  coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
+  return coll.hash;
 }
 
 } // namespace lazy

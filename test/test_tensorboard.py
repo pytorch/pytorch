@@ -562,15 +562,15 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         expected_proto = GraphDef()
         text_format.Parse(expected_str, expected_proto)
 
-        self.assertEquals(len(expected_proto.node), len(actual_proto.node))
+        self.assertEqual(len(expected_proto.node), len(actual_proto.node))
         for i in range(len(expected_proto.node)):
             expected_node = expected_proto.node[i]
             actual_node = actual_proto.node[i]
-            self.assertEquals(expected_node.name, actual_node.name)
-            self.assertEquals(expected_node.op, actual_node.op)
-            self.assertEquals(expected_node.input, actual_node.input)
-            self.assertEquals(expected_node.device, actual_node.device)
-            self.assertEquals(
+            self.assertEqual(expected_node.name, actual_node.name)
+            self.assertEqual(expected_node.op, actual_node.op)
+            self.assertEqual(expected_node.input, actual_node.input)
+            self.assertEqual(expected_node.device, actual_node.device)
+            self.assertEqual(
                 sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
     def test_nested_nn_squential(self):

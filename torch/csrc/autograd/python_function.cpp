@@ -682,10 +682,19 @@ PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
+
+  // save a local copy of seq_id before it gets incremented
+  int seq_id = at::sequence_number::peek();
+  auto info_pair = unpack_input<false>(inputs);
+  UnpackedInput& unpacked_input = info_pair.first;
+  InputFlags& input_info = info_pair.second;
+
+  // Call record function after all the inputs have been decoded, but
+  // before context has been allocated.
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
-    std::vector<c10::IValue>(),
-    at::sequence_number::peek());
+    std::vector<c10::IValue>(unpacked_input.input_vars.begin(), unpacked_input.input_vars.end()),
+    seq_id);
 
   // Temporary hack to improve functorch UX. We'll find a better solution.
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
@@ -702,11 +711,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   auto cdata = std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
   ctx->cdata = cdata;
 
-  // Prepare inputs and allocate context (grad fn)
-  auto info_pair = unpack_input<false>(inputs);
-  UnpackedInput& unpacked_input = info_pair.first;
-  InputFlags& input_info = info_pair.second;
-
   // Record input nodes if tracing
   auto* node = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
 
@@ -715,6 +719,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   cdata->set_next_edges(std::move(input_info.next_edges));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
+
 
   // Prepend ctx to input_tuple, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(inputs);

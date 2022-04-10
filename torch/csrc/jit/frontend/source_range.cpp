@@ -18,7 +18,7 @@ c10::optional<SourceRange> SourceView::findSourceRangeThatGenerated(
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }
 
-C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
+void SourceRange::highlight(std::ostream& out) const {
   // Retrieve original SourceRange, if present.
   if (auto orig_source_range = findSourceRangeThatGenerated()) {
     orig_source_range->highlight(out);
@@ -27,7 +27,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   print_with_context(out, CONTEXT, true, "");
 }
 
-C10_EXPORT void format_stack_trace(
+void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries) {
   bool has_orig_ranges = false;
@@ -63,7 +63,7 @@ C10_EXPORT void format_stack_trace(
   }
 }
 
-C10_EXPORT void SourceRange::print_with_context(
+void SourceRange::print_with_context(
     std::ostream& out,
     size_t context,
     bool highlight,

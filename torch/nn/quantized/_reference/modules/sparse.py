@@ -29,6 +29,21 @@ class Embedding(nn.Embedding, ReferenceQuantizedModule):
             input, weight_quant_dequant, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
+    @classmethod
+    def from_float(cls, mod, weight_qparams):
+        return cls(
+            mod.num_embeddings,
+            mod.embedding_dim,
+            mod.padding_idx,
+            mod.max_norm,
+            mod.norm_type,
+            mod.scale_grad_by_freq,
+            mod.sparse,
+            mod.weight,
+            mod.weight.device,
+            mod.weight.dtype,
+            weight_qparams)
+
 class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
     """ A reference quantized EmbeddingBag module that fits into the
     FX Graph Mode Quantization workflow, activation will be floating point Tensor,
@@ -57,3 +72,21 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
                                self.scale_grad_by_freq, self.mode, self.sparse,
                                per_sample_weights, self.include_last_offset,
                                self.padding_idx)
+
+    @classmethod
+    def from_float(cls, mod, weight_qparams):
+        return cls(
+            mod.num_embeddings,
+            mod.embedding_dim,
+            mod.max_norm,
+            mod.norm_type,
+            mod.scale_grad_by_freq,
+            mod.mode,
+            mod.sparse,
+            mod.weight,
+            mod.include_last_offset,
+            mod.padding_idx,
+            mod.weight.device,
+            mod.weight.dtype,
+            weight_qparams
+        )
