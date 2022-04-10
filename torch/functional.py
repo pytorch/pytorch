@@ -1838,7 +1838,7 @@ def unravel_index(
             if torch.any(inp < 0):
                 raise ValueError(f"Negative values in {name} are not allowed.")
         else:
-            allowed_types = "Sequence/Scalar (int)/Tensor" if name == "shape" else "Sequence/Tensor"
+            allowed_types = "Sequence/Scalar (int)/Tensor" if name == "shape" else "Tensor"
             msg = f"{name} should either be a {allowed_types}, but found {type(inp)}"
             raise TypeError(msg)
 
