@@ -15,7 +15,7 @@ Expand::Expand(
       size_(std::move(size)),
       is_scalar_expand_(is_scalar_expand) {
   SetShapeDeferred(
-      [&]() { return Shape(GetShapeFromTsValue(input).scalar_type(), size_); });
+      [&]() { return Shape(input.shape().scalar_type(), size_); });
 }
 
 std::string Expand::ToString() const {

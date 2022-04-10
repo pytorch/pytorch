@@ -1,6 +1,7 @@
 from typing import Callable, Iterator, TypeVar
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.utils.common import check_lambda_fn
 

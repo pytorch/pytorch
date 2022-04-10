@@ -364,6 +364,26 @@ Available options:
   :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
   option should be used as a last resort for a workload that is aborting
   due to 'out of memory' and showing a large amount of inactive split blocks.
+* ``roundup_power2_divisions`` helps with rounding the requested allocation
+  size to nearest power-2 division and making better use of the blocks. In
+  the current CUDACachingAllocator, the sizes are rounded up in multiple
+  of blocks size of 512, so this works fine for smaller sizes. However, this
+  can be inefficient for large near-by allocations as each will go to different
+  size of blocks and re-use of those blocks are minimized. This might create
+  lots of unused blocks and will waste GPU memory capacity. This option enables
+  the rounding of allocation size to nearest power-2 division. For example, if
+  we need to round-up size of 1200 and if number of divisions is 4,
+  the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
+  will be rounded to 1280 as the nearest ceiling of power-2 division.
+* ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
+  avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
+  which can be unfavorable to latency-critical GPU applications (e.g., servers).
+  Upon setting this threshold (e.g., 0.8), the allocator will start reclaiming
+  GPU memory blocks if the GPU memory capacity usage exceeds the threshold (i.e.,
+  80% of the total memory allocated to the GPU application). The algorithm prefers
+  to free old & unused blocks first to avoid freeing blocks that are actively being
+  reused. The threshold value should be between greater than 0.0 and less than 1.0.
 
 .. _cufft-plan-cache:
 
