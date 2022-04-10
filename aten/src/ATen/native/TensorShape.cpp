@@ -1701,6 +1701,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             for (const auto i : c10::irange(start, end)) {
               const auto val = *ptr_tid_idx++;
               const auto intersection_counts = ptr_intersection_counts[val];
+              if (!intersection_counts) continue;
               const auto intersection_offset = ptr_intersection_offsets[val];
               const auto val_count = ptr_other_idx_counts[val];
               auto& val_tid_offset = tid_offsets[val];
