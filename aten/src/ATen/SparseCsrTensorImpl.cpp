@@ -19,6 +19,18 @@ DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
         key_set);
   }
 }
+
+std::string SparseCsrTensorLayoutToSTRING(Layout layout) {
+  switch (layout) {
+  case kSparseCsr: return "CSR";
+  case kSparseCsc: return "CSC";
+  case kSparseBsr: return "BSR";
+  case kSparseBsc: return "BSC";
+  default:
+    TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+    return "";
+  }
+}
 } // namespace
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
@@ -135,19 +147,19 @@ void SparseCsrTensorImpl::set_member_tensors(
 }
 
 IntArrayRef SparseCsrTensorImpl::strides() const {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have strides.");
+  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_)," tensors do not have strides.");
 }
 int64_t SparseCsrTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have strides.");
+  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have strides.");
 }
 void SparseCsrTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have set_size.");
+  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have set_size.");
 }
 void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have set_stride.");
+  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have set_stride.");
 }
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have set_storage_offset.");
+  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have set_storage_offset.");
 }
 
 } // namespace at
