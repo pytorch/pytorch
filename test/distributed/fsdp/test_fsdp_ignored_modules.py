@@ -2,7 +2,9 @@
 
 import sys
 
+import torch
 from torch import distributed as dist
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -23,10 +25,26 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
+class Model(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.layer0 = torch.nn.Linear(3, 5)
+        self.layer1 = torch.nn.Sequential(
+            torch.nn.Linear(5, 5),
+            torch.nn.Linear(5, 4),
+            torch.nn.Linear(4, 4),
+        )
+        self.layer2 = torch.nn.Linear(4, 1)
+
+    def forward(self, x):
+        return self.layer2(self.layer1(self.layer0(x)))
+
+
 class TestFSDPIgnoredModules(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    def test_ignored_modules(self):
-        """Tests that ignored modules' parameters are not flattened."""
+    def test_ignored_modules_transformer(self):
+        """Tests that ignored modules' parameters are not flattened for a
+        transformer model with shared parameters."""
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
         group = dist.distributed_c10d._get_default_group()
@@ -42,6 +60,39 @@ class TestFSDPIgnoredModules(FSDPTest):
         with wrapped_model.summon_full_params():
             flat_param_numel = wrapped_model.params[0].numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_modules_nested(self):
+        """Tests that passing a module with nested FSDP modules does not
+        error and still ignores non-FSDP modules' parameters."""
+        # Initialize an FSDP-wrapped nested model that first wraps the nested
+        # sequential's middle linear layer (`layer1[1]`) and then wraps the
+        # overall model while ignoring the nested sequential (`layer1`)
+        model = Model().cuda()
+        model.layer1[1] = FSDP(model.layer1[1])
+        wrapped_model = FSDP(model, ignored_modules=[model.layer1])
+        # Check that the wrapped model's flattened parameter does not include
+        # the ignored nested sequential's parameters
+        nonwrapped_model = Model()
+        total_numel = sum(p.numel() for p in nonwrapped_model.parameters())
+        ignored_numel = sum(
+            p.numel() for p in nonwrapped_model.layer1.parameters()
+        )
+        nonignored_numel = total_numel - ignored_numel
+        with wrapped_model.summon_full_params():
+            flat_param_numel = wrapped_model.params[0].numel()
+            self.assertEqual(flat_param_numel, nonignored_numel)
+
+    def test_ignored_modules_invalid(self):
+        """Tests that passing an FSDP module as an ignored module errors."""
+        model = Model()
+        model.layer1 = FSDP(model.layer1)
+        # Passing an FSDP module as an ignored module should error
+        with self.assertRaises(
+            ValueError,
+            msg="`ignored_modules` should not include FSDP modules",
+        ):
+            FSDP(model, ignored_modules=[model.layer1])
 
 
 instantiate_parametrized_tests(TestFSDPIgnoredModules)

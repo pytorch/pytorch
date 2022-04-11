@@ -97,12 +97,12 @@ def enable_wrap(
     """
     Context manager to wrap modules using a wrapper.
 
-    Useful for when you'd like to apply the same parameters to all child modules
-    that you wrap. A particularly important use case is wrapping large layers so
-    that they get sharded (in-place) during initialization, to avoid running out of
-    system memory. Large layers can indicate that they should be sharded via
-    the ``wrap`` annotation and this context manager can provide the
-    exact configuration for these nested instances.
+    Useful for when you'd like to apply the same configuration arguments to all
+    child modules that you wrap. A particularly important use case is wrapping
+    large layers so that they get sharded (in-place) during initialization, to
+    avoid running out of system memory. Large layers can indicate that they
+    should be sharded via the ``wrap`` annotation and this context manager can
+    provide the exact configuration for these nested instances.
 
     Usage::
 
