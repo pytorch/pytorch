@@ -1043,7 +1043,6 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
 
   Tensor col_indices = sparse.col_indices();
   Tensor values = sparse.values();
-  auto ncols = sparse.size(1);
   auto numel = values.numel();
   Tensor new_col_indices;
   Tensor columns_map;
@@ -1137,7 +1136,6 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   auto ioptions = crow_indices.options();
   Tensor values = sparse.values();
   auto nrows = sparse.size(0);
-  auto numel = values.numel();
 
   Tensor new_crow_indices = at::empty({crow_indices.numel()}, ioptions);
   Tensor new_col_indices = at::empty({}, ioptions);
