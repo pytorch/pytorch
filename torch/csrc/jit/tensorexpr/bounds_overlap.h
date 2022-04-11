@@ -89,8 +89,6 @@ OverlapKind TORCH_API overlaps(const IndexBounds& a, const IndexBounds& b);
 // Note: this doesn't use IndexBounds because the Bounds returned do not
 // represent multiple different dimensions.
 std::vector<Bound> TORCH_API subtractBound(Bound a, Bound b);
-std::vector<Bound> TORCH_API
-subtractBound(Bound a, Bound b, OverlapKind overlap);
 
 // Returns the bound slices created by subtracting the IndexBounds B from A.
 std::vector<IndexBounds> TORCH_API subtractIndicesBounds(
