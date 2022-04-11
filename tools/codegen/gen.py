@@ -308,8 +308,64 @@ def static_dispatch(
         return generate_static_dispatch(f, cpp_sig, method=method, backend_index=keys[0])
     elif len(keys) == 0:
         return generate_static_dispatch(f, cpp_sig, method=method, backend_index=backend_indices[0])
+    native_tensor_args = [
+        a.name for a in cpp_sig.arguments()
+        if isinstance(a.argument, SelfArgument) or isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
+    ]
+    is_factory_method = str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_')
+    tensor_opts = [a for a in cpp_sig.arguments() if isinstance(a.argument, TensorOptionsArguments)]
+    has_backend_select = not is_factory_method and tensor_opts
+
+    stmts = []
+
+    if method:
+        native_tensor_args.append('const_cast<Tensor&>(*this)')
+
+    tensor_args = ', '.join(native_tensor_args)
+    if not tensor_args and not tensor_opts:
+        tensor_options = f.func.arguments.tensor_options
+        if tensor_options:
+            stmts.append(f"c10::TensorOptions options = c10::TensorOptions().device({tensor_options.device.name}).dtype({tensor_options.dtype.name}).layout({tensor_options.layout.name});")
+            stmts.append(f"""\
+DispatchKey _dk = options.computeDispatchKey();""")
+        else:
+            dispatch_key = next(get_static_dispatch_backend(f, backend_index=b) for b in backend_indices if get_static_dispatch_backend(f, b))
+            return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
+    elif not tensor_args:
+        assert len(tensor_opts) == 1
+        stmts.append(f"""\
+DispatchKey _dk = {tensor_opts[0].name}.computeDispatchKey();""")
     else:
-        return f'TORCH_CHECK(false, "Static dispatch does not support backends with multiple kernels");'
+        subexprs: List[str] = []
+        subexprs.append(f"c10::detail::multi_dispatch_key_set({tensor_args})")
+        for tensor_opt in tensor_opts:
+            subexprs.append(f'DispatchKeySet({tensor_opt.name}.computeDispatchKey())')
+        stmts.append(f"""\
+DispatchKeySet _dk_set = {' | '.join(subexprs)};""")
+        stmts.append("""\
+DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);""")
+    dispatch_code = []
+    if not has_backend_select:
+        dispatch_code.append("""case DispatchKey::BackendSelect:""")
+    for index in keys:
+        dispatch_code.append(f"""case DispatchKey::{index.dispatch_key}:""")
+        dispatch_code.append(f"""\t{generate_static_dispatch(f, cpp_sig, method=method, backend_index=index)};""")
+    connector = '\n\t\t'
+    fallback = None
+    if f.has_composite_explicit_autograd_kernel:
+        fallback = f'return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs_str});'
+    elif f.has_composite_implicit_autograd_kernel:
+        fallback = f'return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs_str});'
+    else:
+        fallback = f"""TORCH_CHECK(false, "Static dispatch does not support {name} for {','.join([str(index.dispatch_key) for index in backend_indices])}, dispatch key: ", _dk);"""
+    return f"""
+    {connector.join(stmts)}
+    switch (_dk) {{
+        {connector.join(dispatch_code)}
+        default:
+            {fallback}
+    }}
+    """
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
