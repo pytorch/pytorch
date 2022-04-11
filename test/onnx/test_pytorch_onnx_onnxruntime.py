@@ -10542,13 +10542,18 @@ class _TestONNXRuntime:
     #       such that inputs and outputs do not always overflow/underflow.
     #       Otherwise test results could be inaccurate.
     @skipIfUnsupportedMinOpsetVersion(10)
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/74501")
     def test_quantized_linear(self):
         model = torch.nn.quantized.Linear(4, 8)
+        # Set fixed weight to avoid flaky test.
+        weight = torch.quantize_per_tensor(
+            torch.arange(32, dtype=torch.float).view(8, 4),
+            0.5, 0, torch.qint8)
         # Set non-zero bias.
-        bias = torch.arange(8).to(torch.float)
-        model.set_weight_bias(model.weight(), bias)
+        bias = torch.arange(8, dtype=torch.float)
+        model.set_weight_bias(weight, bias)
+        # Set fixed input to avoid flaky test.
         input = torch.randn(4, 4)
+        input = torch.arange(16, dtype=torch.float).view(4, 4) - 8
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         # Currently, we need convert the model to ScriptModule before export.
         # The reason is that PackedParams contains int (not tensor).
@@ -10650,6 +10655,29 @@ class _TestONNXRuntime:
 
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 0, torch.qint8)
         self.run_test(torch.jit.trace(Module(), x), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_convolution_allow_tf32(self):
+        class Module(torch.nn.Module):
+            def __init__(self, allow_tf32):
+                super().__init__()
+
+                self.allow_tf32 = allow_tf32
+                weight = torch.rand(32, 3, 3, 3)
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                if self.allow_tf32:
+                    return torch._convolution(x, self.weight, None, [2, 2], [0, 0], [1, 1], False, [0, 0],
+                                              1, False, False, True, True)
+                else:
+                    return torch._convolution(x, self.weight, None, [2, 2], [0, 0], [1, 1], False, [0, 0],
+                                              1, False, False, True)
+
+        x = torch.randn(1, 3, 224, 224)
+        self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
+        self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,

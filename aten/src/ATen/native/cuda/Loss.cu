@@ -1,13 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/TensorIterator.h>
-#include <aten/src/ATen/TensorUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/binary_cross_entropy_backward_native.h>
+#include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/nll_loss_backward_native.h>
+#include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/squeeze.h>
+#endif
 
 constexpr float EPSILON = 1e-12;
 
