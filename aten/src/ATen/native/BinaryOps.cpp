@@ -608,6 +608,18 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
   return native::floor_divide_out(self, other, self);
 }
 
+Tensor mul(const Tensor& self, const Tensor& other) {
+  return at::mul(self, other);
+}
+
+Tensor& mul_(Tensor& self, const Tensor& other) {
+  return self.mul_(other);
+}
+
+Tensor& mul_out(const Tensor & self, const Tensor & other, Tensor & out) {
+  return at::mul_out(out, self, other);
+}
+
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 Tensor mul(const Tensor& self, const Scalar& other) {
@@ -635,7 +647,11 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+  // auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+
+  // hack to work around at::redispatch::mul missing problem
+  auto meta_out = at::mul(self, other);
+
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 

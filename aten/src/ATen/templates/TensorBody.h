@@ -506,6 +506,9 @@ class TORCH_API Tensor: public TensorBase {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+  at::Tensor mul(const at::Tensor & other) const;
+  at::Tensor & mul_(const at::Tensor & other) const;
+
 
   // Special C++ only overloads for std()-like functions (See gh-40287)
   // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef

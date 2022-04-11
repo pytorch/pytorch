@@ -141,4 +141,8 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
+TORCH_API Tensor mul(const Tensor& self, const Tensor& other);
+TORCH_API Tensor& mul_out(Tensor& out, const Tensor& self, const Tensor& other);
+TORCH_API Tensor& mul_outf(const Tensor& self, const Tensor& other, Tensor& out);
+
 }
