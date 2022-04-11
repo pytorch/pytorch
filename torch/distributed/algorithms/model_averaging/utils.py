@@ -37,7 +37,7 @@ def average_parameters(
 
 def get_params_to_average(params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
     """
-    Returns a list of parameters that need to average.
+    Returns a list of parameters that need to average, which filters out the parameters that do not contain any gradients.
     Args:
         params: The parameters of a model or parameter groups of an optimizer.
     """
