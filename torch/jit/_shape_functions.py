@@ -1,8 +1,6 @@
-# mypy: ignore-errors
-# flake8: noqa
-
-from typing import List, Any, Optional, Tuple, TypeVar, Union
-number = TypeVar('number', bound=Union[int, float])
+from typing import List, Any, Optional, TypeVar, Union, Dict, Callable
+import math
+number = Union[int, float]
 
 import torch
 
@@ -461,9 +459,9 @@ def slice(
         end_val = start_val
     elif end_val >= self[dim]:
         end_val = self[dim]
-    len = end_val - start_val
+    slice_len = end_val - start_val
     out = _copy(self)
-    out[dim] = (len + step - 1) // step
+    out[dim] = (slice_len + step - 1) // step
     return out
 
 
@@ -776,7 +774,7 @@ def multiply_integers(li: List[int]):
 
 def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
     assert end >= 0
-    return [int(torch.ceil(end))]
+    return [int(math.ceil(end))]
 
 
 def arange_start(
@@ -784,7 +782,7 @@ def arange_start(
 ):
     assert end >= 0
     assert end >= start
-    return [int(torch.ceil(end - start))]
+    return [int(math.ceil(end - start))]
 
 
 def arange_start_step(
@@ -795,7 +793,7 @@ def arange_start_step(
         assert start >= end
     else:
         assert end >= start
-    return [int(torch.ceil((end - start) / step))]
+    return [int(math.ceil((end - start) / step))]
 
 
 def permute(input: List[int], dims: List[int]):
@@ -838,18 +836,18 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         shape.append(input[i])
     return shape
 
-shape_compute_graph_mapping = {}
-shape_compute_graph_set = {}
+shape_compute_graph_mapping : Dict[str, torch._C.ScriptFunction] = {}
+script_func_map: Dict[Callable, torch._C.ScriptFunction] = {}
 
-def add_shape_compute_mapping(operator_schema, function_naming):
+def add_shape_compute_mapping(operator_schema: str, func: Callable):
     global shape_compute_graph_mapping
     global shape_compute_graph_set
 
-    if function_naming in shape_compute_graph_set:
-        shape_compute_graph_mapping[operator_schema] = shape_compute_graph_set[function_naming]
+    if func in script_func_map:
+        shape_compute_graph_mapping[operator_schema] = script_func_map[func]
         return
 
-    scripted_func = torch.jit.script(function_naming)
+    scripted_func = torch.jit.script(func)
 
     torch._C._jit_pass_inline(scripted_func.graph)
 
@@ -857,6 +855,7 @@ def add_shape_compute_mapping(operator_schema, function_naming):
         torch._C._jit_pass_peephole(scripted_func.graph)
         torch._C._jit_pass_constant_propagation(scripted_func.graph)
 
+    script_func_map[func] = scripted_func
     shape_compute_graph_mapping[operator_schema] = scripted_func
 
 add_shape_compute_mapping("aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", unary)
@@ -877,7 +876,7 @@ add_shape_compute_mapping("aten::slice.Tensor(Tensor(a) self, int dim=0, int? st
 add_shape_compute_mapping("aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", select)
 add_shape_compute_mapping("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", index_select)
 add_shape_compute_mapping("aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
-       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", unary)
+                          "float eps=1e-05, bool cudnn_enable=True) -> Tensor", unary)
 add_shape_compute_mapping("aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", unary)
 add_shape_compute_mapping("aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", unary)
 add_shape_compute_mapping("aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", unary)
