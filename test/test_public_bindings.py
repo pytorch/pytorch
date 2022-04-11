@@ -144,6 +144,7 @@ class TestPublicBindings(TestCase):
             "InterfaceType",
             "IntStorageBase",
             "IntType",
+            "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
             "is_autocast_cache_enabled",
@@ -290,7 +291,9 @@ class TestPublicBindings(TestCase):
           `__module__` that start with the current submodule.
         '''
         failure_list = []
-        with open(os.path.join(sys.path[0], 'allowlist_for_publicAPI.json')) as json_file:
+        with open(os.path.join(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
+            # no new entries should be added to this allow_dict.
+            # New APIs must follow the public API guidelines.
             allow_dict = json.load(json_file)
 
         def test_module(modname):
@@ -336,7 +339,8 @@ class TestPublicBindings(TestCase):
         test_module('torch')
         msg = "Following new APIs ( displayed in the form (module, element, element module) )" \
               " were added that do not meet our guidelines for public API" \
-              " and don't have an entry in the allow_dict :\n" + "\n".join(map(str, failure_list))
+              " Please review  https://docs.google.com/document/d/10yx2-4gs0gTMOimVS403MnoAWkqitS8TUHX73PN8EjE/edit?pli=1#" \
+              " for more information:\n" + "\n".join(map(str, failure_list))
 
         # empty lists are considered false in python
         self.assertTrue(not failure_list, msg)

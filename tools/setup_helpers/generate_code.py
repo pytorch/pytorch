@@ -13,7 +13,6 @@ except ImportError:
 source_files = {'.py', '.cpp', '.h'}
 
 NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
-TAGS_PATH = 'aten/src/ATen/native/tags.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
@@ -28,9 +27,7 @@ def all_generator_source() -> List[str]:
 
 
 def generate_code(ninja_global: Optional[str] = None,
-                  nn_path: Optional[str] = None,
                   native_functions_path: Optional[str] = None,
-                  tags_path: Optional[str] = None,
                   install_dir: Optional[str] = None,
                   subset: Optional[str] = None,
                   disable_autograd: bool = False,
@@ -60,7 +57,6 @@ def generate_code(ninja_global: Optional[str] = None,
     if subset == "pybindings" or not subset:
         gen_autograd_python(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
-            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir)
 
@@ -71,7 +67,6 @@ def generate_code(ninja_global: Optional[str] = None,
 
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
-            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
@@ -81,7 +76,6 @@ def generate_code(ninja_global: Optional[str] = None,
     if subset == "python" or not subset:
         gen_annotated(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
-            tags_path or TAGS_PATH,
             python_install_dir,
             autograd_dir)
 
@@ -140,8 +134,6 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--native-functions-path')
-    parser.add_argument('--tags-path')
-    parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
     parser.add_argument(
@@ -182,9 +174,7 @@ def main() -> None:
 
     generate_code(
         options.ninja_global,
-        options.nn_path,
         options.native_functions_path,
-        options.tags_path,
         options.install_dir,
         options.subset,
         options.disable_autograd,
@@ -207,16 +197,19 @@ def main() -> None:
         assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
         assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
+        from tools.codegen.dest.lazy_ir import TSLazyIR
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
+                            backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
                             impl_path=ts_native_functions,
-                            gen_ts_lowerings=True,
                             node_base="TsNode",
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
-                            per_operator_headers=options.per_operator_headers)
+                            lazy_ir_cls=TSLazyIR,
+                            per_operator_headers=options.per_operator_headers,
+                            gen_forced_fallback_code=True)
 
 
 if __name__ == "__main__":
