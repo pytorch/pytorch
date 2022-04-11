@@ -2179,7 +2179,7 @@ class TestQuantizedOps(TestCase):
                     torch_type, Y_scale, Y_zero_point, channels_last, \
                     affine = test_case
                 num_channels = num_groups * channels_per_group
-                # minimum rank for for channels_last
+                # minimum rank for channels_last
                 shapes = (batches, num_channels, elements_per_channel, 1)
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
