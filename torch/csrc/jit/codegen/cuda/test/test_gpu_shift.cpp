@@ -407,6 +407,7 @@ TEST_F(NVFuserTest, FusionShiftLeftOfCA_CUDA) {
 
   // Lowering should trigger an assertion failure as a shifted axis is
   // found inside an allocation position.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -4078,6 +4079,7 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingRfactor_CUDA) {
   tv3->split(-1, 8);
   tv3->reorder({{1, 2}});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv3->rFactor({-2}));
 }
 
@@ -4233,6 +4235,7 @@ TEST_F(NVFuserTest, FusionPartialSplit2_CUDA) {
   tv1->computeAt(tv4, 1);
 
   // Validation should throw an error due to tv5 and tv6.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -4928,6 +4931,7 @@ TEST_F(NVFuserTest, FusionGatherStrided7_CUDA) {
   tv4->split(0, 2);
 
   // Since tv3 has a different stride factor, this should fail.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv0->computeAt(tv4, 1));
 }
 
@@ -5014,6 +5018,7 @@ TEST_F(NVFuserTest, FusionGatherStridedChain_CUDA) {
   fusion.addOutput(out);
 
   // This should throw an error at HaloInfo::build.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(GpuLower gpulw(&fusion));
 }
 

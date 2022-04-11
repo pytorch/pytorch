@@ -304,9 +304,11 @@ TEST_F(NVFuserTest, FusionExprEvalBindings_CUDA) {
   evaluator.bind(b, 3);
 
   // can't bind to the results of expressions
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(evaluator.bind(c, 100));
 
   // can't bind to concrete values
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(evaluator.bind(e, 100));
 
   checkIntValue(evaluator, c, 10);
@@ -537,9 +539,11 @@ TEST_F(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
   evaluator.bind(b, 3);
 
   // can't bind to the results of expressions
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(evaluator.bind(c, 100));
 
   // can't bind to concrete values
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(evaluator.bind(e, 100));
 
   checkIntValue(evaluator, c, 10);
@@ -3649,6 +3653,7 @@ TEST_F(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
   fusion.addOutput(tv4);
 
   // computeAt should fail as there is no valid root mapping.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv1->computeAt(tv4, 1));
 }
 
@@ -4829,6 +4834,7 @@ TEST_F(NVFuserTest, FusionMultiGridReduction2_CUDA) {
   tv2->axis(0)->parallelize(ParallelType::BIDy);
 
   FusionExecutor fe;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
@@ -6253,6 +6259,7 @@ TEST_F(NVFuserTest, FusionSimpleGemm_CUDA) {
 
   // Make sure bad launch params throws
   // TODO: Re-enable once we have parallelization validation in.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   // ASSERT_ANY_THROW(fe.runFusion({t0, t1}, LaunchParams(1, 2, 3, 4, 5, 6)));
 
   // Don't specify any launch params
@@ -6545,6 +6552,7 @@ TEST_F(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
   fusion.addOutput(tv7);
 
   tv1->computeAt(tv7, 1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv1->computeAt(tv7, -1));
 }
 
@@ -10757,6 +10765,7 @@ TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
 
   // Not possible to do computeAt at position -1 as recomputation
   // would be required. An exception should be thrown.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
 }
 
@@ -11422,6 +11431,7 @@ TEST_F(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
 
   // In order to do this, tv1->axis(1) and tv2->axis(1) must have the
   // same size, but we can't prove it, so this should throw an error.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv3->computeAt(tv4, -1));
 }
 
@@ -12311,6 +12321,7 @@ TEST_F(NVFuserTest, FusionIssue549_CUDA) {
 
   // Make sure bad launch params throws
   // TODO: Re-enable once we have parallelization validation in.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   // ASSERT_ANY_THROW(fe.runFusion({t0, t1}, LaunchParams(1, 2, 3, 4, 5, 6)));
 
   // Don't specify any launch params
@@ -14526,6 +14537,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   FusionExecutor fe;
   // TODO: throw assertion - cannot merge non-contiguous vectorization axes
   // Make sure compilation fails
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
@@ -14622,6 +14634,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
 
   FusionExecutor fe;
   // Make sure compilation fails
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
@@ -14720,6 +14733,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   fe.compileFusion(&fusion, aten_inputs);
 
   // Failure because the input + output tensors do not have the same stride
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 }
 
@@ -14807,6 +14821,7 @@ TEST_F(NVFuserTest, FusionVectorization2_CUDA) {
 
   FusionExecutor fe;
   // Make sure compilation fails
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
@@ -14851,10 +14866,12 @@ TEST_F(NVFuserTest, FusionVectorization3_CUDA) {
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 
   aten_inputs[0] = t0.index({"...", Slice(1)});
   aten_inputs[1] = t1.index({"...", Slice(1)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 
   t0 = at::randn({bx, 2048}, options).index({"...", Slice(4)});
@@ -15034,6 +15051,7 @@ TEST_F(NVFuserTest, FusionValidateParallelize1_CUDA) {
 
   // Invalid as tv1 and tv2 do have the same ParallelType
   FusionExecutor fe;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
@@ -15165,6 +15183,7 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
 
   // Validation should throw an exception saying the first axes of tv2
   // and tv3 have incompatible parallelization. See also issue #995.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -18659,6 +18678,7 @@ TEST_F(NVFuserTest, FusionIssue1127_CUDA) {
   tv5->axis(0)->parallelize(ParallelType::TIDx);
 
   // Lowering should fail since tv5 is predicated and paralellized with TIDx.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -19792,6 +19812,7 @@ TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize1_CUDA) {
   auto t0_non_divisible = at::randn({8}, options);
   // Since ceilDiv(8, 8) is not divisible by 4, the vectorization is
   // illegal. The run-time validation of vectorization should throw an error.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0_non_divisible}));
 }
 
@@ -20054,6 +20075,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering3_CUDA) {
 
   // tv2 is invalid to double-buffer as its producer, tv1, is
   // computed inside the double-buffering loop.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv2->doubleBuffer());
 
   // Moving tv2 inner makes tv1 large enough to double-buffer tv2
@@ -20439,6 +20461,7 @@ TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
 
     // This should throw an exception as the extent of t0 is not
     // divisible by the vector width
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_ANY_THROW(fe.runFusion({t0}));
 
     auto t1 = at::randn({16}, options);
@@ -21235,6 +21258,7 @@ TEST_F(NVFuserTest, FusionTooLargeSmem_CUDA) {
 
   // Should be throwing because the kernel
   //  requested absolute device limit
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0}));
 }
 
@@ -21292,6 +21316,7 @@ TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
 
   auto immediate_scalr = IrBuilder::create<Double>(0.1);
   // Adding an immediate scalar value as an input is not allowed
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.addInput(immediate_scalr));
 
   // Instead, use a symbolic value
@@ -21373,6 +21398,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexFail_CUDA) {
   // This should fail at the launch time as 14 is not divisible by the
   // vector word size. The two domains are merged, but they are not
   // contiguous, so contig indexing is not involved in this case.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0}));
 }
 
@@ -21404,9 +21430,11 @@ TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
   TORCH_CHECK(t0.equal(cg_outputs[0]));
 
   // Pass misaligned input. This must fail.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0_misaligned}));
 
   // Pass misaligned output. This must fail too.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
 }
 
@@ -21438,6 +21466,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexValidationFail_CUDA) {
   FusionExecutor fe;
   fe.compileFusion(&fusion, {t0});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0}));
 }
 
@@ -21519,6 +21548,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexValidationFail2_CUDA) {
   fe.compileFusion(&fusion, {t0, t1});
 
   // Vectorization of tv2 should be detected as invalid.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fe.runFusion({t0, t1}));
 }
 
