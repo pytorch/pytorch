@@ -1,3 +1,4 @@
+from collections import defaultdict
 import logging
 import math
 from typing import Dict, List
@@ -11,38 +12,38 @@ from . import default_hooks as default
 logger = logging.getLogger(__name__)
 
 
-def _orthogonalize(matrix, epsilon=0):
+def _orthogonalize(matrices, epsilon=0):
     """
-    Decide between Gram-Schmidt or QR factorization to orthogonalize the matrix.
+    Decide between Gram-Schmidt or QR factorization to orthogonalize a batch of matrices.
     QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
     """
-    assert len(matrix.shape) == 3 and matrix.shape[2] <= matrix.shape[1]
+    assert len(matrices.shape) == 3 and matrices.shape[2] <= matrices.shape[1]
 
-    batch_size = matrix.shape[0]
-    rank = matrix.shape[2]
-    dtype = matrix.dtype
+    num_matrices = matrices.shape[0]
+    rank = matrices.shape[2]
+    dtype = matrices.dtype
     if rank <= 2 or dtype in [torch.float16, torch.bfloat16]:
-        _orthogonalize_gram_schmidt(matrix, epsilon=epsilon)
+        _orthogonalize_gram_schmidt(matrices, epsilon=epsilon)
     else:
         torch.linalg.qr(
-            matrix,
+            matrices,
             out=(
-                matrix,
-                torch.empty(batch_size, rank, rank, device=matrix.device, dtype=dtype)
+                matrices,
+                torch.empty(num_matrices, rank, rank, device=matrices.device, dtype=dtype)
             )
         )
 
-def _orthogonalize_gram_schmidt(matrix, epsilon=0):
+def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
-    Applies Gram-Schmidt procedure to orthogonalize a given 3D tensor (batch of matrices).
-    If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
+    Applies Gram-Schmidt procedure to orthogonalize a batch of matrices.
+    If epsilon is 0, this is equivalent to `torch.qr(matrices, out=(matrices, _))`,
     """
-    num_cols = matrix.shape[2]
+    num_cols = matrices.shape[2]
     for i in range(num_cols):
         # Normalize the i'th column.
-        col = matrix[:, :, i : i + 1]
+        col = matrices[:, :, i : i + 1]
         # If no epsilon is added here, division by zero may be caused by vanishing gradients.
-        # This epsilon is not needed if the input matrix covers the gradients of at least one entire layer in the neural network.
+        # This epsilon is not needed if the input batch of matrices covers the gradients of at least one entire layer in the neural network.
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
@@ -50,7 +51,7 @@ def _orthogonalize_gram_schmidt(matrix, epsilon=0):
                 col /= torch.norm(col, dim=1, keepdim=True)
             except ZeroDivisionError:
                 logger.error(
-                    "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
+                    "The matrices to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
                     "as `orthogonalization_epsilon` in PowerSGD state."
                 )
                 # Recover the values from NaNs to 0s.
@@ -59,7 +60,7 @@ def _orthogonalize_gram_schmidt(matrix, epsilon=0):
             col /= torch.norm(col, dim=1, keepdim=True) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
-            rest = matrix[:, :, i + 1 :]
+            rest = matrices[:, :, i + 1 :]
             rest -= torch.sum(col * rest, dim=1, keepdim=True) * col
 
 
@@ -281,7 +282,7 @@ class PowerSGDState(object):
 
 
 def powerSGD_hook(
-    state: PowerSGDState, bucket: dist.GradBucket
+    state: PowerSGDState, bucket: dist.GradBucket, batch_tensors_with_same_shape: bool = False
 ) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
@@ -329,6 +330,10 @@ def powerSGD_hook(
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
+        batch_tensors_with_same_shape (bool): A boolean value that when set to ``True``, compress and decompress tensors with
+            same shape in a batched operation to achieve higher parallelism. Note that you should also increase the bucket size
+            to make more same-shaped tensors appear in the same bucket, however this may reduce the overlap between computation
+            and communication. Set to ``True`` if the compression / decompression computation is a bottleneck.
 
     Returns:
         Future handler of the communication, which updates the gradients in place.
@@ -434,27 +439,35 @@ def powerSGD_hook(
         )
 
     # Batch tensors to compress by shape.
-    shape_to_tensors: Dict[torch.Size, List[torch.Tensor]] = {}
+    shape_to_tensors = defaultdict(list)
     for tensor in tensors_to_compress:
-        if tensor.shape not in shape_to_tensors:
-            shape_to_tensors[tensor.shape] = []
         shape_to_tensors[tensor.shape].append(tensor)
 
+    # This function decides whether to batch tensors with same shape or not according to the argument,
+    # so the following process could share the same code.
+    def maybe_batched_tensors_to_compress():
+        for tensors in shape_to_tensors.values():
+            if batch_tensors_with_same_shape:
+                batch_size = len(tensors)
+                if batch_size == 1:
+                    # Use the original tensor to avoid copy.
+                    yield tensors[0].unsqueeze(0)
+                else:
+                    yield torch.stack(tensors)
+            else:
+                for tensor in tensors:
+                    yield tensor.unsqueeze(0)
+
     # Create Ps and Qs that point to the allocated memory.
-    batched_tensors_to_compress = []
+    tensors_to_compress = []
     ps = []
     qs = []
     p_idx = 0
     q_idx = 0
-    for shape, tensors in shape_to_tensors.items():
-        batch_size = len(tensors)
-        n, m = shape
+    for tensor in maybe_batched_tensors_to_compress():
+        batch_size, n, m = tensor.shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
-        if batch_size == 1:
-            # Use the original tensor to avoid copy.
-            batched_tensors_to_compress.append(tensors[0].unsqueeze(0))
-        else:
-            batched_tensors_to_compress.append(torch.stack(tensors))
+        tensors_to_compress.append(tensor)
         ps.append(
             state.p_memory_dict[bucket_index][
                 p_idx : p_idx + batch_size * n * matrix_approximation_rank
@@ -492,8 +505,8 @@ def powerSGD_hook(
                 _orthogonalize(q, state.orthogonalization_epsilon)
 
     # Compute Ps.
-    for batched_tensor, q, p in zip(batched_tensors_to_compress, qs, ps):
-        torch.bmm(batched_tensor, q, out=p)
+    for tensor, q, p in zip(tensors_to_compress, qs, ps):
+        torch.bmm(tensor, q, out=p)
 
     # This allreduce is only applied to uncompressed tensors,
     # so it should have been kicked off before the above computation on the compressed tensors to hide more communication costs.
@@ -526,8 +539,8 @@ def powerSGD_hook(
             _orthogonalize(p, state.orthogonalization_epsilon)
 
         # Compute Qs.
-        for batched_tensor, p, q in zip(batched_tensors_to_compress, ps, qs):
-            torch.bmm(batched_tensor.transpose(1, 2), p, out=q)
+        for tensor, p, q in zip(tensors_to_compress, ps, qs):
+            torch.bmm(tensor.transpose(1, 2), p, out=q)
 
         # TODO: The above procedure does two matmul+allreduce steps per iteration --
         # one left multiplication and one right multiplication.
@@ -545,17 +558,18 @@ def powerSGD_hook(
     def decompress(fut):
         state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
 
-        for p, q, batched_tensor in zip(ps, qs, batched_tensors_to_compress):
-            torch.bmm(p, q.transpose(1, 2), out=batched_tensor)
+        for p, q, tensor in zip(ps, qs, tensors_to_compress):
+            torch.bmm(p, q.transpose(1, 2), out=tensor)
 
         # Copy batched tensors back to original buffer.
-        for batched_tensor in batched_tensors_to_compress:
-            if batched_tensor.shape[0] == 1:
-                # Skip tensor with batch_size == 1 since itself is the original tensor.
-                continue
-            original_tensors = shape_to_tensors[batched_tensor.shape[1:]]
-            for i, tensor in enumerate(original_tensors):
-                tensor.copy_(batched_tensor[i])
+        if batch_tensors_with_same_shape:
+            for tensor in tensors_to_compress:
+                if tensor.shape[0] == 1:
+                    # Skip tensor with batch_size == 1 since itself is the original tensor.
+                    continue
+                original_tensors = shape_to_tensors[tensor.shape[1:]]
+                for i, original_tensor in enumerate(original_tensors):
+                    original_tensor.copy_(tensor[i])
 
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
