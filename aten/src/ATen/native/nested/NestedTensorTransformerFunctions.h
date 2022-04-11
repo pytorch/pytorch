@@ -71,12 +71,5 @@ void remove_padding_transform0213_kernelLauncher(
     const int* output_sizes,
     int output_dim,
     const int batch_size);
-
-Tensor NestedTensor_embedding(
-    const Tensor& weight,
-    const Tensor& indices,
-    int64_t padding_idx,
-    bool scale_grad_by_freq,
-    bool sparse);
 } // namespace native
 } // namespace at
