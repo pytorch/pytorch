@@ -1139,9 +1139,11 @@ class IrParser {
             auto operand = list_val.front();
             list_val.pop_front();
             Val* min = value_map.count(node->inputs()[1]->unique()) != 0
-                ? *value_map[node->inputs()[1]->unique()] : nullptr;
+                ? *value_map[node->inputs()[1]->unique()]
+                : nullptr;
             Val* max = value_map.count(node->inputs()[2]->unique()) != 0
-                ? *value_map[node->inputs()[2]->unique()] : nullptr;
+                ? *value_map[node->inputs()[2]->unique()]
+                : nullptr;
 
             Val* out = nullptr;
             if (min && max) {
@@ -1159,7 +1161,8 @@ class IrParser {
                   max,
                   TypePromotion::default_op_config);
             } else {
-              TORCH_INTERNAL_ASSERT(false,
+              TORCH_INTERNAL_ASSERT(
+                  false,
                   "clamp: At least one of 'min' or 'max' must not be None");
             }
             value_map.emplace(node->output()->unique(), out);
