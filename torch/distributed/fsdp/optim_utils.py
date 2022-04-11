@@ -44,7 +44,6 @@ class _ConsolidatedOptimState:
     non_tensor_state: Dict[str, Any] = {}
 
 
-
 class _PosDimTensorInfo(NamedTuple):
     """Used internally for :meth:`scatter_full_optim_state_dict`."""
     shape: torch.Size
