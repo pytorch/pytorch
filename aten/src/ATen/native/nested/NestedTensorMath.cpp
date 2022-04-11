@@ -51,10 +51,9 @@ int64_t num_bytes(IntArrayRef sizes) {
 }
 
 std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(const Tensor& sizes) {
-  if (sizes.numel() == 0) {
+  if (sizes.dim() == 0) {
     return {};
   }
-  TORCH_INTERNAL_ASSERT(sizes.dim() == 2);
   const auto sizes_ptr = sizes.data_ptr<int64_t>();
   const auto sizes_size_0 = sizes.sizes()[0];
   const auto sizes_size_1 = sizes.sizes()[1];
@@ -265,6 +264,12 @@ Tensor NestedTensor_layer_norm(
       std::move(output_buffer), nt_input->get_nested_size_tensor());
 }
 
+Tensor NestedTensor_from_padded_and_nested_example(
+    const Tensor& padded,
+    const Tensor& nt_example) {
+  return _nested_from_padded(padded, get_nested_tensor_impl(nt_example)->get_nested_size_tensor());
+}
+
 Tensor nested_from_padded_generic(
     const Tensor& padded,
     const Tensor& sizes,
@@ -307,7 +312,6 @@ Tensor NestedTensor_to_padded_tensor(const Tensor& t, double padding) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nt.get_buffer().numel() == 0);
     return nt.get_buffer();
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
 
   // TODO: doesn't handle empty/scalar entries because we don't need
   // it for transformers; see to_padded_tensor in
@@ -364,6 +368,7 @@ Tensor NestedTensor_embedding(
   TORCH_CHECK(
       !weight.is_nested(), "NestedTensor weight not supported for embedding");
   TORCH_CHECK(indices.dim() < 3);
+  TORCH_CHECK(indices.dim() > 0, "NestedTensor embedding doesn't support empty indices.")
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_indices));
   TORCH_CHECK(weight.is_contiguous());
