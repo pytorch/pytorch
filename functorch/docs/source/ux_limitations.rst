@@ -140,7 +140,7 @@ to occur:
   y = torch.randn(3)
   expected = x + y
 
-  # Raises an error
+  # Does not raise an error
   vmap(f, in_dims=(0, 0))(x, y)
   assert torch.allclose(x, expected)
 
