@@ -1133,14 +1133,26 @@ void TensorPipeAgent::shutdownImpl() {
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     const std::string& workerName) const {
-  const auto& it = workerNameToInfo_.find(workerName);
+  std::unordered_map<std::string, WorkerInfo>::const_iterator it;
+  if (isStaticGroup_) {
+    it = workerNameToInfo_.find(workerName);
+  } else {
+    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+    it = workerNameToInfo_.find(workerName);
+  }
   TORCH_CHECK(
       it != workerNameToInfo_.end(), "Unknown destination worker ", workerName);
   return it->second;
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
-  const auto& it = workerIdToInfo_.find(workerId);
+  std::unordered_map<worker_id_t, WorkerInfo>::const_iterator it;
+  if (isStaticGroup_) {
+    it = workerIdToInfo_.find(workerId);
+  } else {
+    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+    it = workerIdToInfo_.find(workerId);
+  }
   TORCH_CHECK(
       it != workerIdToInfo_.end(), "Unknown destination worker ", workerId);
   return it->second;
@@ -1152,6 +1164,20 @@ std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
     workerInfos.emplace_back(item.second);
   }
   return workerInfos;
+}
+
+const std::string& TensorPipeAgent::findWorkerURL(
+    const WorkerInfo& worker) const {
+  std::unordered_map<std::string, std::string>::const_iterator it;
+  if (isStaticGroup_) {
+    it = workerNameToURL_.find(worker.name_);
+  } else {
+    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+    it = workerNameToURL_.find(worker.name_);
+  }
+  TORCH_CHECK(
+      it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
+  return it->second;
 }
 
 void TensorPipeAgent::updateGroupMembership(
@@ -1175,15 +1201,18 @@ void TensorPipeAgent::updateGroupMembership(
   // Rank with workerInfo is joining the group, update internal mappings
   if (isJoin) {
     std::cout << "in isJoin" << std::endl;
-    workerIdToInfo_.emplace(id, workerInfo);
-    workerNameToInfo_.emplace(name, workerInfo);
+    {
+      std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+      workerIdToInfo_.emplace(id, workerInfo);
+      workerNameToInfo_.emplace(name, workerInfo);
 
-    // TODO: we should get nodeAddrStr in the joining process, then pass in as
-    // an argument rather than getting from store each time
-    auto nodeAddrData = nameToAddressStore_.get(name);
-    auto nodeAddrStr =
-        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
-    workerNameToURL_.insert({name, nodeAddrStr});
+      // TODO: we should get nodeAddrStr in the joining process, then pass in as
+      // an argument rather than getting from store each time
+      auto nodeAddrData = nameToAddressStore_.get(name);
+      auto nodeAddrStr =
+          std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
+      workerNameToURL_.insert({name, nodeAddrStr});
+    }
 
     // TODO: update so that these mappings are locked
     // if (!reverseDeviceMap.empty()) {
@@ -1238,15 +1267,6 @@ void TensorPipeAgent::updateGroupMembership(
   else {
   }
 }
-
-const std::string& TensorPipeAgent::findWorkerURL(
-    const WorkerInfo& worker) const {
-  const auto it = workerNameToURL_.find(worker.name_);
-  TORCH_CHECK(
-      it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
-  return it->second;
-}
-
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());

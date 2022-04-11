@@ -278,27 +278,20 @@ def _tensorpipe_check_local_device_maps(name, device_count, options):
 def _update_group_membership(worker_info, my_devices, reverse_device_map):
     agent = api._get_current_rpc_agent()
     ret = agent._update_group_membership(worker_info, my_devices, reverse_device_map, True)
-    return "hi"
+    return ret
 
 def _get_device_infos():
-    if torch.cuda.is_available():
-        device_count = torch.cuda.device_count()
-    else:
-        device_count = 0
     agent = api._get_current_rpc_agent()
     opts = agent._get_backend_options()
-    if torch.cuda.is_available():
-        device_count = torch.cuda.device_count()
-    else:
-        device_count = 0
+    device_count = torch.cuda.device_count()
     return device_count, opts.device_maps, opts.devices
 
 def _set_devices_and_reverse_device_map(agent, my_rank, my_device_maps):
-    print(f"{my_rank}: _set_devices_and_reverse_device_map, {my_device_maps}")
+    print(f"{my_rank}: _set_devices_and_reverse_device_map, {my_device_maps}", flush=True)
     my_worker_info = agent.get_worker_info()
     my_name = my_worker_info.name
     all_worker_infos = agent.get_worker_infos()
-    # one round to get device_maps of all workers and construct reverse device maps
+    # One round to get device_maps of all workers and construct reverse device maps
     all_device_counts, all_device_maps, all_devices, all_names = {}, {}, {}, []
     for worker_info in all_worker_infos:
         worker_name = worker_info.name
@@ -308,21 +301,20 @@ def _set_devices_and_reverse_device_map(agent, my_rank, my_device_maps):
         all_devices[worker_name] = devices
         all_names.append(worker_name)
 
+    # TODO: validation on device map, e.g. handle tests starting from rpc_test.py:5445
     reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
 
-    print(f"{my_rank}: {all_device_maps=}")
-    print(f"{my_rank}: {reverse_device_maps=}")
+    print(f"{my_rank}: {all_device_maps=}", flush=True)
+    print(f"{my_rank}: {reverse_device_maps=}", flush=True)
+    print(f"{my_rank}: {all_names=}", flush=True)
+    # Perform RPC call to all workers, including itself
     for worker_name in all_names:
-        # set device list for each worker
+        # Set device list for each worker
         all_devices[worker_name] = _create_device_list(all_devices[worker_name],
                                         all_device_maps[worker_name], reverse_device_maps)
-        # print(worker_name)
-        # print(worker_rank)
-        # print(device_maps)
-        # rpc call to all workers, including itself
-        print(f"{my_rank} : start rpc_sync, {my_rank} -> {worker_info.id}")
-        test = api.rpc_sync(worker_name, _update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps))
-        print(f"{my_rank} : finish rpc_sync")
+        print(f"{my_rank} : Start rpc_sync, {my_rank} -> {worker_name}", flush=True)
+        api.rpc_sync(worker_name, _update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps))
+        print(f"{my_rank} : Finish rpc_sync, {my_rank} -> {worker_name}", flush=True)
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
@@ -415,9 +407,8 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                 api._init_rpc_states(agent)
 
                 try:
-                    # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
+                    # Notify all workers in group this rank has joined and set devices and reverse_device_map
                     # This is a synchronous operation that completes once all existing ranks are updated
-                    # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
                     _set_devices_and_reverse_device_map(agent, rank, rpc_backend_options.device_maps)
                     pass
                 except Exception:

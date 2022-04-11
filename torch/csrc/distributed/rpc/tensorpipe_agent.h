@@ -423,6 +423,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
 
+  // Mutex to guard access to group membership data
+  // e.g. updates to (workerIdToInfo_, workerNameToInfo_, workerNameToURL_)
+  mutable std::mutex groupMembershipMutex_;
+
   // Map to Track Network Data
   NetworkDataDict networkData_;
   // Mutex to guard networkData_
