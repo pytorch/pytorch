@@ -1,7 +1,6 @@
 from collections import defaultdict
 import logging
 import math
-from typing import Dict, List
 
 import numpy as np
 import torch
