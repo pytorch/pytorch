@@ -35,15 +35,13 @@ runs:
     - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
       shell: powershell
       run: |
-        Set-MpPreference -ExclusionPath $(Get-Location).tostring()
-      continue-on-error: true
+        Set-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
     # Kill unexisting process
     - name: Test Step
       shell: powershell
       run: |
-         Stop-Process 13,23
-      continue-on-error: true
+         Stop-Process 13,23 -ErrorAction Ignore
 
     - name: Install Visual Studio 2019 toolchain
       shell: powershell
