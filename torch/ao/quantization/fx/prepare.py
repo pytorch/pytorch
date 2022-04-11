@@ -78,7 +78,6 @@ from torch.ao.quantization.quantize import (
 )
 
 from ..utils import (
-    get_combined_dict,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
@@ -175,7 +174,7 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     in a different place rather than not observed.
     """
     node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
-    if isinstance(node.args[0], Node):
+    if len(node.args) > 0 and isinstance(node.args[0], Node):
         if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
             return False
     return True
@@ -1372,8 +1371,6 @@ def prepare(
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
 
-    additional_quant_patterns = \
-        prepare_custom_config_dict.get("additional_quant_pattern", {})
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
     # {
@@ -1387,7 +1384,7 @@ def prepare(
     # TODO: rename to pattern_to_quantize_handler
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
-        patterns = get_native_quant_patterns(additional_quant_patterns)
+        patterns = get_native_quant_patterns({})
         root_node_getter_mapping = {}
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
@@ -1423,18 +1420,15 @@ def prepare(
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
-        additional_qat_module_mapping = prepare_custom_config_dict.get(
-            "additional_qat_module_mapping", {})
         # this path will be deprecated after we fully migrate the convert path
         # of fbgemm/qnnpack to use the reference path, it will stay
         # here for a few months
         if backend_config_dict is None:
-            module_to_qat_module = get_combined_dict(
-                get_default_qat_module_mappings(), additional_qat_module_mapping)
+            module_to_qat_module = get_default_qat_module_mappings()
         else:
             module_to_qat_module = get_module_to_qat_module(backend_config_dict)
         qat_swap_modules(model, module_to_qat_module)
-        qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
+        qconfig_dict = update_qconfig_for_qat(qconfig_dict, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
