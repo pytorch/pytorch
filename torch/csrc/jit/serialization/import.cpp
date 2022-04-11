@@ -300,7 +300,7 @@ Module import_ir_module(
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_stream(in, device);
+      return load_jit_module_from_stream(in, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -351,7 +351,7 @@ Module import_ir_module(
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_file(filename, device);
+      return load_jit_module_from_file(filename, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -400,7 +400,7 @@ Module load(
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_stream(in, device);
+      return load_jit_module_from_stream(in, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -431,7 +431,7 @@ Module load(
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_file(filename, device);
+      return load_jit_module_from_file(filename, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
