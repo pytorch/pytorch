@@ -30,8 +30,6 @@ from .qconfig_utils import (
 
 from .quantization_patterns import (
     QuantizeHandler,
-    CustomModuleQuantizeHandler,
-    StandaloneModuleQuantizeHandler,
 )
 
 from .quantization_types import (
@@ -80,7 +78,6 @@ from torch.ao.quantization.quantize import (
 )
 
 from ..utils import (
-    get_combined_dict,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
@@ -177,7 +174,7 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     in a different place rather than not observed.
     """
     node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
-    if isinstance(node.args[0], Node):
+    if len(node.args) > 0 and isinstance(node.args[0], Node):
         if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
             return False
     return True
@@ -488,8 +485,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     # default (no observer)
     new_arg = arg
 
-    is_standalone_module = qhandler is not None and \
-        isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
     assert qconfig is not None
     if not is_standalone_module:
         # regular flow for most nodes, except standalone modules
@@ -713,8 +709,7 @@ def maybe_insert_output_observer_for_node(
     assert qconfig is not None
     assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
-    is_standalone_module = qhandler is not None and \
-        isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
 
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
     should_insert_observer = dtype not in DO_NOT_OBS_DTYPE_LIST + [torch.float]
@@ -1212,7 +1207,6 @@ def insert_observers_for_model(
                     is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
                         (qhandler is not None and qhandler.is_general_tensor_value_op())
-
                     is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
@@ -1252,7 +1246,7 @@ def insert_observers_for_model(
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
-                            if isinstance(qhandler, CustomModuleQuantizeHandler):
+                            if qhandler is not None and qhandler.is_custom_module():
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)
 
                 else:  # output
@@ -1295,7 +1289,7 @@ def run_prepare_fx_on_standalone_modules(
     ) in matches.items():
         if qhandler is None:
             continue
-        elif not isinstance(qhandler, StandaloneModuleQuantizeHandler):
+        elif not qhandler.is_standalone_module():
             continue
 
         sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
@@ -1377,8 +1371,6 @@ def prepare(
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
 
-    additional_quant_patterns = \
-        prepare_custom_config_dict.get("additional_quant_pattern", {})
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
     # {
@@ -1392,7 +1384,7 @@ def prepare(
     # TODO: rename to pattern_to_quantize_handler
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
-        patterns = get_native_quant_patterns(additional_quant_patterns)
+        patterns = get_native_quant_patterns({})
         root_node_getter_mapping = {}
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
@@ -1428,18 +1420,15 @@ def prepare(
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
-        additional_qat_module_mapping = prepare_custom_config_dict.get(
-            "additional_qat_module_mapping", {})
         # this path will be deprecated after we fully migrate the convert path
         # of fbgemm/qnnpack to use the reference path, it will stay
         # here for a few months
         if backend_config_dict is None:
-            module_to_qat_module = get_combined_dict(
-                get_default_qat_module_mappings(), additional_qat_module_mapping)
+            module_to_qat_module = get_default_qat_module_mappings()
         else:
             module_to_qat_module = get_module_to_qat_module(backend_config_dict)
         qat_swap_modules(model, module_to_qat_module)
-        qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
+        qconfig_dict = update_qconfig_for_qat(qconfig_dict, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
