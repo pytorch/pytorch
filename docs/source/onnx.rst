@@ -332,10 +332,20 @@ The process for adding a symbolic function depends on the type of operator.
 ATen operators
 ^^^^^^^^^^^^^^
 
-
 `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch’s built-in tensor library.
 If the operator is an ATen operator (shows up in the TorchScript graph with the prefix
-``aten::``):
+``aten::``), make sure it is not supported already.
+
+List of supported operators
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Visit the auto generated :doc:`list of supported ATen operators <../onnx_supported_aten_ops>`
+for details on which operator are supported in each ``opset_version``.
+
+Adding support for an operator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If the operator is not in the list above:
 
 * Define the symbolic function in ``torch/onnx/symbolic_opset<version>.py``, for example
   `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset9.py>`_.

@@ -138,7 +138,9 @@ class TestReplicatedTensor(ShardedTensorTestBase):
 
         # test implicit broadcasting
         local_tensor1 = torch.rand(12, 3, device=f"cuda:{self.rank}") * 4
-        local_tensor2 = torch.ones(1, 3, device=f"cuda:{self.rank}")
+        # we use size (3) to trigger the implicit broadcasting logic
+        # and it will fail if implicit broadcasting not happen.
+        local_tensor2 = torch.ones(3, device=f"cuda:{self.rank}")
 
         spec = ChunkShardingSpec(
             dim=0,
