@@ -107,8 +107,8 @@ Mutation: in-place PyTorch Operations
 
 :func:`vmap` will raise an error if it encounters an unsupported PyTorch
 in-place operation and it will succeed otherwise. Unsupported operations
-are those that would cause a Tensor with more memory to be written to a
-Tensor with less memory. Here's an example of how this can occur:
+are those that would cause a Tensor with more elements to be written to a
+Tensor with fewer elements. Here's an example of how this can occur:
 
 ::
 
@@ -119,16 +119,16 @@ Tensor with less memory. Here's an example of how this can occur:
   x = torch.randn(1)
   y = torch.randn(3)
 
-  # Raises an error
+  # Raises an error because `y` has fewer elements than `x`.
   vmap(f, in_dims=(None, 0))(x, y)
 
 ``x`` is a Tensor with one element, ``y`` is a Tensor with three elements.
 ``x + y`` has three elements (due to broadcasting), but attempting to write
 three elements back into ``x``, which only has one element, raises an error
-due to there not being enough memory to hold three elements.
+due to attempting to write three elements into a Tensor with a single element.
 
-There is no problem if there is sufficient memory for the in-place operations
-to occur:
+There is no problem if the Tensor being written to has the same number of
+elements (or more):
 
 ::
 
@@ -140,7 +140,7 @@ to occur:
   y = torch.randn(3)
   expected = x + y
 
-  # Does not raise an error
+  # Does not raise an error because x and y have the same number of elements.
   vmap(f, in_dims=(0, 0))(x, y)
   assert torch.allclose(x, expected)
 
