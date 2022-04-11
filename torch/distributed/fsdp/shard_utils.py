@@ -4,15 +4,12 @@ import math
 from typing import List, Tuple, Optional
 
 import torch
-from torch.distributed import ProcessGroup
+import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardingSpec,
-)
-from torch.distributed.nn.functional import (
-    all_to_all_single,
 )
 
 
@@ -98,7 +95,7 @@ def reshard_flatten_tensor(
     world_size: int,
     my_rank: int,
     device: torch.device,
-    process_group: Optional[ProcessGroup],
+    process_group: Optional[dist.ProcessGroup],
 ) -> torch.Tensor:
     """
     Resharded a sharded flatten tensor, this is used by FSDP to do sharded
@@ -134,7 +131,7 @@ def reshard_flatten_tensor(
     )
     output_size = sum(output_split_sizes)
     local_shard = torch.empty(output_size, dtype=input_tensor.dtype, device=device)
-    all_to_all_single(
+    dist.all_to_all_single(
         local_shard,
         input_tensor.local_shards()[0].tensor,
         input_split_sizes=input_split_sizes,
