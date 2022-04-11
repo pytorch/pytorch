@@ -30,7 +30,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
-from torch.distributed._sharded_tensor import (
+from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
     init_from_local_shards,
