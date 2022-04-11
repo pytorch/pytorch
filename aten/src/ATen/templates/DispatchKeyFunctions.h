@@ -20,4 +20,11 @@
 // - All other files that want the cpu fastpath functions can include CPUFunctions.h directly.
 // - This also means that static dispatch build, CPUFunctions.h only needs to
 //   #include TensorBody.h, and it will automatically bring in CPUFunctions_inl.h.
+//
+// To support static dispatch with multiple backends,
+// - Tensor method definitions (which was previously in TensorBody.h) needed to use multi_dispatch_key_set() API which includes List.h.
+//   This introduced a circular dependency as List.h includes Tensor.h and inturn TensorBody.h down the line.
+// - To avoid that, Tensor method definitions along with dependency DispatchKeyExtractor.h
+//   is moved from TensorBody.h to TensorMethods.cpp
+
 ${inline_headers_for_nonstatic_build}

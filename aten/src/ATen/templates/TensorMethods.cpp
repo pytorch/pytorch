@@ -29,3 +29,10 @@ namespace at {
  #undef DEFINE_ITEM
 
  } //namespace at
+
+
+// See Note [Avoiding Include Cycles In Static Dispatch]
+${static_dispatch_ops_headers}
+namespace at {
+${tensor_method_definitions}
+} // namespace at
