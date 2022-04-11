@@ -39,6 +39,14 @@ class Model(torch.nn.Module):
     def forward(self, x):
         return self.layer2(self.layer1(self.layer0(x)))
 
+    def get_input(self, device):
+        return (torch.randn((8, 3)).to(device),)
+
+    def get_loss(self, input, output):
+        return output.sum()
+
+    def run_backward(self, loss):
+        loss.backward()
 
 class TestFSDPIgnoredModules(FSDPTest):
     @skip_if_lt_x_gpu(2)
@@ -60,6 +68,15 @@ class TestFSDPIgnoredModules(FSDPTest):
         with wrapped_model.summon_full_params():
             flat_param_numel = wrapped_model.params[0].numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
+        # Check that we can run a few iterations
+        device = torch.device("cuda")
+        optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
+        for _ in range(3):
+            inp = wrapped_model.module.get_input(device)
+            output = wrapped_model(*inp)
+            loss = wrapped_model.module.get_loss(inp, output).to(device)
+            wrapped_model.module.run_backward(loss)
+            optim.step()
 
     @skip_if_lt_x_gpu(2)
     def test_ignored_modules_nested(self):
@@ -82,6 +99,15 @@ class TestFSDPIgnoredModules(FSDPTest):
         with wrapped_model.summon_full_params():
             flat_param_numel = wrapped_model.params[0].numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
+        # Check that we can run a few iterations
+        device = torch.device("cuda")
+        optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
+        for _ in range(3):
+            inp = wrapped_model.get_input(device)
+            output = wrapped_model(*inp)
+            loss = wrapped_model.get_loss(inp, output).to(device)
+            wrapped_model.run_backward(loss)
+            optim.step()
 
     def test_ignored_modules_invalid(self):
         """Tests that passing an FSDP module as an ignored module errors."""
