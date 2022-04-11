@@ -113,7 +113,8 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
   return overlap;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
+std::vector<Bound> subtractBound(Bound a, Bound b) {
+  OverlapKind overlap = boundOverlap(a, b);
   if (overlap == NoOverlap) {
     return {a};
   }
@@ -175,11 +176,6 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
   }
 
   return res;
-}
-
-std::vector<Bound> subtractBound(Bound a, Bound b) {
-  OverlapKind overlap = boundOverlap(a, b);
-  return subtractBound(a, b, overlap);
 }
 
 std::vector<IndexBounds> subtractIndicesBounds(
