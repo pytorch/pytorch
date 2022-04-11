@@ -304,14 +304,13 @@ def _set_devices_and_reverse_device_map(agent, my_rank, my_device_maps):
     # TODO: validation on device map, e.g. handle tests starting from rpc_test.py:5445
     reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
 
-    print(f"{my_rank}: {all_device_maps=}", flush=True)
-    print(f"{my_rank}: {reverse_device_maps=}", flush=True)
-    print(f"{my_rank}: {all_names=}", flush=True)
+    print(f"{my_rank}: all_device_maps = {all_device_maps}", flush=True)
+    print(f"{my_rank}: reverse_device_maps = {reverse_device_maps}", flush=True)
+    print(f"{my_rank}: all_names = {all_names}", flush=True)
     # Perform RPC call to all workers, including itself
     for worker_name in all_names:
         # Set device list for each worker
-        all_devices[worker_name] = _create_device_list(all_devices[worker_name],
-                                        all_device_maps[worker_name], reverse_device_maps)
+        all_devices[worker_name] = _create_device_list(all_devices[worker_name], all_device_maps[worker_name], reverse_device_maps)
         print(f"{my_rank} : Start rpc_sync, {my_rank} -> {worker_name}", flush=True)
         api.rpc_sync(worker_name, _update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps))
         print(f"{my_rank} : Finish rpc_sync, {my_rank} -> {worker_name}", flush=True)
@@ -385,7 +384,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     # initialization for dynamic rpc (ranks can join and leave)
     else:
         # Validate devices and device_maps locally for current rank
-        # local_devices = list(_tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options))
+        local_devices = list(_tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options))
 
         token_key = "RpcGroupManagementToken"
         token_location = f"TokenOnWorker{rank}"
@@ -402,7 +401,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                     world_size,
                     rpc_backend_options,
                     {},
-                    [],
+                    local_devices,
                 )
                 api._init_rpc_states(agent)
 
@@ -410,9 +409,8 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                     # Notify all workers in group this rank has joined and set devices and reverse_device_map
                     # This is a synchronous operation that completes once all existing ranks are updated
                     _set_devices_and_reverse_device_map(agent, rank, rpc_backend_options.device_maps)
-                    pass
                 except Exception:
-                    # api.shutdown()
+                    api.shutdown(graceful=False)
                     raise
 
                 # Finish initialization

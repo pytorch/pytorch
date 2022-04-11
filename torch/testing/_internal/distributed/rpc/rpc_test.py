@@ -4379,7 +4379,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     # Dynamic RPC existing ranks can communicate with new ranks
     @dist_init(setup_rpc=False)
-    def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
+    def test_without_world_size_existing_rank_can_communicate_with_new_rank(self):
         # TODO: Using process group for synchronization to ensure rank 0 is created first
         dist.init_process_group(
             backend='gloo',
@@ -4421,7 +4421,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
     @skip_if_lt_x_gpu(2)
     @dist_init(setup_rpc=False)
-    def test_without_world_size_new_rank_can_communicated_with_existing_rank_cuda(self):
+    def test_without_world_size_existing_rank_can_communicate_with_new_rank_cuda(self):
         # TODO: Using process group for synchronization to ensure rank 0 is created first
         dist.init_process_group(
             backend='gloo',
