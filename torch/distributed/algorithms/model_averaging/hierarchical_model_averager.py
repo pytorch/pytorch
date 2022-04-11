@@ -158,19 +158,5 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         if self.step >= self.warmup_steps:
             group = self._find_process_group()
             if group is not None:
-                filter_params = []
-                for param in params:
-                    if isinstance(param, torch.nn.Parameter):
-                        # model.parameters() input
-                        param_data = param
-                        if param_data.grad is not None:
-                            filter_params.append(param_data)
-                    elif isinstance(param, dict):
-                        # optimzer.param_groups input
-                        for param_data in param["params"]:
-                            if param_data.grad is not None:
-                                filter_params.append(param_data)
-                    else:
-                        raise NotImplementedError(f"Parameter input of type {type(param)} is not supported")
-                utils.average_parameters(filter_params, group)
+                utils.average_parameters_or_parameter_groups(params, group)
         self.step += 1

@@ -113,19 +113,5 @@ class PeriodicModelAverager(ModelAverager):
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            filter_params = []
-            for param in params:
-                if isinstance(param, torch.nn.Parameter):
-                    # model.parameters() input
-                    param_data = param
-                    if param_data.grad is not None:
-                        filter_params.append(param_data)
-                elif isinstance(param, dict):
-                    # optimizer.param_groups input
-                    for param_data in param["params"]:
-                        if param_data.grad is not None:
-                            filter_params.append(param_data)
-                else:
-                    raise NotImplementedError(f"Parameter input of type {type(param)} is not supported")
-            utils.average_parameters(filter_params, self.process_group)
+            utils.average_parameters_or_parameter_groups(params, self.process_group)
         self.step += 1
