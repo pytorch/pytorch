@@ -701,6 +701,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                         nn.RNNCell,
                 ]:
                     continue
+                if isinstance(base_op, tuple):
+                    # skip fusion patterns
+                    continue
                 # didn't match explicit quantize handler class, we can check if the
                 # operator is in the related op set directly
                 if not (_op_in_base_sets_of_related_ops(base_op) or _op_is_unmatchable(base_op)):
