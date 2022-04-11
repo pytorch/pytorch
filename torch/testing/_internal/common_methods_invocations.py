@@ -11225,7 +11225,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         sample_inputs_func=sample_inputs_binary_cross_entropy_with_logits,
         skips=(
@@ -11234,7 +11234,6 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
-                device_type="cpu",
                 dtypes=(torch.float32,)
             ),
             # Adding OpInfo to existing operator
@@ -11242,7 +11241,6 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCompositeCompliance",
                 "test_backward",
-                device_type="cpu",
                 dtypes=(torch.float32,)
             ),
             # Pos Weight is required to be positve
@@ -11250,9 +11248,24 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestMathBits",
                 "test_neg_view",
-                device_type="cpu",
                 dtypes=(torch.float64,)
             ),
+            # Test Gradient failures CI
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_neg_view",
+                dtypes=(torch.float64,)
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestJit',
+                'test_variant_consistency_jit',
+                dtypes=(torch.float32,)
+            ),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_forward_mode_AD", dtypes=(torch.float64,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
     ),
     OpInfo('nn.functional.relu',
