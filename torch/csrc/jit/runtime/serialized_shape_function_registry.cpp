@@ -4,11 +4,11 @@
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
  * cd ~/pytorch && python
- * tools/codegen/decompositions/gen_jit_shape_functions.py
+ * tools/codegen/shape_functions/gen_jit_shape_functions.py
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/decomposition_registry_util.h>
+#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 // clang-format off
@@ -60,7 +60,7 @@ def adaptive_avg_pool2d(self: List[int],
 def zero_dim_tensor(input: Any) -> List[int]:
   return annotate(List[int], [])
 
-def arange_end(end: number,
+def arange_end(end: Union[float, int],
     inp0: Any,
     inp1: Any,
     inp2: Any,
@@ -71,8 +71,8 @@ def arange_end(end: number,
     ops.prim.RaiseException("AssertionError: ")
   return [int(torch.ceil(end))]
 
-def arange_start(start: number,
-    end: number,
+def arange_start(start: Union[float, int],
+    end: Union[float, int],
     inp0: Any,
     inp1: Any,
     inp2: Any,
@@ -89,9 +89,9 @@ def arange_start(start: number,
   return [_0]
 
 ")====="
-R"=====("def arange_start_step(start: number,
-    end: number,
-    step: number,
+R"=====("def arange_start_step(start: Union[float, int],
+    end: Union[float, int],
+    step: Union[float, int],
     inp0: Any,
     inp1: Any,
     inp2: Any,
@@ -253,13 +253,13 @@ R"=====("def slice(self: List[int],
     else:
       end_val2 = end_val0
     end_val1 = end_val2
-  len = torch.sub(end_val1, start_val2)
+  slice_len = torch.sub(end_val1, start_val2)
   out = annotate(List[int], [])
   for _2 in range(torch.len(self)):
     elem = self[_2]
     _3 = torch.append(out, elem)
-  _4 = torch.floordiv(torch.sub(torch.add(len, step), 1), step)
-  _5 = torch._set_item(out, dim0, _4)
+  _4 = torch.sub(torch.add(slice_len, step), 1)
+  _5 = torch._set_item(out, dim0, torch.floordiv(_4, step))
   return out
 
 ")====="

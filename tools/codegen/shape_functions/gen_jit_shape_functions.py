@@ -10,11 +10,11 @@ SHAPE_HEADER = r"""
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
  * cd ~/pytorch && python
- * tools/codegen/decompositions/gen_jit_shape_functions.py
+ * tools/codegen/shape_functions/gen_jit_shape_functions.py
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/decomposition_registry_util.h>
+#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 // clang-format off
@@ -51,7 +51,7 @@ DECOMP_END = r"""
 """
 
 
-DECOMPOSITION_UTIL_FILE_NAME = "serialized_shape_function_registry.cpp"
+SERIALIZED_SHAPE_UTIL_FILE_NAME = "serialized_shape_function_registry.cpp"
 
 def gen_serialized_decompisitions() -> str:
     already_serialized_names = set()
@@ -86,21 +86,21 @@ def gen_serialized_decompisitions() -> str:
     final_output += ";"
     return final_output
 
-def gen_decomposition_mappings() -> str:
-    decomposition_mappings = []
+def gen_shape_mappings() -> str:
+    shape_mappings = []
     for schema, scripted_func in shape_compute_graph_mapping.items():
-        decomposition_mappings.append(
+        shape_mappings.append(
             '    {"' + schema + '", "' + scripted_func.name + '"},'
         )
-    return "\n".join(decomposition_mappings)
+    return "\n".join(shape_mappings)
 
 def write_decomposition_util_file(path: str) -> None:
     decomposition_str = gen_serialized_decompisitions()
-    decomposition_mappings = gen_decomposition_mappings()
-    file_components = [SHAPE_HEADER, decomposition_str, DECOMP_CENTER, decomposition_mappings, DECOMP_END]
-    print("writing file to : ", path + "/" + DECOMPOSITION_UTIL_FILE_NAME)
+    shape_mappings = gen_shape_mappings()
+    file_components = [SHAPE_HEADER, decomposition_str, DECOMP_CENTER, shape_mappings, DECOMP_END]
+    print("writing file to : ", path + "/" + SERIALIZED_SHAPE_UTIL_FILE_NAME)
     with open(
-        os.path.join(path, DECOMPOSITION_UTIL_FILE_NAME), "wb"
+        os.path.join(path, SERIALIZED_SHAPE_UTIL_FILE_NAME), "wb"
     ) as out_file:
         final_output = "".join(file_components)
         out_file.write(final_output.encode("utf-8"))
