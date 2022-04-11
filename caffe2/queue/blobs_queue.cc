@@ -18,16 +18,11 @@
 namespace caffe2 {
 
 // Constants for user tracepoints
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
-static constexpr int SDT_NONBLOCKING_OP = 0;
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
-static constexpr int SDT_BLOCKING_OP = 1;
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
-static constexpr uint64_t SDT_TIMEOUT = (uint64_t)-1;
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
-static constexpr uint64_t SDT_ABORT = (uint64_t)-2;
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
-static constexpr uint64_t SDT_CANCEL = (uint64_t)-3;
+C10_UNUSED static constexpr int SDT_NONBLOCKING_OP = 0;
+C10_UNUSED static constexpr int SDT_BLOCKING_OP = 1;
+C10_UNUSED static constexpr uint64_t SDT_TIMEOUT = (uint64_t)-1;
+C10_UNUSED static constexpr uint64_t SDT_ABORT = (uint64_t)-2;
+C10_UNUSED static constexpr uint64_t SDT_CANCEL = (uint64_t)-3;
 
 BlobsQueue::BlobsQueue(
     Workspace* ws,
@@ -66,8 +61,7 @@ bool BlobsQueue::blockingRead(
     float timeout_secs) {
   Timer readTimer;
   auto keeper = this->shared_from_this();
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const auto& name = name_.c_str();
+  C10_UNUSED const auto& name = name_.c_str();
   CAFFE_SDT(queue_read_start, name, (void*)this, SDT_BLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
   auto canRead = [this]() {
@@ -117,8 +111,7 @@ bool BlobsQueue::blockingRead(
 bool BlobsQueue::tryWrite(const std::vector<Blob*>& inputs) {
   Timer writeTimer;
   auto keeper = this->shared_from_this();
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const auto& name = name_.c_str();
+  C10_UNUSED const auto& name = name_.c_str();
   CAFFE_SDT(queue_write_start, name, (void*)this, SDT_NONBLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
   if (!canWrite()) {
@@ -139,8 +132,7 @@ bool BlobsQueue::tryWrite(const std::vector<Blob*>& inputs) {
 bool BlobsQueue::blockingWrite(const std::vector<Blob*>& inputs) {
   Timer writeTimer;
   auto keeper = this->shared_from_this();
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const auto& name = name_.c_str();
+  C10_UNUSED const auto& name = name_.c_str();
   CAFFE_SDT(queue_write_start, name, (void*)this, SDT_BLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
   // Increase queue balance before writing to indicate queue write pressure is
@@ -178,8 +170,7 @@ bool BlobsQueue::canWrite() {
 void BlobsQueue::doWrite(const std::vector<Blob*>& inputs) {
   auto& result = queue_[writer_ % queue_.size()];
   CAFFE_ENFORCE(inputs.size() >= result.size());
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const auto& name = name_.c_str();
+  C10_UNUSED const auto& name = name_.c_str();
   for (const auto i : c10::irange(result.size())) {
     using std::swap;
     swap(*(inputs[i]), *(result[i]));
