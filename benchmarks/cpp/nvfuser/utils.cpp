@@ -108,11 +108,31 @@ void clearL2Cache() {
   torch::Tensor t1 = torch::clone(t0);
 };
 
+TensorView* makeSymbolicTensor(size_t ndims, DataType dtype) {
+  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
+}
+
 TensorView* makeContigTensor(size_t ndims, DataType dtype) {
   return TensorViewBuilder()
       .ndims(ndims)
       .dtype(dtype)
       .contiguity(std::vector<bool>(ndims, true))
+      .build();
+}
+
+TensorView* makeConcreteTensor(
+    std::vector<int64_t> shape,
+    DataType dtype) {
+  return TensorViewBuilder().shape(shape).dtype(dtype).build();
+}
+
+TensorView* makeContigConcreteTensor(
+    std::vector<int64_t> shape,
+    DataType dtype) {
+  return TensorViewBuilder()
+      .shape(shape)
+      .dtype(dtype)
+      .contiguity(std::vector<bool>(shape.size(), true))
       .build();
 }
 
@@ -129,11 +149,13 @@ void runBenchmarkIterations(
     fusion_executor_cache->runFusionWithInputs(aten_inputs);
     auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
     auto executor_instance = compile_log.fusion_executor;
-    TORCH_INTERNAL_ASSERT(compile_log.reduction_params.has_value());
-    TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
-    auto rparams = toString(compile_log.reduction_params.value());
-    auto lparams = toString(compile_log.launch_constraints.value());
-    benchmark_state.SetLabel(rparams + lparams);
+
+    if (compile_log.reduction_params.has_value() &&
+        compile_log.launch_constraints.has_value()) {
+      auto rparams = toString(compile_log.reduction_params.value());
+      auto lparams = toString(compile_log.launch_constraints.value());
+      benchmark_state.SetLabel(rparams + lparams);
+    }
     executor_instance->setMeasureKernelTimeFlag(true);
 
     // Sync everything up before we start

@@ -17,6 +17,7 @@ if(USE_CUDA)
     softmax.cpp
     softmax_backward.cpp
     scale_bias_relu.cpp
+    transpose.cpp
     utils.cpp
     main.cpp)
 
