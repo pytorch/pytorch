@@ -1138,29 +1138,25 @@ class IrParser {
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
-            bool has_low = value_map.count(node->inputs()[1]->unique()) != 0;
-            Val* low = has_low
-                ? *value_map[node->inputs()[1]->unique()]
-                : IrBuilder::create<Double>(std::numeric_limits<float>::min());
-            bool has_high = value_map.count(node->inputs()[2]->unique()) != 0;
-            Val* high = has_high
-                ? *value_map[node->inputs()[2]->unique()]
-                : IrBuilder::create<Double>(std::numeric_limits<float>::max());
+            Val* min = value_map.count(node->inputs()[1]->unique()) != 0
+                ? *value_map[node->inputs()[1]->unique()] : nullptr;
+            Val* max = value_map.count(node->inputs()[2]->unique()) != 0
+                ? *value_map[node->inputs()[2]->unique()] : nullptr;
 
             Val* out = nullptr;
-            if (has_low && has_high) {
-              out = clamp(operand, low, high);
-            } else if (has_low) {
+            if (min && max) {
+              out = clamp(operand, min, max);
+            } else if (min) {
               out = binaryOp(
                   BinaryOpType::Max,
                   operand,
-                  low,
+                  min,
                   TypePromotion::default_op_config);
-            } else if (has_high) {
+            } else if (max) {
               out = binaryOp(
                   BinaryOpType::Min,
                   operand,
-                  high,
+                  max,
                   TypePromotion::default_op_config);
             } else {
               TORCH_INTERNAL_ASSERT(false,
