@@ -97,7 +97,8 @@ auto shift(
     at::Tensor tensor,
     const std::vector<int>& offsets,
     std::vector<int> padding = {}) {
-  TORCH_INTERNAL_ASSERT(tensor.ndimension() == offsets.size());
+  TORCH_INTERNAL_ASSERT(
+      tensor.ndimension() == static_cast<int64_t>(offsets.size()));
   if (padding.empty()) {
     padding = offsets;
     for (auto& p : padding) {
@@ -144,12 +145,12 @@ auto gather(
     const std::vector<std::vector<int>>& pad_width,
     std::vector<int> strides = {}) {
   TORCH_CHECK(
-      tensor.ndimension() == window_shape.size(),
+      tensor.ndimension() == static_cast<int64_t>(window_shape.size()),
       "Invalid window shape: ",
       window_shape,
       ". Size of the window shape is different from the tensor dimension.");
   TORCH_CHECK(
-      tensor.ndimension() == pad_width.size(),
+      tensor.ndimension() == static_cast<int64_t>(pad_width.size()),
       "Invalid pad width: ",
       pad_width,
       ". Size of the pad width is different from the tensor dimension.");
@@ -157,7 +158,7 @@ auto gather(
     strides = std::vector<int>(tensor.ndimension(), 1);
   } else {
     TORCH_CHECK(
-        tensor.ndimension() == strides.size(),
+        tensor.ndimension() == static_cast<int64_t>(strides.size()),
         "Invalid strides: ",
         strides,
         ". Size of strides is different from the tensor dimension.");
@@ -4649,7 +4650,7 @@ TEST_F(NVFuserTest, FusionGatherStrided1_CUDA) {
   // tensor.
   auto fuser_out = outputs[0];
   TORCH_CHECK(
-      fuser_out.ndimension() == tv0->nDims() * 2,
+      fuser_out.ndimension() == static_cast<int64_t>(tv0->nDims()) * 2,
       "Invalid dimensionality of output tensor: ",
       fuser_out.ndimension());
 

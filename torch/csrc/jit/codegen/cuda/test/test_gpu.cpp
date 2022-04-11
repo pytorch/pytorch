@@ -35,7 +35,6 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
 
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -7651,7 +7650,7 @@ TEST_F(NVFuserTest, FusionSumTo_CUDA) {
   auto cg_outputs = fe.runFusion({aten_input});
 
   TORCH_CHECK(
-      cg_outputs[0].dim() == sum_to_shape.size(),
+      cg_outputs[0].dim() == static_cast<int64_t>(sum_to_shape.size()),
       "sum_to not keeping the final dimension");
 
   testValidate(
@@ -7695,7 +7694,7 @@ TEST_F(NVFuserTest, FusionSumToNoop_CUDA) {
   auto aten_output = at::sum_to(aten_input.to(at::kDouble), sum_to_shape_ref);
 
   TORCH_CHECK(
-      cg_outputs[0].dim() == sum_to_shape.size(),
+      cg_outputs[0].dim() == static_cast<int64_t>(sum_to_shape.size()),
       "sum_to not keeping the final dimension");
 
   testValidate(
@@ -19068,10 +19067,10 @@ TEST_F(NVFuserTest, FusionPersistentBufferCalculation1_CUDA) {
 
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Float));
+      static_cast<int64_t>(aten_t0.size(1) * dataTypeSize(DataType::Float)));
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.projected_persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Float));
+      static_cast<int64_t>(aten_t0.size(1) * dataTypeSize(DataType::Float)));
 }
 
 TEST_F(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
@@ -19131,10 +19130,10 @@ TEST_F(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
 
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Float));
+      static_cast<int64_t>(aten_t0.size(1) * dataTypeSize(DataType::Float)));
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.projected_persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Half));
+      static_cast<int64_t>(aten_t0.size(1) * dataTypeSize(DataType::Half)));
 }
 
 TEST_F(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
@@ -19215,11 +19214,13 @@ TEST_F(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
 
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Float) * 2);
+      static_cast<int64_t>(
+          aten_t0.size(1) * dataTypeSize(DataType::Float) * 2));
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.projected_persistent_buffer_size ==
-      aten_t0.size(1) *
-          (dataTypeSize(DataType::Half) + dataTypeSize(DataType::Float)));
+      static_cast<int64_t>(
+          aten_t0.size(1) *
+          (dataTypeSize(DataType::Half) + dataTypeSize(DataType::Float))));
 }
 
 TEST_F(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
@@ -19292,11 +19293,12 @@ TEST_F(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
 
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Float) * 2);
+      static_cast<int64_t>(
+          aten_t0.size(1) * dataTypeSize(DataType::Float) * 2));
 
   TORCH_INTERNAL_ASSERT(
       persistent_buffer_size.projected_persistent_buffer_size ==
-      aten_t0.size(1) * dataTypeSize(DataType::Half));
+      static_cast<int64_t>(aten_t0.size(1) * dataTypeSize(DataType::Half)));
 }
 
 TEST_F(NVFuserTest, FusionPersistentBufferProjection_CUDA) {
