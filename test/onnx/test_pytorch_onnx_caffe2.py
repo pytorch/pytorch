@@ -117,8 +117,7 @@ model_urls = {
 
 
 class TestCaffe2Backend_opset9(unittest.TestCase):
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
-    opset_version = _export_onnx_opset_version
+    opset_version = 9
     embed_params = False
 
     def setUp(self):
