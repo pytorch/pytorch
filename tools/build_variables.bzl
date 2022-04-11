@@ -420,6 +420,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/debug_util.cpp",
+    "torch/csrc/lazy/core/dynamic_ir.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",

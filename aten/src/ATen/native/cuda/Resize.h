@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/native/ResizeCommon.h>
 

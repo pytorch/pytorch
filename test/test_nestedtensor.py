@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import torch
+import torch.nn
 import unittest
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -199,7 +200,27 @@ class TestNestedTensor(TestCase):
             self.assertTrue(nested_result.is_nested)
             self.assertEqual(func(t), nested_result.unbind()[0])
 
+    def test_to_padded_tensor_on_empty_tensor(self):
+        nt = torch.nested_tensor([])
+        empty = nt.to_padded_tensor(4)
+        self.assertEqual(empty, torch.tensor([]))
+
 class TestNestedTensorDeviceType(TestCase):
+    @dtypes(torch.float)
+    @skipMeta
+    def test_to_then_from_padded_tensor_no_transform0213(self, device, dtype):
+        t = torch.randn(4, 4, 4, device=device, dtype=dtype)
+        ts = list(torch.unbind(t))
+        ts[0] = ts[0][:-1]
+        nt = torch.nested_tensor(ts, device=device, dtype=dtype)
+        padded = nt.to_padded_tensor(0)
+
+        nt_to = torch._nested_from_padded_and_nested_example(padded, nt)
+
+        for (t1, t2) in zip(nt.unbind(), nt_to.unbind()):
+            self.assertEqual(t1, t2)
+        self.assertEqual(nt.device, nt_to.device)
+
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
     @skipMeta
@@ -240,13 +261,29 @@ class TestNestedTensorDeviceType(TestCase):
         ts = list(torch.unbind(t))
         ts[0] = ts[0][:-1]
         nt = torch.nested_tensor(ts, device=device)
+        for padding_value in (0, 1):
+            padded = nt.to_padded_tensor(padding_value)
+
+            correct_output = t.clone()
+            if padding_value == 0:
+                correct_output[0][-1] = torch.zeros_like(correct_output[0][-1])
+            else:
+                correct_output[0][-1] = torch.ones_like(correct_output[0][-1])
+
+            self.assertEqual(padded, correct_output)
+            self.assertEqual(padded.device, torch.device(device))
+
+    def test_to_padded_tensor_unrelated_shapes(self, device):
+        ts = [
+            torch.randn(1, 2, 3, device=device),
+            torch.randn(2, 3, 4, device=device),
+            torch.randn(4, 5, 6, device=device),
+        ]
+        nt = torch.nested_tensor(ts, device=device)
+        correct_output = torch.cat(
+            [torch.nn.ConstantPad3d((0, 6 - x.shape[2], 0, 5 - x.shape[1], 0, 4 - x.shape[0]), 0)(x.unsqueeze(0)) for x in ts])
         padded = nt.to_padded_tensor(0)
-
-        correct_output = t.clone()
-        correct_output[0][-1] = torch.zeros_like(correct_output[0][-1])
-
         self.assertEqual(padded, correct_output)
-        self.assertEqual(padded.device, torch.device(device))
 
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
