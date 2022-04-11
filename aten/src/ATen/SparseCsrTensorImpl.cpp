@@ -73,6 +73,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       col_indices_(std::move(col_indices)),
       values_(std::move(values)),
       layout_(layout) {
+  // https://pytorch.org/blog/pytorch-feature-classification-changes/#beta
+  TORCH_WARN_ONCE("Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensor support is in beta state.");
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
   set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
