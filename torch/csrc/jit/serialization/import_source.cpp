@@ -112,7 +112,9 @@ SourceImporterImpl::SourceImporterImpl(
     const std::vector<at::IValue>* constant_table,
     SourceLoader source_loader,
     size_t version)
-    : cu_(std::move(cu)), source_loader_(std::move(source_loader)) {
+    : cu_(std::move(cu)),
+      source_loader_(std::move(source_loader)),
+      version_(version) {
   env_ = {
       {"torch", std::make_shared<BuiltinModule>("aten", version)},
       {"ops", std::make_shared<OpsValue>(version)},
@@ -568,13 +570,16 @@ void SourceImporterImpl::importClass(
 
   cu_->register_type(class_type);
   const auto self = SimpleSelf(class_type);
+  // TODO (this will include the version number later)
   cu_->define(
       qualified_classname,
       /*properties=*/{},
       /*propResolvers=*/{},
       methods,
       method_resolvers,
-      &self);
+      &self,
+      /*shouldMangle=*/false,
+      /*operator_set_version=*/version_);
   cu_->define_hooks(
       qualified_classname,
       hooks,

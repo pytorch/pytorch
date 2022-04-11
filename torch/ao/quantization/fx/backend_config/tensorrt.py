@@ -1,7 +1,10 @@
 import torch
 from .observation_type import ObservationType
+import torch.nn.qat as nnqat
 import torch.nn.intrinsic as nni
-from ...fuser_method_mappings import reverse2
+import torch.nn.intrinsic.qat as nniqat
+
+from ...fuser_method_mappings import reverse_sequential_wrapper2
 
 def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
@@ -40,6 +43,16 @@ def get_tensorrt_backend_config_dict():
         "root_module": torch.nn.Linear,
         # the corresponding reference quantized module for the root module
         "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+        "qat_module": nnqat.Linear,
+    }
+    linear_qat_config = {
+        "pattern": nnqat.Linear,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "root_module": torch.nn.Linear,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
     }
     # TODO: maybe make "pattern" to be a list of patterns
     # TODO: current patterns are the ones after fusion, we will want to expose fusion
@@ -50,9 +63,7 @@ def get_tensorrt_backend_config_dict():
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
-        "fuser_method": reverse2(nni.LinearReLU),
-        "root_module": torch.nn.Linear,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     }
     linear_relu_mf_config = {
         "pattern": (torch.nn.functional.relu, torch.nn.Linear),
@@ -60,13 +71,21 @@ def get_tensorrt_backend_config_dict():
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
-        "fuser_method": reverse2(nni.LinearReLU),
-        "root_module": torch.nn.Linear,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     }
 
     linear_relu_fused_config = {
         "pattern": nni.LinearReLU,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "root_module": torch.nn.Linear,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+        "qat_module": nniqat.LinearReLU,
+    }
+    linear_relu_qat_config = {
+        "pattern": nniqat.LinearReLU,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
@@ -82,18 +101,10 @@ def get_tensorrt_backend_config_dict():
         ],
         "root_module": torch.nn.Conv2d,
         "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        "qat_module": nnqat.Conv2d,
     }
-    conv_relu_1d_fused_config = {
-        "pattern": torch.nn.intrinsic.ConvReLU1d,
-        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-        "dtype_configs": [
-            weighted_op_qint8_dtype_config,
-        ],
-        "root_module": torch.nn.Conv1d,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv1d,
-    }
-    conv_relu_2d_fused_config = {
-        "pattern": torch.nn.intrinsic.ConvReLU2d,
+    conv_qat_config = {
+        "pattern": nnqat.Conv2d,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
@@ -101,14 +112,59 @@ def get_tensorrt_backend_config_dict():
         "root_module": torch.nn.Conv2d,
         "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
     }
-    conv_relu_3d_fused_config = {
-        "pattern": torch.nn.intrinsic.ConvReLU3d,
+    conv1d_relu_fused_config = {
+        "pattern": nni.ConvReLU1d,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "root_module": torch.nn.Conv1d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv1d,
+    }
+    conv2d_relu_fused_config = {
+        "pattern": nni.ConvReLU2d,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "root_module": torch.nn.Conv2d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        "qat_module": nniqat.ConvReLU2d,
+    }
+    conv2d_relu_qat_config = {
+        "pattern": nniqat.ConvReLU2d,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "root_module": torch.nn.Conv2d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+    }
+    conv3d_relu_fused_config = {
+        "pattern": nni.ConvReLU3d,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
         "root_module": torch.nn.Conv3d,
         "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv3d,
+        "qat_module": nniqat.ConvReLU3d,
+    }
+    conv2d_relu_mf_config = {
+        "pattern": (torch.nn.functional.relu, torch.nn.Conv2d),
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "fuser_method": reverse_sequential_wrapper2(nni.ConvReLU2d),
+    }
+    conv2d_relu_mm_config = {
+        "pattern": (torch.nn.ReLU, torch.nn.Conv2d),
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "fuser_method": reverse_sequential_wrapper2(nni.ConvReLU2d),
     }
     addmm_config = {
         "pattern": torch.addmm,
@@ -142,15 +198,21 @@ def get_tensorrt_backend_config_dict():
         "name": "tensorrt",
         "configs": [
             linear_module_config,
+            linear_qat_config,
             linear_relu_fused_config,
+            linear_relu_qat_config,
             linear_relu_mm_config,
             linear_relu_mf_config,
             conv_module_config,
+            conv_qat_config,
             # conv1d is not supported in fx2trt
-            # conv_relu_1d_fused_config,
-            conv_relu_2d_fused_config,
+            # conv1d_relu_fused_config,
+            conv2d_relu_fused_config,
+            conv2d_relu_qat_config,
+            conv2d_relu_mf_config,
+            conv2d_relu_mm_config,
             # conv3d is not supported in fx2trt
-            # conv_relu_3d_fused_config,
+            # conv3d_relu_fused_config,
             addmm_config,
             cat_config,
             identity_config,

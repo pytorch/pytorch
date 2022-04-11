@@ -354,7 +354,7 @@ def lobpcg(A: Tensor,
            ) -> Tuple[Tensor, Tensor]:
 
     """Find the k largest (or smallest) eigenvalues and the corresponding
-    eigenvectors of a symmetric positive defined generalized
+    eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
 
     This function is a front-end to the following LOBPCG algorithms
@@ -652,17 +652,16 @@ class LOBPCG(object):
     """
 
     def __init__(self,
-                 A,        # type: Optional[Tensor]
-                 B,        # type: Optional[Tensor]
-                 X,        # type: Tensor
-                 iK,       # type: Optional[Tensor]
-                 iparams,  # type: Dict[str, int]
-                 fparams,  # type: Dict[str, float]
-                 bparams,  # type: Dict[str, bool]
-                 method,   # type: str
-                 tracker   # type: None
-                 ):
-        # type: (...) -> None
+                 A: Optional[Tensor],
+                 B: Optional[Tensor],
+                 X: Tensor,
+                 iK: Optional[Tensor],
+                 iparams: Dict[str, int],
+                 fparams: Dict[str, float],
+                 bparams: Dict[str, bool],
+                 method: str,
+                 tracker: None
+                 ) -> None:
 
         # constant parameters
         self.A = A
@@ -681,10 +680,10 @@ class LOBPCG(object):
         self.E = torch.zeros((n, ), dtype=X.dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
-        self.tvars = {}               # type: Dict[str, Tensor]
-        self.ivars = {'istep': 0}     # type: Dict[str, int]
-        self.fvars = {'_': 0.0}       # type: Dict[str, float]
-        self.bvars = {'_': False}     # type: Dict[str, bool]
+        self.tvars: Dict[str, Tensor] = {}
+        self.ivars: Dict[str, int] = {'istep': 0}
+        self.fvars: Dict[str, float] = {'_': 0.0}
+        self.bvars: Dict[str, bool] = {'_': False}
 
     def __str__(self):
         lines = ['LOPBCG:']
@@ -947,11 +946,10 @@ class LOBPCG(object):
         return Rinv * d_col
 
     def _get_svqb(self,
-                  U,     # Tensor
-                  drop,  # bool
-                  tau    # float
-                  ):
-        # type: (Tensor, bool, float) -> Tensor
+                  U: Tensor,     # Tensor
+                  drop: bool,  # bool
+                  tau: float    # float
+                  ) -> Tensor:
         """Return B-orthonormal U.
 
         .. note:: When `drop` is `False` then `svqb` is based on the

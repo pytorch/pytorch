@@ -388,6 +388,42 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   // TODO: add memory types.
 };
 
+// PlacementAllocate is a variation of the Allocate operator in NNC IR. It does
+// not allocate memory but reuse the memory of another buffer for the given
+// buffer.
+class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
+ public:
+  static PlacementAllocatePtr make(
+      const BufHandle& buf_handle,
+      const BufHandle& buf_handle_to_reuse) {
+    return alloc<PlacementAllocate>(
+        buf_handle.node(), buf_handle_to_reuse.node());
+  }
+
+  BufPtr buf() const {
+    return buf_;
+  }
+
+  BufPtr buf_to_reuse() const {
+    return buf_to_reuse_;
+  }
+
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
+  void set_buf_to_reuse(BufPtr buf) {
+    buf_to_reuse_ = buf;
+  }
+
+  explicit PlacementAllocate(BufPtr buf, BufPtr buf_to_reuse)
+      : buf_(buf), buf_to_reuse_(buf_to_reuse) {}
+
+ private:
+  BufPtr buf_;
+  BufPtr buf_to_reuse_;
+};
+
 // Free the specific buffer. It is an error.
 class TORCH_API Free : public StmtNode<Free> {
  public:
@@ -411,6 +447,24 @@ class TORCH_API Free : public StmtNode<Free> {
 
  private:
   BufPtr buf_;
+};
+
+class TORCH_API FreeExt : public StmtNode<FreeExt> {
+ public:
+  static FreeExtPtr make(const std::vector<BufHandle>& bufs);
+
+  std::vector<BufPtr> bufs() const {
+    return bufs_;
+  }
+
+  void set_bufs(std::vector<BufPtr> bufs) {
+    bufs_ = std::move(bufs);
+  }
+
+  explicit FreeExt(std::vector<BufPtr> bufs) : bufs_(std::move(bufs)) {}
+
+ private:
+  std::vector<BufPtr> bufs_;
 };
 
 class TORCH_API Let : public StmtNode<Let> {
@@ -900,6 +954,60 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
  private:
   BufPtr buf_;
   std::string func_name_;
+  std::vector<BufPtr> buf_args_;
+  std::vector<ExprPtr> args_;
+};
+
+class TORCH_API ExternalCallWithAlloc : public StmtNode<ExternalCallWithAlloc> {
+ public:
+  static ExternalCallWithAllocPtr make(
+      const std::string& func_name,
+      const std::vector<BufHandle>& buf_out_args,
+      const std::vector<BufHandle>& buf_args,
+      const std::vector<ExprHandle>& args);
+
+  std::vector<BufPtr> buf_out_args() const {
+    return buf_out_args_;
+  }
+
+  std::string func_name() const {
+    return func_name_;
+  }
+
+  std::vector<BufPtr> buf_args() const {
+    return buf_args_;
+  }
+
+  std::vector<ExprPtr> args() const {
+    return args_;
+  }
+
+  void set_buf_out_args(std::vector<BufPtr> buf_out_args) {
+    buf_out_args_ = std::move(buf_out_args);
+  }
+
+  void set_buf_args(std::vector<BufPtr> buf_args) {
+    buf_args_ = std::move(buf_args);
+  }
+
+  void set_args(std::vector<ExprPtr> args) {
+    args_ = std::move(args);
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  ExternalCallWithAlloc(
+      std::string func_name,
+      std::vector<BufPtr> buf_out_args,
+      std::vector<BufPtr> buf_args,
+      std::vector<ExprPtr> args)
+      : func_name_(std::move(func_name)),
+        buf_out_args_(std::move(buf_out_args)),
+        buf_args_(std::move(buf_args)),
+        args_(std::move(args)) {}
+
+ private:
+  std::string func_name_;
+  std::vector<BufPtr> buf_out_args_;
   std::vector<BufPtr> buf_args_;
   std::vector<ExprPtr> args_;
 };

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/view_ops/diagonal.h>
 
 #include <cmath>
@@ -14,8 +15,7 @@ Diagonal::Diagonal(
           OpKind(at::aten::diagonal),
           {input},
           [&]() {
-            return MakeDiagonalShape(
-                GetShapeFromTsValue(input), offset, dim1, dim2);
+            return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
           },
           /*num_outputs=*/1,
           MHash(offset, dim1, dim2)),
@@ -36,7 +36,7 @@ Shape Diagonal::MakeDiagonalShape(
     int64_t dim1,
     int64_t dim2) {
   std::vector<int64_t> dimensions;
-  for (int64_t dim = 0; dim < shape.dim(); ++dim) {
+  for (const auto dim : c10::irange(shape.dim())) {
     if (dim != dim1 && dim != dim2) {
       dimensions.push_back(shape.size(dim));
     }

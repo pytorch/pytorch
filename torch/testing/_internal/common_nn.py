@@ -509,6 +509,7 @@ def kldivloss_with_target_no_reduce_test():
         cpp_var_map={'i': i, 't': '_get_input()'},
         reference_fn=lambda t, *_:
             loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -523,6 +524,7 @@ def kldivloss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False,
     )
 
@@ -538,6 +540,7 @@ def kldivloss_no_reduce_scalar_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -552,6 +555,7 @@ def kldivloss_with_log_target_no_reduce_test():
         cpp_var_map={'i': i, 't': '_get_input()'},
         reference_fn=lambda t, *_:
             loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -566,6 +570,7 @@ def kldivloss_no_reduce_log_target_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False,
     )
 
@@ -581,6 +586,7 @@ def kldivloss_no_reduce_scalar_log_target_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -594,6 +600,7 @@ def l1loss_no_reduce_test():
         input_fn=lambda: torch.randn(2, 3, 4),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -607,6 +614,7 @@ def l1loss_no_reduce_complex_test():
         input_fn=lambda: torch.randn(2, 3, 4, dtype=torch.cdouble),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -620,6 +628,7 @@ def l1loss_no_reduce_scalar_test():
         input_fn=lambda: torch.randn(()),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -634,6 +643,7 @@ def mseloss_no_reduce_test():
         input_size=input_size,
         cpp_var_map={'i': '_get_input()', 'target': target},
         reference_fn=lambda i, *_: (i - target).pow(2),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -648,6 +658,7 @@ def mseloss_no_reduce_scalar_test():
         input_size=input_size,
         cpp_var_map={'i': '_get_input()', 'target': target},
         reference_fn=lambda i, *_: (i - target).pow(2),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -869,6 +880,7 @@ def smoothl1loss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -884,6 +896,7 @@ def smoothl1loss_no_reduce_scalar_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -899,6 +912,7 @@ def smoothl1loss_beta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0.5),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -914,6 +928,7 @@ def smoothl1loss_zero_beta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -929,6 +944,7 @@ def huberloss_delta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['HuberLoss'](i, t.type_as(i), reduction='none', delta=0.5),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1044,6 +1060,7 @@ def softmarginloss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1312,6 +1329,56 @@ def fractional_max_pool3d_test(test_case, return_indices=False):
     return out
 
 
+def fractional_max_pool3d_no_batch_dim_test(test_case, use_random_samples):
+    if use_random_samples:
+        # random_samples enables CPU and GPU checks to be consistent
+        random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d(
+                    2, output_ratio=0.5, _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
+                                        .output_ratio(0.5)
+                                        ._random_samples(random_samples)''',
+                input_size=(4, 5, 5, 5),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool3d_ratio_no_batch_dim')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                    4, 4, 4), _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
+                                        .output_size(std::vector<int64_t>({4, 4, 4}))
+                                        ._random_samples(random_samples)''',
+                input_size=(4, 7, 7, 7),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool3d_size_no_batch_dim')
+    else:
+        # can not check cuda because there RNG is different between cpu and cuda
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d(
+                    2, output_ratio=0.5),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
+                                        .output_ratio(0.5)''',
+                input_size=(4, 5, 5, 5),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool3d_ratio_no_batch_dim_no_random_samples')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                    4, 4, 4)),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
+                                        .output_size(std::vector<int64_t>({4, 4, 4}))''',
+                input_size=(4, 7, 7, 7),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool3d_size_no_batch_dim_no_random_samples')
+
+
 def single_batch_reference_fn(input, parameters, module):
     """Reference function for modules supporting no batch dimensions.
 
@@ -1391,6 +1458,10 @@ new_module_tests = [
     fractional_max_pool3d_test('size'),
     fractional_max_pool3d_test('asymsize'),
     fractional_max_pool3d_test('ratio', return_indices=True),
+    fractional_max_pool3d_no_batch_dim_test('ratio', True),
+    fractional_max_pool3d_no_batch_dim_test('ratio', False),
+    fractional_max_pool3d_no_batch_dim_test('size', True),
+    fractional_max_pool3d_no_batch_dim_test('size', False),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -1582,6 +1653,27 @@ new_module_tests = [
         desc='tracking_stats',
     ),
     dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm1dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(3, 15),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
+    ),
+    dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm1dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 15),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='InstanceNorm2d',
         constructor_args=(3, 1e-3, 0.3),
         cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
@@ -1600,6 +1692,27 @@ new_module_tests = [
         desc='tracking_stats',
     ),
     dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm2dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
+    ),
+    dict(
         module_name='InstanceNorm3d',
         constructor_args=(3, 1e-3, 0.3),
         cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3)',
@@ -1616,6 +1729,27 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm3dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
     ),
     dict(
         module_name='LayerNorm',
@@ -3582,12 +3716,16 @@ new_module_tests = [
     ),
     dict(
         module_name='GELU',
+        constructor_args=('none',),
+        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
         input_size=(),
         desc='scalar',
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
     dict(
         module_name='GELU',
+        constructor_args=('none',),
+        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
         input_size=(3, 2, 5),
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
@@ -5990,6 +6128,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
         self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode', None)
+        self.supports_forward_ad = kwargs.get('supports_forward_ad', False)
+        self.supports_fwgrad_bwgrad = kwargs.get('supports_fwgrad_bwgrad', False)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -6010,12 +6150,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         else:
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
                                            check_batched_grad=self.check_batched_grad,
-                                           fast_mode=self.gradcheck_fast_mode))
+                                           fast_mode=self.gradcheck_fast_mode,
+                                           check_forward_ad=self.supports_forward_ad))
 
         if self.check_gradgrad:
             test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
                                                check_batched_grad=self.check_batched_grad,
-                                               fast_mode=self.gradcheck_fast_mode))
+                                               fast_mode=self.gradcheck_fast_mode,
+                                               check_fwd_over_rev=self.supports_fwgrad_bwgrad))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()

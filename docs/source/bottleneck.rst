@@ -1,6 +1,7 @@
 torch.utils.bottleneck
 ======================
 
+.. automodule:: torch.utils.bottleneck
 .. currentmodule:: torch.utils.bottleneck
 
 `torch.utils.bottleneck` is a tool that can be used as an initial step for

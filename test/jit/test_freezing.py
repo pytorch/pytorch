@@ -1606,13 +1606,14 @@ class TestFrozenOptimizations(JitTestCase):
         conv_bias = [True, False]
         module_pairs = [(nn.Conv1d, nn.BatchNorm1d), (nn.Conv2d, nn.BatchNorm2d), (nn.Conv3d, nn.BatchNorm3d)]
         use_tracing = [True, False]
+        bn_running_stats = [True, False]
 
-        for use_bias, modules, tracing in product(conv_bias, module_pairs, use_tracing):
+        for use_bias, modules, tracing, track_stats in product(conv_bias, module_pairs, use_tracing, bn_running_stats):
             class ConvBN(torch.nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
                     super(ConvBN, self).__init__()
                     self.conv = modules[0](in_channels, out_channels, bias=use_bias, **kwargs)
-                    self.bn = modules[1](out_channels, eps=0.001)
+                    self.bn = modules[1](out_channels, eps=0.001, track_running_stats=track_stats)
 
                 def forward(self, x):
                     x = self.conv(x)
@@ -1644,7 +1645,10 @@ class TestFrozenOptimizations(JitTestCase):
 
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("fold_frozen_conv_bn", scripted_mod.graph)
-            FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
+            if track_stats:
+                FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
+            else:
+                FileCheck().check("conv").check("aten::batch_norm").run(scripted_mod.graph)
 
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
@@ -1940,7 +1944,7 @@ class TestFrozenOptimizations(JitTestCase):
         frozen_mod = torch.jit.freeze(mod)
         FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
 
-        input = torch.randn(2, 2)
+        input = torch.randn(2, 2, 1, 1)
         output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)

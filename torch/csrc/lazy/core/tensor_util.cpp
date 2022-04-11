@@ -3,8 +3,10 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
 
 #include <algorithm>
@@ -49,17 +51,14 @@ std::vector<BackendDataPtr> CreateTensorsData(
   TORCH_CHECK(tensors.size() == devices.size());
   std::vector<BackendDataPtr> result;
   result.reserve(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     result.push_back(TensorToDataHandle(tensors[i], devices[i]));
   }
   return result;
 }
 
 bool IsSpecialScalar(const at::Scalar& value) {
-  static bool no_scalars = false;
-  // TODO: need to clean up all the env options
-  // lazy_tensors::sys_util::GetEnvBool("NO_SPECIAL_SCALARS", false);
-  if (!no_scalars && (value.isIntegral(false) || value.isFloatingPoint())) {
+  if (FLAGS_torch_lazy_handle_special_scalars && (value.isIntegral(false) || value.isFloatingPoint())) {
     double scalar_value = value.toDouble();
     return scalar_value == 0.0 || std::fabs(scalar_value) == 1.0;
   }

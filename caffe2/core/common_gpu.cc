@@ -206,6 +206,8 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "rocblas_status_size_increased";
   case rocblas_status_size_unchanged:
     return "rocblas_status_size_unchanged";
+  default:
+    return "unrecognized_rocblas_error";
 #endif
   }
   // To suppress compiler warning.

@@ -11,9 +11,13 @@ namespace at { namespace native {
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
   if (envar) {
-#ifdef HAVE_VSX_CPU_DEFINITION
+#if defined(HAVE_VSX_CPU_DEFINITION)
     if (strcmp(envar, "vsx") == 0) {
       return CPUCapability::VSX;
+    }
+#elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
+    if (strcmp(envar, "zvector") == 0) {
+      return CPUCapability::ZVECTOR;
     }
 #else
 #ifdef HAVE_AVX512_CPU_DEFINITION
@@ -54,6 +58,8 @@ static CPUCapability compute_cpu_capability() {
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   return CPUCapability::VSX;
+#elif HAVE_ZVECTOR_CPU_DEFINITION
+  return CPUCapability::ZVECTOR;
 #else
   return CPUCapability::DEFAULT;
 #endif
@@ -76,6 +82,9 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_VSX_CPU_DEFINITION
   , void *VSX
 #endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  , void *ZVECTOR
+#endif
 ) {
   switch (device_type) {
     case DeviceType::CPU: {
@@ -93,6 +102,9 @@ void* DispatchStubImpl::get_call_ptr(
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
           , VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+          , ZVECTOR
 #endif
         );
         cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
@@ -124,6 +136,9 @@ void* DispatchStubImpl::choose_cpu_impl(
 #ifdef HAVE_VSX_CPU_DEFINITION
   , void *VSX
 #endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  , void *ZVECTOR
+#endif
 ) {
   auto capability = static_cast<int>(get_cpu_capability());
   (void)capability;
@@ -151,6 +166,12 @@ void* DispatchStubImpl::choose_cpu_impl(
   if (capability >= static_cast<int>(CPUCapability::VSX)) {
     TORCH_INTERNAL_ASSERT(VSX, "DispatchStub: missing VSX kernel");
     return VSX;
+  }
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::ZVECTOR)) {
+    TORCH_INTERNAL_ASSERT(ZVECTOR, "DispatchStub: missing ZVECTOR kernel");
+    return ZVECTOR;
   }
 #endif
   TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");

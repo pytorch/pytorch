@@ -1,8 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #define _USE_MATH_DEFINES
 
 #include <math.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>

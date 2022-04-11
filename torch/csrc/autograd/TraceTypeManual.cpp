@@ -4,6 +4,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
@@ -282,7 +283,9 @@ void general_trace_function(
         AT_ASSERT(iter->isObject());
         tracer::addOutput(node, iter->toObject());
       } else {
-        throw std::runtime_error("unsupported output type: " + type->str());
+        throw std::runtime_error(
+            "unsupported output type: " + type->str() +
+            ", from operator: " + toString(op.operator_name()));
       }
     }
   }

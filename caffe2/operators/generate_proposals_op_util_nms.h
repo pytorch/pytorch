@@ -50,8 +50,7 @@ std::vector<int> nms_cpu_upright(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -127,7 +126,7 @@ std::vector<int> soft_nms_cpu_upright(
   EArrXi pending = AsEArrXt(indices);
   while (pending.size() > 0) {
     // Exit if already enough proposals
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<unsigned>(topN)) {
       break;
     }
 
@@ -344,7 +343,6 @@ int convex_hull_graham(
     Eigen::Vector2f* q,
     bool shift_to_zero = false) {
   CAFFE_ENFORCE(num_in >= 2);
-  std::vector<int> order;
 
   // Step 1:
   // Find point with minimum y
@@ -370,7 +368,7 @@ int convex_hull_graham(
   // Step 3:
   // Sort point 1 ~ num_in according to their relative cross-product values
   // (essentially sorting according to angles)
-  std::sort(
+  std::stable_sort(
       q + 1,
       q + num_in,
       [](const Eigen::Vector2f& A, const Eigen::Vector2f& B) -> bool {
@@ -561,8 +559,7 @@ std::vector<int> nms_cpu_rotated(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -627,7 +624,7 @@ std::vector<int> soft_nms_cpu_rotated(
   EArrXi pending = AsEArrXt(indices);
   while (pending.size() > 0) {
     // Exit if already enough proposals
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -711,7 +708,7 @@ std::vector<int> nms_cpu(
     bool legacy_plus_one = false) {
   std::vector<int> indices(proposals.rows());
   std::iota(indices.begin(), indices.end(), 0);
-  std::sort(
+  std::stable_sort(
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });

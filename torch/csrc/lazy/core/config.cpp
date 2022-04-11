@@ -7,6 +7,16 @@ C10_DEFINE_bool(
     false,
     "Enable parameter aliasing support");
 
+C10_DEFINE_bool(
+    torch_lazy_handle_special_scalars,
+    false,
+    "Handle special scalars 0 and 1 diffrently");
+
+C10_DEFINE_bool(
+    torch_lazy_use_thread_pool,
+    false,
+    "Use thread pool to schedule backend execution");
+
 C10_DEFINE_int(
     torch_lazy_compilation_cache_size,
     1024,
@@ -40,3 +50,21 @@ C10_DEFINE_string(
     torch_lazy_metrics_percentiles,
     "0.01:0.05:0.1:0.2:0.5:0.8:0.9:0.95:0.99",
     "Metrics percentiles to be collected, using : as the delimiter");
+
+namespace torch {
+namespace lazy {
+
+std::string& getLTCForceFallback() {
+    static std::string config;
+    static bool _ignore = [&]() {
+        char *envptr = std::getenv("LTC_FORCE_FALLBACK");
+        if (envptr) {
+            config = std::string(envptr);
+        }
+        return true;
+    }();
+    (void) _ignore;  // avoid unused variables warning
+    return config;
+}
+
+} }

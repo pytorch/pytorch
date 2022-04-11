@@ -6,6 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -97,7 +98,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     int unknown_idx = -1;
-    for (int i = 0; i < actual_new_shape.size(); ++i) {
+    for (const auto i : c10::irange(actual_new_shape.size())) {
       const auto dim = actual_new_shape[i];
       if (dim == -1) {
         CAFFE_ENFORCE(
@@ -153,7 +154,7 @@ class ReshapeOp : public Operator<Context> {
     old_shape->Resize(input.sizes().size());
     T* old_shape_data = old_shape->template mutable_data<T>();
     std::vector<T> old_shape_vector(input.sizes().begin(), input.sizes().end());
-    for (int i = 0; i < old_shape_vector.size(); ++i) {
+    for (const auto i : c10::irange(old_shape_vector.size())) {
       old_shape_data[i] = old_shape_vector[i];
     }
 
