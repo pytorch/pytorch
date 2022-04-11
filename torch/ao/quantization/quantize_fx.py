@@ -310,10 +310,6 @@ def fuse_fx(
         * `fuse_custom_config_dict`: Dictionary for custom configurations for fuse_fx, e.g.::
 
             fuse_custom_config_dict = {
-              "additional_fuser_method_mapping": {
-                (Module1, Module2): fuse_module1_module2
-              }
-
               # Attributes that are not used in forward function will
               # be removed when constructing GraphModule, this is a list of attributes
               # to preserve as an attribute of the GraphModule even when they are
@@ -438,11 +434,6 @@ def prepare_fx(
             "non_traceable_module_class": [
                NonTraceableModule
             ],
-
-            # Additional fuser_method mapping
-            "additional_fuser_method_mapping": {
-               (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
-            },
 
             # By default, inputs and outputs of the graph are assumed to be in
             # fp32. Providing `input_quantized_idxs` will set the inputs with the
