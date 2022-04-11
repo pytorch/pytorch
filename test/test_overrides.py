@@ -1087,6 +1087,19 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
+    def test_factory_override(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return -1
+
+        with torch.overrides.push_torch_function_mode(A):
+            self.assertEqual(torch.tensor([1]), -1)
+            self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
+            self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
+            self.assertEqual(torch._sparse_coo_tensor_unsafe(1, 1, (1, 1)), -1)
+            self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
+            self.assertEqual(torch.as_tensor([1]), -1)
+
     def test_enable_torch_function_mode_with_tensor_subclass(self):
         x = torch.randn(1)
         with torch.overrides.enable_torch_function_mode(SubTensor):
@@ -1209,6 +1222,8 @@ class TestTorchFunctionMode(TestCase):
             torch.sub(x, y)
         # add hits the torch function again!
         self.assertEqual(log, [torch.sub, torch.add])
+
+
 
 
 if __name__ == '__main__':
