@@ -6410,8 +6410,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4,
-                                        rtol=self.rtol_maybe_tf32)
+                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
         cpu_gradInput = test_case._backward_criterion(
             cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
@@ -6420,8 +6419,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4,
-                                        rtol=self.rtol_maybe_tf32)
+                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
     def _get_target(self):
         return self._get_arg('target', False)
