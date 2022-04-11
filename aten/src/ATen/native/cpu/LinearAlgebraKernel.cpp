@@ -165,7 +165,7 @@ void unpack_pivots_cpu_kernel(
   iter.for_each(loop);
 }
 
-void qr_orthogonalization_cpu(const Tensor& A, Tensor& out, const float epsilon){  
+void qr_orthogonalization_cpu(const Tensor& A, Tensor& out, Tensor& vs, const float epsilon){  
   //TODO
 }
 
