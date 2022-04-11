@@ -6,7 +6,7 @@ from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, T
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import check_lambda_fn
-from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn
+from torch.utils.data._utils.serialization import DILL_AVAILABLE, SerializationType, serialize_fn, deserialize_fn
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -344,12 +344,11 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
 
-        serialized_fn_with_method = serialize_fn(self.classifier_fn)
         state = (
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            serialized_fn_with_method,
+            serialize_fn(self.classifier_fn) if DILL_AVAILABLE else self.classifier_fn,
             self.drop_none,
         )
         return state
@@ -359,10 +358,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            serialized_fn_with_method,
+            fn,
             self.drop_none,
         ) = state
-        self.classifier_fn = deserialize_fn(serialized_fn_with_method)
+        if isinstance(fn, tuple) and len(fn) == 2 and isinstance(fn[1], SerializationType):
+            self.classifier_fn = deserialize_fn(fn)
+        else:
+            self.classifier_fn = fn
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
