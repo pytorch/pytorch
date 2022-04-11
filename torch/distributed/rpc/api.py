@@ -343,7 +343,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
             else:
                 # This is a dynamic group so we need to grab the token for the operation
                 workerInfo = agent.get_worker_info()
-                with utils.group_membership_management(agent._get_store(), workerInfo.name):
+                with utils.group_membership_management(agent.store, workerInfo.name):
                     agent.join(shutdown=True)
 
         finally:

@@ -204,7 +204,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   TensorPipeRpcBackendOptions getBackendOptions() const;
 
-  const c10::intrusive_ptr<::c10d::Store>& getStore() const;
+  const c10::intrusive_ptr<::c10d::Store> getStore() const;
 
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
@@ -225,7 +225,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
 
-  const c10::intrusive_ptr<::c10d::Store>& store_;
   const bool isStaticGroup_;
 
  protected:
@@ -321,6 +320,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
     std::unordered_map<uint64_t, std::shared_ptr<AtomicJitFuture>>
         pendingResponseMessage_;
   };
+
+  const c10::intrusive_ptr<::c10d::Store> store_;
 
   const TensorPipeRpcBackendOptions opts_;
   // For dynamic RPC, the reverse device maps are updated whenever a new rank
@@ -425,6 +426,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, TimeSeriesMetricsTracker> timeSeriesMetrics_;
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
+
+  // Mutex to guard access to group membership data
+  // e.g. updates to (workerIdToInfo_, workerNameToInfo_, workerNameToURL_)
+  mutable std::mutex groupMembershipMutex_;
 
   // Map to Track Network Data
   NetworkDataDict networkData_;
