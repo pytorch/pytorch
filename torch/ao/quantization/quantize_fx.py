@@ -310,10 +310,6 @@ def fuse_fx(
         * `fuse_custom_config_dict`: Dictionary for custom configurations for fuse_fx, e.g.::
 
             fuse_custom_config_dict = {
-              "additional_fuser_method_mapping": {
-                (Module1, Module2): fuse_module1_module2
-              }
-
               # Attributes that are not used in forward function will
               # be removed when constructing GraphModule, this is a list of attributes
               # to preserve as an attribute of the GraphModule even when they are
@@ -438,22 +434,6 @@ def prepare_fx(
             "non_traceable_module_class": [
                NonTraceableModule
             ],
-
-            # Additional fuser_method mapping
-            "additional_fuser_method_mapping": {
-               (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
-            },
-
-            # Additioanl module mapping for qat
-            "additional_qat_module_mapping": {
-               torch.nn.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
-            },
-
-            # Additional quantization patterns
-            "additional_quant_pattern": {
-               torch.nn.Conv2d: ConvReluQuantizeHandler,
-               (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
-            }
 
             # By default, inputs and outputs of the graph are assumed to be in
             # fp32. Providing `input_quantized_idxs` will set the inputs with the
@@ -614,20 +594,6 @@ def convert_fx(
         * `convert_custom_config_dict`: dictionary for custom configurations for convert function::
 
             convert_custom_config_dict = {
-
-              # additional object (module/operator) mappings that will overwrite the default
-              # module mappinng
-              "additional_object_mapping": {
-                 "static": {
-                    FloatModule: QuantizedModule,
-                    float_op: quantized_op
-                 },
-                 "dynamic": {
-                    FloatModule: DynamicallyQuantizedModule,
-                    float_op: dynamically_quantized_op
-                 },
-              },
-
               # user will manually define the corresponding quantized
               # module class which has a from_observed class method that converts
               # observed custom module to quantized custom module
