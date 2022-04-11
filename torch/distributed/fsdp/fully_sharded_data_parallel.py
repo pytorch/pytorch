@@ -45,7 +45,6 @@ from .flatten_params_wrapper import (
     FlattenParamsWrapper,
 )
 from .optim_utils import (
-    OPTIM_TARGET_RANK,
     _flatten_optim_state,
     _get_flat_param_to_fsdp_module,
     _get_param_id_to_param,
@@ -2367,6 +2366,7 @@ class FullyShardedDataParallel(nn.Module):
         optim_input: Optional[Union[
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
+        rank0_only: bool = True,
     ) -> Dict[str, Any]:
         """
         Consolidates the full optimizer state on rank 0 and returns it
@@ -2376,8 +2376,9 @@ class FullyShardedDataParallel(nn.Module):
         contained in ``model`` are mapped back to their unflattened parameters.
 
         .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used. However, the state dict is only populated on
-            rank 0. All other ranks return an empty :class:`dict`.
+            primitives are used. However, if ``rank0_only=True``, then the
+            state dict is only populated on rank 0, and all other ranks return
+            an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -2403,13 +2404,16 @@ class FullyShardedDataParallel(nn.Module):
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
                 ``model.parameters()``. (Default: ``None``)
+            rank0_only (bool): If ``True``, saves the populated :class:`dict`
+                only on rank 0; if ``False``, saves it on all ranks. (Default:
+                ``True``)
 
         Returns:
             Dict[str, Any]: A :class:`dict` containing the optimizer state for
             ``model`` 's original unflattened parameters and including keys
             "state" and "param_groups" following the convention of
-            :meth:`torch.optim.Optimizer.state_dict` if on rank 0, and an empty
-            :class:`dict` otherwise.
+            :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
+            then nonzero ranks return an empty :class:`dict`.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2417,7 +2421,7 @@ class FullyShardedDataParallel(nn.Module):
         group = model.process_group if hasattr(model, "process_group") \
             else None  # not all `torch.nn.Module`s have `process_group`
         rank = dist.get_rank(group)
-        to_save = rank == OPTIM_TARGET_RANK
+        to_save = not rank0_only or rank == 0
         full_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
         full_osd_state = full_osd["state"] if to_save else None  # alias
 
@@ -2440,7 +2444,7 @@ class FullyShardedDataParallel(nn.Module):
                     f"param: {param}"
                 unflat_state = _unflatten_optim_state(
                     flat_param_to_fsdp_module[param], param,
-                    osd_state[flat_param_id],
+                    osd_state[flat_param_id], to_save,
                 )
                 if to_save:
                     assert len(unflat_state) == len(unflat_param_names) and \
