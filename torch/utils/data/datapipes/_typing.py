@@ -337,6 +337,27 @@ class _DataPipeMeta(GenericMeta):
         return hash((self.__name__, self.type))
 
 
+def simplify_value_name(value) -> str:
+    if inspect.isfunction(value):
+        return value.__name__
+    try:
+        return str(value.__class__.__qualname__)
+    except Exception as _:
+        return str(value)
+
+
+def get_input_args(obj):
+    signature = inspect.signature(obj.__class__)
+    input_param_names = set()
+    for param_name, _ in signature.parameters.items():
+        input_param_names.add(param_name)
+    result = []
+    for name, value in inspect.getmembers(obj):
+        if name in input_param_names:
+            result.append((name, simplify_value_name(value)))
+    return ', '.join([f'{name}={value}' for name, value in result])
+
+
 def hook_iterator(namespace, profile_name):
 
     def context():
@@ -369,6 +390,13 @@ def hook_iterator(namespace, profile_name):
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
+            except Exception as e:
+                datapipe = args[0]
+                # Short version, but requires custom __repr__ for each DataPipe class
+                # msg = f"thrown by {datapipe}"
+                # Long version with all input arguments
+                msg = f"thrown by __iter__ of {datapipe.__class__.__name__}({get_input_args(datapipe)})"
+                raise RuntimeError(msg) from e
 
         namespace['__iter__'] = wrap_generator
     else:
@@ -389,6 +417,7 @@ def hook_iterator(namespace, profile_name):
                 return IteratorDecorator(iter_ret)
 
             namespace['__iter__'] = wrap_iter
+
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
@@ -428,6 +457,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
+
 
 def reinforce_type(self, expected_type):
     r"""
