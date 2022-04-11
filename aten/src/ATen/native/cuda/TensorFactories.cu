@@ -1,13 +1,28 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/EmptyTensor.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/eye_native.h>
+#include <ATen/ops/tril_indices_native.h>
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_indices_native.h>
+#include <ATen/ops/triu_native.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
