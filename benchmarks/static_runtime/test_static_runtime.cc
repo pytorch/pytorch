@@ -3134,3 +3134,48 @@ TEST(StaticRuntime, ReshapeAs) {
   )JIT";
   testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
 }
+
+TEST(StaticRuntime, MoveCtor) {
+  auto mod = getDeepAndWideSciptModel();
+  std::vector<IValue> args{
+      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
+
+  torch::jit::StaticModule smod(mod);
+
+  torch::jit::StaticRuntime runtime(smod);
+  auto expected = runtime(args);
+
+  torch::jit::StaticRuntime new_runtime(std::move(runtime));
+  auto actual = new_runtime(args);
+  compareResults(expected, actual);
+}
+
+TEST(StaticRuntime, SingleBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond: bool):
+        lst = []
+        if cond:
+            lst.append(a + b)
+        return lst
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true};
+  std::vector<IValue> args2{at::randn({42, 42}), at::randn({42, 42}), false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond1: bool, cond2: bool):
+        if cond1:
+            lst = []
+            if cond2:
+                lst.append(a + b)
+            lst.append(a * b)
+            return lst
+        return []
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true, true};
+  std::vector<IValue> args2{
+      at::randn({42, 42}), at::randn({42, 42}), true, false};
+  testStaticRuntime(src, args1, args2);
+}
