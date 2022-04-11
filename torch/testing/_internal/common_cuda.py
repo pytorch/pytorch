@@ -74,17 +74,21 @@ def tf32_off():
 
 
 @contextlib.contextmanager
-def tf32_on(self, tf32_precision=1e-5):
+def tf32_on(self, tf32_precision=1e-5, tf32_rtol=None):
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     old_precison = self.precision
+    old_tf32_rtol = self.rtol_maybe_tf32
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
+        if tf32_rtol is not None:
+            self.rtol_maybe_tf32 = tf32_rtol
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-        self.precision = old_precison
+        self.precision = old_precision
+        self.rtol_maybe_tf32 = old_tf32_rtol
 
 
 # This is a wrapper that wraps a test to run this test twice, one with

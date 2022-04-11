@@ -5926,6 +5926,7 @@ class ModuleTest(TestBase):
         self.FIXME_no_cuda_gradgrad_comparison = \
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         self.precision = kwargs.get('precision', 2e-4)
+        self.rtol_maybe_tf32 = 0.
         self.check_forward_only = kwargs.get('check_forward_only', False)
 
     def __call__(self, test_case):
@@ -6009,7 +6010,7 @@ class ModuleTest(TestBase):
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
-                test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
+                test_case.assertEqual(grad, d_input, atol=1e-4, rtol=self.rtol_maybe_tf32)
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
 
     def test_cuda(self, test_case):
@@ -6038,7 +6039,7 @@ class ModuleTest(TestBase):
             cpu_output = cpu_output[0]
             gpu_output = gpu_output[0]
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=self.rtol_maybe_tf32)
 
         # Run backwards on CPU and GPU and compare results
         for _ in range(5):
@@ -6047,9 +6048,9 @@ class ModuleTest(TestBase):
             cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
             gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=self.rtol_maybe_tf32)
             for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
-                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=self.rtol_maybe_tf32)
 
         # Run double-backwards on CPU and GPU and compare results
         if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
@@ -6076,7 +6077,7 @@ class ModuleTest(TestBase):
 
             for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
+                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=self.rtol_maybe_tf32)
 
             # We mix output into the second backwards computation so that
             # torch.autograd.grad doesn't complain that some inputs
@@ -6091,10 +6092,10 @@ class ModuleTest(TestBase):
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=self.rtol_maybe_tf32)
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=self.rtol_maybe_tf32)
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
@@ -6409,7 +6410,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4,
+                                        rtol=self.rtol_maybe_tf32)
 
         cpu_gradInput = test_case._backward_criterion(
             cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
@@ -6418,7 +6420,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4,
+                                        rtol=self.rtol_maybe_tf32)
 
     def _get_target(self):
         return self._get_arg('target', False)
