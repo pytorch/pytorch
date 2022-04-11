@@ -35,7 +35,8 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, floating_types_and, get_all_math_dtypes
+from torch.testing._internal.common_dtype import integral_types, floating_types_and, get_all_math_dtypes, \
+    floating_and_complex_types_and
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, \
@@ -909,30 +910,32 @@ class TestNN(NNTestCase):
                 module(input)
 
     def test_mismatch_shape_conv2d(self):
-        x = torch.randn(1, 10, 1, 28, 28)
-        w = torch.randn(6, 1, 5, 5)
+        for dtype in (torch.float, torch.cfloat):
+            x = torch.randn(1, 10, 1, 28, 28, dtype=dtype)
+            w = torch.randn(6, 1, 5, 5, dtype=dtype)
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    r'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
-                                    r'input of size: \[1, 10, 1, 28, 28\]'):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
+                                        r'input of size: \[1, 10, 1, 28, 28\]'):
 
-            F.conv2d(x, w)
+                F.conv2d(x, w)
 
     def test_conv2d_discontiguous_weight(self):
-        # Test for https://github.com/pytorch/pytorch/issues/55781
-        x = torch.ones(64, 16, 16, 16)
-        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
-        self.assertFalse(weight.is_contiguous())
-        y = torch.nn.functional.conv2d(x, weight, None)
-        if torch.backends.mkldnn.is_available():
-            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-            with torch.backends.mkldnn.flags(enabled=False):
-                y_ = torch.nn.functional.conv2d(x, weight, None)
-                self.assertEqual(y, y_)
-        self.assertEqual(y.sum(), 4186112.)
+        for dtype in (torch.float, torch.cfloat):
+            # Test for https://github.com/pytorch/pytorch/issues/55781
+            x = torch.ones(64, 16, 16, 16, dtype=dtype)
+            weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2).to(dtype)[:, :, :, ::2]
+            self.assertFalse(weight.is_contiguous())
+            y = torch.nn.functional.conv2d(x, weight, None)
+            if torch.backends.mkldnn.is_available():
+                # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_ = torch.nn.functional.conv2d(x, weight, None)
+                    self.assertEqual(y, y_)
+            self.assertEqual(y.sum(), 4186112.)
 
     def test_invalid_conv2d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
+        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
             input = torch.empty(1, 1, 4, 4).to(dtype)
             self.assertRaises(RuntimeError, lambda: module(input))
@@ -957,7 +960,7 @@ class TestNN(NNTestCase):
                 module(input)
 
     def test_invalid_conv3d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
+        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
             input = torch.empty(1, 1, 4, 4, 4).to(dtype)
             self.assertRaises(RuntimeError, lambda: module(input))
@@ -4825,7 +4828,7 @@ class TestNN(NNTestCase):
                                                 (torch.float32, torch.complex64),
                                                 (True, False)):
             # Conv2d does not support complex yet
-            if not use_linear and dtype.is_complex:
+            if not use_linear:
                 continue
 
             if use_linear:
@@ -6307,7 +6310,7 @@ class TestNN(NNTestCase):
                 # just run it to ensure no exception raised.
                 module(input)
 
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
+        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             # Conv1d
             test(True, nn.Conv1d(1, 1, 3).to(dtype), (1, 2), dtype)
             test(True, nn.Conv1d(1, 1, 3, stride=2).to(dtype), (1, 2), dtype)
@@ -13103,7 +13106,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
-    @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
+    @dtypes(*floating_and_complex_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_deterministic_cudnn(self, device, dtype):
         inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
@@ -13402,47 +13405,56 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual)
 
-
-    def test_conv2d_same_padding(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv2d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
         # Compare F.conv2d padding='same' output against manual padding
         # Without strides/dilation
-        x = torch.rand(1, 1, 10, 11, device=device)
-        y = torch.rand(1, 1, 4, 5, device=device)
+        x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=(2, 2))[..., 1:, :]
         actual = F.conv2d(x, y, padding='same')
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # With dilation
-        y = torch.rand(1, 1, 3, 4, device=device)
+        y = torch.rand(1, 1, 3, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=(2, 3), dilation=2)
         actual = F.conv2d(x, y, padding='same', dilation=2)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # Dilation with asymmetric padding
-        y = torch.rand(1, 1, 4, 4, device=device)
+        y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1:, 1:]
         actual = F.conv2d(x, y, padding='same', dilation=3)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
-    def test_conv3d_same_padding(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv3d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
         # Compare F.conv3d padding='same' output against manual padding
         # Without strides/dilation
-        x = torch.rand(1, 1, 10, 11, 12, device=device)
-        y = torch.rand(1, 1, 1, 2, 5, device=device)
+        x = torch.rand(1, 1, 10, 11, 12, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 1, 2, 5, device=device, dtype=dtype)
         expect = F.conv3d(x, y, padding=(0, 1, 2))[..., :, 1:, :]
         actual = F.conv3d(x, y, padding='same')
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # With dilation
         expect = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
         actual = F.conv3d(x, y, padding='same', dilation=2)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
         # Dilation with asymmetric padding
-        y = torch.rand(1, 1, 4, 4, 4, device=device)
+        y = torch.rand(1, 1, 4, 4, 4, device=device, dtype=dtype)
         expect = F.conv3d(x, y, padding=5, dilation=3)[..., 1:, 1:, 1:]
         actual = F.conv3d(x, y, padding='same', dilation=3)
-        self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv1d_valid_padding(self, device, dtype):
@@ -13453,18 +13465,20 @@ class TestNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding='valid')
         self.assertEqual(expect, actual)
 
-    def test_conv2d_valid_padding(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv2d_valid_padding(self, device, dtype):
         # Test F.conv2d padding='valid' is the same as no padding
-        x = torch.rand(1, 1, 1, 10, device=device)
-        y = torch.rand(1, 1, 1, 4, device=device)
+        x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 1, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y)
         actual = F.conv2d(x, y, padding='valid')
         self.assertEqual(expect, actual)
 
-    def test_conv3d_valid_padding(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv3d_valid_padding(self, device, dtype):
         # Test F.conv3d padding='valid' is the same as no padding
-        x = torch.rand(1, 1, 1, 1, 10, device=device)
-        y = torch.rand(1, 1, 1, 1, 4, device=device)
+        x = torch.rand(1, 1, 1, 1, 10, dtype=dtype, device=device)
+        y = torch.rand(1, 1, 1, 1, 4, dtype=dtype, device=device)
         expect = F.conv3d(x, y)
         actual = F.conv3d(x, y, padding='valid')
         self.assertEqual(expect, actual)
@@ -13498,10 +13512,11 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
-    def test_conv2d_same_padding_backward(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv2d_same_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='same'
-        x = torch.rand(1, 1, 10, 11, device=device, requires_grad=True)
-        y = torch.rand(1, 1, 4, 5, device=device, requires_grad=True)
+        x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype, requires_grad=True)
+        y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype, requires_grad=True)
 
         # Symmetric padding
         z = F.conv2d(x, y, padding=(3, 4), dilation=2)
@@ -13516,7 +13531,7 @@ class TestNNDeviceType(NNTestCase):
         x.grad, y.grad = None, None
 
         # Asymmetric padding
-        y = torch.rand(1, 1, 4, 4, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype, requires_grad=True)
         z = F.conv2d(x, y, padding=2)[..., 1:, 1:]
         z.sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
@@ -13527,12 +13542,13 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
-    def test_conv3d_same_padding_backward(self, device):
+    @dtypes(torch.double, torch.cdouble)
+    def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != 'xla'
 
         # Test F.conv3d gradients work with padding='same'
-        x = torch.rand(1, 1, 1, 11, 12, device=device, requires_grad=True)
-        y = torch.rand(1, 1, 1, 2, 5, device=device, requires_grad=True)
+        x = torch.rand(1, 1, 1, 11, 12, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 2, 5, dtype=dtype, device=device, requires_grad=True)
 
         # Symmetric padding
         z = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
@@ -13554,7 +13570,7 @@ class TestNNDeviceType(NNTestCase):
                           check_fwd_over_rev=True)
 
         # Asymmetric padding
-        y = torch.rand(1, 1, 1, 4, 4, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 4, 4, dtype=dtype, device=device, requires_grad=True)
         z = F.conv3d(x, y, padding=2)[..., 1:, 1:]
         z.sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
@@ -13625,10 +13641,93 @@ class TestNNDeviceType(NNTestCase):
             _test(t, weight_even, mode)
             _test(t, weight_odd, mode)
 
-    def test_conv2d_valid_padding_backward(self, device):
+    @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @dtypes(torch.float, torch.cfloat)
+    @parametrize_test("mode", ('valid', 'same'))
+    def test_conv2d_vs_scipy(self, device, dtype, mode):
+        t = make_tensor((1, 5, 10), device=device, dtype=dtype)
+        weight_even = make_tensor((1, 1, 2, 4), device=device, dtype=dtype)
+        weight_odd = make_tensor((1, 1, 3, 5), device=device, dtype=dtype)
+
+        def _test(t, weight, mode):
+            # SciPy expects two 2-D inputs.
+            t_a = t.squeeze(0).cpu().numpy()
+            w_a = weight.squeeze(0).squeeze(0).cpu().numpy()
+            expected = scipy.signal.convolve2d(t_a, w_a, mode=mode)
+
+            kwargs = {'padding': mode}
+            if mode == 'same':
+                # `same` padding in PyTorch conv2d is different
+                # from SciPy
+                left_right_pad = weight.shape[3] // 2
+                top_bottom_pad = weight.shape[2] // 2
+                p = (left_right_pad, left_right_pad, top_bottom_pad, top_bottom_pad)
+                t = torch.nn.functional.pad(t, p)
+                # We have already taken care of padding
+                kwargs.pop("padding")
+
+            # second input is flipped in SciPy's convolve2d
+            weight_flipped = torch.flip(weight, (2, 3))
+            actual = torch.nn.functional.conv2d(t, weight_flipped, **kwargs).squeeze(0)
+            if mode == 'same':
+                actual = actual[:5, :10]
+
+            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+
+        # Global dtype for this test suite is torch.double
+        # This leads to change in type-promotion
+        # and conv1d outputs `complex128` for `complex64` input.
+        with set_default_dtype(torch.float):
+            _test(t, weight_even, mode)
+            _test(t, weight_odd, mode)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @dtypes(torch.float, torch.cfloat)
+    @parametrize_test("mode", ('valid', 'same'))
+    def test_conv3d_vs_scipy(self, device, dtype, mode):
+        t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)
+        weight_even = make_tensor((1, 1, 2, 2, 4), device=device, dtype=dtype)
+        weight_odd = make_tensor((1, 1, 2, 3, 5), device=device, dtype=dtype)
+
+        def _test(t, weight, mode):
+            # SciPy expects two 3-D inputs.
+            t_a = t.squeeze(0).cpu().numpy()
+            w_a = weight.squeeze(0).squeeze(0).cpu().numpy()
+            expected = scipy.signal.convolve(t_a, w_a, mode=mode)
+
+            kwargs = {'padding': mode}
+            if mode == 'same':
+                # `same` padding in PyTorch conv3d is different
+                # from SciPy
+                left_right_pad = weight.shape[4] // 2
+                top_bottom_pad = weight.shape[3] // 2
+                front_back_pad = weight.shape[2] // 2
+                p = (left_right_pad, left_right_pad, top_bottom_pad, top_bottom_pad,
+                     front_back_pad, front_back_pad)
+                t = torch.nn.functional.pad(t, p)
+                # We have already taken care of padding
+                kwargs.pop("padding")
+
+            # second input is flipped in SciPy's convolve
+            weight_flipped = torch.flip(weight, (2, 3, 4))
+            actual = torch.nn.functional.conv3d(t, weight_flipped, **kwargs).squeeze(0)
+            if mode == 'same':
+                actual = actual[:5, :5, :10]
+
+            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+
+        # Global dtype for this test suite is torch.double
+        # This leads to change in type-promotion
+        # and conv1d outputs `complex128` for `complex64` input.
+        with set_default_dtype(torch.float):
+            _test(t, weight_even, mode)
+            _test(t, weight_odd, mode)
+
+    @dtypes(torch.float, torch.complex64)
+    def test_conv2d_valid_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='valid'
-        x = torch.rand(1, 1, 1, 10, device=device, requires_grad=True)
-        y = torch.rand(1, 1, 1, 4, device=device, requires_grad=True)
+        x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype, requires_grad=True)
+        y = torch.rand(1, 1, 1, 4, device=device, dtype=dtype, requires_grad=True)
         F.conv2d(x, y, padding=0).sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
@@ -13638,12 +13737,13 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
-    def test_conv3d_valid_padding_backward(self, device):
+    @dtypes(torch.double, torch.cdouble)
+    def test_conv3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != 'xla'
 
         # Test F.conv3d gradients work with padding='valid'
-        x = torch.rand(1, 1, 1, 1, 10, device=device, requires_grad=True)
-        y = torch.rand(1, 1, 1, 1, 4, device=device, requires_grad=True)
+        x = torch.rand(1, 1, 1, 1, 10, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 1, 4, dtype=dtype, device=device, requires_grad=True)
         F.conv3d(x, y, padding=0).sum().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
@@ -13845,6 +13945,20 @@ class TestNNDeviceType(NNTestCase):
         # mkldnn doesn't support gradcheck :(
         if layout is torch._mkldnn:
             return
+
+        if backend_actual != torch._C._ConvBackend.Empty:  # FIXME: forward AD fails
+            # Forward AD and forward-over-reverse AD smoke test in float32
+            # TODO: remove this if we introduce per-op gradient tests for float32
+            with fwAD.dual_level():
+                dual_inputs = [(fwAD.make_dual(i, torch.rand_like(i)) if isinstance(i, torch.Tensor) else i) for i in inputs]
+                # Forward AD
+                output = convolution(*dual_inputs)
+                # Forward over reverse AD
+                grad_output_d = fwAD.make_dual(torch.rand_like(output), torch.rand_like(output))
+                if has_bias:
+                    torch.autograd.grad(output, [x, weight, bias], grad_output_d)
+                else:
+                    torch.autograd.grad(output, [x, weight], grad_output_d)
 
         # Convert to float64 for gradcheck.
         x = x.to(torch.float64).detach().requires_grad_(True)
@@ -14669,26 +14783,27 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(mod.weight.grad, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
-    def test_conv_empty_channel(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv_empty_channel(self, device, dtype):
         in_channels = 0
-        mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2).to(device)
-        inp = torch.randn(2, 0, 15, device=device)
+        mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2, dtype=dtype).to(device)
+        inp = torch.randn(2, 0, 15, device=device, dtype=dtype)
         self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
             inp = torch.randn(2, 1, 0, device=device)
             mod(inp)
 
-        mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2).to(device)
-        inp = torch.randn(2, 0, 50, 100, device=device)
+        mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
+        inp = torch.randn(2, 0, 50, 100, device=device, dtype=dtype)
         self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
             inp = torch.randn(2, 1, 40, 0, device=device)
             mod(inp)
 
-        mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2).to(device)
-        inp = torch.randn(2, 0, 50, 20, 40, device=device)
+        mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
+        inp = torch.randn(2, 0, 50, 20, 40, device=device, dtype=dtype)
         self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
@@ -17708,7 +17823,7 @@ class TestNNDeviceType(NNTestCase):
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                          atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_Conv2d_backward_depthwise(self, device, dtype):
         x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
         weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
@@ -18572,7 +18687,7 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfRocmVersionLessThan((4, 3))
     @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
-    @dtypes(torch.half, torch.float)
+    @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
