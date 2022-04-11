@@ -740,6 +740,8 @@ def _broadcast_sharded_pos_dim_tensor_state(
         unsharded_tensor (Optional[torch.Tensor]): Unsharded tensor from which
             to broadcast shards if on rank 0; ignored otherwise.
         shape (torch.Size): Shape of the sharded tensor; same on all ranks.
+        device (torch.device): Device on which the final sharded tensor
+            should reside.
     """
     assert rank != 0 or unsharded_tensor is not None, \
         "Expects rank 0 to pass in the unsharded tensor"
@@ -753,16 +755,17 @@ def _broadcast_sharded_pos_dim_tensor_state(
             unsharded_tensor,
         )
     for target_rank in range(1, world_size):
+        # NCCL requires broadcast tensors to be on CUDA
+        broadcast_device = torch.device("cuda") if using_nccl \
+            else device
         if rank == 0:
             assert get_shard is not None
-            sharded_tensor = get_shard(target_rank, world_size)[0]
+            sharded_tensor = get_shard(target_rank, world_size)[0].to(broadcast_device)
         else:
             sharded_tensor = torch.zeros(
-                shape, requires_grad=False, dtype=dtype, device=device,
+                shape, requires_grad=False, dtype=dtype,
+                device=broadcast_device,
             )
-        # NCCL requires broadcast tensors to be on CUDA
-        if using_nccl:
-            sharded_tensor = sharded_tensor.cuda()
         dist.broadcast(sharded_tensor, src=0, group=group)
         # Only keep the shard on the target rank
         if rank == target_rank:
@@ -773,7 +776,7 @@ def _broadcast_sharded_pos_dim_tensor_state(
     # Lastly, shard on rank 0
     if rank != 0:
         return
-    param_state[state_name] = get_shard(0, world_size)[0]  # type: ignore[misc]
+    param_state[state_name] = get_shard(0, world_size)[0].to(device)  # type: ignore[misc]
 
 
 def _broadcast_unsharded_pos_dim_tensor_state(
