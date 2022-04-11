@@ -1,286 +1,507 @@
 import torch
 from torch._C import _add_docstr  # type: ignore[attr-defined]
 
-from typing import Sequence, Optional
+import torch._prims.utils as utils
+from torch._prims.utils import TensorLike, TensorMeta
+
+from typing import Sequence, Optional, Union, Callable
 from numbers import Number
 from functools import reduce
-
-
-__all__ = [
-  # Elementwise unary operators
-  'abs',
-  'acos',
-  'acosh',
-  'asin',
-  'atan',
-  'cos',
-  'cosh',
-  # Elementwise binary operators
-  'add',
-  'atan2',
-  'div',
-  'mul',
-  'sub',
-  # View operators
-  'broadcast',  # sugar
-  'broadcast_in_dim',
-  'merge_dims',
-  'split_dim',
-  'squeeze',
-  # Shape operators
-  'collapse',  # sugar
-  'concatenate',
-  'reshape',
-  # Type conversion operators
-  'convert_element_type',
-  'device_put',
-  # Inplace operators
-  'copy_to',
-]
+from enum import Enum
 
 Tensor = torch.Tensor
 
-#
-# Common helper functions
-#
 
-def _validate_dim_length(length: int):
-  '''
-  Validates that an object represents a valid
-  dimension length.
-  '''
-
-  assert isinstance(length, int)
-  assert length >= 0
-
-def _validate_shape(shape: Sequence):
-  '''
-  Validates that a sequence represents a valid shape.
-  '''
-
-  assert isinstance(shape, Sequence)
-  for l in shape:
-    _validate_dim_length(l)
-
-def _validate_idx(shape: Sequence, idx: int):
-  '''
-  Validates that idx is a valid idx for the given shape.
-  '''
-
-  assert isinstance(idx, int)
-  assert idx >= 0 and idx < len(shape)
-
-def _validate_exclusive_idx(shape: Sequence, ex_idx: int):
-  '''
-  Validates that ex_idx is a valid exclusive index
-  for the given shape.
-  '''
-
-  assert isinstance(ex_idx, int)
-  assert ex_idx > 0 and ex_idx <= len(shape)
-
-def _validate_permutation(rank: int, perm: Sequence):
-  '''
-  Validates that perm is a permutation of length rank.
-  '''
-
-  assert isinstance(perm, Sequence)
-  assert tuple(sorted(perm)) == tuple(range(0, rank))
-
-def _dtype_to_kind(dtype: torch.dtype):
-  '''
-  Computes the corresponding Python type (AKA "type kind") for the
-  given dtype.
-  '''
-  assert isinstance(dtype, torch.dtype)
-
-  bools = (torch.bool,)
-  ints = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-  floats = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-  complexes = (torch.complex64, torch.complex128)
-
-  if dtype in bools:
-    return bool
-  if dtype in ints:
-    return int
-  if dtype in floats:
-    return float
-  return complex
-
-# TODO: refactor into util
-def _higher_type_kind(a: type, b: type):
-  '''
-  Returns the higher of the two given type kinds.
-
-  Type kinds are ordered bool -> int -> float -> complex.
-  '''
-  # Type checking
-  assert isinstance(a, type)
-  assert isinstance(b, type)
-
-  if a is b:
-      return a
-
-  ordered_type_kinds = (
-      bool, int, float, complex
-  )
-
-  for kind in ordered_type_kinds:
-      if a is kind:
-          return b
-      if b is kind:
-          return a
-
-  raise ValueError("Unknown kind!")
-
-# TODO: support additional datastructures
-def _check_same_device(*args, allow_scalars):
-  if len(args) <= 1:
-    return
-
-  # Note: cannot initialize device to the first arg's device (it may not have one)
-  device = None
-  for arg in args:
-    if isinstance(arg, Number):
-      assert allow_scalars, "Found a scalar when checking for same device but scalars not allowed!"
-    elif isinstance(arg, Tensor):
-      if device is None:
-        device = arg.device
-
-      assert device == arg.device, "Tensor on device " + str(arg.device) + " is not on the expected device " + str(device) + "!"
-    else:
-      assert False, "Unexpected type when checking for same device, " + str(type(arg)) + "!"
-
-# Asserts if any of the following are true:
-#   - a non-scalar or non-Tensor is given
-#   - the shape of any tensors is distinct
-# TODO: change asserts to RuntimeError and ValueError exceptions
-# TODO: update to handle containers
-def _check_same_shape(*args):
-  shape = None
-
-  for arg in args:
-    if isinstance(arg, Number):
-      continue
-    elif isinstance(arg, Tensor):
-      if shape is None:
-        shape = arg.shape
-
-      assert tuple(shape) == tuple(arg.shape)
-    else:
-      assert False, "Unexpected type when checking for same shape, " + str(type(arg)) + "!"
-
-# Returns the Python type (AKA "type kind") corresponding to the torch dtype.
-def _dtype_to_kind(dtype):
-  bools = (torch.bool,)
-  ints = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-  floats = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-  complexes = (torch.complex64, torch.complex128)
-
-  if dtype in bools:
-    return bool
-  if dtype in ints:
-    return int
-  if dtype in floats:
-    return float
-  return complex
-
-# Asserts if any of the following are true:
-#   - the dtypes of any tensor args are different
-#   - the type kind of any args are different
-#   - a non-scalar or non-Tensor is given
-# TODO: change asserts to RuntimeError and ValueError exceptions
-# TODO: update to handle containers
-def _check_same_dtype(*args):
-  full_dtype = None
-  scalar_dtype = None
-
-  for arg in args:
-    if isinstance(arg, Number):
-      if scalar_dtype is None:
-        scalar_dtype = type(arg)
-
-      assert scalar_dtype is type(arg), "Scalar of type " + str(type(arg)) + " is not the expected dtype of " + str(scalar_dtype) + "!"
-    elif isinstance(arg, Tensor):
-      if full_dtype is None:
-        full_dtype = arg.dtype
-      if scalar_dtype is None:
-        scalar_dtype = _dtype_to_kind(arg.dtype)
-
-      assert full_dtype is arg.dtype, "Tensor with dtype " + str(arg.dtype) + " is not the expected dtype of " + str(full_dtype) + "!"
-      assert _dtype_to_kind(arg.dtype) is scalar_dtype, "Tensor with dtype " + str(arg.dtype) + " is not the expected dtype kind of " + str(scalar_dtype) + "!"
-    else:
-      assert False, "Unexpected type when checking for same dtype, " + str(type(arg)) + "!"
+__all__ = [
+    #
+    # Common datastructures and helpers
+    #
+    "RETURN_TYPE",
+    #
+    # Elementwise unary prims
+    #
+    "abs",
+    "acos",
+    "acosh",
+    "asin",
+    "atan",
+    "cos",
+    "cosh",
+    "bessel_i0e",
+    "bessel_i1e",
+    "cbrt",
+    "ceil",
+    "digamma",
+    "erf",
+    "erf_inv",
+    "erfc",
+    "exp",
+    "expm1",
+    "floor",
+    "igamma",
+    "igammac",
+    "is_finite",
+    "lgamma",
+    "log",
+    "log1p",
+    "neg",
+    "reciprocal",
+    "round",
+    "sign",
+    "sin",
+    "sinh",
+    "sqrt",
+    "square",
+    "tan",
+    #
+    # Elementwise binary prims
+    #
+    "add",
+    "atan2",
+    "bitwise_and",
+    "bitwise_not",
+    "bitwise_or",
+    "bitwise_xor",
+    # 'complex',  # needs custom meta
+    "div",
+    "eq",
+    "ge",
+    "gt",
+    "le",
+    "lt",
+    "max",
+    "min",
+    "mul",
+    "ne",
+    "nextafter",
+    "pow",
+    "rsqrt",
+    "shift_left",
+    "shift_right_arithmetic",
+    "shift_right_logical",  # not implemented
+    #
+    # View prims
+    #
+    "broadcast_in_dim",
+    "collapse_view",
+    "split_dim",
+    "squeeze",
+    #
+    # Shape prims
+    #
+    "collapse",
+    "concatenate",
+    "reshape",
+    #
+    # Conditional prims
+    #
+    "select",
+    #
+    # Data conversion and movement prims
+    #
+    "convert_element_type",
+    "device_put",
+    #
+    # Inplace prims
+    #
+    "copy_to",
+    "resize",
+]
 
 #
-# Elementwise operations
+# Common datastructures and helpers
 #
 
-# TODO: extend to handle scalar x scalar cases consistently
 
-def _elementwise_checks(*args, allow_scalars=True):
-  _check_same_device(*args, allow_scalars=allow_scalars)
-  _check_same_dtype(*args)
-  _check_same_shape(*args)
+class RETURN_TYPE(Enum):
+    NEW = (0,)
+    VIEW = (1,)
+    INPLACE = (2,)
 
-def _make_elementwise_unary_op(op, *, allow_scalars=False):
-  def _op(a):
-    _elementwise_checks(a, allow_scalars=allow_scalars)
-    return op(a)
-  return _op
 
-def _make_elementwise_binary_op(op, *, allow_scalars=True):
-  def _op(a, b):
-    _elementwise_checks(a, b, allow_scalars=allow_scalars)
-    return op(a, b)
-  return _op
+def _make_prim(
+    *, meta: Callable, impl_aten: Callable, return_type: RETURN_TYPE, doc: str
+):
+    """ """
+
+    def _prim(*args, **kwargs):
+        meta(*args, **kwargs)
+        return impl_aten(*args, **kwargs)
+
+    _prim.__doc__ = doc
+    _prim.meta = meta
+    _prim.return_type = return_type
+
+    return _prim
+
+
+def _elementwise_meta(*args):
+    assert len(args) > 0
+
+    utils.check_same_device(*args, allow_scalars=True)
+    utils.check_same_shape(*args)
+    utils.check_same_dtype(*args)
+
+    strides = None
+    tensor = None
+    number = None
+    for arg in args:
+        if isinstance(arg, TensorLike):
+            if strides is None:
+                strides = arg.stride()
+
+            if tensor is None:
+                tensor = arg
+
+            if arg.stride() != strides:
+                return TensorMeta(
+                    arg, strides=utils.make_contiguous_strides_for(arg.shape)
+                )
+        if isinstance(arg, Number):
+            if number is None:
+                number = arg
+
+    if tensor is not None:
+        return TensorMeta(tensor)
+
+    return TensorMeta(number)
+
+
+def _make_elementwise_unary_prim(impl_aten: Callable, doc: str):
+    """ """
+    return _make_prim(
+        meta=_elementwise_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
+
+
+def _make_elementwise_binary_prim(impl_aten: Callable, doc: str):
+    """ """
+    return _make_prim(
+        meta=_elementwise_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
+
+
+def _not_impl(*args, **kwargs):
+    raise NotImplementedError
 
 
 #
 # Elementwise unary operations
 #
 
-abs = _make_elementwise_unary_op(torch.abs)
+abs = _make_elementwise_unary_prim(
+    impl_aten=torch.abs,
+    doc="",
+)
 
-# TODO: make sugar
-acos = _make_elementwise_unary_op(torch.acos)
+acos = _make_elementwise_unary_prim(
+    impl_aten=torch.acos,
+    doc="",
+)
 
-acosh = _make_elementwise_unary_op(torch.acosh)
+acosh = _make_elementwise_unary_prim(
+    impl_aten=torch.acosh,
+    doc="",
+)
 
-# TODO: make sugar
-asin = _make_elementwise_unary_op(torch.asin)
+asin = _make_elementwise_unary_prim(
+    impl_aten=torch.asin,
+    doc="",
+)
 
-# TODO: make sugar
-atan = _make_elementwise_unary_op(torch.atan)
+atan = _make_elementwise_unary_prim(
+    impl_aten=torch.atan,
+    doc="",
+)
 
-cos = _make_elementwise_unary_op(torch.cos)
+cos = _make_elementwise_unary_prim(
+    impl_aten=torch.cos,
+    doc="",
+)
 
-cosh = _make_elementwise_unary_op(torch.cosh)
+cosh = _make_elementwise_unary_prim(
+    impl_aten=torch.cosh,
+    doc="",
+)
 
+bessel_i0e = _make_elementwise_unary_prim(
+    impl_aten=torch.special.i0e,
+    doc="",
+)
+
+bessel_i1e = _make_elementwise_unary_prim(
+    impl_aten=torch.special.i1e,
+    doc="",
+)
+
+
+def _cbrt_aten(a: torch.Tensor):
+    return pow(a, (1 / 3))
+
+
+cbrt = _make_elementwise_unary_prim(
+    impl_aten=_cbrt_aten,
+    doc="",
+)
+
+ceil = _make_elementwise_unary_prim(
+    impl_aten=torch.ceil,
+    doc="",
+)
+
+digamma = _make_elementwise_unary_prim(
+    impl_aten=torch.digamma,
+    doc="",
+)
+
+erf = _make_elementwise_unary_prim(
+    impl_aten=torch.erf,
+    doc="",
+)
+
+erf_inv = _make_elementwise_unary_prim(
+    impl_aten=torch.special.erfinv,
+    doc="",
+)
+
+erfc = _make_elementwise_unary_prim(
+    impl_aten=torch.special.erfc,
+    doc="",
+)
+
+exp = _make_elementwise_unary_prim(
+    impl_aten=torch.exp,
+    doc="",
+)
+
+expm1 = _make_elementwise_unary_prim(
+    impl_aten=torch.special.expm1,
+    doc="",
+)
+
+floor = _make_elementwise_unary_prim(
+    impl_aten=torch.floor,
+    doc="",
+)
+
+igamma = _make_elementwise_unary_prim(
+    impl_aten=torch.special.gammainc,
+    doc="",
+)
+
+igammac = _make_elementwise_unary_prim(
+    impl_aten=torch.special.gammaincc,
+    doc="",
+)
+
+is_finite = _make_elementwise_unary_prim(
+    impl_aten=torch.isfinite,
+    doc="",
+)
+
+lgamma = _make_elementwise_unary_prim(
+    impl_aten=torch.lgamma,
+    doc="",
+)
+
+log = _make_elementwise_unary_prim(
+    impl_aten=torch.log,
+    doc="",
+)
+
+log1p = _make_elementwise_unary_prim(
+    impl_aten=torch.log1p,
+    doc="",
+)
+
+reciprocal = _make_elementwise_unary_prim(
+    impl_aten=torch.reciprocal,
+    doc="",
+)
+
+neg = _make_elementwise_unary_prim(
+    impl_aten=torch.neg,
+    doc="",
+)
+
+round = _make_elementwise_unary_prim(
+    impl_aten=torch.round,
+    doc="",
+)
+
+sign = _make_elementwise_unary_prim(
+    impl_aten=torch.sign,
+    doc="",
+)
+
+sin = _make_elementwise_unary_prim(
+    impl_aten=torch.sin,
+    doc="",
+)
+
+sinh = _make_elementwise_unary_prim(
+    impl_aten=torch.sinh,
+    doc="",
+)
+
+sqrt = _make_elementwise_unary_prim(
+    impl_aten=torch.sqrt,
+    doc="",
+)
+
+square = _make_elementwise_unary_prim(
+    impl_aten=torch.square,
+    doc="",
+)
+
+tan = _make_elementwise_unary_prim(
+    impl_aten=torch.tan,
+    doc="",
+)
 
 #
 # Elementwise binary operations
 #
 
-add = _make_elementwise_binary_op(torch.add)
+add = _make_elementwise_binary_prim(
+    impl_aten=torch.add,
+    doc="",
+)
 
-atan2 = _make_elementwise_binary_op(torch.atan2)
+atan2 = _make_elementwise_binary_prim(
+    impl_aten=torch.atan2,
+    doc="",
+)
 
-div = _make_elementwise_binary_op(torch.true_divide)
+bitwise_and = _make_elementwise_binary_prim(
+    impl_aten=torch.bitwise_and,
+    doc="",
+)
 
-mul = _make_elementwise_binary_op(torch.mul)
+bitwise_not = _make_elementwise_binary_prim(
+    impl_aten=torch.bitwise_not,
+    doc="",
+)
 
-sub = _make_elementwise_binary_op(torch.sub)
+bitwise_or = _make_elementwise_binary_prim(
+    impl_aten=torch.bitwise_or,
+    doc="",
+)
 
+bitwise_xor = _make_elementwise_binary_prim(
+    impl_aten=torch.bitwise_xor,
+    doc="",
+)
+
+# TODO: complex needs a special meta to account for its float -> complex behavior
+# complex = _make_elementwise_binary_prim(
+#   impl_aten=torch.complex,
+#   doc="",
+# )
+
+# div prim performs truncation division on integers
+def _div(a, b):
+    if isinstance(a, (bool, int)):
+        return torch.div(a, b, rounding_mode="trunc")
+    return torch.true_divide(a, b)
+
+
+div = _make_elementwise_binary_prim(
+    impl_aten=_div,
+    doc="",
+)
+
+eq = _make_elementwise_binary_prim(
+    impl_aten=torch.eq,
+    doc="",
+)
+
+ge = _make_elementwise_binary_prim(
+    impl_aten=torch.ge,
+    doc="",
+)
+
+gt = _make_elementwise_binary_prim(
+    impl_aten=torch.gt,
+    doc="",
+)
+
+le = _make_elementwise_binary_prim(
+    impl_aten=torch.le,
+    doc="",
+)
+
+lt = _make_elementwise_binary_prim(
+    impl_aten=torch.lt,
+    doc="",
+)
+
+max = _make_elementwise_binary_prim(
+    impl_aten=torch.maximum,
+    doc="",
+)
+
+min = _make_elementwise_binary_prim(
+    impl_aten=torch.minimum,
+    doc="",
+)
+
+mul = _make_elementwise_binary_prim(
+    impl_aten=torch.mul,
+    doc="",
+)
+
+ne = _make_elementwise_binary_prim(
+    impl_aten=torch.ne,
+    doc="",
+)
+
+nextafter = _make_elementwise_binary_prim(
+    impl_aten=torch.nextafter,
+    doc="",
+)
+
+pow = _make_elementwise_binary_prim(
+    impl_aten=torch.pow,
+    doc="",
+)
+
+rsqrt = _make_elementwise_binary_prim(
+    impl_aten=torch.rsqrt,
+    doc="",
+)
+
+shift_left = _make_elementwise_binary_prim(
+    impl_aten=torch.bitwise_left_shift,
+    doc="",
+)
+
+shift_right_arithmetic = _make_elementwise_binary_prim(
+    impl_aten=torch.bitwise_right_shift,
+    doc="",
+)
+
+shift_right_logical = _not_impl
+
+sub = _make_elementwise_binary_prim(
+    impl_aten=torch.sub,
+    doc="",
+)
 
 # View operations
 
-def _broadcast_in_dim_checks(
-  a: Tensor,
-  shape: Sequence[int],
-  broadcast_dimensions: Sequence[int]):
+
+def _broadcast_in_dim_meta(
+    a: TensorLike, shape: Sequence[int], broadcast_dimensions: Sequence[int]
+):
     # Type checks
-    assert isinstance(a, Tensor)
+    assert isinstance(a, TensorLike)
     assert isinstance(shape, Sequence)
     assert isinstance(broadcast_dimensions, Sequence)
 
@@ -306,6 +527,17 @@ def _broadcast_in_dim_checks(
     for idx, new_idx in enumerate(broadcast_dimensions):
         assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
 
+    new_strides = []
+    original_idx = 0
+    for idx in range(len(shape)):
+        if idx in broadcast_dimensions:
+            new_strides.append(a.stride()[original_idx])
+            original_idx = original_idx + 1
+        new_strides.append(1)
+
+    return TensorMeta(a, shape=shape, strides=new_strides)
+
+
 def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
     s = list(shape)
     for broadcast_dimension in broadcast_dimensions:
@@ -313,66 +545,73 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
 
     v = a
     for idx, x in enumerate(s):
-        if x != - 1:
-            v.unsqueeze_(idx)
+        if x != -1:
+            v = v.unsqueeze(idx)
 
     return v.expand(shape)
 
 
-def broadcast_in_dim(a, shape, broadcast_dimensions):
-    '''
-    Creates a view of t with the specified shape.
+_broadcast_in_dim_doc = """
+  Creates a view of t with the specified shape.
 
-    Allows adding dimensions of any length and broadcasting
-    dimensions of length one in t to any length.
+  Allows adding dimensions of any length and broadcasting
+  dimensions of length one in t to any length.
 
-    The location of the broadcast dimensions must be specified
-    using the broadcast_dimensions argument. Changing the
-    relative order of dimensions is not supported.
-    '''
+  The location of the broadcast dimensions must be specified
+  using the broadcast_dimensions argument. Changing the
+  relative order of dimensions is not supported.
+  """
 
-    _broadcast_in_dim_checks(a, shape, broadcast_dimensions)
-    return _broadcast_in_dim_aten(a, shape, broadcast_dimensions)
+broadcast_in_dim = _make_prim(
+    meta=_broadcast_in_dim_meta,
+    impl_aten=_broadcast_in_dim_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_broadcast_in_dim_doc,
+)
 
-def broadcast(a, leading_lengths):
-  '''
-  A wrapper around broadcast_in_dim that just adds outermost dimensions
-  to a.
-  '''
-  shape = leading_lengths + a.shape
-  rank = len(leading_lengths) + len(a.shape)
-  return broadcast_in_dim(a, shape, tuple(range(len(leading_lengths), rank)))
 
-def _merge_dims_checks(a: Tensor, start: int, end: int):
-  assert isinstance(a, Tensor)
+def _collapse_view_meta(a: TensorLike, start: int, end: int) -> TensorLike:
+    assert isinstance(a, TensorLike)
 
-  shape = a.shape
-  strides = a.stride()
+    shape = a.shape
+    strides = a.stride()
 
-  _validate_idx(shape, start)
-  _validate_exclusive_idx(shape, end)
+    utils.validate_idx(shape, start)
+    utils.validate_exclusive_idx(shape, end)
 
-  # Verifies end greater than start
-  assert end > start
+    # Verifies end is strictly greater than start
+    # (Collapse requires a non-empty interval)
+    assert end > start
 
-  for idx in range(start, end - 1):
-    assert strides[idx] == strides[idx + 1] * shape[idx + 1]
+    length = 1
+    stride = 1
+    for idx in range(start, end):
+        if idx != (end - 1):
+            assert strides[idx] == strides[idx + 1] * shape[idx + 1]
+        length = length * shape[idx]
+        stride = stride * strides[idx]
 
-def _merge_dims_aten(a: Tensor, start: int, end: int) -> Tensor:
-  # Short-circuits on null op
-  if start == end - 1:
-    return a
+    new_shape = shape[:start] + [length] + start[end:]
+    new_strides = strides[:start] + [stride] + start[end:]
 
-  dim_length = 1
-  for idx in range(start, end):
-    dim_length = dim_length * a.shape[idx]
+    return TensorMeta(a, shape=new_shape, strides=new_strides)
 
-  new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
 
-  return a.view(new_shape)
+def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
+    # Short-circuits on null op
+    if start == end - 1:
+        return a
 
-def merge_dims(a: Tensor, start: int, end: int) -> Tensor:
-  '''
+    dim_length = 1
+    for idx in range(start, end):
+        dim_length = dim_length * a.shape[idx]
+
+    new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
+
+    return a.view(new_shape)
+
+
+_collapse_view_doc = """
   Creates a view of a with the dimensions between
   start (inclusive) and end (exclusive) merged into a
   single dimension.
@@ -387,180 +626,343 @@ def merge_dims(a: Tensor, start: int, end: int) -> Tensor:
   stride[i] = stride[i+1] * shape[i+1]
 
   for all i in [start, end - 1).
-  '''
+  """
 
-  _merge_dims_checks(a, start, end)
-  return _merge_dims_aten(a, start, end)
+collapse_view = _make_prim(
+    meta=_collapse_view_meta,
+    impl_aten=_collapse_view_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_collapse_view_doc,
+)
 
-def _split_dim_checks(a: Tensor, dim: int, outer_length: int):
-  assert isinstance(a, Tensor)
-  assert isinstance(dim, int)
-  assert isinstance(outer_length, int)
 
-  # Verifies dim is a valid idx
-  assert dim >=0 and dim < len(a.shape)
+def _split_dim_meta(a: TensorLike, dim: int, outer_length: int) -> TensorLike:
+    assert isinstance(a, TensorLike)
+    utils.validate_idx(a.shape, dim)
+    utils.validate_dim_length(outer_length)
 
-  # Verifies outer_length is a valid length
-  assert outer_length >= 0
+    # Verifies the dim can be split with the specified lhs_length
+    inner_length = a.shape[dim] / outer_length
+    assert int(inner_length) == inner_length
 
-  # Verifies the dim can be split with the specified lhs_length
-  inner_length = a.shape[dim] / outer_length
-  assert int(inner_length) == inner_length
+    new_shape = []
+    new_strides = []
+    for idx in range(a.shape):
+        if idx == dim:
+            new_shape.extend((outer_length, inner_length))
+            new_strides.extend((a.stride[idx] * inner_length, a.stride[idx]))
+        else:
+            new_shape.append(a.shape[idx])
+            new_strides.append(a.stride()[idx])
+
+    return TensorMeta(a, shape=new_shape, strides=new_strides)
+
 
 def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
-  inner_length = int(a.shape[dim] / outer_length)
-  new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1:]
+    inner_length = int(a.shape[dim] / outer_length)
+    new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1 :]
 
-  return a.view(new_shape)
+    return a.view(new_shape)
 
-def split_dim(a: Tensor, dim: int, outer_length: int) -> Tensor:
-  '''
+
+_split_dim_doc = """
   Creates a view of a with the given dimension (of length l) split
   into two dimensions, with the outer of the two having
   length outer_length and the inner of the two having computed
   length inner_length such outer_length * inner_length = l.
-  '''
+  """
 
-  _split_dim_checks(a, dim, outer_length)
-  return _split_dim_aten(a, dim, outer_length)
+# TODO: consider renaming split_dim_view
+split_dim = _make_prim(
+    meta=_split_dim_meta,
+    impl_aten=_split_dim_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_split_dim_doc,
+)
 
 # Note: allows dimensions to be specified redundantly
-def _squeeze_checks(a: Tensor, dimensions: Sequence):
-  assert isinstance(a, Tensor)
+def _squeeze_meta(a: TensorLike, dimensions: Sequence) -> TensorLike:
+    assert isinstance(a, TensorLike)
 
-  for idx in dimensions:
-    _validate_idx(a.shape, idx)
-    assert a.shape[idx] == 1
+    for idx in dimensions:
+        utils.validate_idx(a.shape, idx)
+        assert a.shape[idx] == 1
+
+    new_shape = []
+    new_strides = []
+    for idx in range(a.shape):
+        if idx in dimensions:
+            continue
+
+        new_shape.append(a.shape[idx])
+        new_strides.append(a.stride()[idx])
+
+    return TensorMeta(a, shape=new_shape, stride=new_strides)
+
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
-  for idx in dimensions:
-    a = torch.squeeze(a, dim=idx)
+    for idx in dimensions:
+        a = torch.squeeze(a, dim=idx)
 
-  return a
+    return a
 
-def squeeze(a: Tensor, dimensions: Sequence) -> Tensor:
-  '''
-  Creates a view of a with the specified dimensions of
-  length one removed.
-  '''
 
-  _squeeze_checks(a, dimensions)
-  return _squeeze_aten(a, dimensions)
+_squeeze_doc = """
+  Creates a view of the tensor with the specified dimensions removed.
+
+  The removed dimensions must each have length one.
+  """
+
+squeeze = _make_prim(
+    meta=_squeeze_meta,
+    impl_aten=_squeeze_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_squeeze_doc,
+)
 
 #
 # Shape operations
 #
 def collapse(a: Tensor, start: int, end: int) -> Tensor:
-  '''
-  Wrapper around reshape that collapses a span of dimensions.
+    """
+    Wrapper around reshape that collapses a span of dimensions.
 
-  See merge_dims for the corresponding view operation.
-  '''
+    See merge_dims for the corresponding view operation.
+    """
 
-  dim_length = 1
-  for idx in range(start, end):
-    dim_length = dim_length * a.shape[idx]
+    dim_length = 1
+    for idx in range(start, end):
+        dim_length = dim_length * a.shape[idx]
 
-  new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
-  return reshape(a, new_shape)
+    new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
+    return reshape(a, new_shape)
 
-def _concatenate_checks(tensors: Sequence[Tensor], dim: int):
-  assert len(tensors) > 0
-  assert dim >= 0
 
-  shape = tensors[0].shape
-  assert dim < len(shape)
+def _concatenate_meta(tensors: Sequence, dim: int) -> TensorLike:
+    assert len(tensors) > 0
 
-  _check_same_dtype(*tensors)
+    for tensor in tensors:
+        assert isinstance(tensor, TensorLike)
 
-  # Verifies same shape (except in the concat dimension)
-  for tensor in tensors:
-    for idx, lengths in enumerate(zip(shape, tensor.shape)):
-      common_length, length = lengths
-      if idx == dim:
-        continue
-      assert length == common_length
+    utils.check_same_dtype(tensors)
+    utils.check_same_device(tensors)
 
-def _concatentate_aten(tensors: Sequence[Tensor], dim: int) -> Tensor:
-  return torch.cat(tensors, dim)
+    shape = tensors[0].shape
+    utils.validate_idx(shape, dim)
 
-def concatenate(tensors: Sequence[Tensor], dim: int) -> Tensor:
-  _concatenate_checks(tensors, dim)
-  return _concatentate_aten(tensors, dim)
+    # Verifies same shape (except in the concat dimension)
+    concat_length = 0
+    for tensor in tensors:
+        for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
+            if idx == dim:
+                concat_length = concat_length + length
+            else:
+                assert length == common_length
 
-def _reshape_checks(a: Tensor, shape: Sequence):
-  assert isinstance(a, Tensor)
-  _validate_shape(shape)
+    new_shape = tensors[0].shape
+    new_shape[dim] = concat_length
+    return TensorMeta(
+        tensors[0], shape=new_shape, strides=make_contiguous_strides_for(new_shape)
+    )
 
-  # Validates the tensor and the requested shape have the
-  # same number of elements
-  numel = reduce(lambda acc, x: acc * x, shape)
-  assert a.numel() == numel
+
+def _concatenate_aten(tensors: Sequence, dim: int) -> Tensor:
+    return torch.cat(tensors, dim)
+
+
+_concatenate_doc = """
+  Concatenates tensors along the specified dimension.
+
+  The tensors' shapes must have the same rank and same length for other dimensions.
+  """
+
+# TODO: review stride logic
+concatenate = _make_prim(
+    meta=_concatenate_meta,
+    impl_aten=_concatenate_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_concatenate_doc,
+)
+
+
+def _reshape_meta(a: TensorLike, shape: Sequence):
+    assert isinstance(a, TensorLike)
+    utils.validate_shape(shape)
+
+    # Validates the tensor and the requested shape have the
+    # same number of elements
+    numel = reduce(lambda acc, x: acc * x, shape)
+    assert a.numel() == numel
+
 
 def _reshape_aten(a: Tensor, shape: Sequence) -> Tensor:
 
-  return a.clone().reshape(shape).contiguous()
+    return a.clone().reshape(shape).contiguous()
 
-def reshape(a: Tensor, shape: Sequence) -> Tensor:
-  '''
+
+_reshape_doc = """
   Creates a contiguous tensor with the specified shape
   containing a copy of the data in a.
-  '''
+  """
 
-  _reshape_checks(a, shape)
-  return _reshape_aten(a, shape)
+reshape = _make_prim(
+    meta=_reshape_meta,
+    impl_aten=_reshape_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_reshape_doc,
+)
+
+#
+# Conditional prims
+#
+
+
+def _select_meta(pred: TensorLike, a: TensorLike, b: TensorLike) -> TensorLike:
+    utils.check_same_device(pred, a, b, allow_scalars=True)
+    utils.check_same_shape(pred, a, b)
+    assert pred.dtype is torch.bool
+
+    return _elementwise_meta(a, b)
+
+
+def _select_aten(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
+    return torch.where(pred, a, b)
+
+
+_select_doc = """
+  Selects elements from a and b according to pred.
+
+  Where pred is true the result contains the element from a, and
+  where pred is false the result contains the element from b.
+  """
+
+select = _make_prim(
+    meta=_select_meta,
+    impl_aten=_select_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_select_doc,
+)
+
+
+def select(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
+    """ """
+
+    _select_meta(pred, a, b)
+    return _select_aten(pred, a, b)
+
 
 #
 # Type conversions
 #
 
-def _convert_element_type_checks(a: Tensor, dtype: torch.dtype):
-  # Type checks
+
+def _convert_element_type_meta(a: TensorLike, dtype: torch.dtype) -> TensorLike:
+    # Type checks
     assert isinstance(a, Tensor)
     assert isinstance(dtype, torch.dtype)
 
+    return TensorMeta(a, dtype=dtype)
+
+
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-  return a.to(dtype)
+    return a.to(dtype)
 
-def convert_element_type(a: Tensor, dtype: torch.dtype) -> Tensor:
-  _convert_element_type_checks(a, dtype)
-  return _convert_element_type_aten(a, dtype)
 
-def _device_put_checks(a: Tensor, device):
-  assert isinstance(a, Tensor)
-  assert isinstance(device, (str, torch.device))
+_convert_element_type_doc = """
+  Creates a copy of a tensor with the given dtype.
+  """
 
-def _device_put_aten(a: Tensor, device) -> Tensor:
-  return a.to(device)
+convert_element_type = _make_prim(
+    meta=_convert_element_type_meta,
+    impl_aten=_convert_element_type_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_convert_element_type_doc,
+)
 
-def device_put(a: Tensor, device) -> Tensor:
-  _device_put_checks(a, device)
-  return _device_put_aten(a, device)
+
+def _device_put_meta(a: TensorLike, device: Union[str, torch.device]) -> TensorLike:
+    assert isinstance(a, TensorLike)
+    assert isinstance(device, (str, torch.device))
+
+    return TensorMeta(a, device=utils.wrap_device(device))
+
+
+def _device_put_aten(a: Tensor, device: Union[str, torch.device]) -> Tensor:
+    return a.to(device)
+
+
+_device_put_doc = """
+  Creates a copy of a tensor on the given device.
+  """
+
+device_put = _make_prim(
+    meta=_device_put_meta,
+    impl_aten=_device_put_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_device_put_doc,
+)
 
 #
 # Inplace operators
 #
 
-def _copy_to_checks(a: Tensor, b: Tensor):
-  assert isinstance(a, Tensor)
-  assert isinstance(b, Tensor)
 
-  # Validates the cast is safe
-  a_kind = _dtype_to_kind(a.dtype)
-  b_kind = _dtype_to_kind(b.dtype)
-  assert a_kind is _higher_type_kind(a_kind, b_kind)
+def _copy_to_meta(a: TensorLike, b: TensorLike):
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
 
-  assert a.numel() == b.numel()
+    # Validates the cast is safe
+    a_typ = utils.dtype_to_type(a.dtype)
+    b_typ = utils.dtype_to_type(b.dtype)
+    if a_typ is not utils.get_higher_type(a_typ, b_typ):
+        raise RuntimeError(str(b.dtype), " can't be cast safely to ", str(a.dtype), "!")
+
+    # Validates the tensors have the same number of elements
+    if a.numel() != b.numel():
+        msg = "Attempting to copy {0} elements to a tensor with {1} elements!".format(
+            b.numel(), a.numel()
+        )
+        raise RuntimeError(msg)
+
+    return a
+
 
 def _copy_to_aten(a: Tensor, b: Tensor) -> Tensor:
-  return a.copy_(b)
+    return a.copy_(b)
 
-# TODO: implementing 'casting' options like NumPy
-# Currently implements 'safe' casting
-def copy_to(a: Tensor, b: Tensor) -> Tensor:
-  '''
-  Copies the data in b to a inplace and returns the modified a.
-  '''
 
-  _copy_to_checks(a, b)
-  return _copy_to_aten(a, b)
+_copy_to_doc = """
+  Copies the data in b to a and returns the modified a.
+  """
+
+# TODO: Remove safe casting and implement on reference instead
+copy_to = _make_prim(
+    meta=_copy_to_meta,
+    impl_aten=_copy_to_aten,
+    return_type=RETURN_TYPE.INPLACE,
+    doc=_copy_to_doc,
+)
+
+
+def _resize_meta(a: TensorLike, shape: Sequence):
+    assert a.numel() == 0
+    return TensorMeta(a, shape=shape, strides=make_contiguous_strides_for(shape))
+
+
+def _resize_aten(a: Tensor, shape: Sequence) -> Tensor:
+    return a.resize_(shape)
+
+
+_resize_doc = """
+  Gives a tensor with no elements a new shape, returning the modified tensor.
+
+  The tensor's strides are contiguous. The tensor's values are unitialized.
+  """
+
+# TODO: review support arbitrary resizes
+resize = _make_prim(
+    meta=_resize_meta,
+    impl_aten=_resize_aten,
+    return_type=RETURN_TYPE.INPLACE,
+    doc=_resize_doc,
+)

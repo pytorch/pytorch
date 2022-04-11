@@ -335,12 +335,8 @@ class TestBinaryUfuncs(TestCase):
 
         self.assertEqual(expected, actual)
 
-    # Tests that elementwise binary operators participate in type promotion properly
-    # NOTE: because the cross-product of all possible type promotion tests is huge, this
-    #   just spot checks some handwritten cases.
-    # NOTE: It may be possible to refactor this test into something simpler
-    @ops(binary_ufuncs, dtypes=OpDTypes.none)
-    def test_type_promotion(self, device, op):
+    # TODO: add scalar and zero dim tensor cases
+    def _test_type_promotion_helper(self, device, op, fn):
         supported_dtypes = op.supported_dtypes(torch.device(device).type)
 
         def _supported(dtypes):
@@ -356,60 +352,56 @@ class TestBinaryUfuncs(TestCase):
             rhs_i32 = make_tensor((5,), device=device, dtype=torch.int32, **op.rhs_make_tensor_kwargs)
             rhs_i64 = make_tensor((5,), device=device, dtype=torch.int64, **op.rhs_make_tensor_kwargs)
 
-
             if op.promotes_int_to_float:
                 default_dtype = torch.get_default_dtype()
-                self.assertEqual(op(lhs_i16, rhs_i32).dtype, default_dtype)
-                self.assertEqual(op(lhs_i16, rhs_i32), op(lhs_i16.to(default_dtype), rhs_i32.to(default_dtype)))
+                self.assertEqual(fn(lhs_i16, rhs_i32).dtype, default_dtype)
+                self.assertEqual(fn(lhs_i16, rhs_i32), fn(lhs_i16.to(default_dtype), rhs_i32.to(default_dtype)))
 
-                self.assertEqual(op(lhs_i32, rhs_i64).dtype, default_dtype)
-                self.assertEqual(op(lhs_i32, rhs_i64), op(lhs_i32.to(default_dtype), rhs_i64.to(default_dtype)))
+                self.assertEqual(fn(lhs_i32, rhs_i64).dtype, default_dtype)
+                self.assertEqual(fn(lhs_i32, rhs_i64), fn(lhs_i32.to(default_dtype), rhs_i64.to(default_dtype)))
             elif op.always_returns_bool:
-                self.assertEqual(op(lhs_i16, rhs_i32).dtype, torch.bool)
-                self.assertEqual(op(lhs_i32, rhs_i64).dtype, torch.bool)
+                self.assertEqual(fn(lhs_i16, rhs_i32).dtype, torch.bool)
+                self.assertEqual(fn(lhs_i32, rhs_i64).dtype, torch.bool)
             else:  # standard type promotion
-                self.assertEqual(op(lhs_i16, rhs_i32).dtype, torch.int32)
-                self.assertEqual(op(lhs_i16, rhs_i32), op(lhs_i16.to(torch.int32), rhs_i32))
+                self.assertEqual(fn(lhs_i16, rhs_i32).dtype, torch.int32)
+                self.assertEqual(fn(lhs_i16, rhs_i32), fn(lhs_i16.to(torch.int32), rhs_i32))
 
-                self.assertEqual(op(lhs_i32, rhs_i64).dtype, torch.int64)
-                self.assertEqual(op(lhs_i32, rhs_i64), op(lhs_i32.to(torch.int64), rhs_i64))
+                self.assertEqual(fn(lhs_i32, rhs_i64).dtype, torch.int64)
+                self.assertEqual(fn(lhs_i32, rhs_i64), fn(lhs_i32.to(torch.int64), rhs_i64))
 
             if op.supports_out:
                 if not op.promotes_int_to_float:
                     # Integers can be safely cast to other integer types
                     out = torch.empty_like(lhs_i64)
-                    self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.int64)
-                    self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                    self.assertEqual(fn(lhs_i16, rhs_i32, out=out).dtype, torch.int64)
+                    self.assertEqual(fn(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                     out = torch.empty_like(lhs_i16)
-                    self.assertEqual(op(lhs_i32, rhs_i64, out=out).dtype, torch.int16)
-                    self.assertEqual(op(lhs_i32, rhs_i64), out, exact_dtype=False)
+                    self.assertEqual(fn(lhs_i32, rhs_i64, out=out).dtype, torch.int16)
                 else:
                     # Float outs cannot be safely cast to integer types
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-                        op(lhs_i16, rhs_i32, out=torch.empty_like(lhs_i64))
+                        fn(lhs_i16, rhs_i32, out=torch.empty_like(lhs_i64))
 
                 if not op.always_returns_bool:
                     # Neither integer nor float outs can be cast to bool
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-                        op(lhs_i16, rhs_i32, out=torch.empty_like(lhs_i64, dtype=torch.bool))
+                        fn(lhs_i16, rhs_i32, out=torch.empty_like(lhs_i64, dtype=torch.bool))
 
                 # All these output types can be cast to any float or complex type
                 out = torch.empty_like(lhs_i64, dtype=torch.float16)
-                self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float16)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_i16, rhs_i32, out=out).dtype, torch.float16)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.bfloat16)
-                self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.bfloat16)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_i16, rhs_i32, out=out).dtype, torch.bfloat16)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.float32)
-                self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float32)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_i16, rhs_i32, out=out).dtype, torch.float32)
+                self.assertEqual(fn(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_i16, rhs_i32, out=out).dtype, torch.complex64)
+                self.assertEqual(fn(lhs_i16, rhs_i32), out, exact_dtype=False)
 
         # float x float type promotion
         if _supported((torch.float32, torch.float64)):
@@ -420,38 +412,37 @@ class TestBinaryUfuncs(TestCase):
             rhs_f64 = make_tensor((5,), device=device, dtype=torch.float64, **op.rhs_make_tensor_kwargs)
 
             if op.always_returns_bool:
-                self.assertEqual(op(lhs_f32, rhs_f64).dtype, torch.bool)
+                self.assertEqual(fn(lhs_f32, rhs_f64).dtype, torch.bool)
             else:  # normal float type promotion
-                self.assertEqual(op(lhs_f32, rhs_f64).dtype, torch.float64)
-                self.assertEqual(op(lhs_f32, rhs_f64), op(lhs_f32.to(torch.float64), rhs_f64))
+                self.assertEqual(fn(lhs_f32, rhs_f64).dtype, torch.float64)
+                self.assertEqual(fn(lhs_f32, rhs_f64), fn(lhs_f32.to(torch.float64), rhs_f64))
 
             if op.supports_out:
                 # All these output types can be cast to any float or complex type
                 out = torch.empty_like(lhs_f64, dtype=torch.float16)
-                self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.float16)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_f32, rhs_f64, out=out).dtype, torch.float16)
 
                 out = torch.empty_like(lhs_f64, dtype=torch.bfloat16)
-                self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.bfloat16)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_f32, rhs_f64, out=out).dtype, torch.bfloat16)
+                self.assertEqual(fn(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_f64, dtype=torch.float32)
-                self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.float32)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_f32, rhs_f64, out=out).dtype, torch.float32)
+                self.assertEqual(fn(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_f64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_f32, rhs_f64, out=out).dtype, torch.complex64)
+                self.assertEqual(fn(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 if not op.always_returns_bool:
                     # float outs can't be cast to an integer dtype
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-                        op(lhs_f32, rhs_f64, out=torch.empty_like(lhs_f64, dtype=torch.int64))
+                        fn(lhs_f32, rhs_f64, out=torch.empty_like(lhs_f64, dtype=torch.int64))
                 else:
                     # bool outs can be cast to an integer dtype
                     out = torch.empty_like(lhs_f64, dtype=torch.int64)
-                    self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.int64)
-                    self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                    self.assertEqual(fn(lhs_f32, rhs_f64, out=out).dtype, torch.int64)
+                    self.assertEqual(fn(lhs_f32, rhs_f64), out, exact_dtype=False)
 
         # complex x complex type promotion
         if _supported((torch.complex64, torch.complex128)):
@@ -462,34 +453,47 @@ class TestBinaryUfuncs(TestCase):
             rhs_c128 = make_tensor((5,), device=device, dtype=torch.complex128, **op.rhs_make_tensor_kwargs)
 
             if op.always_returns_bool:
-                self.assertEqual(op(lhs_c64, lhs_c128).dtype, torch.bool)
+                self.assertEqual(fn(lhs_c64, lhs_c128).dtype, torch.bool)
             else:  # normal complex type promotion
-                self.assertEqual(op(lhs_c64, rhs_c128).dtype, torch.complex128)
-                self.assertEqual(op(lhs_c64, rhs_c128), op(lhs_c64.to(torch.complex128), rhs_c128))
+                self.assertEqual(fn(lhs_c64, rhs_c128).dtype, torch.complex128)
+                self.assertEqual(fn(lhs_c64, rhs_c128), fn(lhs_c64.to(torch.complex128), rhs_c128))
 
             if op.supports_out:
                 # All these output types can be cast to any or complex type
                 out = torch.empty_like(lhs_c64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_c64, rhs_c128, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_c64, rhs_c128), out, exact_dtype=False)
+                self.assertEqual(fn(lhs_c64, rhs_c128, out=out).dtype, torch.complex64)
+                self.assertEqual(fn(lhs_c64, rhs_c128), out, exact_dtype=False)
 
                 if not op.always_returns_bool:
                     # complex outs can't be cast to float types
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-                        op(lhs_c64, rhs_c128, out=torch.empty_like(lhs_c64, dtype=torch.float64))
+                        fn(lhs_c64, rhs_c128, out=torch.empty_like(lhs_c64, dtype=torch.float64))
                     # complex outs can't be cast to an integer dtype
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-                        op(lhs_c64, rhs_c128, out=torch.empty_like(lhs_c64, dtype=torch.int64))
+                        fn(lhs_c64, rhs_c128, out=torch.empty_like(lhs_c64, dtype=torch.int64))
                 else:
                     # bool outs can be cast to a float type
                     out = torch.empty_like(lhs_c64, dtype=torch.float64)
-                    self.assertEqual(op(lhs_c64, rhs_c128, out=out).dtype, torch.float64)
-                    self.assertEqual(op(lhs_c64, rhs_c128), out, exact_dtype=False)
+                    self.assertEqual(fn(lhs_c64, rhs_c128, out=out).dtype, torch.float64)
+                    self.assertEqual(fn(lhs_c64, rhs_c128), out, exact_dtype=False)
 
                     # bool outs can be cast to an integer dtype
                     out = torch.empty_like(lhs_f64, dtype=torch.int64)
-                    self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.int64)
-                    self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                    self.assertEqual(fn(lhs_f32, rhs_f64, out=out).dtype, torch.int64)
+                    self.assertEqual(fn(lhs_f32, rhs_f64), out, exact_dtype=False)
+
+    # Tests that elementwise binary operators participate in type promotion properly
+    # NOTE: because the cross-product of all possible type promotion tests is huge, this
+    #   just spot checks some handwritten cases.
+    # NOTE: It may be possible to refactor this test into something simpler
+    @ops(binary_ufuncs, dtypes=OpDTypes.none)
+    def test_type_promotion(self, device, op):
+        self._test_type_promotion_helper(device, op, op.get_op())
+
+    _python_ref_ops = tuple(op for op in binary_ufuncs if op.python_ref is not None)
+    @ops(_python_ref_ops, dtypes=OpDTypes.none)
+    def test_type_promotion_python_references(self, device, op):
+        self._test_type_promotion_helper(device, op, op.python_ref)
 
     # TODO: move to error input test
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))

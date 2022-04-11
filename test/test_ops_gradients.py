@@ -119,6 +119,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, device, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
+    _python_ref_ops = tuple(filter(lambda op: op.python_ref is not None, op_db))
+    @skipCUDAIfRocm
+    @_gradcheck_ops(_python_ref_ops)
+    def test_fn_grad_python_references(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+        self._grad_test_helper(device, dtype, op, op.python_ref)
+
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
     # @_gradcheck_ops(op_db)
@@ -132,6 +139,22 @@ class TestGradients(TestCase):
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+
+    # Test that gradients of gradients are computed correctly
+    @_gradcheck_ops(op_db)
+    def test_fn_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+        if not op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
+        self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
+
+    @skipCUDAIfRocm
+    @_gradcheck_ops(_python_ref_ops)
+    def test_fn_gradgrad_python_references(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+        if not op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
+        self._check_helper(device, dtype, op, op.python_ref, 'bwgrad_bwgrad')
 
     # Test that gradients of gradients are computed correctly
     @_gradcheck_ops(op_db)
