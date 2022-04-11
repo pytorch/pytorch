@@ -418,11 +418,11 @@ def run_test(
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_module + ".py"] + unittest_args
+    argv = [test_directory + "/" + test_module + ".py"] + unittest_args
 
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    return shell(command, test_directory)
+    return shell(command, REPO_ROOT)
 
 
 def test_cuda_primary_ctx(test_module, test_directory, options):
