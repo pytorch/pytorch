@@ -42,7 +42,8 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
         # Normalize the i'th column.
         col = matrices[:, :, i : i + 1]
         # If no epsilon is added here, division by zero may be caused by vanishing gradients.
-        # This epsilon is not needed if the input batch of matrices covers the gradients of at least one entire layer in the neural network.
+        # This epsilon is not needed if the input batch of matrices covers the gradients of at least one entire layer
+        # in the neural network.
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
