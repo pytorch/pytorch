@@ -215,7 +215,6 @@ def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Option
                                                "non_traceable_module_class",
                                                "additional_fuser_method_mapping",
                                                "additional_qat__module_mapping",
-                                               "additional_fusion_pattern",
                                                "additional_quant_pattern",
                                                "input_quantized_idxs",
                                                "output_quantized_idxs",
