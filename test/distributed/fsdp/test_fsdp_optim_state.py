@@ -338,6 +338,19 @@ class TestFSDPOptimState(FSDPTest):
                         continue
                     self.assertEqual(full_osd_value, ref_osd_pg[name])
 
+    def _check_state_device(self, osd: Dict[str, Any], on_gpu: bool):
+        """Checks that all tensors in ``osd["state"]`` are on GPU if
+        ``on_gpu=True`` and on CPU if ``on_gpu=False.``"""
+        for param_state in osd["state"].values():
+            for state_name, value in param_state.items():
+                if torch.is_tensor(value):
+                    if on_gpu and not value.is_cuda:
+                        print(state_name, value.device)
+                    if on_gpu:
+                        self.assertTrue(value.is_cuda)
+                    else:
+                        self.assertFalse(value.is_cuda)
+
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("rank0_only", [False, True])
@@ -519,6 +532,8 @@ class TestFSDPOptimState(FSDPTest):
                 full_osd2 if self.rank == 0 else None, model2, optim_input2,
                 group=new_group,
             )
+            self._check_state_device(sharded_osd1, on_gpu=True)
+            self._check_state_device(sharded_osd2, on_gpu=True)
         # As a sanity check, check that sharding the second model's full
         # optimizer state dict according to itself is equivalent to its local
         # optimizer's state dict
