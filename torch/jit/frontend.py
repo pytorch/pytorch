@@ -3,6 +3,7 @@ import sys
 import ast
 import inspect
 import string
+import re
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
