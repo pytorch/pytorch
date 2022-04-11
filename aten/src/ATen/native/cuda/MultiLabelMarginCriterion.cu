@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/CUDAFunctions.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/CUDAFunctions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/sum_cuda_dispatch.h>
+#include <ATen/ops/multilabel_margin_loss.h>
+#endif
 
 
 namespace at {
