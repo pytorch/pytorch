@@ -1325,8 +1325,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         try:
             all_params = list(params)
         except TypeError:
-            raise TypeError("`params` argument should be an iterable of "
-                            f"Tensors, but got {torch.typename(params)}")
+            raise TypeError("`params` argument should be an iterable of Tensors"
+                            f" or dicts, but got {torch.typename(params)}")
         if len(all_params) == 0:
             raise ValueError("ZeroRedundancyOptimizer got an empty parameter "
                              "list")
@@ -1415,7 +1415,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
                     "error due to an empty parameter list"
                 )
-                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)
+                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
 
             # Log information about the DDP and ZeRO bucketing
             if dist.get_debug_level() != dist.DebugLevel.OFF:

@@ -1,10 +1,11 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)

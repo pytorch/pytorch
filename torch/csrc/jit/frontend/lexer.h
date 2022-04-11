@@ -190,7 +190,7 @@ struct TORCH_API SharedParserData {
   // find the longest match of str.substring(pos) against a token, return true
   // if successful filling in kind, start,and len
   bool match(
-      StringCordView str,
+      c10::string_view str,
       size_t pos,
       bool continuation, // are we inside a scope where newlines don't count
                          // (e.g. inside parens)
@@ -241,12 +241,12 @@ struct TORCH_API SharedParserData {
     // invariant: the next token is not whitespace or newline
     *start = pos;
     // check for a valid number
-    if (isNumber(str.piece(0), pos, len)) {
+    if (isNumber(str, pos, len)) {
       *kind = TK_NUMBER;
       return true;
     }
     // check for string
-    if (isString(str.piece(0), pos, len)) {
+    if (isString(str, pos, len)) {
       *kind = TK_STRINGLITERAL;
       return true;
     }
@@ -369,7 +369,7 @@ struct TORCH_API SharedParserData {
     return isspace(n) && n != '\n';
   }
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(StringCordView str, size_t pos) {
+  bool isTypeComment(c10::string_view str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;
@@ -388,7 +388,7 @@ struct Token {
   SourceRange range;
   Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
-    return range.text().str();
+    return range.text();
   }
   std::string kindString() const {
     return kindToString(kind);
@@ -396,7 +396,7 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(std::shared_ptr<Source> source)
+  explicit Lexer(std::shared_ptr<SourceView> source)
       : source(std::move(source)),
         pos(0),
         nesting(0),
@@ -519,19 +519,25 @@ struct Lexer {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t length;
     AT_ASSERT(source);
-    auto src = source->text_str();
     if (!shared.match(
-            src, pos, nesting > 0, whitespace_token, &kind, &start, &length)) {
+            source->text(),
+            pos,
+            nesting > 0,
+            whitespace_token,
+            &kind,
+            &start,
+            &length)) {
       expected(
           "a valid token",
-          Token(source->char_at(start), SourceRange(source, start, start + 1)));
+          Token(
+              (source->text())[start], SourceRange(source, start, start + 1)));
     }
     auto t = Token(kind, SourceRange(source, start, start + length));
     pos = start + length;
     return t;
   }
 
-  std::shared_ptr<Source> source;
+  std::shared_ptr<SourceView> source;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of indentation level of blocks

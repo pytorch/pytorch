@@ -18,6 +18,7 @@ import builtins
 import typing
 import io
 import pickle
+import threading
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -322,15 +323,6 @@ def get_type_hint_captures(fn):
         A Dict[str, Any] containing a mapping from the literal annotations used on
         fn to the Python objects they refer to.
     """
-    # First, try to get the source of the function. We'll need to parse it to find the actual string names
-    # that were used to annotate the types, since inspect.signature() will only return the class object that
-    # the annotation refers to, not the string name. If we can't get the source, simply return an empty dict.
-    # This may happen in cases where the function is synthesized dynamically at runtime.
-    try:
-        src = inspect.getsource(fn)
-    except OSError:
-        return {}
-
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
     # that refers to a class in its own definition, but trying to include a mapping for this in the result
@@ -346,6 +338,8 @@ def get_type_hint_captures(fn):
     # Then, get the literal type annotations from the function declaration
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
+    src = inspect.getsource(fn)
+
     # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
     a = ast.parse(dedent(src))
     if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
@@ -911,7 +905,7 @@ def is_optional(ann):
 
     def is_union_as_optional(ann):
         ann_args = ann.__args__
-        return len(ann_args) == 2 and (None in ann_args or type(None) in ann_args)
+        return len(ann_args) == 2 and None in ann_args
 
     return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
 
@@ -1257,6 +1251,8 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
         if isinstance(obj, torch.cuda.Event):
+            return ""
+        if isinstance(obj, threading.Thread):
             return ""
         return None
 

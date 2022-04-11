@@ -10,6 +10,10 @@
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/file_format.h>
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#endif
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -307,8 +311,9 @@ void BytecodeDeserializer::parseMethods(
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
-  // version number don't have to be re-generated.
-  int64_t model_version = 0x3L;
+  // version number are seen as version 3 (deprecated).
+  constexpr uint64_t default_version = 0x3L;
+  uint64_t model_version = default_version;
   size_t method_i_start = 0;
   if (vals[0].isInt()) {
     model_version = vals[0].toInt();
@@ -379,11 +384,7 @@ void BytecodeDeserializer::parseMethods(
     }
     init_upgrader(function.get());
     // 1. First pass all operators from models
-    parseOperators(
-        std::move(ops_list),
-        model_version,
-        module_load_options_,
-        function.get());
+    parseOperators(std::move(ops_list), module_load_options_, function.get());
 
     // 2. Decides if upgrader is needed
     bool use_upgrader =
@@ -536,18 +537,48 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  return module;
+  in.seekg(0, in.beg);
+  auto format = getFileFormat(in);
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<IStreamAdapter> rai =
+          std::make_unique<IStreamAdapter>(&in);
+      auto module = _load_for_mobile(std::move(rai), device, extra_files);
+      return module;
+    }
+#if defined(ENABLE_FLATBUFFER)
+    case FileFormat::FlatbufferFileFormat: {
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_stream_content(in);
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
+    }
+#else
+    case FileFormat::FlatbufferFileFormat: {
+      TORCH_CHECK(
+          false,
+          "Flatbuffer input file but the build hasn't enabled flatbuffer");
+    }
+#endif
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  return module;
+  return _load_for_mobile(
+      filename,
+      device,
+      extra_files,
+      /*module_load_options=*/_default_mobile_module_load_options);
 }
 
 mobile::Module _load_for_mobile(
@@ -555,10 +586,37 @@ mobile::Module _load_for_mobile(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
-  return module;
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<FileAdapter> rai =
+          std::make_unique<FileAdapter>(filename);
+      auto module = _load_for_mobile_impl(
+          std::move(rai), device, extra_files, module_load_options);
+      return module;
+    }
+#if defined(ENABLE_FLATBUFFER)
+    case FileFormat::FlatbufferFileFormat: {
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_file_content(filename.c_str());
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
+    }
+#else
+    case FileFormat::FlatbufferFileFormat: {
+      TORCH_CHECK(
+          false,
+          "Flatbuffer input file but the build hasn't enabled flatbuffer");
+    }
+#endif
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 mobile::Module _load_for_mobile(

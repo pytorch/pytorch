@@ -50,7 +50,7 @@ if [[ -z ${IS_GHA:-} ]]; then
   export PACKAGE_TYPE="${configs[0]}"
   export DESIRED_PYTHON="${configs[1]}"
   export DESIRED_CUDA="${configs[2]}"
-  if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+  if [[ "${OSTYPE}" == "msys" ]]; then
     export DESIRED_DEVTOOLSET=""
     export LIBTORCH_CONFIG="${configs[3]:-}"
     if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
@@ -153,10 +153,14 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
-export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
-if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
-  export DEBUG="${DEBUG:-}"
+  if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
+    export DEBUG=1
+  fi
+  export DESIRED_DEVTOOLSET=""
+else
+  export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 fi
 
 export DATE="$DATE"

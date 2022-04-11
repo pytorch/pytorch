@@ -51,9 +51,10 @@ class Embedding(nn.Embedding):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
-        assert mod.qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
+        weight_qscheme = mod.qconfig.weight().qscheme  # type: ignore[union-attr, operator]
+        assert weight_qscheme == torch.per_channel_affine_float_qparams, \
             'Embedding weights requires a qscheme of torch.per_channel_affine_float_qparams Got ' + \
-            str(mod.qconfig.weight().qscheme)
+            str(weight_qscheme)
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.padding_idx,
@@ -120,9 +121,10 @@ class EmbeddingBag(nn.EmbeddingBag):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
-        assert mod.qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
+        weight_qscheme = mod.qconfig.weight().qscheme  # type: ignore[union-attr, operator]
+        assert weight_qscheme == torch.per_channel_affine_float_qparams, \
             'Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got ' + \
-            str(mod.qconfig.weight().qscheme)
+            str(weight_qscheme)
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.max_norm, mod.norm_type,

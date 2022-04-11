@@ -64,9 +64,9 @@ class Conv1d(_ConvNd, nn.Conv1d):
         x -- quant --- *dequant --  *F.conv1d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
-        weight_dequant = self.get_weight()
+        weight_quant_dequant = self.get_weight()
         result = F.conv1d(
-            x, weight_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
@@ -100,9 +100,9 @@ class Conv2d(_ConvNd, nn.Conv2d):
         x -- quant --- *dequant --  *F.conv2d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
-        weight_dequant = self.get_weight()
+        weight_quant_dequant = self.get_weight()
         result = F.conv2d(
-            x, weight_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
@@ -136,9 +136,9 @@ class Conv3d(_ConvNd, nn.Conv3d):
         x -- quant --- *dequant --  *F.conv3d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
-        weight_dequant = self.get_weight()
+        weight_quant_dequant = self.get_weight()
         result = F.conv3d(
-            x, weight_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
@@ -214,9 +214,9 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
-        weight_dequant = self.get_weight()
+        weight_quant_dequant = self.get_weight()
         result = F.conv_transpose1d(
-            x, weight_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, output_padding, self.groups, self.dilation)
         return result
 
@@ -258,9 +258,9 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
-        weight_dequant = self.get_weight()
+        weight_quant_dequant = self.get_weight()
         result = F.conv_transpose2d(
-            x, weight_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, output_padding, self.groups, self.dilation)
 
         return result
@@ -302,9 +302,9 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
-        weight_dequant = self.get_weight()
+        weight_quant_dequant = self.get_weight()
         result = F.conv_transpose3d(
-            x, weight_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, output_padding, self.groups, self.dilation)
         return result
 

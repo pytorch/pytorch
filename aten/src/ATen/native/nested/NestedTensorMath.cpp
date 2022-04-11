@@ -8,25 +8,19 @@
 namespace at {
 namespace native {
 
+namespace {
+template <typename Func>
+Tensor map_nt(const Tensor& nt, Func f) {
+  auto* nt_impl = get_nested_tensor_impl(nt);
+  const auto& sizes = nt_impl->get_nested_size_tensor();
+  return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
+}
+} // namespace
 
 at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
   TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor));
-}
-
-bool is_nested_tensor_impl(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(
-      c10::DispatchKey::NestedTensor);
-}
-
-inline at::native::NestedTensorImpl* get_nested_tensor_impl(
-    const at::Tensor& tensor) {
-  TORCH_CHECK(
-      is_nested_tensor_impl(tensor),
-      "get_nested_tensor_impl requires a NestedTensor.");
-  return static_cast<at::native::NestedTensorImpl*>(
-      tensor.unsafeGetTensorImpl());
 }
 
 inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
@@ -69,11 +63,29 @@ std::vector<at::Tensor> NestedTensor_unbind(
   return result_tensors;
 }
 
-/*
- * This result of this function cannot be used by itself. The result needs to
- * be wrapped in torch.nested.NestedTensor.
- */
-Tensor _nested_tensor(
+Tensor& NestedTensor_relu_(Tensor& self) {
+  at::relu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()));
+  return self;
+}
+
+Tensor NestedTensor_relu(const Tensor& self) {
+  return map_nt(self, at::relu);
+}
+
+Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
+  at::gelu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()), approximate);
+  return self;
+}
+
+Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
+  return map_nt(
+      self,
+      [approximate](const Tensor& buffer) {
+        return at::gelu(buffer, approximate);
+      });
+}
+
+Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
