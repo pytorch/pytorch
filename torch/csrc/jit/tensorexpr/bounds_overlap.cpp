@@ -6,71 +6,13 @@ namespace jit {
 namespace tensorexpr {
 namespace analysis {
 
-// Returns true if the given expression includes a "Sub" term.
-bool hasSub(ExprPtr e) {
-  return !NodeFinder<Sub>::find(e).empty();
-}
-
-// Returns true if the given expression includes a "Div" term.
-bool hasDiv(ExprPtr e) {
-  return !NodeFinder<Div>::find(e).empty();
-}
-
-// Returns true if all immediates in the given expression are positive.
-bool allImmsArePositive(ExprPtr e) {
-#define TYPE_CASE(Type, Name)                                 \
-  {                                                           \
-    auto imms = NodeFinder<Name##Imm>::find(e);               \
-    for (const auto& imm : imms) {                            \
-      if (immediateIsNegative(imm) || immediateIsZero(imm)) { \
-        return false;                                         \
-      }                                                       \
-    }                                                         \
-  }
-  AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
-#undef TYPE_CASE
-  {
-    auto imms = NodeFinder<BoolImm>::find(e);
-    for (const auto& imm : imms) {
-      if (immediateIsZero(imm)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 // Returns true if the given expression is guaranteed to be positive.
-//
-// If the given expression is constant, this checks if the constant value is
-// positive.
-//
-// If the given expression is not constant, we use the following conservative
-// approximation to identify those that are guaranteed to be positive.
-//
-// Assumption:
-//   * The variables in the given expression are always positive.
-//
-// The only way for the given expression to be negative is if it includes
-// at least one of:
-//     * "subtract" term.
-//     * a negative immediate value.
-//
-// The only way for the given expression to be zero is if it includes at least
-// one of:
-//     * "subtract" term.
-//     * "div" term.
-//     * a zero immediate value.
-//
-// The expression could involve multiple subtract terms and negative
-// immediate values and end up being positive. But even if one of them is
-// present we conservatively assume that it can be negative.
 bool mustBePositive(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val > 0;
   }
-  return !hasSub(e) && !hasDiv(e) && allImmsArePositive(e);
+  return false;
 }
 
 OverlapKind boundOverlap(Bound a, Bound b) {
@@ -195,6 +137,13 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
 }
 
 std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
+  if (overlap == NoOverlap) {
+    return {a};
+  }
+  if (overlap == ContainedOrEqual) {
+    return {};
+  }
+
   // The bounds must overlap.
   std::vector<Bound> res;
 
@@ -253,13 +202,6 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
 
 std::vector<Bound> subtractBound(Bound a, Bound b) {
   OverlapKind overlap = boundOverlap(a, b);
-  if (overlap == NoOverlap) {
-    return {a};
-  }
-  if (overlap == ContainedOrEqual) {
-    return {};
-  }
-
   return subtractBound(a, b, overlap);
 }
 
@@ -309,12 +251,6 @@ std::vector<IndexBounds> subtractIndicesBounds(
         // In some cases, we might end up with empty remainingSlices due to the
         // optimization done in subtraction while handling diff expressions
         // that have a single variable in `subtractBound()`.
-        //
-        // For example:
-        //    (j, j) - (j + v, j + v) => (j, j + v - 1)
-        // When we try to extract the remaining slices from (j, j), we perform:
-        //    (j, j) - (j, j + v - 1) => ()
-        // and end up with empty remainingSlices.
         if (!remainingSlices.empty()) {
           TORCH_INTERNAL_ASSERT(
               remainingSlices.size() == 1, buildErrorMessage());

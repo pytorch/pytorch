@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <list>
 
 #include <c10/macros/Macros.h>
 #include <ATen/record_function.h>
@@ -120,7 +121,9 @@ class ApproximateClockToUnixTimeConverter final {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes);
+    const std::vector<std::vector<int64_t>>& shapes,
+    at::RecordFunctionHandle op_id = 0,
+    const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids = {});
 
 struct TORCH_API FileLineFunc {
   std::string filename;
@@ -136,10 +139,12 @@ TORCH_API std::string stacksToStr(
     const std::vector<std::string>& stacks,
     const char* delim);
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(
-    const at::RecordFunction& fn);
+    const at::RecordFunction& fn,
+    const bool flatten_list_enabled=false);
 TORCH_API std::string shapesToStr(
     const std::vector<std::vector<int64_t>>& shapes);
 TORCH_API std::string dtypesToStr(const std::vector<std::string>& types);
+TORCH_API std::string inputOpIdsToStr(const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API

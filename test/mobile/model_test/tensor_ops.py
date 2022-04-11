@@ -15,7 +15,7 @@ class TensorOpsModule(torch.nn.Module):
         c = torch.randn(4, dtype=torch.cfloat)
         w = torch.rand(4, 4, 4, 4)
         v = torch.rand(4, 4, 4, 4)
-        return (
+        return len(
             # torch.is_tensor(a),
             # torch.is_storage(a),
             torch.is_complex(a),
@@ -51,7 +51,7 @@ class TensorOpsModule(torch.nn.Module):
             x.cpu(),
             # x.cuda(),
             # x.data_ptr(),
-            # x.dense_dim(),
+            x.dense_dim(),
             w.fill_diagonal_(0),
             w.element_size(),
             w.exponential_(),
@@ -68,6 +68,8 @@ class TensorOpsModule(torch.nn.Module):
             w.is_pinned(),
             w.is_set_to(w),
             # w.is_shared,
+            w.is_coalesced(),
+            w.coalesce(),
             w.is_signed(),
             w.is_sparse,
             torch.tensor([1]).item(),
@@ -120,7 +122,7 @@ class TensorCreationOpsModule(torch.nn.Module):
             0,
             torch.quint8,
         )
-        return (
+        return len(
             torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]]),
             # torch.sparse_coo_tensor(i, v, [2, 3]), # not work for iOS
             torch.as_tensor([1, 2, 3]),
@@ -171,7 +173,7 @@ class TensorIndexingOpsModule(torch.nn.Module):
         t = torch.tensor([[0, 0], [1, 0]])
         mask = x.ge(0.5)
         i = [0, 1]
-        return (
+        return len(
             torch.cat((x, x, x), 0),
             torch.concat((x, x, x), 0),
             torch.conj(x),
@@ -233,7 +235,7 @@ class TensorTypingOpsModule(torch.nn.Module):
 
     def tensor_typing_ops(self):
         x = torch.randn(1, 3, 4, 4)
-        return (
+        return len(
             x.to(torch.float),
             x.to(torch.double),
             x.to(torch.cfloat),
@@ -262,7 +264,7 @@ class TensorViewOpsModule(torch.nn.Module):
     def tensor_view_ops(self):
         x = torch.randn(4, 4, 1)
         y = torch.randn(4, 4, 2)
-        return (
+        return len(
             x[0, 2:],
             x.detach(),
             x.detach_(),
