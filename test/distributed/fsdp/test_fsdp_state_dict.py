@@ -359,7 +359,7 @@ class TestFSDPStateDict(FSDPTest):
             model.outer.bias: "outer.bias", model.outer.weight: "outer.weight",
         }
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
-        with FSDP.state_dict_type(fsdp_model):
+        with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd = fsdp_model.state_dict()
         with fsdp_model.summon_full_params():
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
