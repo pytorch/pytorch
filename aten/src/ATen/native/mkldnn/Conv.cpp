@@ -219,11 +219,11 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
   if (!is_channels_last) {
     return std::make_tuple(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
-        mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
     return std::make_tuple(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(at::MemoryFormat::ChannelsLast),
-        mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
 
