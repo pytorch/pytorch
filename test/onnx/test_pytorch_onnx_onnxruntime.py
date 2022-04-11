@@ -3548,14 +3548,7 @@ class _TestONNXRuntime:
         self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int64))
 
     def test_relu_int(self):
-        class MyReLUInt(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.relu(x)
-        self.run_test(MyReLUInt(), torch.randn(3, 3).to(torch.int32))
+        self.run_test(torch.nn.ReLU(), torch.randn(3, 3).to(torch.int32))
 
     def test_pad_int(self):
         class MyPadInt(torch.nn.Module):
