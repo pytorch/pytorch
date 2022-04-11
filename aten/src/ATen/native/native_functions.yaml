@@ -5098,6 +5098,7 @@
   structured_delegate: sub.out
   dispatch:
     SparseCPU, SparseCUDA: sub_sparse
+    ZeroTensor: sub_zerotensor
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
