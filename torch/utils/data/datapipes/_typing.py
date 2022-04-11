@@ -358,6 +358,11 @@ def get_input_args(obj):
     return ', '.join([f'{name}={value}' for name, value in result])
 
 
+class DataPipeException(Exception):
+    def __init__(self, message, errors):
+        super().__init__(message)
+
+
 def hook_iterator(namespace, profile_name):
 
     def context():
@@ -390,13 +395,15 @@ def hook_iterator(namespace, profile_name):
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
+            except DataPipeException:
+                raise
             except Exception as e:
                 datapipe = args[0]
                 # Short version, but requires custom __repr__ for each DataPipe class
                 # msg = f"thrown by {datapipe}"
                 # Long version with all input arguments
                 msg = f"thrown by __iter__ of {datapipe.__class__.__name__}({get_input_args(datapipe)})"
-                raise RuntimeError(msg) from e
+                raise DataPipeException(msg, e) from e
 
         namespace['__iter__'] = wrap_generator
     else:
