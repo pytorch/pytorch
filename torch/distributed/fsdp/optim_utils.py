@@ -58,7 +58,7 @@ class _BroadcastHandle(NamedTuple):
     Attributes:
         work (Work): Broadcast work handle with destination tensor ``tensor``.
         tensor (torch.Tensor): Destination tensor.
-        device (torch.device): Device to move ``tensor`` after the broadcast
+        device (torch.device): Device to move ``tensor`` to after the broadcast
             completes.
     """
     work: Any
@@ -821,7 +821,9 @@ def _broadcast_unsharded_pos_dim_tensor_state(
     """
     Broadcasts positive-dimension tensor state for the state ``state_name``
     corresponding to an unsharded non-FSDP parameter from rank 0 to all ranks.
-    This modifies ``param_state`` destructively.
+    This modifies ``param_state`` destructively, replacing the
+    ``_PosDimTensorInfo`` metadata with a ``_BroadcastHandle`` object, which
+    contains the work handle to wait on.
 
     Args:
         unsharded_tensor (Optional[torch.Tensor]): Unsharded tensor to
