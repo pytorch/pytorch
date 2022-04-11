@@ -24,12 +24,38 @@ void logical_not_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
+const char neg_name[] = "neg_kernel";
 void neg_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "neg_cuda", [&]() {
+  auto dtype = iter.dtype();
+  if (at::isComplexType(dtype)) {
+#if AT_USE_JITERATOR()
+  static const auto neg_string = jiterator_stringify(
+      template <typename T>
+      T neg_kernel(T a) {
+        return -a;
+      }
+  ); // neg_string
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "neg_cuda", [&]() {
+      jitted_gpu_kernel<
+        /*name=*/ neg_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, neg_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "neg_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return -a;
+      });
+  });
+#endif
+  } else {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, dtype, "neg_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return -a;
     });
   });
+  }
 }
 
 void sign_kernel_cuda(TensorIteratorBase& iter){
