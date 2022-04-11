@@ -4410,7 +4410,6 @@ class TestCudaFuser(JitTestCase):
             for t in [clamp_max, clamp_min, clamp_min_max]:
                 t_jit = torch.jit.script(t)
                 self._run_helper(t_jit, t, x)
-                print(t_jit.graph_for(x))
 
 
 class TestPassManagerCudaFuser(JitTestCase):
