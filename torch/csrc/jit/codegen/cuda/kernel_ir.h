@@ -502,17 +502,17 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
 //!
 //! This node provides FusionExecutor the information it needs to allocate the
 //! reduction and sync buffers.
-class TORCH_CUDA_CU_API GridReduction final : public Expr {
+class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
  public:
   GridReduction(
       IrBuilderPasskey passkey,
-      ReductionOp* reduction_op,
+      BinaryOpType reduction_op_type,
+      Val* init,
+      Val* out,
+      Val* in,
       Allocate* reduction_buffer,
-      Allocate* sync_buffer);
-
-  ReductionOp* reduction_op() const {
-    return reduction_op_;
-  }
+      Allocate* sync_buffer,
+      bool is_fused = false);
 
   Allocate* reduction_buffer() const {
     return reduction_buffer_;
@@ -531,7 +531,6 @@ class TORCH_CUDA_CU_API GridReduction final : public Expr {
   }
 
  private:
-  ReductionOp* reduction_op_ = nullptr;
   Allocate* reduction_buffer_ = nullptr;
   Allocate* sync_buffer_ = nullptr;
   // gridReduce has template flags for thread predicates. In order to

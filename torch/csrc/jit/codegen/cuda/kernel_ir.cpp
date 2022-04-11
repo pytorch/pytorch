@@ -429,11 +429,21 @@ Allocate::Allocate(
 
 GridReduction::GridReduction(
     IrBuilderPasskey passkey,
-    ReductionOp* reduction_op,
+    BinaryOpType reduction_op_type,
+    Val* init,
+    Val* out,
+    Val* in,
     Allocate* reduction_buffer,
-    Allocate* sync_buffer)
-    : Expr(passkey, ExprType::GridReduction),
-      reduction_op_(reduction_op),
+    Allocate* sync_buffer,
+    bool is_fused)
+    : ReductionOp(
+          passkey,
+          reduction_op_type,
+          init,
+          out,
+          in,
+          is_fused,
+          ExprType::GridReduction),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {
   TORCH_INTERNAL_ASSERT(
@@ -496,7 +506,7 @@ AllocateFusedReduction::AllocateFusedReduction(
 TensorIndex* AllocateFusedReduction::out() const {
   TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
   if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
-    return grid_reduction->reduction_op()->out()->as<kir::TensorIndex>();
+    return grid_reduction->out()->as<kir::TensorIndex>();
   } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
     return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
   } else {

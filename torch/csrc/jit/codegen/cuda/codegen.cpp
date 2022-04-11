@@ -1053,19 +1053,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto op_type = rop->getReductionOpType();
 
     if (has_block_reduce) {
-      if (has_grid_reduce) {
-        indent() << data_type << " "
-                 << "block_result_" << block_reduce_name_ << "="
-                 << gen(rop->init()) << ";\n";
-      }
       indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
                << ">(\n";
-      if (has_grid_reduce) {
-        indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
-      } else {
-        indent() << kTab << gen(rop->out()) << ",\n";
-      }
+      indent() << kTab << gen(rop->out()) << ",\n";
       indent() << kTab << gen(rop->in()) << ",\n";
       indent() << kTab << genReductionOp(op_type, rop->out()) << ",\n";
       indent() << kTab << "threadIdx,\n";
@@ -1225,16 +1216,45 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return flags.str();
   }
 
-  void handle(const kir::GridReduction* grop) final {
-    const auto rop = grop->reduction_op();
-    TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
+  // TODO: This should replace generateGridReduceTemplateFlags once
+  // GridWelford is refactored as GridReduction.
+  template <typename REDUCTION_OP>
+  std::string generateGridReduceTemplateFlags2(
+      const REDUCTION_OP* rop,
+      const ParallelTypeBitmap& thread_pred) {
+    TORCH_INTERNAL_ASSERT(
+        !rop->isFused(), "This is not for the fused reduction kernel\n");
 
-    const auto out = rop->out()->as<kir::TensorIndex>();
+    const auto par_domains = ir_utils::getParallelDomains(rop->outputs()[0]);
+    ArgumentBuilder flags;
+    for (const ParallelType pt : kParallelTypeThreads) {
+      const bool parallel_reduction =
+          par_domains.find(pt) != par_domains.end() &&
+          par_domains.at(pt)->isReduction();
+      const bool pred = thread_pred.get(pt);
+      TORCH_INTERNAL_ASSERT(
+          !(parallel_reduction && pred), "Cannot reduce predicated axis: ", pt);
+      // Currently assumed that no dimensions parallelized with blocks
+      // are predicated. This assumption may be lifted, but
+      // gridReduction would need some changes.
+      if (isParallelTypeBlockDim(pt)) {
+        TORCH_INTERNAL_ASSERT(
+            !pred, "Predication on block dimensions not allowed: ", pt);
+      }
+      flags.arg(parallel_reduction);
+    }
+    return flags.str();
+  }
+
+  void handle(const kir::GridReduction* grop) final {
+    TORCH_INTERNAL_ASSERT(grop->out()->isA<kir::TensorIndex>());
+
+    const auto out = grop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
     TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
 
-    const auto data_type = rop->out()->dtype();
-    const auto op_type = rop->getReductionOpType();
+    const auto data_type = grop->out()->dtype();
+    const auto op_type = grop->getReductionOpType();
 
     TORCH_INTERNAL_ASSERT(
         grop->reduction_buffer()->buffer()->isA<TensorView>());
@@ -1243,13 +1263,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         grop->reduction_buffer()->buffer()->as<TensorView>();
     const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
 
-    if (rop->isFused()) {
+    if (grop->isFused()) {
       generateFusedGridReduction(grop);
       return;
     }
 
     const std::string flags_str =
-        generateGridReduceTemplateFlags(rop, grop->threadPredicate());
+        generateGridReduceTemplateFlags2(grop, grop->threadPredicate());
 
     const bool persistent_sync =
         kernel_->summary().has_cooperative_grid_reduction;
@@ -1261,13 +1281,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     template_args.arg(flags_str).arg(persistent_sync);
 
     ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
-    func_args.arg(gen(rop->out()));
-    if (domain->hasBlockReduction()) {
-      func_args.arg("block_result_").append(block_reduce_name_);
-      block_reduce_name_++;
-    } else {
-      func_args.arg(gen(rop->in()));
-    }
+    func_args.arg(gen(grop->out()));
+    func_args.arg(gen(grop->in()));
     func_args.arg(genReductionOp(op_type, out));
     func_args.arg("&").append(varName(work_buffer)).append("[0]");
     func_args.arg(varName(sync_buffer));
@@ -1284,7 +1299,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       func_args.arg(read_pred);
     }
     // Init val
-    func_args.arg(genCall(data_type, genInline(grop->reduction_op()->init())));
+    func_args.arg(genCall(data_type, genInline(grop->init())));
 
     indent() << "reduction::gridReduce<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
@@ -1295,14 +1310,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void generateFusedGridReduction(const kir::GridReduction* grop) {
-    const auto rop = grop->reduction_op();
-    TORCH_INTERNAL_ASSERT(rop->isFused());
+    TORCH_INTERNAL_ASSERT(grop->isFused());
 
-    const auto out = rop->out()->as<kir::TensorIndex>();
+    const auto out = grop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
 
-    const auto data_type = rop->out()->dtype();
-    const auto op_type = rop->getReductionOpType();
+    const auto data_type = grop->out()->dtype();
+    const auto op_type = grop->getReductionOpType();
 
     const auto work_buffer =
         grop->reduction_buffer()->buffer()->as<TensorView>();
@@ -1327,9 +1341,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
     // out
-    func_args.arg(genCall("RefTuple", data_type, gen(rop->out())));
+    func_args.arg(genCall("RefTuple", data_type, gen(grop->out())));
     // inp
-    func_args.arg(genCall("ConstRefTuple", data_type, gen(rop->in())));
+    func_args.arg(genCall("ConstRefTuple", data_type, gen(grop->in())));
     // global_work_buffer
     func_args.arg(genCall(
         "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
@@ -1351,8 +1365,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
     func_args.arg(read_pred).arg(write_pred);
     // init_val
-    func_args.arg(genCall(
-        "LocalTuple", data_type, genInline(grop->reduction_op()->init())));
+    func_args.arg(genCall("LocalTuple", data_type, genInline(grop->init())));
     // reduction_op
     func_args.arg(genReductionOp(op_type, out));
 

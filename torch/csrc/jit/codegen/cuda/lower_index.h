@@ -53,7 +53,8 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   Val* lowerDstIndex(Val* dst) const;
 
-  void handleGridReduction(ReductionOp* new_rop);
+  void handleBlockReduction(const ReductionOp* rop, Val* out, Val* in);
+  void handleGridReduction(const ReductionOp* rop, Val* out, Val* in);
   void handleGridWelford(WelfordOp* new_wop);
 
  private:

@@ -382,8 +382,9 @@ ReductionOp::ReductionOp(
     Val* init,
     Val* out,
     Val* in,
-    bool is_fused)
-    : Expr(passkey, ExprType::ReductionOp),
+    bool is_fused,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),

@@ -129,7 +129,7 @@ __device__ void gridReduceLastBlock(
   }
 }
 
-// Reduces per-thread values across thread blocks.
+// Reduces per-thread values across threads and thread blocks.
 //
 // Function parameters:
 // - out: Per-thread output location
@@ -143,14 +143,8 @@ __device__ void gridReduceLastBlock(
 // reduction dimension
 //
 // Template parameters:
-// - X/Y/Z_BLOCK: When true, reduces across thread blocks along the X/Y/Z
+// - X/Y/Z_BLOCK/THREAD: When true, reduces across thread blocks along the X/Y/Z
 //   dimensions
-// - X/Y/Z_THREAD: When true, all threads along the X/Y/Z dimensions participate
-//   in the cross-block reduction. Otherwise, only threads at offset 0 do.
-//   These are set to true if the dimension in the block has not been reduced
-//   previously in producer tensors, and does not participate in the reduction
-//   (right now they can't), so it's just a "pure" iteration domain as far as
-//   the grid reduce is concerned.
 // - PERSISTENT_REDUCTION: Indicates grid reduction will be called in a loop, or
 //   the result of the grid reduction will be broadcasted and used across the
 //   grid. These requires cross grid communication and the grid synchronizations
@@ -173,16 +167,8 @@ __device__ void gridReduceLastBlock(
 // blocks that have the same blockDim.x. There will be blockDim.y*blockDim.z
 // such segments.
 //
-// X/Y/Z_THREAD defines a sub region of a thread block that should be reduced
-// with the sub regions of other thread blocks. We call it a reduction block.
-// E.g.,
-//
-// Case 1: X/Y/Z_THREAD == false/false/false -> Only thread 0 participates in
-// the cross-block reductions. The reduction block is 1x1x1 with thread 0.
-//
-// Case 2: X/Y/Z_THREAD == true/true/true-> All threads in a thread block
-// participate in the cross-block reductions. The reduction block in this case
-// is equivalent to the thread block.
+// X/Y/Z_THREAD also works similarly as X/Y/Z_BLOCK and defines a
+// group of threads that are reduced togather.
 //
 // After the function completes, only one thread block per reduction segment
 // gets valid reduction results. There is no guarantee which particular block
@@ -208,6 +194,24 @@ __device__ void gridReduce(
     bool read_pred,
     bool write_pred,
     T init_val) {
+  T block_reduction_val = init_val;
+
+  // Do block reduction when required
+  if (X_THREAD || Y_THREAD || Z_THREAD) {
+    blockReduce<X_THREAD, Y_THREAD, Z_THREAD>(
+        block_reduction_val,
+        inp_val,
+        reduction_op,
+        threadIdx,
+        blockDim,
+        shared_buf,
+        read_pred,
+        true,
+        init_val);
+  } else if (read_pred) {
+    block_reduction_val = inp_val;
+  }
+
   // Number of values to reduce in the reduction segment
   const auto grid_reduction_segment_size =
       index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
@@ -221,27 +225,23 @@ __device__ void gridReduce(
   // Number of threads we can use in final reduction, Seems to assume all
   // threads in the block participate
   const auto block_reduction_segment_size =
-      index_utils::maskedSize<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
+      index_utils::maskedSize<!X_THREAD, !Y_THREAD, !Z_THREAD>(blockDim);
 
   // advance to the offset for this segment
   // index of reduction * size of the reduction * size of threads
   work_buf += idx_in_grid_segment * grid_reduction_segment_size *
       block_reduction_segment_size;
 
-  if ((X_THREAD || threadIdx.x == 0) && (Y_THREAD || threadIdx.y == 0) &&
-      (Z_THREAD || threadIdx.z == 0)) {
+  if ((!X_THREAD || threadIdx.x == 0) && (!Y_THREAD || threadIdx.y == 0) &&
+      (!Z_THREAD || threadIdx.z == 0)) {
     auto block_offset =
         index_utils::maskedOffset<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
     auto thread_offset =
-        index_utils::maskedOffset<X_THREAD, Y_THREAD, Z_THREAD>(
+        index_utils::maskedOffset<!X_THREAD, !Y_THREAD, !Z_THREAD>(
             threadIdx, blockDim);
     auto work_buf_offset =
         block_offset * block_reduction_segment_size + thread_offset;
-    if (read_pred) {
-      work_buf[work_buf_offset] = inp_val;
-    } else {
-      work_buf[work_buf_offset] = init_val;
-    }
+    work_buf[work_buf_offset] = block_reduction_val;
   }
 
   grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
@@ -252,7 +252,7 @@ __device__ void gridReduce(
 
   if (last_block) {
     // Cleanup with block reduction
-    gridReduceLastBlock<X_THREAD, Y_THREAD, Z_THREAD>(
+    gridReduceLastBlock<!X_THREAD, !Y_THREAD, !Z_THREAD>(
         out,
         (T*)work_buf,
         grid_reduction_segment_size,

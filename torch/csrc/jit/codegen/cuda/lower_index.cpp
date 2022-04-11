@@ -191,12 +191,21 @@ void IndexLowering::handle(const ReductionOp* rop) {
   const auto out = lowerDstIndex(rop->out());
   const auto in = lowerSrcIndex(rop->in(), rop->out());
 
-  // Serial reduction
-  if (!has_block_reduce && !has_grid_reduce) {
+  if (has_grid_reduce) {
+    handleGridReduction(rop, out, in);
+  } else if (has_block_reduce) {
+    handleBlockReduction(rop, out, in);
+  } else {
     pushBack(
         IrBuilder::create<BinaryOp>(rop->getReductionOpType(), out, out, in));
-    return;
   }
+}
+
+void IndexLowering::handleBlockReduction(
+    const ReductionOp* rop,
+    Val* out,
+    Val* in) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(rop));
 
   ReductionOp* indexed_rop = IrBuilder::create<ReductionOp>(
       rop->getReductionOpType(), rop->init(), out, in, rop->isFused());
@@ -207,17 +216,14 @@ void IndexLowering::handle(const ReductionOp* rop) {
     indexed_rop->setWritePredicate(rop->writePredicate());
   }
 
-  // If not grid reduction, just append the new ReductionOp node
-  if (!has_grid_reduce) {
-    pushBack(indexed_rop);
-    return;
-  }
-
-  handleGridReduction(indexed_rop);
+  pushBack(indexed_rop);
 }
 
-void IndexLowering::handleGridReduction(ReductionOp* indexed_rop) {
-  const auto out_tv = indexed_rop->out()->as<kir::TensorIndex>()->view();
+void IndexLowering::handleGridReduction(
+    const ReductionOp* rop,
+    Val* out,
+    Val* in) {
+  const auto out_tv = out->as<kir::TensorIndex>()->view();
   const auto out_domain = out_tv->domain();
 
   TORCH_INTERNAL_ASSERT(out_domain->hasGridReduction());
@@ -246,15 +252,12 @@ void IndexLowering::handleGridReduction(ReductionOp* indexed_rop) {
 
   const auto reduce_buffer = allocGlobalBufferForGridComm(
       getGridCommWorkBufferSize(
-          out_domain, indexed_rop->isFused() && is_within_a_loop ? 2 : 1),
-      indexed_rop->out()->dtype(),
+          out_domain, rop->isFused() && is_within_a_loop ? 2 : 1),
+      out->dtype(),
       false);
 
   const auto sync_buffer = allocGlobalBufferForGridComm(
       getGridSyncBufferSize(out_domain), DataType::Int, true);
-
-  const bool block_reduce_separated =
-      out_domain->hasBlockReduction() && !indexed_rop->isFused();
 
   // The thread predicate for GridReduction needs to be set
   // separately from the main predicate. Do not combine them like
@@ -263,39 +266,28 @@ void IndexLowering::handleGridReduction(ReductionOp* indexed_rop) {
       GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
 
   auto grid_reduction = IrBuilder::create<kir::GridReduction>(
-      indexed_rop, reduce_buffer, sync_buffer);
+      rop->getReductionOpType(),
+      rop->init(),
+      out,
+      in,
+      reduce_buffer,
+      sync_buffer,
+      rop->isFused());
 
   grid_reduction->setThreadPredicate(thread_pred);
 
-  // If preceded by a blockReduce, all thread blocks should have
-  // valid inputs to gridReduce. In fact, using the original
-  // predicate does not work when the write predicate of the
-  // blockReduce is different from the read predicate.
-  if (indexed_rop->predicate()) {
-    if (block_reduce_separated) {
-      grid_reduction->setPredicate(IrBuilder::create<kir::Predicate>(
-          GpuLower::current()->kernel()->trueVal()));
-    } else {
-      grid_reduction->setPredicate(indexed_rop->predicate());
-    }
+  if (rop->predicate()) {
+    grid_reduction->setPredicate(rop->predicate());
   }
-
-  if (indexed_rop->writePredicate()) {
-    grid_reduction->setWritePredicate(indexed_rop->writePredicate());
-  }
-
-  // Push back the reduction op when block reduction is done
-  // separately. Otherwise, the reduction op is just referenced from
-  // the grid reduction op.
-  if (block_reduce_separated) {
-    pushBack(indexed_rop);
+  if (rop->writePredicate()) {
+    grid_reduction->setWritePredicate(rop->writePredicate());
   }
 
   pushBack(reduce_buffer);
   pushBack(sync_buffer);
   pushBack(grid_reduction);
 
-  if (indexed_rop->isFused()) {
+  if (rop->isFused()) {
     // When using the fused reduction, allocate the reduction object at
     // the outer-most scope
     auto fused_reduction_alloc_reduction =

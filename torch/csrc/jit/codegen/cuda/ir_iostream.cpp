@@ -615,25 +615,24 @@ void IrPrinter::handle(const kir::GridBroadcast* node) {
 }
 
 void IrPrinter::handle(const kir::GridReduction* node) {
-  const auto* reduction_op = node->reduction_op();
   indent();
-  handle(reduction_op->out());
+  handle(node->out());
   os_ << " = "
-      << "GRID_REDUCTION(op='" << reduction_op->getReductionOpType() << "'"
+      << "GRID_REDUCTION(op='" << node->getReductionOpType() << "'"
       << ", in=";
-  handle(reduction_op->in());
+  handle(node->in());
   os_ << ", init=";
-  handle(reduction_op->init());
+  handle(node->init());
   os_ << ", read_pred=";
-  if (reduction_op->predicate() != nullptr) {
-    handle(reduction_op->predicate());
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
   } else {
     os_ << "nullptr";
   }
   os_ << ")\n";
   os_ << ", write_pred=";
-  if (reduction_op->writePredicate() != nullptr) {
-    handle(reduction_op->writePredicate());
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
   } else {
     os_ << "nullptr";
   }

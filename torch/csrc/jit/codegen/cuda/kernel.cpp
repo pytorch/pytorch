@@ -122,11 +122,7 @@ class KernelIrScanner : private IrVisitor {
 
   void handle(GridReduction* grid_reduction) final {
     summary_.has_grid_reductions = true;
-    const auto dom = grid_reduction->reduction_op()
-                         ->out()
-                         ->as<TensorIndex>()
-                         ->view()
-                         ->domain();
+    const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
     updateGridReductionInLoop(dom);
   }
 

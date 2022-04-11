@@ -152,7 +152,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       Val* init,
       Val* out,
       Val* in,
-      bool is_fused = false);
+      bool is_fused = false,
+      ExprType expr_type = ExprType::ReductionOp);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
