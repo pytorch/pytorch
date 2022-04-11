@@ -111,7 +111,6 @@ namespace c10 {
   _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, Delete)                    \
-  _(aten, gelu_)                     \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
