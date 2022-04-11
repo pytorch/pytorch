@@ -53,7 +53,7 @@ if [[ "\$python_nodot" = *39*  ]]; then
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "$DESIRED_CUDA" == "cu112" || "$DESIRED_CUDA" == "cu115" ]]; then
+if [[ "$DESIRED_CUDA" == "cu115" || "$DESIRED_CUDA" == "cu116" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
 
