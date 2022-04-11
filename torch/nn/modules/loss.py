@@ -451,8 +451,9 @@ class KLDivLoss(_Loss):
         >>> target = F.softmax(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
 
+        >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
         >>> log_target = F.log_softmax(torch.rand(3, 5))
-        >>> output = kl_loss(input, log_target, log_target=True)
+        >>> output = kl_loss(input, log_target)
     """
     __constants__ = ['reduction']
 
