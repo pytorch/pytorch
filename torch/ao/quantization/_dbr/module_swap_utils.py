@@ -47,7 +47,7 @@ def _swap_child_modules(
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
         op_int8_dynamically_quantized = op_is_int8_dynamically_quantized(qconfig)
         activation_int32_quantized = activation_is_int32_quantized(qconfig)
-
+        print(activation_int8_quantized, op_int8_dynamically_quantized, activation_int32_quantized)
         # Get the output observer from qstate and attach it to the module,
         # to match the API for Eager mode module swaps
         if qstate is not None:
@@ -55,14 +55,14 @@ def _swap_child_modules(
             if output_obs is not None:
                 mod.activation_post_process = output_obs
 
-        if activation_int8_quantized:
-            if not type(mod) in static_mappings:
-                continue
-            reassign[local_fqn] = swap_module(mod, static_mappings, {})
-        elif op_int8_dynamically_quantized:
+        if op_int8_dynamically_quantized:
             if not type(mod) in dynamic_mappings:
                 continue
             reassign[local_fqn] = swap_module(mod, dynamic_mappings, {})
+        elif activation_int8_quantized:
+            if not type(mod) in static_mappings:
+                continue
+            reassign[local_fqn] = swap_module(mod, static_mappings, {})
         elif activation_int32_quantized:
             # For now, only apply reference logic to modules quantized to
             # int32. Do it automatically.

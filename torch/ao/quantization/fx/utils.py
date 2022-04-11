@@ -120,7 +120,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if activation_post_process.is_dynamic:
+    if activation_post_process.replacement_quant_is_dynamic:
         # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic

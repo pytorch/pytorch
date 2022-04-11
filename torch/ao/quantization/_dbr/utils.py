@@ -683,16 +683,20 @@ def get_input_args_quant_dequant_info(
     output_dtype = seen_q_op_info.output_tensor_infos[0].inf_dtype
     packable_arg_idxs = get_packable_arg_idxs(seen_q_op_info.type)
     any_arg_quant_or_dequant_needed = False
+    print("are we here 1", seen_q_op_info)
 
     for input_arg_idx, input_arg in enumerate(seen_q_op_info.input_tensor_infos):
         arg_will_be_packed = packable_arg_idxs is not None and \
             input_arg_idx in packable_arg_idxs and \
             seen_q_op_info.op_packing_only_uses_module_attributes
         if input_arg is not None and not arg_will_be_packed:
+            print("are we here 2")
             tensor_id = input_arg.id
             if input_arg.inf_dtype != output_dtype:
+                print("are we here 3", input_arg.inf_dtype, output_dtype)
                 any_arg_quant_or_dequant_needed = True
                 if output_dtype in (torch.quint8, torch.qint32):
+                    print("are we here 4")
                     assert tensor_id in tensor_id_to_scale_zp
                     scale, zp = tensor_id_to_scale_zp[tensor_id]
                     # TODO: return this to the caller
@@ -705,16 +709,21 @@ def get_input_args_quant_dequant_info(
                         # assuming
                         dequant_infos.append(True)
                     else:
+                        print("are we here 5")
                         dequant_infos.append(False)
                 else:
+                    print("are we here 6")
                     quant_infos.append(None)
                     dequant_infos.append(True)
             else:
+                print("are we here 7")
                 quant_infos.append(None)
                 dequant_infos.append(False)
         else:
+            print("are we here 8")
             quant_infos.append(None)
             dequant_infos.append(False)
+        print("are we here 9")
     return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
 
 def get_cur_qconfig(
