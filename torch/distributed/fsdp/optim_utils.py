@@ -45,10 +45,18 @@ class _ConsolidatedOptimState:
 
 
 class _PosDimTensorInfo(NamedTuple):
-    """Used internally for :meth:`scatter_full_optim_state_dict`."""
+    """
+    Meatadata for positive-dimension tensors used internally for
+    :meth:`scatter_full_optim_state_dict`.
+
+    Attributes:
+        shape (torch.Size): Sharded tensor shape (which is equal to the
+            unsharded tensor shape if the tensor is optimizer state for a
+            non-FSDP parameter and is hence not sharded).
+        dtype (torch.dtype): Data type of the tensor.
+    """
     shape: torch.Size
     dtype: torch.dtype
-    on_cpu: bool
 
 
 class _BroadcastHandle(NamedTuple):
@@ -58,12 +66,9 @@ class _BroadcastHandle(NamedTuple):
     Attributes:
         work (Work): Broadcast work handle with destination tensor ``tensor``.
         tensor (torch.Tensor): Destination tensor.
-        device (torch.device): Device to move ``tensor`` to after the broadcast
-            completes.
     """
     work: Any
     tensor: torch.Tensor
-    device: torch.device
 
 
 def _unflatten_optim_state(
@@ -661,17 +666,53 @@ def _process_pos_dim_tensor_state(
                 info = _PosDimTensorInfo(
                     shape=torch.Size([chunk.shape[0] + num_to_pad]),
                     dtype=chunk.dtype,
-                    on_cpu=chunk.device == cpu_device,
                 )
             else:  # non-FSDP parameter
                 info = _PosDimTensorInfo(
-                    shape=state_value.shape,
-                    dtype=state_value.dtype,
-                    on_cpu=state_value.device == cpu_device,
+                    shape=state_value.shape, dtype=state_value.dtype,
                 )
             no_tensor_osd["state"][param_id][state_name] = info
     no_tensor_osd["param_groups"] = copy.deepcopy(flat_osd["param_groups"])
     return no_tensor_osd
+
+
+def _broadcast_processed_optim_state_dict(
+    processed_optim_state_dict: Optional[Dict[str, Any]],
+    fsdp_flat_param_ids: Optional[Set[int]],
+    rank: int,
+    group,
+    device: torch.device,
+) -> Tuple[Dict[str, Any], Set[int]]:
+    """
+    Broadcasts the processed optimizer state dict and the accompanying FSDP
+    parameter IDs from rank 0 to all ranks.
+
+    Args:
+        processed_optim_state_dict (Optional[Dict[str, Any]]): The full
+            optimizer state dict with positive-dimension tensor states replaced
+            with metadata if on rank 0; ignored otherwise.
+        fsdp_flat_param_ids (Optional[Set[int]]): Parameter IDs corresponding
+            to FSDP parameters if on rank 0; ignored otherwise.
+        device (torch.device): Device to move zero-dimension tensors post-
+            broadcast.
+
+    Returns:
+        Tuple[Dict[str, Any], Set[int]]: The processed optimizer state dict
+        and the parameter IDs corresponding to FSDP parameters.
+    """
+    # Broadcast the two data structures rank 0 to all ranks
+    obj_list = [processed_optim_state_dict, fsdp_flat_param_ids] if rank == 0 \
+        else [None, None]
+    dist.broadcast_object_list(obj_list, src=0, group=group)
+    processed_optim_state_dict, fsdp_flat_param_ids = obj_list  # type: ignore[assignment]
+    assert processed_optim_state_dict is not None
+    assert fsdp_flat_param_ids is not None
+    # Move zero-dimension tensors to `device`
+    for param_state in processed_optim_state_dict["state"].values():
+        for state_name, value in param_state.items():
+            if _is_zero_dim_tensor(value):
+                param_state[state_name] = value.to(device)
+    return processed_optim_state_dict, fsdp_flat_param_ids
 
 
 def _broadcast_pos_dim_tensor_states(
@@ -681,6 +722,7 @@ def _broadcast_pos_dim_tensor_states(
     rank: int,
     world_size: int,
     group,
+    broadcast_device: torch.device,
 ) -> Dict[str, Any]:
     """
     Takes ``processed_optim_state_dict``, which has metadata in place of
@@ -720,27 +762,25 @@ def _broadcast_pos_dim_tensor_states(
                 unsharded_tensor = flat_osd["state"][param_id][state_name]
             else:
                 unsharded_tensor = None
-            shape, dtype, on_cpu = value.shape, value.dtype, value.on_cpu
-            device = torch.device("cpu") if on_cpu or \
-                not torch.cuda.is_available() else torch.device("cuda")
+            shape, dtype = value.shape, value.dtype
             if param_id in fsdp_flat_param_ids:  # FSDP parameter
                 _broadcast_sharded_pos_dim_tensor_state(
                     unsharded_tensor, param_state, state_name, shape, dtype,
-                    device, rank, world_size, group,
+                    broadcast_device, rank, world_size, group,
                 )  # modify `param_state` destructively
             else:  # non-FSDP parameter
                 _broadcast_unsharded_pos_dim_tensor_state(
                     unsharded_tensor, param_state, state_name, shape, dtype,
-                    device, rank, group,
+                    broadcast_device, rank, group,
                 )  # modify `param_state` destructively
     # Wait on the broadcast handles and move the tensor to the correct device
     for _, param_state in sorted(no_tensor_osd["state"].items()):
         for state_name, value in param_state.items():
             if not isinstance(value, _BroadcastHandle):
                 continue
-            work, tensor, device = value.work, value.tensor, value.device
+            work, tensor = value.work, value.tensor
             work.wait()
-            param_state[state_name] = tensor.to(device)
+            param_state[state_name] = tensor
     return no_tensor_osd
 
 
@@ -750,7 +790,7 @@ def _broadcast_sharded_pos_dim_tensor_state(
     state_name: str,
     shape: torch.Size,
     dtype: torch.dtype,
-    device: torch.device,
+    broadcast_device: torch.device,
     rank: int,
     world_size: int,
     group,
@@ -766,24 +806,17 @@ def _broadcast_sharded_pos_dim_tensor_state(
         unsharded_tensor (Optional[torch.Tensor]): Unsharded tensor from which
             to broadcast shards if on rank 0; ignored otherwise.
         shape (torch.Size): Shape of the sharded tensor; same on all ranks.
-        device (torch.device): Device on which the final sharded tensor
-            should reside.
     """
-    assert rank != 0 or unsharded_tensor is not None, \
-        "Expects rank 0 to pass in the unsharded tensor"
-    using_nccl = dist.distributed_c10d._check_for_nccl_backend(group)
-    assert not using_nccl or torch.cuda.is_available(), \
-        "Expects GPU for NCCL backend"
     get_shard: Optional[functools.partial[Tuple[torch.Tensor, int]]] = None
     if rank == 0:
+        assert unsharded_tensor is not None, \
+            "Expects rank 0 to pass in the unsharded tensor"
+        unsharded_tensor = unsharded_tensor.to(broadcast_device)
         get_shard = functools.partial(
             FSDP.FullyShardedDataParallel._get_shard_functional,
             unsharded_tensor,
         )
     for target_rank in range(1, world_size):
-        # NCCL requires broadcast tensors to be on CUDA
-        broadcast_device = torch.device("cuda") if using_nccl \
-            else device
         if rank == 0:
             assert get_shard is not None
             sharded_tensor = get_shard(target_rank, world_size)[0].to(broadcast_device)
@@ -795,17 +828,16 @@ def _broadcast_sharded_pos_dim_tensor_state(
         # Broadcast asynchronously and wait on the work handle later after all
         # broadcasts have been scheduled
         work = dist.broadcast(sharded_tensor, src=0, group=group, async_op=True)
-        # Only keep the shard (and hence, broadcast handle) on the target rank
+        # Only keep the shard on the target rank and keep it on the broadcast
+        # device, which is typically GPU
         if rank == target_rank:
-            param_state[state_name] = _BroadcastHandle(
-                work, sharded_tensor, device,
-            )
+            param_state[state_name] = _BroadcastHandle(work, sharded_tensor)
         else:
             del sharded_tensor
     # Lastly, shard on rank 0
     if rank != 0:
         return
-    param_state[state_name] = get_shard(0, world_size)[0].to(device)  # type: ignore[misc]
+    param_state[state_name] = get_shard(0, world_size)[0]  # type: ignore[misc]
 
 
 def _broadcast_unsharded_pos_dim_tensor_state(
@@ -814,7 +846,7 @@ def _broadcast_unsharded_pos_dim_tensor_state(
     state_name: str,
     shape: torch.Size,
     dtype: torch.dtype,
-    device: torch.device,
+    broadcast_device: torch.device,
     rank: int,
     group,
 ) -> None:
@@ -836,17 +868,16 @@ def _broadcast_unsharded_pos_dim_tensor_state(
             f"Shape mismatch: {shape} {unsharded_tensor.shape}"
         assert dtype == unsharded_tensor.dtype, \
             f"dtype mismatch: {dtype} {unsharded_tensor.dtype}"
+        unsharded_tensor = unsharded_tensor.to(broadcast_device)
     else:
         unsharded_tensor = torch.zeros(
-            shape, requires_grad=False, dtype=dtype, device=device,
+            shape, requires_grad=False, dtype=dtype, device=broadcast_device,
         )
-    if dist.distributed_c10d._check_for_nccl_backend(group):
-        assert torch.cuda.is_available(), "Expects GPU for NCCL backend"
-        unsharded_tensor = unsharded_tensor.cuda()
     # Broadcast asynchronously and wait on the work handle later after all
     # broadcasts have been scheduled
     work = dist.broadcast(unsharded_tensor, src=0, group=group, async_op=True)
-    param_state[state_name] = _BroadcastHandle(work, unsharded_tensor, device)
+    # Keep the tensor on the broadcast device, which is typically GPU
+    param_state[state_name] = _BroadcastHandle(work, unsharded_tensor)
 
 
 def _get_flat_param_to_fsdp_module(model: torch.nn.Module):

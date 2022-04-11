@@ -46,6 +46,7 @@ from .flatten_params_wrapper import (
 )
 from .optim_utils import (
     _broadcast_pos_dim_tensor_states,
+    _broadcast_processed_optim_state_dict,
     _flatten_full_optim_state_dict,
     _get_flat_param_to_fsdp_module,
     _get_param_id_to_param,
@@ -2637,6 +2638,12 @@ class FullyShardedDataParallel(nn.Module):
             group = model.process_group
         rank = dist.get_rank(group)
         world_size = dist.get_world_size(group)
+        # Check for a valid broadcast device, preferring GPU when available
+        using_nccl = dist.distributed_c10d._check_for_nccl_backend(group)
+        broadcast_device = torch.device("cuda") if torch.cuda.is_available() \
+            else torch.device("cpu")
+        if using_nccl and not torch.cuda.is_available():
+            raise RuntimeError("NCCL requires a GPU for collectives")
         # Flatten the optimizer state dict and construct a copy with the
         # positive-dimension tensors' shapes in place of the tensors themselves
         # since those tensors will be broadcast separately to avoid copying
@@ -2646,20 +2653,23 @@ class FullyShardedDataParallel(nn.Module):
             flat_osd, fsdp_flat_param_ids = _flatten_full_optim_state_dict(
                 full_optim_state_dict, model, False, optim_input,
             )
-            no_tensor_osd = _process_pos_dim_tensor_state(
+            processed_osd = _process_pos_dim_tensor_state(
                 flat_osd, fsdp_flat_param_ids, world_size,
             )
         # Broadcast the optim state dict without positive-dimension tensor
         # state and the FSDP parameter IDs from rank 0 to all ranks
-        obj_list = [no_tensor_osd, fsdp_flat_param_ids] if rank == 0 \
-            else [None, None]
-        dist.broadcast_object_list(obj_list, src=0, group=group)
-        no_tensor_osd, fsdp_flat_param_ids = obj_list  # type: ignore[assignment]
+        processed_osd, fsdp_flat_param_ids = \
+            _broadcast_processed_optim_state_dict(
+                processed_osd if rank == 0 else None,
+                fsdp_flat_param_ids if rank == 0 else None, rank, group,
+                broadcast_device,
+            )
         # Broadcast positive-dimension tensor state (both sharded tensors for
         # FSDP parameters and unsharded tensors for non-FSDP parameters)
         sharded_osd = _broadcast_pos_dim_tensor_states(
-            no_tensor_osd, fsdp_flat_param_ids,
+            processed_osd, fsdp_flat_param_ids,
             flat_osd if rank == 0 else None, rank, world_size, group,
+            broadcast_device,
         )
         return sharded_osd
 
