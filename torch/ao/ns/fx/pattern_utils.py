@@ -70,6 +70,14 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
 
     default_base_op_idx = 0
     for quant_pattern, _quant_handler in all_quant_patterns.items():
+        # TODO: this is a temporary hack to flatten the patterns from quantization so
+        # that it works with the ns matcher function, maybe we should use `is_match`
+        # in torch.ao.quantization.fx.match_utils to match the patterns
+        if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
+           isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
+            # flatten the pattern with form (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d))
+            quant_pattern = (quant_pattern[0], quant_pattern[1][0], quant_pattern[1][1])
+
         # Only patterns of multiple ops are fusions, ignore
         # patterns which contain a single ops (they get matched
         # without caring about fusions).
