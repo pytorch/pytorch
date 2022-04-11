@@ -734,14 +734,18 @@ void Unpickler::rebuildSparseTensor() {
         result = autograd::make_variable(result, options.requires_grad());
         break;
       }
-      case static_cast<int>(c10::Layout::SparseCsr): {
+      case static_cast<int>(c10::Layout::SparseCsr):
+      case static_cast<int>(c10::Layout::SparseCsc):
+      case static_cast<int>(c10::Layout::SparseBsr):
+      case static_cast<int>(c10::Layout::SparseBsc): {
+        c10::Layout layout_ = static_cast<c10::Layout>(layout);
         std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
         bool requires_grad = elements.at(idx++).toBool();
         auto& crow_indices = elements.at(idx++).toTensor();
         auto& col_indices = elements.at(idx++).toTensor();
         auto& values_tensor = elements.at(idx++).toTensor();
         auto options = values_tensor.options()
-                           .layout(c10::Layout::SparseCsr)
+                           .layout(layout_)
                            .requires_grad(requires_grad);
         result = at::_sparse_csr_tensor_unsafe(
             crow_indices, col_indices, values_tensor, size, options);

@@ -2028,7 +2028,7 @@ class TestCase(expecttest.TestCase):
 
         return torch.sparse_csr_tensor(crow_indices,
                                        col_indices,
-                                       values, size=size, dtype=dtype, device=device)
+                                       values, size=size, dtype=dtype, layout=torch.sparse_csr, device=device)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have

@@ -308,15 +308,15 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Union[Tensor, List],'
                                'col_indices: Union[Tensor, List],'
                                ' values: Union[Tensor, List], size: Optional[_size]=None,'
-                               ' *, dtype: Optional[_dtype]=None,'
+                               ' *, dtype: Optional[_dtype]=None, layout: _layout=None,'
                                ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
-                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                      ' dtype: Optional[_dtype] = None, layout: _layout=None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
         '_sparse_csr_tensor_unsafe': ['def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],'
                                       'col_indices: Union[Tensor, List],'
                                       ' values: Union[Tensor, List], size: List[int],'
-                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                      ' dtype: Optional[_dtype] = None, layout: _layout=None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
                   ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'

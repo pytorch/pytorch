@@ -375,6 +375,9 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       pushTensor(tensor._values());
       break;
     case static_cast<int>(c10::Layout::SparseCsr):
+    case static_cast<int>(c10::Layout::SparseCsc):
+    case static_cast<int>(c10::Layout::SparseBsr):
+    case static_cast<int>(c10::Layout::SparseBsc):
       push<PickleOpCode>(PickleOpCode::MARK);
       for (auto size : tensor.sizes()) {
         pushInt(size);
@@ -413,9 +416,15 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // format can be found in `torch/serialization.py`.
   auto& tensor = ivalue.toTensor();
 
-  if (tensor.is_sparse() || tensor.is_sparse_csr()) {
+  switch (tensor.layout()) {
+  case c10::Layout::Sparse:
+  case c10::Layout::SparseCsr:
+  case c10::Layout::SparseCsc:
+  case c10::Layout::SparseBsr:
+  case c10::Layout::SparseBsc:
     pushLiteralSparseTensor(tensor);
     return;
+  default: ;
   }
 
   bool quantized = tensor.is_quantized();
