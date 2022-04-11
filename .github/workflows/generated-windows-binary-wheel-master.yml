@@ -75,8 +75,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
-        continue-on-error: true
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -181,8 +180,7 @@ jobs:
       - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
-        continue-on-error: true
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
