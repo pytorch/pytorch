@@ -780,7 +780,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
