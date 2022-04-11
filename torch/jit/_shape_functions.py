@@ -1,6 +1,7 @@
 from typing import List, Any, Optional, TypeVar, Union, Dict, Callable
 import math
 number = Union[int, float]
+# flake8: noqa
 
 import torch
 
