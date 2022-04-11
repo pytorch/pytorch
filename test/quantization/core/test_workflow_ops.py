@@ -579,9 +579,8 @@ class TestFakeQuantizeOps(TestCase):
     def test_fake_quant_control(self):
         for fq_module in [torch.ao.quantization.default_fake_quant(),
                           _LearnableFakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0,
-                                                           quant_max=255,
-                                                           dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                                                           reduce_range=True)()]:
+                                                           quant_max=127,
+                                                           dtype=torch.quint8, qscheme=torch.per_tensor_affine)()]:
             torch.manual_seed(42)
             X = torch.rand(20, 10, dtype=torch.float32)
             # Output of fake quant is not identical to input
