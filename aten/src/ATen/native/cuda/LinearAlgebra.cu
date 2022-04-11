@@ -1,4 +1,5 @@
-#define TORCH_ASSERT_NO_OPERATORS
+#define TORCH_ASSERT_NO_OPERATOR
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -6,7 +7,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
-#include <ATen/cuda/cub.h>
+#include <ATen/native/cuda/block_reduce.cuh>
 #include <c10/core/Scalar.h>
 
 namespace at { namespace native {
@@ -33,8 +34,7 @@ __device__ __forceinline__ void set_barrier(int* barrier, int value){
 
 template <int BLOCK_THREADS, typename scalar_t>
 __device__  __forceinline__ scalar_t dot(scalar_t *a, scalar_t *b, uint length){
-    typedef cub::BlockReduce<scalar_t, BLOCK_THREADS, cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY> BlockReduce;
-    __shared__ typename BlockReduce::TempStorage tmp_storage;
+    __shared__ scalar_t tmp_storage[(BLOCK_THREADS - 1) / 32 + 1];
 
     int tx = threadIdx.x;
     uint unroll = ceil( (float)length / (float)BLOCK_THREADS );
@@ -46,7 +46,7 @@ __device__  __forceinline__ scalar_t dot(scalar_t *a, scalar_t *b, uint length){
         idx += 32;
     }
 
-    scalar_t reduce = BlockReduce(tmp_storage).Sum(local_prod);
+    scalar_t reduce = cuda_utils::BlockReduceSum(local_prod, tmp_storage);
 
      __shared__ scalar_t dot;
     if (tx == 0) 
@@ -108,13 +108,11 @@ __global__ void q_loop(scalar_t *Q, scalar_t *vs, const uint n, const uint m){
 }
 
 template <int BLOCK_THREADS, typename scalar_t> 
-void qr_main(const at::Tensor& A, at::Tensor& Q, const uint m, const uint n, const float epsilon){
+void qr_main(const Tensor& A, Tensor& Q, Tensor& vs, const uint m, const uint n, const float epsilon){
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    auto options = at::TensorOptions().dtype(at::kInt).device(A.device());
-    at::Tensor barriers = at::zeros({m}, options);
-    at::Tensor vs = at::zeros_like(A);
-    at::Tensor R = A.clone();
+    int barriers[m];
+    Tensor R = A.clone();
     R.diagonal().add_((scalar_t) epsilon);
     
     reflections<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(
@@ -122,7 +120,7 @@ void qr_main(const at::Tensor& A, at::Tensor& Q, const uint m, const uint n, con
         vs.data_ptr<scalar_t>(), 
         m, 
         n, 
-        barriers.data_ptr<int>()
+        barriers
     );
 
     Q.fill_(0);
@@ -135,17 +133,21 @@ void qr_main(const at::Tensor& A, at::Tensor& Q, const uint m, const uint n, con
     );
 }
 
-void qr_orthogonalization_cuda_impl(const Tensor& A, Tensor& out, const float epsilon){
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-    A.scalar_type(), "qr_orthogonalization_cuda", ([&] {
-        if (n < 512)
-            qr_main<256, scalar_t>(A, out, m, n, epsilon);
-        else if (n < 1024)
-            qr_main<512, scalar_t>(A, out, m, n, epsilon);
-        else
-            qr_main<1024, scalar_t>(A, out, m, n, epsilon);
+void qr_orthogonalization_cuda_impl(const Tensor& A, Tensor& out, Tensor& vs, const float epsilon){
+    const uint m = A.size(0);
+    const uint n = A.size(1);
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+    A.scalar_type(), "qr_orthogonalization", ([&] {
+      if (n < 512)
+          qr_main<256, scalar_t>(A, out, vs, m, n, epsilon);
+      else if (n < 1024)
+          qr_main<512, scalar_t>(A, out, vs, m, n, epsilon);
+      else
+          qr_main<1024, scalar_t>(A, out, vs, m, n, epsilon);
     })
     );
+    
 }
 
 REGISTER_DISPATCH(qr_orthogonalization_stub, &qr_orthogonalization_cuda_impl);

@@ -131,7 +131,8 @@ Tensor& qr_orthogonalization(const Tensor& A, Tensor& out, const float epsilon){
         TORCH_CHECK(A.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
     }
         
-    qr_orthogonalization_stub(A.device().type(), A, out, epsilon);
+    Tensor vs = at::zeros_like(A);
+    qr_orthogonalization_stub(A.device().type(), A, out, vs, epsilon);
 
     return out;
 }
