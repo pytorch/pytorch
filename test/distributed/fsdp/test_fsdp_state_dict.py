@@ -343,12 +343,12 @@ class TestFSDPStateDict(FSDPTest):
             with torch.no_grad():
                 param.zero_()
 
-        with fsdp.summon_full_params():
+        with fsdp.summon_full_params(fsdp):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertNotEqual(p1, p2)
 
         local.load_state_dict(deepcopy(state_dict))
-        with fsdp.summon_full_params():
+        with fsdp.summon_full_params(fsdp):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertEqual(p1, p2)
 
