@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+import os
+import re
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
-import os
-import re
 
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
@@ -258,6 +259,12 @@ class GitRepo:
 
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
+
+
+def clone_repo(username: str, password: str, org: str, project: str) -> GitRepo:
+    path = tempfile.mkdtemp()
+    _check_output(['git', 'clone', f'https://{username}:{password}@github.com/{org}/{project}', path]).strip()
+    return GitRepo(path=path)
 
 
 class PeekableIterator(Iterator[str]):
