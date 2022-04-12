@@ -66,7 +66,7 @@ class C10_API intrusive_ptr_target {
   //      plus one more if refcount > 0
   //    An invariant: refcount > 0  =>  weakcount > 0
   //
-  //  - THStorage stays live as long as there are any strong
+  //  - c10::StorageImpl stays live as long as there are any strong
   //    or weak pointers to it (weakcount > 0, since strong
   //    references count as a +1 to weakcount)
   //
@@ -75,7 +75,7 @@ class C10_API intrusive_ptr_target {
   //  - Once refcount == 0, it can never again be > 0 (the transition
   //    from > 0 to == 0 is monotonic)
   //
-  //  - When you access THStorage via a weak pointer, you must
+  //  - When you access c10::StorageImpl via a weak pointer, you must
   //    atomically increment the use count, if it is greater than 0.
   //    If it is not, you must report that the storage is dead.
   //
@@ -146,14 +146,18 @@ class C10_API intrusive_ptr_target {
   // intrusive_ptr_target supports copy and move: but refcount and weakcount
   // don't participate (since they are intrinsic properties of the memory
   // location)
-  intrusive_ptr_target(intrusive_ptr_target&& other) noexcept
+  intrusive_ptr_target(intrusive_ptr_target&& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(intrusive_ptr_target&& other) noexcept {
+
+  intrusive_ptr_target& operator=(intrusive_ptr_target&& /*other*/) noexcept {
     return *this;
   }
-  intrusive_ptr_target(const intrusive_ptr_target& other) noexcept
+
+  intrusive_ptr_target(const intrusive_ptr_target& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(const intrusive_ptr_target& other) noexcept {
+
+  intrusive_ptr_target& operator=(
+      const intrusive_ptr_target& /*other*/) noexcept {
     return *this;
   }
 
@@ -469,6 +473,17 @@ class intrusive_ptr final {
   }
 
   /**
+   * Takes an owning pointer to TTarget* and creates an intrusive_ptr
+   * representing a new reference, i.e. the raw pointer retains
+   * ownership.
+   */
+  static intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
+    auto ret = reclaim(owning_ptr);
+    ret.retain_();
+    return ret;
+  }
+
+  /**
    * Allocate a heap object with args and wrap it inside a intrusive_ptr and
    * incref. This is a helper function to let make_intrusive() access private
    * intrusive_ptr constructors.
@@ -613,78 +628,8 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
-  }
-};
-
-template <typename T>
-struct ExclusivelyOwnedTraits<c10::intrusive_ptr<T>> {
-  using repr_type = T*;
-  using pointer_type = T*;
-  // You can still have non-const access to the T in the const methods
-  // because it's not stored by value.
-  using const_pointer_type = T*;
-
-  static constexpr repr_type nullRepr() {
-    return nullptr;
-  }
-
-  template <class... Args>
-  static repr_type createInPlace(Args&&... args) {
-    return new T(std::forward<Args>(args)...);
-  }
-
-  static repr_type moveToRepr(c10::intrusive_ptr<T>&& x) {
-    return x.release();
-  }
-
-  static void destroyOwned(repr_type x) {
-    if (!x) {
-      return;
-    }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->refcount_ == 1,
-        "ExclusivelyOwned<intrusive_ptr<T>> destroyed with refcount other than 1!");
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->weakcount_ == 1,
-        "ExclusivelyOwned<intrusive_ptr<T>> destroyed with weakcount other than 1!");
-    const_cast<std::remove_const_t<T>*>(x)->release_resources();
-#ifndef NDEBUG
-    // Needed to pass the debug assertions in ~intrusive_ptr_target.
-    x->refcount_ = 0;
-    x->weakcount_ = 0;
-#endif
-    x->release_resources();
-    delete x;
-  }
-
-  static c10::intrusive_ptr<T> take(repr_type& x) {
-    // May need to do reference count initialization, so use the regular
-    // intrusive_ptr ctor.
-
-    // Refcount would be zero if the ExclusivelyOwned was created
-    // in-place (so that the underlying T was never owned by an
-    // intrusive_ptr), and it would be 1 if it was created as an
-    // intrusive_ptr<T> and then moved into the ExclusivelyOwned.
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->refcount_ == 1 || x->refcount_ == 0,
-        "take() from ExclusivelyOwned<intrusive_ptr<T>> with refcount other than 0 or 1!");
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->weakcount_ == 1 || x->weakcount_ == 0,
-        "take() from ExclusivelyOwned<intrusive_ptr<T>> with weakcount other than 0 or 1!");
-#ifndef NDEBUG
-    // Needed to pass the debug assertions in ~intrusive_ptr_target.
-    x->refcount_ = 0;
-    x->weakcount_ = 0;
-#endif
-    auto result = c10::intrusive_ptr<T>(x);
-    x = nullptr;
-    return result;
-  }
-
-  static pointer_type getImpl(repr_type x) {
-    return x;
   }
 };
 
@@ -920,6 +865,17 @@ class weak_intrusive_ptr final {
              owning_weak_ptr->weakcount_.load() > 0),
         "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
     return weak_intrusive_ptr(owning_weak_ptr);
+  }
+
+  /**
+   * Takes a pointer to TTarget* (may be weak or strong) and creates a
+   * new weak_intrusive_ptr representing a new weak reference, i.e.
+   * the raw pointer retains ownership.
+   */
+  static weak_intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
+    auto ret = reclaim(owning_ptr);
+    ret.retain_();
+    return ret;
   }
 
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>

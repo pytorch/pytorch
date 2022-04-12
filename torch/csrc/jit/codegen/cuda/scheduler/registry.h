@@ -1,7 +1,7 @@
 #pragma once
-
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/compile_time_info.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -182,6 +182,15 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_reduction_param)
       : heuristc_(heuristic), has_reduction_param_(has_reduction_param) {}
 
+  ReductionParams& rparams() {
+    return rparams_;
+  };
+
+  PointwiseParams& pparams() {
+    return pparams_;
+  }
+
+ private:
   //! What kind of heuristics does this entry have?
   const ScheduleHeuristic heuristc_;
 
@@ -189,10 +198,10 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   const bool has_reduction_param_;
 
   //! Reduction parameters if applicable
-  ReductionParams rparams_ = ReductionParams();
+  ReductionParams rparams_;
 
   //! Pointwise parameters if applicable
-  PointwiseParams pparams_ = PointwiseParams();
+  PointwiseParams pparams_;
 
   //! Kernel Index Mode
   KernelIndexMode index_mode_ = KernelIndexMode::INT64;
@@ -206,182 +215,6 @@ class TORCH_CUDA_CU_API SchedulerEntryHash {
 
 //! Debug print function for heuristics
 std::string toString(ScheduleHeuristic sh);
-
-class TORCH_CUDA_CU_API HeuristicSummary {
-  using ValToFactorMap = std::unordered_map<Val*, int>;
-  using ValToFactorMapPtr = std::unique_ptr<ValToFactorMap>;
-  using ScopedPersistenceFactorMap =
-      std::unordered_map<Val*, ValToFactorMapPtr>;
-
- public:
-  HeuristicSummary(
-      Fusion* fusion,
-      ScheduleHeuristic heuristic,
-      SchedulerRuntimeInfo& runtime_info);
-  // Recording scheme:
-  bool isRecording() {
-    return recording_;
-  }
-
-  // Validate post recording:
-  //  make sure we have collected all the needed fields
-  void validate() {
-    switch (heuristic_) {
-      case ScheduleHeuristic::PointWise:
-        TORCH_INTERNAL_ASSERT(vectorizable_inputs_outputs_);
-        TORCH_INTERNAL_ASSERT(mapped_input_output_dims_);
-        break;
-      case ScheduleHeuristic::Reduction:
-        TORCH_INTERNAL_ASSERT(reduction_tvs_);
-        break;
-      case ScheduleHeuristic::Normalization:
-        TORCH_INTERNAL_ASSERT(vectorizable_inputs_outputs_);
-        TORCH_INTERNAL_ASSERT(reduction_tvs_);
-        TORCH_INTERNAL_ASSERT(persistent_buffer_info_);
-        TORCH_INTERNAL_ASSERT(has_post_reduction_bcast_);
-        TORCH_INTERNAL_ASSERT(supported_post_reduction_fusion_);
-        break;
-    }
-  }
-
-  // Accessors (un-protected for now)
-  void setVectorizableInputsOutputs(const std::vector<TensorView*>& input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    if (!vectorizable_inputs_outputs_) {
-      vectorizable_inputs_outputs_ =
-          std::make_unique<std::vector<TensorView*>>(input);
-    }
-  }
-
-  auto* getVectorizableInputsOutputs() {
-    return vectorizable_inputs_outputs_.get();
-  }
-
-  void setReductionTVs(const std::vector<TensorView*>& input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    if (!reduction_tvs_) {
-      reduction_tvs_ = std::make_unique<std::vector<TensorView*>>(input);
-    }
-  }
-
-  auto* getReductionTVs() {
-    return reduction_tvs_.get();
-  }
-
-  void setPersistentBufferInfo(
-      const scheduler_utils::PersistentBufferInfo& input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    if (!persistent_buffer_info_) {
-      persistent_buffer_info_ =
-          std::make_unique<scheduler_utils::PersistentBufferInfo>(input);
-    }
-  }
-
-  auto* getPersistentBufferInfo() {
-    return persistent_buffer_info_.get();
-  }
-
-  void setSupportedPostReductionFusion(bool input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    if (!supported_post_reduction_fusion_) {
-      supported_post_reduction_fusion_ = std::make_unique<bool>(input);
-    }
-  }
-
-  auto* getSupportedPostReductionFusion() {
-    return supported_post_reduction_fusion_.get();
-  }
-
-  void setHasPostReductionBCast(bool input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    if (!has_post_reduction_bcast_) {
-      has_post_reduction_bcast_ = std::make_unique<bool>(input);
-    }
-  }
-
-  auto* getHasPostReductionBCast() {
-    return has_post_reduction_bcast_.get();
-  }
-
-  void setScopedPersistenceFactorMap(const ScopedPersistenceFactorMap& input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    scope_persistence_factor_map_ =
-        std::make_unique<ScopedPersistenceFactorMap>();
-    for (const auto& it : input) {
-      ValToFactorMap& to_copy = *(it.second);
-      scope_persistence_factor_map_->operator[](it.first) =
-          std::make_unique<ValToFactorMap>(to_copy);
-    }
-  }
-
-  auto* getScopedPersistenceFactorMap() {
-    return scope_persistence_factor_map_.get();
-  }
-
-  void setMappedInputOutputDims(const std::vector<int64_t>& input) {
-    TORCH_INTERNAL_ASSERT(recording_);
-
-    if (!mapped_input_output_dims_) {
-      mapped_input_output_dims_ = std::make_unique<std::vector<int64_t>>(input);
-    }
-  }
-
-  auto* getMappedInputOutputDims() {
-    return mapped_input_output_dims_.get();
-  }
-
- private:
-  ScheduleHeuristic heuristic_;
-  bool recording_ = true;
-
-  // Actual data payload, could be folded into subclasses later.
-  std::unique_ptr<std::vector<TensorView*>> vectorizable_inputs_outputs_;
-  std::unique_ptr<std::vector<TensorView*>> reduction_tvs_;
-  std::unique_ptr<scheduler_utils::PersistentBufferInfo>
-      persistent_buffer_info_;
-  std::unique_ptr<bool> has_post_reduction_bcast_;
-  std::unique_ptr<bool> supported_post_reduction_fusion_;
-  std::unique_ptr<ScopedPersistenceFactorMap> scope_persistence_factor_map_;
-  std::unique_ptr<std::vector<int64_t>> mapped_input_output_dims_;
-};
-
-// A temporary utility class to save some boilerplate code when
-//  using HeuristicSummary. Can be significantly improved in a follow up.
-template <typename T>
-class HeuristicCacheAccessor {
- public:
-  HeuristicCacheAccessor() = default;
-
-  T& read() {
-    if (temporary_data_) {
-      return *temporary_data_;
-    } else {
-      return *owned_data_;
-    }
-  }
-
-  void writeNew(T data) {
-    owned_data_ = std::make_unique<T>(std::move(data));
-  }
-
-  void takeNew(std::unique_ptr<T>& data) {
-    owned_data_ = std::move(data);
-  }
-
-  void writeTemporary(T* data) {
-    temporary_data_ = data;
-  }
-
- private:
-  std::unique_ptr<T> owned_data_ = nullptr;
-  T* temporary_data_ = nullptr;
-};
 
 } // namespace cuda
 } // namespace fuser

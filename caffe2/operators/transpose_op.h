@@ -7,6 +7,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -23,9 +24,8 @@ class TransposeOp : public Operator<Context> {
     // We will check the legality of axes_: it should be from 0 to axes_.size().
     std::vector<int> axes_sorted = axes_;
     std::sort(axes_sorted.begin(), axes_sorted.end());
-    for (std::size_t i = 0; i < axes_sorted.size(); ++i) {
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      if (axes_sorted[i] != i) {
+    for (const auto i : c10::irange(axes_sorted.size())) {
+      if (axes_sorted[i] != static_cast<int64_t>(i)) {
         CAFFE_THROW("Axes should be a permutation of 0 to ndim.");
       }
     }
@@ -49,7 +49,7 @@ class TransposeOp : public Operator<Context> {
     }
     const at::IntArrayRef X_dims = X.sizes();
     std::vector<std::int64_t> Y_dims(ndim);
-    for (int i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       Y_dims[i] = X_dims[axes_[i]];
     }
     Y->Resize(Y_dims);

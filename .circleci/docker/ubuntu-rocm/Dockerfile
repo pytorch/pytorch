@@ -6,6 +6,10 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
+# Set AMD gpu targets to build for
+ARG PYTORCH_ROCM_ARCH
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
+
 # Install common dependencies (so that this step can be cached separately)
 ARG EC2
 ADD ./common/install_base.sh install_base.sh
@@ -24,8 +28,10 @@ RUN bash ./install_user.sh && rm install_user.sh
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ADD requirements-ci.txt /opt/conda/requirements-ci.txt
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
+RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION

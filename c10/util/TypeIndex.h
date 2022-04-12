@@ -132,7 +132,7 @@ inline constexpr uint64_t type_index_impl() {
 // of this function, including its template parameter, i.e. including the
 // type we want an id for. We use this name and run crc64 on it to get a type
 // id.
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
   return crc64(__FUNCSIG__, sizeof(__FUNCSIG__)).checksum();
 #elif defined(__clang__)
   return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();

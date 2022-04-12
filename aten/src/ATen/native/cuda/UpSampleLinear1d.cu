@@ -1,14 +1,23 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_linear1d_native.h>
+#include <ATen/ops/upsample_linear1d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -119,8 +128,6 @@ static void upsample_linear1d_out_cuda_template(
 
   int output_width = output_size[0];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_width = input.size(2);
 
   output.zero_();
@@ -164,8 +171,6 @@ static void upsample_linear1d_backward_out_cuda_template(
 
   int output_width = output_size[0];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_width = input_size[2];
 
   Tensor grad_output = grad_output_.contiguous();

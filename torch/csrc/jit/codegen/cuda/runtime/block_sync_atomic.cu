@@ -1,3 +1,4 @@
+
 // Counter-based block synchronization. Only meant to be used for
 // debugging and validating synchronization. This should be replaced
 // with cuda::barrier::arrive_and_wait as that should be more robust.
@@ -39,7 +40,10 @@ __device__ void sync() {
   // becomes smaller than old. In that case, it's guaranteed that all
   // threads have incremented the counter.
   while (local_sync_counter < next && old < local_sync_counter) {
-    __nanosleep(backoff);
+#if __CUDA_ARCH__ >= 700
+    // __nanosleep only available on compute capability 7.0 or higher
+    __nanosleep(backoff); // avoids busy waiting
+#endif
     if (backoff < backoff_max) {
       backoff *= 2;
     }

@@ -192,14 +192,6 @@ class BasePruner(BaseSparsifier):
     def get_module_pruned_outputs(self, module):
         r"""Returns the set of pruned indices of module"""
         assert parametrize.is_parametrized(module)  # can only get pruned indices of pruned module
-        modules = {config['module'] for config in self.module_groups}
-        module_list = set()
-        for m in modules:
-            if type(m) is tuple:
-                module_list.update(m)
-            else:
-                module_list.add(m)
-        assert module in module_list  # check that module is in pruner.module_groups
         return module.parametrizations.weight[0].pruned_outputs  # assume only one parametrization attached
 
     def step(self, use_path=False):

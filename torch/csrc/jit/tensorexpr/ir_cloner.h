@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
@@ -52,6 +52,7 @@ class TORCH_API IRCloner : public IRMutator {
   StmtPtr mutate(AtomicAddPtr v) override;
   StmtPtr mutate(SyncThreadsPtr v) override;
   StmtPtr mutate(ExternalCallPtr v) override;
+  StmtPtr mutate(ExternalCallWithAllocPtr v) override;
 
   StmtPtr mutate(AllocatePtr v) override;
   StmtPtr mutate(FreePtr v) override;

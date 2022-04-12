@@ -12,6 +12,11 @@ namespace fuser {
 namespace cuda {
 namespace ir_utils {
 
+// Replace values in fusion using ValReplacementMutator
+void replaceValue(
+    Fusion*,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 template <typename FilterType, typename Iterator>
 class FilterIterator {
  public:
@@ -96,6 +101,10 @@ class FilteredView {
     return cend();
   }
 
+  bool empty() const {
+    return begin() == end();
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;
@@ -105,6 +114,9 @@ template <typename FilterType, typename InputIt>
 auto filterByType(InputIt first, InputIt last) {
   return FilteredView<FilterType, InputIt>(first, last);
 }
+
+template <typename FilterType, typename ContainerType>
+auto filterByType(const ContainerType&& inputs) = delete;
 
 template <typename FilterType, typename ContainerType>
 auto filterByType(const ContainerType& inputs) {
@@ -136,34 +148,44 @@ std::vector<int> normalizeOld2New(
 Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
 // Makes rfactor generic with reduction ops and Welford
-TensorView* rfactorHelper(TensorView* red_tv, const std::vector<int>& axes);
+TORCH_CUDA_CU_API TensorView* rfactorHelper(
+    TensorView* red_tv,
+    const std::vector<int>& axes);
 
 // Return immediate producers of tv
-std::vector<TensorView*> producerTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 
 // Return immediate consumers of tv
-std::vector<TensorView*> consumerTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
 
 // Return immediate producers of tvs (can return tvs input)
-std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(
+    const std::vector<TensorView*>& tvs);
 
 // Return immediate consumers of tvs (can return tvs input)
-std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(
+    const std::vector<TensorView*>& tvs);
 
 // Returns producers of tv that are inputs of fusion
-std::vector<TensorView*> inputTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> inputTvsOf(TensorView* tv);
 
 // Returns consumers of tv that are outputs of fusion
-std::vector<TensorView*> outputTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(TensorView* tv);
 
 // Returns producers of tvs that are inputs of fusion
-std::vector<TensorView*> inputTvsOf(std::vector<TensorView*> tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> inputTvsOf(
+    std::vector<TensorView*> tvs);
 
 // Returns consumers of tvs that are outputs of fusion
-std::vector<TensorView*> outputTvsOf(std::vector<TensorView*> tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
+    std::vector<TensorView*> tvs);
 
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
+
+TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
+    Fusion* fusion,
+    bool ignore_trivial = true);
 
 } // namespace ir_utils
 } // namespace cuda

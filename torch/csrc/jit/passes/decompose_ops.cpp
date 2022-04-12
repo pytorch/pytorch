@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <ATen/core/symbol.h>
+
 namespace torch {
 namespace jit {
 
@@ -42,7 +44,7 @@ bool isDecomposableNorm(Node* normalize_op) {
   auto device = input->type()->expectRef<TensorType>().device();
   // As of now, we do the decomposition for batchnorm/layernorm on GPU device
   // only
-  if (!device || (*device).is_cpu()) {
+  if (!device || !(*device).is_cuda()) {
     return false;
   }
 

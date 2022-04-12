@@ -4,7 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <algorithm>
 #include <iostream>
