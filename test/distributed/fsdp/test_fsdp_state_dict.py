@@ -363,7 +363,7 @@ class TestFSDPStateDict(FSDPTest):
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd = fsdp_model.state_dict()
-        with fsdp_model.summon_full_params():
+        with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
         # Check that the ignored parameters are not cloned
         for param, param_name in ignored_param_to_param_name.items():
