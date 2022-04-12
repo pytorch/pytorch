@@ -137,9 +137,9 @@ def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_m
 
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx["Byte"])
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     else:
-        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx["Char"])
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
     return g.op(
         "DequantizeLinear",
         g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis),
@@ -151,9 +151,9 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
         raise RuntimeError(
             "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx["Byte"])
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     else:
-        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx["Char"])
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
     if scale.type().scalarType() != "Float":
         scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
