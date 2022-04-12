@@ -2992,6 +2992,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
            A,
            full_matrices,
            compute_uv,
+           driver,
            *U_, *S_, *Vh_, info);
 
   if (!U_ready) {
