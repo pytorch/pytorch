@@ -1,28 +1,33 @@
 #pragma once
 
-#include <torch/csrc/jit/mobile/module.h>
+#include <ATen/core/TensorBase.h>
+#include <c10/core/Device.h>
+#include <c10/util/Optional.h>
 
 #include <istream>
-#include <memory>
-
-#include <caffe2/serialize/file_adapter.h>
+#include <map>
+#include <string>
 
 namespace torch {
 namespace jit {
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::ReadAdapterInterface;
 
+/**
+ * Loads named parameters from the serialized data in @p in.
+ *
+ * Calls #TORCH_CHECK() if the data format is not recognized.
+ */
 TORCH_API std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
     c10::optional<at::Device> device = c10::nullopt);
 
+/**
+ * Loads named parameters from the serialized data in @p filename.
+ *
+ * Calls #TORCH_CHECK() if the data format is not recognized.
+ */
 TORCH_API std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
 
-TORCH_API std::map<std::string, at::Tensor> _load_parameters(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device = c10::nullopt);
 } // namespace jit
 } // namespace torch

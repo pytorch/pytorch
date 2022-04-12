@@ -92,7 +92,24 @@ struct OptionalArray {
     return *this;
   }
 
+  // Used when saving an argument for the backwards pass.
+  OptionalArray& operator=(c10::OptionalArrayRef<T> ref) {
+    if (ref) {
+      list = std::vector<T>(ref->begin(), ref->end());
+    } else {
+      list = nullopt;
+    }
+    return *this;
+  }
+
   operator c10::optional<c10::ArrayRef<T>>() {
+    if (!list) {
+      return nullopt;
+    }
+    return *list;
+  }
+
+  operator c10::OptionalArrayRef<T>() {
     if (!list) {
       return nullopt;
     }
@@ -127,6 +144,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
+  _(SymInt)   \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -543,6 +561,18 @@ public:
     payload.u.as_int = i;
   }
 
+  IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
+    payload.u.as_int = i.data();
+  }
+
+  bool isSymInt() const {
+    return Tag::SymInt == tag;
+  }
+
+  c10::SymInt toSymInt() const {
+    return c10::SymInt(payload.u.as_int);
+  }
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
@@ -666,6 +696,8 @@ public:
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
   // ClassType
