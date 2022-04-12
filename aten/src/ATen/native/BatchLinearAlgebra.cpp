@@ -3054,13 +3054,14 @@ Tensor linalg_svdvals(const Tensor& A) {
                      /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
+std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv,
+    c10::optional<c10::string_view> driver, Tensor& U, Tensor& S, Tensor& V) {
 
   if (compute_uv) {
     if (V.dim() >= 2) {
       V.transpose_(-2, -1);
     }
-    at::linalg_svd_out(U, S, V, self, /*full_matrices=*/!some);
+    at::linalg_svd_out(U, S, V, self, /*full_matrices=*/!some, driver);
     V.transpose_(-2, -1);
     if (V.is_complex()) {
       // We cannot use `_set_conj` as it does not play well with backwards
@@ -3092,7 +3093,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
   return std::tie(U, S, V);
 }
 
-std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
+std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv, c10::optional<c10::string_view> driver) {
   // TODO: uncomment the following when svd is deprecated not only in docs
   // torch/xla is blocking the transition from at::svd to at::linalg_svd in at::linalg_pinv code
   // see https://github.com/pytorch/xla/issues/2755
@@ -3110,7 +3111,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   TORCH_CHECK(self.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor U, S, Vh;
   if (compute_uv) {
-    std::tie(U, S, Vh) = at::linalg_svd(self, /*full_matrices=*/!some);
+    std::tie(U, S, Vh) = at::linalg_svd(self, /*full_matrices=*/!some, driver);
   } else {
     S = at::linalg_svdvals(self);
     // some == false returns U, Vh of size (m, m), (n, n) full of zeros
