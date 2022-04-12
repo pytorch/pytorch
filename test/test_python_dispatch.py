@@ -726,6 +726,11 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         x.data
         self.assertEqual(called, 2)
         self.assertIs(type(x), SubTensor)
+        x.set_(torch.empty(2))
+        self.assertEqual(called, 3)
+        x.data
+        self.assertEqual(called, 4)
+        self.assertIs(type(x), SubTensor)
 
     def test_construct_int_tensor(self):
         class SubTensor(torch.Tensor):

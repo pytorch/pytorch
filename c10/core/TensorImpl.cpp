@@ -535,9 +535,8 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   // it should), which means that we have to preserve whatever the
   // original Python keyset was (as it's associated with the PyObject
   // being a tensor subclass or not)
-  dest_impl->key_set_ =
-    (src_impl->key_set_ - c10::python_ks) |
-    (dest_impl->key_set_ & c10::python_ks);
+  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
+      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
