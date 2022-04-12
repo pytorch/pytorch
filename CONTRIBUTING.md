@@ -342,6 +342,8 @@ The `expecttest` and `hypothesis` libraries must be installed to run the tests. 
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
 
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
+
 ### Better local unit tests with `pytest`
 
 We don't officially support `pytest`, but it works well with our
@@ -1098,8 +1100,7 @@ This internally invokes our driver script and closely mimics how clang-tidy is r
 
 ## Pre-commit tidy/linting hook
 
-We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-pyi, and others) to perform additional
+We use clang-tidy to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -1107,18 +1108,18 @@ performing these checks, before a commit is created:
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
-
-If you haven't set up the pre-commit hook and have already committed files and
+If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
   flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
-fix the code so that no errors are reported when you re-run the above check again,
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
+
+Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
