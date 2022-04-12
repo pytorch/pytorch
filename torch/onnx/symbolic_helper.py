@@ -970,6 +970,12 @@ def requantize_bias_helper(g, bias, input_scale, weight_scale):
                   to_i=torch.onnx.TensorProtoDataType.INT32)
     return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
 
+def args_have_same_dtype(args):
+    assert args
+    base_dtype = args[0].type().scalarType()
+    has_same_dtype = all(elem.type().scalarType() == base_dtype for elem in args)
+    return has_same_dtype
+
 _default_onnx_opset_version = 13
 _onnx_main_opset = 15
 _onnx_stable_opsets = list(range(7, _onnx_main_opset))
