@@ -64,6 +64,8 @@ namespace c10 {
   _(prim, PadPacked) /* onnx */      \
   _(prim, Placeholder) /* debug */   \
   _(prim, Print)                     \
+  _(prim, EmptyListLiteral)          \
+  _(prim, LegacyTypedConstructor)    \
   _(prim, PythonOp)                  \
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
@@ -107,7 +109,6 @@ namespace c10 {
   _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, Delete)                    \
-  _(aten, gelu_)                     \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
