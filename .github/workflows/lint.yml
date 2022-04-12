@@ -250,13 +250,17 @@ jobs:
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
-      - name: Run actionlint
-        shell: bash
-        run: |
-          set -eux
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint --color
-          rm actionlint
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Run actionlint
+        with:
+          timeout_minutes: 1
+          max_attempts: 3
+          command: |
+            set -eux
+            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+            ./actionlint --color
+            rm actionlint
+
 
   toc:
     name: toc
