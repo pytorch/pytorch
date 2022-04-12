@@ -108,7 +108,6 @@ class Conv1d(_ConvNd, nn.Conv1d):
         weight_fake_quant: fake quant module for weight
     """
     _FLOAT_MODULE = nn.Conv1d
-    _FLOAT_CONV_MODULE = nn.Conv1d
 
     def __init__(self,
                  in_channels: int,
