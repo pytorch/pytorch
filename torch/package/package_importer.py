@@ -217,8 +217,8 @@ class PackageImporter(Importer):
                     )
                 storage = loaded_storages[key]
                 # TODO: Once we decide to break serialization FC, we can
-                # stop wrapping with TypedStorage
-                return torch.storage.TypedStorage(
+                # stop wrapping with _TypedStorage
+                return torch.storage._TypedStorage(
                     wrap_storage=storage._untyped(), dtype=dtype
                 )
             elif typename == "reduce_package":
@@ -287,6 +287,22 @@ class PackageImporter(Importer):
         """
         return _create_directory_from_file_list(
             self.filename, self.zip_reader.get_all_records(), include, exclude
+        )
+
+    def python_version(self):
+        """Returns the version of python that was used to create this package.
+
+        Note: this function is experimental and not Forward Compatible. The plan is to move this into a lock
+        file later on.
+
+        Returns:
+            :class:`Optional[str]` a python version e.g. 3.8.9 or None if no version was stored with this package
+        """
+        python_version_path = ".data/python_version"
+        return (
+            self.zip_reader.get_record(python_version_path).decode("utf-8").strip()
+            if self.zip_reader.has_record(python_version_path)
+            else None
         )
 
     def _read_extern(self):

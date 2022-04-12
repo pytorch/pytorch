@@ -1,6 +1,6 @@
 import copy
 import warnings
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 
 
 class IterableWrapperIterDataPipe(IterDataPipe):
@@ -13,9 +13,15 @@ class IterableWrapperIterDataPipe(IterDataPipe):
             iterator. The copy is made when the first element is read in ``iter()``.
 
     .. note::
-      If ``deepcopy`` is explicitly set to ``False``, users should ensure
-      that the data pipeline doesn't contain any in-place operations over
-      the iterable instance to prevent data inconsistency across iterations.
+        If ``deepcopy`` is explicitly set to ``False``, users should ensure
+        that the data pipeline doesn't contain any in-place operations over
+        the iterable instance to prevent data inconsistency across iterations.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp = IterableWrapper(range(10))
+        >>> list(dp)
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     """
     def __init__(self, iterable, deepcopy=True):
         self.iterable = iterable

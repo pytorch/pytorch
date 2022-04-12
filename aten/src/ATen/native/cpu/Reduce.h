@@ -133,7 +133,7 @@ static void set_results(const res_t result, const TensorIteratorBase &iter, cons
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
-for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
+for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 

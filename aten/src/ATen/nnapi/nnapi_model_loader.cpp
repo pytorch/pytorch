@@ -97,9 +97,9 @@ int load_nnapi_model(
     size_t num_buffers,
     const void** buffer_ptrs,
     int32_t* buffer_sizes,
-    size_t num_memories,
-    ANeuralNetworksMemory** memories,
-    int32_t* memory_sizes,
+    size_t /*num_memories*/,
+    ANeuralNetworksMemory** /*memories*/,
+    int32_t* /*memory_sizes*/,
     int32_t* out_input_count,
     int32_t* out_output_count,
     size_t* out_bytes_consumed) {

@@ -259,7 +259,7 @@ class Join():
                     f"{self._rank} has at least {WARN_THRESHOLD} "
                     f"fewer inputs than other currently-active ranks. "
                     "This level of skew could lead to performance "
-                    "degradataion during training."
+                    "degradation during training."
                 )
             # Shadow the all-reduce in non-joined processes
             num_nonjoined_procs = self._get_num_nonjoined_procs()
