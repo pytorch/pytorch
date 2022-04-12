@@ -18,7 +18,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install lintrunner
-        run: pip install lintrunner=0.5
+        run: pip install lintrunner==0.5
       - name: Initialize lint dependencies
         run: lintrunner init
       - name: Do build steps necessary for linters
