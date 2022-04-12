@@ -65,7 +65,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             p.numel() for p in nonwrapped_model.transformer.parameters()
         )
         nonignored_numel = total_numel - ignored_numel
-        with wrapped_model.summon_full_params():
+        with FSDP.summon_full_params(wrapped_model):
             flat_param_numel = wrapped_model.params[0].numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
@@ -96,7 +96,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             p.numel() for p in nonwrapped_model.layer1.parameters()
         )
         nonignored_numel = total_numel - ignored_numel
-        with wrapped_model.summon_full_params():
+        with FSDP.summon_full_params(wrapped_model):
             flat_param_numel = wrapped_model.params[0].numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
