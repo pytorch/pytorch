@@ -31,10 +31,11 @@ runs:
       run: |
         Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
 
+    # Since it's just a defensive command, the workflow should continue even the command fails
     - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
       shell: powershell
       run: |
-        Set-MpPreference -ExclusionPath $(Get-Location).tostring()
+        Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
     - name: Install Visual Studio 2019 toolchain
       shell: powershell
