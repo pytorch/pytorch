@@ -84,7 +84,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_)                   \
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(_)       \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -287,7 +287,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -302,7 +302,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
