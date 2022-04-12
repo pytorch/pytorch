@@ -25,6 +25,7 @@
 #include <ATen/ops/_softmax_native.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/softmax.h>
+#include <ATen/ops/_softmax_backward_data.h>
 #endif
 
 namespace at {
