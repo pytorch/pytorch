@@ -257,6 +257,29 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::BFloat16> {
+    static inline std::complex<at::Half> apply(at::BFloat16 src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::Half> {
+    static inline std::complex<at::Half> apply(at::Half src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<
+      std::complex<at::Half>,
+      std::complex<double>> {
+    static inline std::complex<at::Half> apply(std::complex<double> src) {
+      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+    }
+  };
+
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
@@ -748,10 +771,15 @@ std::string generate_code(
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
   }
-  if (f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>" || dynamic_casting) {
+  if (f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
     env.s("traits_string", get_traits_string());
     env.s("half_string", jiterator_half_support_literal);
-    env.s("complex_body_string", get_complex_body_string()+get_complex_half_body_string());
+    static const auto complex_body_string =
+        get_complex_body_string() + get_complex_half_body_string();
+    env.s(
+        "complex_body_string",
+        complex_body_string);
     env.s("complex_math_string", get_complex_math_string());
   }
 
