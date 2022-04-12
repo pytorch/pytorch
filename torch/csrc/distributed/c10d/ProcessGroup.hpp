@@ -12,6 +12,7 @@
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
@@ -222,8 +223,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), "does not support allreduce"));
   }
 
-  // This will be moved out of ProcessGroup, do not add dependencies on this
-  // function.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
@@ -428,13 +427,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
  protected:
+  // Implementations of this interface need to call this to setup
+  // appropriate logging etc.
+  void init();
+
   const int rank_;
   const int size_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
-  DistributedDebugLevel dist_debug_level_;
+  DebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

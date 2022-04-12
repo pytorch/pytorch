@@ -43,15 +43,7 @@ Element* MemoryDAG::fromIndex(unsigned x) {
   return indexToElementMap_[x].get();
 }
 
-bool MemoryDAG::mayAlias(Element* a, Element* b) const {
-  return mayAliasImpl(a, b);
-}
-
 bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
-  return mayAliasImpl(a, b);
-}
-
-bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   const auto& aMemLoc = getMemoryLocations(a);
   const auto& bMemLoc = getMemoryLocations(b);
 
@@ -59,11 +51,8 @@ bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
-  return mayContainAliasImpl(a, b);
-}
-
-bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
-  return mayContainAliasImpl(a, b);
+  return getAllContainedMemoryLocations(a).intersects(
+      getAllContainedMemoryLocations(b));
 }
 
 const MemoryLocations& MemoryDAG::getAllContainedMemoryLocations(
@@ -110,9 +99,17 @@ void MemoryDAG::collectAllContainedMemoryLocationsImpl(
   }
 }
 
-bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  return getAllContainedMemoryLocations(a).intersects(
-      getAllContainedMemoryLocations(b));
+bool MemoryDAG::mayContainAlias(
+    const Element* a,
+    const at::ArrayRef<Element*> b) const {
+  if (b.size() == 0) {
+    return false;
+  }
+
+  const auto& a_contained = getAllContainedMemoryLocations(a);
+  return std::any_of(b.begin(), b.end(), [this, &a_contained](Element* b_elem) {
+    return a_contained.intersects(this->getAllContainedMemoryLocations(b_elem));
+  });
 }
 
 bool MemoryDAG::mayContainAlias(

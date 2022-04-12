@@ -13,8 +13,7 @@ namespace {
 template <typename Dtype>
 __global__ void MaxPoolForward(
     const int nthreads,
-    const Dtype* const bottom_data,
-    const int num,
+    const Dtype *const bottom_data,
     const int channels,
     const int height,
     const int width,
@@ -26,8 +25,8 @@ __global__ void MaxPoolForward(
     const int stride_w,
     const int pad_h,
     const int pad_w,
-    Dtype* const top_data,
-    int* mask) {
+    Dtype *const top_data,
+    int *const mask) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
@@ -59,9 +58,8 @@ __global__ void MaxPoolForward(
 template <typename Dtype>
 __global__ void MaxPoolBackward(
     const int nthreads,
-    const Dtype* const top_diff,
-    const int* const mask,
-    const int num,
+    const Dtype *const top_diff,
+    const int *const mask,
     const int channels,
     const int height,
     const int width,
@@ -73,7 +71,7 @@ __global__ void MaxPoolBackward(
     const int stride_w,
     const int pad_h,
     const int pad_w,
-    Dtype* const bottom_diff) {
+    Dtype *const bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
@@ -122,7 +120,6 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
          context_.cuda_stream()>>>(
           output_size,
           X.data<T>(),
-          X.dim32(0),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
@@ -174,7 +171,6 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
       X.numel(),
       dY.data<T>(),
       mask.data<int>(),
-      X.dim32(0),
       X.dim32(1),
       X.dim32(2),
       X.dim32(3),

@@ -78,7 +78,7 @@ But that may not always be the case. For instance:
 Under the hood, to prevent reference cycles, PyTorch has *packed* the tensor
 upon saving and *unpacked* it into a different tensor for reading. Here, the
 tensor you get from accessing ``y.grad_fn._saved_result`` is a different tensor
-object than ``x`` (but they still share the same storage).
+object than ``y`` (but they still share the same storage).
 
 Whether a tensor will be packed into a different tensor object depends on
 whether it is an output of its own `grad_fn`, which is an implementation detail
@@ -108,7 +108,7 @@ Setting ``requires_grad``
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :attr:`requires_grad` is a flag, defaulting to false *unless wrapped
-in a ``nn.Parameter``*, that allows for fine-grained exclusion of
+in a* ``nn.Parameter``, that allows for fine-grained exclusion of
 subgraphs from gradient computation. It takes effect in both the
 forward and backward passes:
 
@@ -222,7 +222,7 @@ Evaluation Mode (``nn.Module.eval()``)
 Evaluation mode is not actually a mechanism to locally disable gradient computation.
 It is included here anyway because it is sometimes confused to be such a mechanism.
 
-Functionally, ``module.eval()`` (or equivalently ``module.train()``) are completely
+Functionally, ``module.eval()`` (or equivalently ``module.train(False)``) are completely
 orthogonal to no-grad mode and inference mode. How ``model.eval()`` affects
 your model depends entirely on the specific modules used in your model and
 whether they define any training-mode specific behavior.
@@ -278,8 +278,8 @@ Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
-that can help you make the best use of it in a multithreaded environment.(this is
-relevant only for PyTorch 1.6+ as the behavior in previous version was different).
+that can help you make the best use of it in a multithreaded environment. (This is
+relevant only for PyTorch 1.6+ as the behavior in previous version was different.)
 
 User could train their model with multithreading code (e.g. Hogwild training), and
 does not block on the concurrent backward computations, example code could be:
@@ -352,9 +352,9 @@ Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
 parallel backwards that share part/whole of the GraphTask.
 
-Custom Python ``autograd.function`` is automatically thread safe because of GIL.
-for built-in C++ Autograd Nodes(e.g. AccumulateGrad, CopySlices) and custom
-``autograd::Function``, the Autograd Engine uses thread mutex locking to protect
+Custom Python ``autograd.Function`` is automatically thread safe because of GIL.
+For built-in C++ Autograd Nodes (e.g. AccumulateGrad, CopySlices) and custom
+``autograd::Function``\s, the Autograd Engine uses thread mutex locking to ensure
 thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks

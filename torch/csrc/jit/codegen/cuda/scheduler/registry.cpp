@@ -1,14 +1,18 @@
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 #include <limits>
+
+#include <ATen/cuda/CUDAContext.h>
 
 namespace torch {
 namespace jit {
@@ -20,7 +24,7 @@ namespace {
 std::deque<std::deque<TensorView*>> tvChains(
     std::deque<std::deque<Val*>> val_chains) {
   std::deque<std::deque<TensorView*>> tv_chains(val_chains.size());
-  for (size_t i = 0; i < val_chains.size(); i++) {
+  for (const auto i : c10::irange(val_chains.size())) {
     auto tv_iterable = ir_utils::filterByType<TensorView>(val_chains[i]);
     tv_chains[i] =
         std::deque<TensorView*>(tv_iterable.begin(), tv_iterable.end());
@@ -36,7 +40,8 @@ class SchedulerTopologyChecker {
     auto all_vals = fusion->usedMathVals();
     std::vector<TensorView*> reduction_tvs;
     for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
-      if (tv->hasReduction() && !fusion->hasInput(tv)) {
+      if (tv->hasReduction() &&
+          !(fusion == tv->fusion() && tv->isFusionInput())) {
         reduction_tvs.push_back(tv);
       }
     }
@@ -293,12 +298,31 @@ class SchedulerTopologyChecker {
       }
     }
 
+    // When checking post reduction vals, we need to make sure
+    //  we are really checking paths starting from all outputs
+    //  of multi-output reductions, i.e. welford. The reduction_tv
+    //  vector is assumed to only have one of them.
+    std::unordered_set<Val*> reduction_tv_set(
+        reduction_tvs.begin(), reduction_tvs.end());
+
+    for (auto red : reduction_tvs) {
+      if (red->definition()) {
+        if (auto wop = dynamic_cast<WelfordOp*>(red->definition())) {
+          for (auto wop_output : wop->outputs()) {
+            if (wop_output->isA<TensorView>()) {
+              reduction_tv_set.insert(wop_output);
+            }
+          }
+        }
+      }
+    }
+
     // If reductions are on fastest dim, don't fuse any operations (after
     // reductions) that requires an input that is not an input to the
     // reductions.
     if (fastest_dim_reduction) {
       auto post_reduction_vals = DependencyCheck::getAllValsBetween(
-          {reduction_tvs.begin(), reduction_tvs.end()},
+          reduction_tv_set,
           {fusion->outputs().begin(), fusion->outputs().end()});
 
       if (post_reduction_vals.empty()) {
@@ -334,6 +358,50 @@ class SchedulerTopologyChecker {
     return true;
   }
 };
+
+bool isConnectedFusionGraph(Fusion* fusion) {
+  if (fusion->outputs().empty()) {
+    // Trivial case interpreted as connected
+    return true;
+  }
+
+  // A set of connected components on the fusion graph
+  DisjointSet<Val*> component_sets;
+
+  // Iterate through all used exprs
+  for (auto expr : fusion->exprs()) {
+    TORCH_INTERNAL_ASSERT(
+        !expr->inputs().empty(), "unknown expr with zero input");
+
+    // Each expr joins all its inputs and
+    //  outputs to the same component
+    auto input0 = expr->inputs()[0];
+    for (auto input : expr->inputs()) {
+      component_sets.join(input0, input);
+    }
+    for (auto output : expr->outputs()) {
+      component_sets.join(input0, output);
+    }
+  }
+
+  // Join aliased outputs
+  for (auto alias_it : fusion->ioAlias()) {
+    component_sets.join(alias_it.first, alias_it.second);
+  }
+
+  // Check connected-ness:
+  //  If there is no independent compute flow
+  // on this fusion graph, all outputs will be
+  // equivalent/connected to the first output.
+  auto output0 = fusion->outputs()[0];
+  for (auto output : fusion->outputs()) {
+    if (!component_sets.areEquivalent(output0, output)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 SchedulerRuntimeInfo::SchedulerRuntimeInfo(
@@ -342,6 +410,8 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
     bool create_expr_evaluator)
     : complete_fusion_(complete_fusion) {
   collectVectorizationInfo(inputs);
+  expression_evaluator_ =
+      std::make_unique<ExpressionEvaluator>(complete_fusion_);
   if (create_expr_evaluator) {
     initializeExpressionEvaluator(inputs);
   }
@@ -370,8 +440,6 @@ void SchedulerRuntimeInfo::initializeExpressionEvaluator(
     const at::ArrayRef<IValue>& inputs) {
   // TODO: refactor bindFusionInputs to better support this
   //  use case, i.e. support construct and bind input.
-  expression_evaluator_ =
-      std::make_unique<ExpressionEvaluator>(complete_fusion_);
   *expression_evaluator_ =
       executor_utils::bindFusionInputs(inputs, complete_fusion_);
 }
@@ -489,7 +557,7 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
 
   // If we don't have an record, either it is a tv with innermost
   //  broadcast, or it is an intermediate tensor allocated by fuser
-  auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+  auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   auto tv_root_size = tv_root.size();
 
   // Filter out 0-dim tensors
@@ -547,6 +615,8 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
 
 void SchedulerRuntimeInfo::collectIndexModeInfo(
     const at::ArrayRef<at::IValue>& inputs) {
+  // TODO: Need to check the output sizes as well.
+
   // Save 1 more bit besides the sign bit to be conservative
   constexpr int64_t most_positive_int32_index =
       std::numeric_limits<int>::max() / 2;
@@ -613,34 +683,81 @@ bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
 }
 
 namespace {
-template <typename REDUCTION_OP = ReductionOp>
-inline bool isTrivialReduction(REDUCTION_OP* red) {
-  auto o_tv = red->out()->template as<TensorView>();
-  // Assuming graph unscheduled at this point.
-  for (auto id : o_tv->getRootDomain()) {
-    if (id->isReduction() && !id->extent()->isOneInt()) {
+std::vector<TransposeOp*> findTransposeOps(Fusion* fusion) {
+  auto exprs = fusion->exprs();
+  auto transpose_ops = ir_utils::filterByType<TransposeOp>(exprs);
+  return std::vector<TransposeOp*>(transpose_ops.begin(), transpose_ops.end());
+}
+
+static bool checkPatternEquivalence(
+    TensorView* out_tv0,
+    TensorView* out_tv1,
+    const ComputeAtRootDomainMap& root_map) {
+  const auto& out_root0 = out_tv0->getRootDomain();
+  const auto& out_root1 = out_tv1->getRootDomain();
+  const auto domain0 = out_tv0->domain();
+  const auto domain1 = out_tv1->domain();
+
+  auto it0 = out_root0.begin();
+  auto it1 = out_root1.begin();
+
+  auto skip_broadcast = [&]() {
+    while (it0 != out_root0.end() && (*it0)->isBroadcast()) {
+      it0++;
+    }
+    while (it1 != out_root1.end() && (*it1)->isBroadcast()) {
+      it1++;
+    }
+  };
+
+  skip_broadcast();
+  while (it0 != out_root0.end() && it1 != out_root1.end()) {
+    if ((*it0)->isReduction() != (*it1)->isReduction()) {
       return false;
     }
-  }
-  return true;
-}
-
-template <typename REDUCTION_OP = ReductionOp>
-std::vector<REDUCTION_OP*> findReductionOps(Fusion* fusion) {
-  std::vector<REDUCTION_OP*> red_ops;
-  for (auto expr : fusion->exprs()) {
-    if (auto red = dynamic_cast<REDUCTION_OP*>(expr)) {
-      if (!isTrivialReduction(red)) {
-        red_ops.push_back(red);
-      }
+    if (!root_map.canMap(domain0, (*it0), domain1, (*it1))) {
+      return false;
     }
+    it0++;
+    it1++;
+    skip_broadcast();
   }
-  return red_ops;
+
+  return it0 == out_root0.end() && it1 == out_root1.end();
 }
 
-class SingleReductionScheduler : public SchedulerEntry {
+//! Scheduler interface:
+//!    Each of the scheduler needs to provide 3 interface functions:
+//!
+//!      1. canScheduleCompileTime(Fusion* fusion) :
+//!
+//!        This function contains compiled-time checks on the graph itself
+//!        without runtime input information. Only `fusion` is given in the
+//!        argument to make sure only compile-time available info is needed in
+//!        the check.
+//!
+//!        This function is to be called exactly once on each segmented group
+//!        created in a segmented fusion so this part will not contribute to
+//!        dynamic shape latency.
+//!
+//!     2. canScheduleRunTime(
+//!            Fusion* fusion,
+//!            SchedulerRuntimeInfo& runtime_info,
+//!           HeuristicSummary* data_cache = nullptr):
+//!        This function contains all canSchedule checks that will have to
+//!        involve runtime input information, and will be run both by the
+//!        segmenter and the kernel cache. The latency of this function will
+//!        contribute to dynamic shape latency so `data_cache` should be used as
+//!        much as possible to save re-computation.
+//!
+//!     3. schedule(fusion):
+//!
+//!        This function will be called when compiling a kernel. It should apply
+//!        scheduling to the given fusion
+
+class ReductionScheduler : public SchedulerEntry {
  public:
-  explicit SingleReductionScheduler(
+  explicit ReductionScheduler(
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr)
@@ -649,135 +766,36 @@ class SingleReductionScheduler : public SchedulerEntry {
   }
 
   //! Check if the reduction heuristics apply in given fusion
-  static bool canSchedule(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    if (data_cache) {
-      return true;
-    }
-
-    auto red_ops = findReductionOps(fusion);
-    auto welford_ops = findReductionOps<WelfordOp>(fusion);
-    if (red_ops.size() + welford_ops.size() != 1) {
+  static bool canScheduleCompileTime(Fusion* fusion) {
+    // Temporarily allow view in reduction scheduler
+    // TODO Add more testing before enabling
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
       return false;
     }
 
-    bool is_welford = welford_ops.size() > 0;
-
-    if (SchedulerTopologyChecker::hasPostReductionBCast(fusion)) {
+    // Needs at least one non-trivial reduction to consider.
+    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
       return false;
     }
 
-    auto reduction_tv = is_welford ? welford_ops[0]->out()->as<TensorView>()
-                                   : red_ops[0]->out()->as<TensorView>();
+    auto reduction_tvs =
+        scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
 
-    if (!SchedulerTopologyChecker::supportedPostReductionFusion(
-            fusion, {reduction_tv})) {
+    if (reduction_tvs.size() == 0) {
+      // Use pointwise logic
       return false;
     }
 
-    return true;
-  }
-
-  void schedule(Fusion* fusion) override {
-    FUSER_PERF_SCOPE("Schedule Single Reduction");
-    scheduleReduction(fusion, rparams_);
-  }
-
- private:
-  void computeHeuristics(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    auto param = getReductionHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(param.has_value());
-    rparams_ = param.value();
-  }
-};
-
-class PointWiseScheduler : public SchedulerEntry {
- public:
-  explicit PointWiseScheduler(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr)
-      : SchedulerEntry(ScheduleHeuristic::PointWise, false) {
-    computeHeuristics(fusion, runtime_info, data_cache);
-  }
-
-  static bool canSchedule(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    if (data_cache) {
-      return true;
-    }
-    auto red_ops = findReductionOps(fusion);
-    auto welford_ops = findReductionOps<WelfordOp>(fusion);
-    return red_ops.empty() && welford_ops.empty();
-  }
-
-  void schedule(Fusion* fusion) override {
-    FUSER_PERF_SCOPE("Schedule PointWise Fusion");
-    schedulePointwise(fusion, pparams_);
-  }
-
-  void computeHeuristics(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    auto pparam = getPointwiseHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(pparam.has_value());
-    pparams_ = pparam.value();
-  }
-};
-
-class NormalizationScheduler : public SchedulerEntry {
- public:
-  explicit NormalizationScheduler(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr)
-      : SchedulerEntry(ScheduleHeuristic::Normalization, true) {
-    computeHeuristics(fusion, runtime_info, data_cache);
-  }
-
-  void schedule(Fusion* fusion) override {
-    FUSER_PERF_SCOPE("Schedule Normalization Fusion");
-    scheduleNormalization(fusion, rparams_);
-  }
-
-  static bool canSchedule(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    FUSER_PERF_SCOPE("NormalizationScheduler::canSchedule");
-
-    HeuristicCacheAccessor<std::vector<TensorView*>> reduction_tv_data;
-    // TODO: move all these boilerplate code into the accessor class
-    // (follow up)
-    if (data_cache && !data_cache->isRecording()) {
-      reduction_tv_data.writeTemporary(data_cache->getReductionTVs());
-    } else {
-      reduction_tv_data.writeNew(scheduler_utils::getReductionTvs(fusion));
-      if (data_cache && data_cache->isRecording()) {
-        data_cache->setReductionTVs(reduction_tv_data.read());
-      }
+    if (findTransposeOps(fusion).size() > 0) {
+      // Use pointwise logic
+      return false;
     }
 
-    auto& reduction_tvs = reduction_tv_data.read();
-
-    if (!data_cache) {
-      if (reduction_tvs.size() == 0) {
-        // Use single reduction or pointwise logic
-        return false;
-      }
-
-      if (SchedulerTopologyChecker::hasNonNormalizePostReductionBCast(fusion)) {
-        return false;
-      }
-
+    // Make sure reduction axes are consistent through the fusion
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+    if (reduction_ops.size() > 1) {
       // Before examining the reduction axes want to quickly
       //   check the reductions have the same axis width
       //   to avoid building root domain map in easier cases
@@ -811,83 +829,272 @@ class NormalizationScheduler : public SchedulerEntry {
 
       // red_ops.size()>1 checked before
       for (size_t it = 1; it < reduction_tvs.size(); it++) {
-        if (!checkEquivalence(
+        if (!checkPatternEquivalence(
                 reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
           return false;
         }
       }
     }
 
-    // TODO: move all these boilerplate code into the accessor class
-    // (follow up)
-    // Note: this persistent buffer is actually cached from
-    //  getNormalizationHeuristics. Will need to create a separate
-    //  cache entry if they are not the same.
-    HeuristicCacheAccessor<scheduler_utils::PersistentBufferInfo>
-        persistent_buffer_data;
-
-    if (data_cache && !data_cache->isRecording()) {
-      persistent_buffer_data.writeTemporary(
-          data_cache->getPersistentBufferInfo());
-    } else {
-      persistent_buffer_data.writeNew(
-          scheduler_utils::persistentBuffers(fusion));
-      if (data_cache && data_cache->isRecording()) {
-        data_cache->setPersistentBufferInfo(persistent_buffer_data.read());
-      }
-    }
-    auto& persistent_buffers = persistent_buffer_data.read();
-
-    auto persistent_buffer_size = scheduler_utils::persistentBufferSize(
-        fusion, runtime_info, persistent_buffers, data_cache);
-    if (persistent_buffer_size * 4 > scheduler_utils::register_file_size * 3) {
+    // Doesn't allow persistent kernels in this scheduler
+    auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
+    if (persistent_buffer_info.persistent_buffers.size() > 0) {
       return false;
     }
 
-    // TODO: really need to make inserting an entry into data_cache easier to do
-    HeuristicCacheAccessor<bool> has_post_reduction_bcast_data;
+    if (!SchedulerTopologyChecker::supportedPostReductionFusion(
+            fusion, reduction_tvs) ||
+        SchedulerTopologyChecker::hasPostReductionBCast(fusion)) {
+      return false;
+    }
 
-    if (data_cache && !data_cache->isRecording()) {
-      has_post_reduction_bcast_data.writeTemporary(
-          data_cache->getHasPostReductionBCast());
-    } else {
-      has_post_reduction_bcast_data.writeNew(
-          SchedulerTopologyChecker::hasPostReductionBCast(fusion));
-      if (data_cache && data_cache->isRecording()) {
-        data_cache->setHasPostReductionBCast(
-            has_post_reduction_bcast_data.read());
+    return true;
+  }
+
+  static bool canScheduleRunTime(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    return true;
+  }
+
+  void schedule(Fusion* fusion) override {
+    FUSER_PERF_SCOPE("Schedule Single Reduction");
+    scheduleReduction(fusion, rparams());
+  }
+
+ private:
+  void computeHeuristics(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    auto param = getReductionHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(param.has_value());
+    rparams() = param.value();
+  }
+};
+
+class PointWiseScheduler : public SchedulerEntry {
+ public:
+  explicit PointWiseScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr)
+      : SchedulerEntry(ScheduleHeuristic::PointWise, false) {
+    computeHeuristics(fusion, runtime_info, data_cache);
+  }
+
+  static bool canScheduleCompileTime(Fusion* fusion) {
+    //   Currently using the same path as the scheduler
+    // to eliminate mismatch between canSchedule and
+    // schedule pointwise.
+    if (!hasReferenceTensorView(fusion)) {
+      return false;
+    }
+
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
+    auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+    return reduction_ops.empty() && welford_ops.empty();
+  }
+
+  static bool canScheduleRunTime(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    return true;
+  }
+
+  void schedule(Fusion* fusion) override {
+    FUSER_PERF_SCOPE("Schedule PointWise Fusion");
+    schedulePointwise(fusion, pparams());
+  }
+
+  void computeHeuristics(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    auto pparam = getPointwiseHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(pparam.has_value());
+    pparams() = pparam.value();
+  }
+};
+
+class PersistentKernelScheduler : public SchedulerEntry {
+ public:
+  explicit PersistentKernelScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr)
+      : SchedulerEntry(ScheduleHeuristic::Persistent, true) {
+    computeHeuristics(fusion, runtime_info, data_cache);
+  }
+
+  void schedule(Fusion* fusion) override {
+    FUSER_PERF_SCOPE("Schedule Persistent Fusion");
+    schedulePersistentKernel(fusion, rparams());
+  }
+
+  static bool canScheduleCompileTime(Fusion* fusion) {
+    // Needs at least one non-trivial reduction to consider.
+    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      return false;
+    }
+
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+    auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+    // For persistent schedule we want welford translated to average and
+    // standard deviation reductions.
+    if (welford_ops.begin() != welford_ops.end()) {
+      return false;
+    }
+
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      return false;
+    }
+
+    auto reduction_tvs =
+        scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
+
+    if (reduction_tvs.size() == 0) {
+      // Use pointwise logic
+      return false;
+    }
+
+    if (findTransposeOps(fusion).size() > 0) {
+      // Use pointwise logic
+      return false;
+    }
+
+    // Before examining the reduction axes want to quickly
+    //   check the reductions have the same axis width
+    //   to avoid building root domain map in easier cases
+    bool valid_axis_count = false;
+    size_t axis_count = 0;
+    auto reduction_root_size = [](TensorView* red_tv) {
+      size_t count = 0;
+      for (auto id : red_tv->getRootDomain()) {
+        if (!id->isBroadcast()) {
+          count++;
+        }
+      }
+      return count;
+    };
+
+    for (auto red : reduction_tvs) {
+      if (!valid_axis_count) {
+        valid_axis_count = true;
+        axis_count = reduction_root_size(red);
+      } else {
+        if (reduction_root_size(red) != axis_count) {
+          return false;
+        }
       }
     }
 
-    HeuristicCacheAccessor<bool> supported_post_reduction_fusion_data;
+    // Use root domain map to check the reduction ops have the same axes
+    FusionGuard fg(fusion);
+    ComputeAtRootDomainMap root_map;
+    root_map.build(true);
 
-    if (data_cache && !data_cache->isRecording()) {
-      supported_post_reduction_fusion_data.writeTemporary(
-          data_cache->getSupportedPostReductionFusion());
-    } else {
-      supported_post_reduction_fusion_data.writeNew(
-          SchedulerTopologyChecker::supportedPostReductionFusion(
-              fusion, reduction_tvs));
-      if (data_cache && data_cache->isRecording()) {
-        data_cache->setSupportedPostReductionFusion(
-            supported_post_reduction_fusion_data.read());
+    // red_ops.size()>1 checked before
+    for (const auto it : c10::irange(1, reduction_tvs.size())) {
+      if (!checkPatternEquivalence(
+              reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
+        return false;
       }
     }
 
-    auto has_post_reduction_bcast = has_post_reduction_bcast_data.read();
-    auto supported_post_reduction_fusion =
-        supported_post_reduction_fusion_data.read();
+    // Only accept persistent kernels
+    auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
+    if (persistent_buffer_info.persistent_buffers.size() == 0) {
+      return false;
+    }
 
-    // Multi reduction scheduler has the same limitations as single reduction
-    // scheduler here
-    if (persistent_buffer_size <= 1) {
-      if (has_post_reduction_bcast) {
-        return false;
-      }
+    if (SchedulerTopologyChecker::hasNonNormalizePostReductionBCast(fusion)) {
+      return false;
+    }
 
-      if (!supported_post_reduction_fusion) {
-        return false;
-      }
+    return true;
+  }
+
+  static bool canScheduleRunTime(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    FUSER_PERF_SCOPE("PersistentKernelScheduler::canSchedule");
+
+    auto reduction_tv_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
+            data_cache, [&fusion]() {
+              return std::make_unique<std::vector<TensorView*>>(
+                  scheduler_utils::getReductionTvs(
+                      fusion /*, ignore_trivial = true*/));
+            });
+
+    auto& reduction_tvs = reduction_tv_entry.get();
+
+    auto persistent_buffer_info_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::PersistentBufferInfo>(
+            data_cache, [&fusion]() {
+              return std::make_unique<scheduler_utils::PersistentBufferInfo>(
+                  scheduler_utils::persistentBuffers(fusion));
+            });
+
+    auto& persistent_buffer_info = persistent_buffer_info_entry.get();
+
+    auto persistent_buffer_size_info = scheduler_utils::persistentBufferSize(
+        fusion, runtime_info, persistent_buffer_info, data_cache);
+
+    auto persistent_buffer_size = std::min(
+        persistent_buffer_size_info.persistent_buffer_size,
+        persistent_buffer_size_info.projected_persistent_buffer_size);
+
+    if (persistent_buffer_size > scheduler_utils::register_file_size) {
+      return false;
+    }
+
+    // If there's a small iteration dimension but a large reduction dimension it
+    // may not make sense to make a persistent kernel
+    auto properties =
+        scheduler_utils::getProperties(fusion, runtime_info, reduction_tvs[0]);
+
+    const int64_t device_max_threads_per_multiprocessor =
+        (int64_t)at::cuda::getCurrentDeviceProperties()
+            ->maxThreadsPerMultiProcessor;
+
+    const int64_t device_multiprocessor_count =
+        (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+    const int64_t warp_size = at::cuda::warp_size();
+
+    // Maximum number of iteration dimensions we can have and still be
+    // persistent.
+    const int64_t max_multi_reduction_factor = std::max(
+        scheduler_utils::register_file_size / persistent_buffer_size,
+        (int64_t)1);
+
+    // If outer reduction, and we have few iteration numel but large reduction
+    // numel, don't generate kernel because we don't support cross grid
+    // persistence
+    if (
+        // Don't go persistent if we can't fit half a warp on an SM
+        (!properties.fastest_dim_reduction &&
+         max_multi_reduction_factor < warp_size / 2) ||
+        ( // Don't go persistent if we can't use a small fraction of the
+          // available SMs yet have a large reduction size
+            properties.total_iteration_numel <
+                (properties.fastest_dim_reduction
+                     ? std::max(device_multiprocessor_count / 8, (int64_t)1)
+                     // Make sure we at least use a quarter of the device * a
+                     // half warp
+                     : (warp_size / 8) * device_multiprocessor_count) &&
+            // Reduction count is larger than max thread count * 4
+            properties.total_reduction_numel >=
+                device_max_threads_per_multiprocessor * 4)) {
+      return false;
     }
 
     return true;
@@ -898,46 +1105,9 @@ class NormalizationScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr) {
-    auto rparams = getNormalizationHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(rparams.has_value());
-    rparams_ = rparams.value();
-  }
-
-  static bool checkEquivalence(
-      TensorView* out_tv0,
-      TensorView* out_tv1,
-      const ComputeAtRootDomainMap& root_map) {
-    const auto& out_root0 = out_tv0->getRootDomain();
-    const auto& out_root1 = out_tv1->getRootDomain();
-    const auto domain0 = out_tv0->domain();
-    const auto domain1 = out_tv1->domain();
-
-    auto it0 = out_root0.begin();
-    auto it1 = out_root1.begin();
-
-    auto skip_broadcast = [&]() {
-      while (it0 != out_root0.end() && (*it0)->isBroadcast()) {
-        it0++;
-      }
-      while (it1 != out_root1.end() && (*it1)->isBroadcast()) {
-        it1++;
-      }
-    };
-
-    skip_broadcast();
-    while (it0 != out_root0.end() && it1 != out_root1.end()) {
-      if ((*it0)->isReduction() != (*it1)->isReduction()) {
-        return false;
-      }
-      if (!root_map.canMap(domain0, (*it0), domain1, (*it1))) {
-        return false;
-      }
-      it0++;
-      it1++;
-      skip_broadcast();
-    }
-
-    return it0 == out_root0.end() && it1 == out_root1.end();
+    auto param = getPersistentHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(param.has_value());
+    rparams() = param.value();
   }
 };
 
@@ -946,8 +1116,31 @@ const std::vector<ScheduleHeuristic>& all_heuristics() {
   static const std::vector<ScheduleHeuristic> hlist = {
       ScheduleHeuristic::Reduction,
       ScheduleHeuristic::PointWise,
-      ScheduleHeuristic::Normalization};
+      ScheduleHeuristic::Persistent};
   return hlist;
+}
+
+//! A Utility for checking both dynamic and static part of
+//!  can schedule
+template <typename SchedulerType>
+bool checkCanSchedule(
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info,
+    HeuristicSummary* data_cache = nullptr) {
+  // If a data cache is given, the compile time part doesn't need to be checked,
+  // since for all current use cases
+  //  it has to pass all the compile time checks to create a data cache for this
+  //  fusion.
+  if (!data_cache) {
+    if (!isConnectedFusionGraph(fusion)) {
+      return false;
+    }
+    if (!SchedulerType::canScheduleCompileTime(fusion)) {
+      return false;
+    }
+  }
+
+  return SchedulerType::canScheduleRunTime(fusion, runtime_info, data_cache);
 }
 
 } // namespace
@@ -960,12 +1153,13 @@ bool SchedulerEntry::canSchedule(
     HeuristicSummary* data_cache) {
   switch (sh) {
     case ScheduleHeuristic::PointWise:
-      return PointWiseScheduler::canSchedule(fusion, runtime_info, data_cache);
-    case ScheduleHeuristic::Reduction:
-      return SingleReductionScheduler::canSchedule(
+      return checkCanSchedule<PointWiseScheduler>(
           fusion, runtime_info, data_cache);
-    case ScheduleHeuristic::Normalization:
-      return NormalizationScheduler::canSchedule(
+    case ScheduleHeuristic::Reduction:
+      return checkCanSchedule<ReductionScheduler>(
+          fusion, runtime_info, data_cache);
+    case ScheduleHeuristic::Persistent:
+      return checkCanSchedule<PersistentKernelScheduler>(
           fusion, runtime_info, data_cache);
     default:
       TORCH_INTERNAL_ASSERT(false, "unreachable");
@@ -986,11 +1180,11 @@ std::unique_ptr<SchedulerEntry> SchedulerEntry::makeEntry(
           fusion, runtime_info, data_cache);
       break;
     case ScheduleHeuristic::Reduction:
-      scheduler_entry = std::make_unique<SingleReductionScheduler>(
+      scheduler_entry = std::make_unique<ReductionScheduler>(
           fusion, runtime_info, data_cache);
       break;
-    case ScheduleHeuristic::Normalization:
-      scheduler_entry = std::make_unique<NormalizationScheduler>(
+    case ScheduleHeuristic::Persistent:
+      scheduler_entry = std::make_unique<PersistentKernelScheduler>(
           fusion, runtime_info, data_cache);
       break;
     default:
@@ -1027,13 +1221,35 @@ std::string toString(ScheduleHeuristic sh) {
       return "pointwise";
     case ScheduleHeuristic::Reduction:
       return "reduction";
-    case ScheduleHeuristic::Normalization:
-      return "normalization";
+    case ScheduleHeuristic::Persistent:
+      return "persistent";
     default:
       TORCH_INTERNAL_ASSERT(false, "undefined schedule");
   }
   return "";
 }
+
+namespace {
+
+//! CompileTimeInfo is the actual subclass of CompileTimeInfoBase that will
+//!  be stored in the data cache. It owns a data_ state internally of the
+//!  dataType defined within the entry class, which are listed in compile
+//!  time info header.
+template <typename EntryClass>
+class CompileTimeInfo : public HeuristicCompileTime::CompileTimeInfoBase {
+ public:
+  CompileTimeInfo(std::unique_ptr<typename EntryClass::DataType> data)
+      : CompileTimeInfoBase(EntryClass::EntryType), data_(std::move(data)) {}
+
+  typename EntryClass::DataType* get() {
+    return data_.get();
+  }
+
+ private:
+  std::unique_ptr<typename EntryClass::DataType> data_;
+};
+
+} // namespace
 
 HeuristicSummary::HeuristicSummary(
     Fusion* fusion,
@@ -1044,15 +1260,15 @@ HeuristicSummary::HeuristicSummary(
   switch (heuristic) {
     case ScheduleHeuristic::PointWise:
       getPointwiseHeuristics(fusion, runtime_info, this);
-      PointWiseScheduler::canSchedule(fusion, runtime_info, this);
+      PointWiseScheduler::canScheduleRunTime(fusion, runtime_info, this);
       break;
     case ScheduleHeuristic::Reduction:
       getReductionHeuristics(fusion, runtime_info, this);
-      SingleReductionScheduler::canSchedule(fusion, runtime_info, this);
+      ReductionScheduler::canScheduleRunTime(fusion, runtime_info, this);
       break;
-    case ScheduleHeuristic::Normalization:
-      getNormalizationHeuristics(fusion, runtime_info, this);
-      NormalizationScheduler::canSchedule(fusion, runtime_info, this);
+    case ScheduleHeuristic::Persistent:
+      getPersistentHeuristics(fusion, runtime_info, this);
+      PersistentKernelScheduler::canScheduleRunTime(fusion, runtime_info, this);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "unknown heuristic");
@@ -1060,6 +1276,88 @@ HeuristicSummary::HeuristicSummary(
   validate();
   recording_ = false;
 }
+
+void HeuristicSummary::validate() const {
+  switch (heuristic_) {
+    case ScheduleHeuristic::PointWise: {
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::BROADCAST_BYTE_MULTIPLES));
+      break;
+    }
+    case ScheduleHeuristic::Reduction: {
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::REDUCTION_TVS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::UNROLLABLE_INPUTS_AND_OUTPUTS));
+      break;
+    }
+    case ScheduleHeuristic::Persistent: {
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::REDUCTION_TVS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::UNROLLABLE_INPUTS_AND_OUTPUTS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::PERSISTENT_BUFFER_INFO));
+      // If check persistent factor only when persistent buffers needed.
+      auto persistent_buffer_info =
+          entry_type_map_.at(EntryType::PERSISTENT_BUFFER_INFO)
+              ->as<
+                  CompileTimeInfo<HeuristicCompileTime::PersistentBufferInfo>>()
+              ->get();
+      TORCH_INTERNAL_ASSERT(
+          !persistent_buffer_info->persistent_buffers.empty() &&
+          entry_type_map_.count(EntryType::SCOPE_PERSISTENT_FACTOR_INFO));
+      break;
+    }
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown heuristic");
+  }
+}
+
+void HeuristicSummary::insert(HeuristicSummary::EntryOwningPtr new_entry) {
+  TORCH_INTERNAL_ASSERT(
+      recording_, "should only insert entries at recording phase");
+  // Just override when insertion duplicates, equality not checked.
+  entry_type_map_[new_entry->type()] = new_entry.get();
+  entries_.emplace_back(std::move(new_entry));
+}
+
+template <typename EntryClass>
+HeuristicSummaryEntry<EntryClass>::HeuristicSummaryEntry(
+    HeuristicSummary* data_cache,
+    MakerFnType fn) {
+  using InfoType = CompileTimeInfo<EntryClass>;
+
+  if (!data_cache || data_cache->isRecording()) {
+    owned_data_ = fn();
+    data_ptr_ = owned_data_.get();
+
+    if (data_cache) {
+      std::unique_ptr<HeuristicCompileTime::CompileTimeInfoBase> new_entry =
+          std::make_unique<InfoType>(std::move(owned_data_));
+      data_cache->insert(std::move(new_entry));
+    }
+  } else {
+    data_ptr_ =
+        data_cache->at(EntryClass::EntryType)->template as<InfoType>()->get();
+  }
+}
+
+// Template instantiation for pre-defined cache entries
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::VectorizableInputsAndOutputs>;
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::UnrollableInputsAndOutputs>;
+template class HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>;
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::PersistentBufferInfo>;
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::ScopePersistentFactorInfo>;
+template class HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>;
 
 } // namespace cuda
 } // namespace fuser

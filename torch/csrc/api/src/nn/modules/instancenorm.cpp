@@ -18,34 +18,26 @@ void InstanceNormImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {
-  if (input.dim() == 2) {
+  if (input.dim() != 3 && input.dim() != 2) {
     TORCH_CHECK(
       false,
-      "InstanceNorm1d returns 0-filled tensor to 2D tensor.",
-      "This is because InstanceNorm1d reshapes inputs to",
-      "(1, N * C, ...) from (N, C,...) and this makes",
-      "variances 0.");
-  }
-  if (input.dim() != 3) {
-    TORCH_CHECK(
-      false,
-      "expected 3D input (got ", input.dim(), "D input)");
+      "expected 2D or 3D input (got ", input.dim(), "D input)");
   }
 }
 
 void InstanceNorm2dImpl::_check_input_dim(const Tensor& input) {
-  if (input.dim() != 4) {
+  if (input.dim() != 4 && input.dim() != 3) {
     TORCH_CHECK(
       false,
-      "expected 4D input (got ", input.dim(), "D input)");
+      "expected 3D or 4D input (got ", input.dim(), "D input)");
   }
 }
 
 void InstanceNorm3dImpl::_check_input_dim(const Tensor& input) {
-  if (input.dim() != 5) { // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+  if (input.dim() != 5 && input.dim() != 4) { // NOLINT(cppcoreguidelines-avoid-magic-numbers)
     TORCH_CHECK(
       false,
-      "expected 5D input (got ", input.dim(), "D input)");
+      "expected 4D or 5D input (got ", input.dim(), "D input)");
   }
 }
 

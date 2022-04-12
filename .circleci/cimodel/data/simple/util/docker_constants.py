@@ -11,7 +11,7 @@ def gen_docker_image_requires(image_name):
 
 
 DOCKER_IMAGE_BASIC, DOCKER_REQUIREMENT_BASE = gen_docker_image(
-    "pytorch-linux-xenial-py3.6-gcc5.4"
+    "pytorch-linux-xenial-py3.7-gcc5.4"
 )
 
 DOCKER_IMAGE_CUDA_10_2, DOCKER_REQUIREMENT_CUDA_10_2 = gen_docker_image(
@@ -19,7 +19,7 @@ DOCKER_IMAGE_CUDA_10_2, DOCKER_REQUIREMENT_CUDA_10_2 = gen_docker_image(
 )
 
 DOCKER_IMAGE_GCC7, DOCKER_REQUIREMENT_GCC7 = gen_docker_image(
-    "pytorch-linux-xenial-py3.6-gcc7"
+    "pytorch-linux-xenial-py3.7-gcc7"
 )
 
 

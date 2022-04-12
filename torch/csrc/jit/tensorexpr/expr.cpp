@@ -375,16 +375,32 @@ std::vector<ExprPtr> make_contiguous_strides(
 std::vector<ExprPtr> make_channels_last_strides(
     const std::vector<ExprHandle>& dims) {
   std::vector<ExprPtr> strides;
-  TORCH_INTERNAL_ASSERT(dims.size() == 4, "got size:", dims.size());
-  strides.resize(dims.size());
-  ExprHandle handle = ExprHandle(immLike(dims[0], 1));
-  strides[1] = handle.node();
-  handle = handle * dims[1];
-  strides[3] = handle.node();
-  handle = handle * dims[3];
-  strides[2] = handle.node();
-  handle = handle * dims[2];
-  strides[0] = handle.node();
+  TORCH_INTERNAL_ASSERT(
+      dims.size() == 4 || dims.size() == 3, "got size:", dims.size());
+  if (dims.size() == 4) {
+    strides.resize(dims.size());
+    ExprHandle handle = ExprHandle(immLike(dims[0], 1));
+    // dims:               n   c    h  w
+    // strides(nhwc):  w*c*h   1  w*c  c
+    strides[1] = handle.node();
+    handle = handle * dims[1];
+    strides[3] = handle.node();
+    handle = handle * dims[3];
+    strides[2] = handle.node();
+    handle = handle * dims[2];
+    strides[0] = handle.node();
+  }
+  if (dims.size() == 3) {
+    strides.resize(dims.size());
+    ExprHandle handle = ExprHandle(immLike(dims[0], 1));
+    // dims:              n   c    l
+    // strides(nlc):    c*l   1    c
+    strides[1] = handle.node();
+    handle = handle * dims[1];
+    strides[2] = handle.node();
+    handle = handle * dims[2];
+    strides[0] = handle.node();
+  }
   return strides;
 }
 
@@ -409,16 +425,30 @@ Buf::Buf(
   TORCH_CHECK(var);
 }
 
-ExprHandle Buf::make(
-    const std::string& name_hint,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype) {
-  return ExprHandle(
-      alloc<Buf>(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
+  return Buf::make("", dims, dtype);
 }
 
-ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
-  return Buf::make("", dims, dtype);
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    c10::optional<ExprHandle> initializer,
+    c10::optional<std::vector<ExprHandle>> strides,
+    c10::optional<ExprHandle> qscale,
+    c10::optional<ExprHandle> qzero) {
+  c10::optional<std::vector<ExprPtr>> opt_strides;
+  if (strides) {
+    opt_strides = ExprHandleVectorToExprVector(*strides);
+  }
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      initializer ? initializer->node() : nullptr,
+      opt_strides,
+      qscale ? qscale->node() : nullptr,
+      qzero ? qzero->node() : nullptr));
 }
 
 std::vector<ExprHandle> BufHandle::dims() const {

@@ -24,17 +24,6 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
-  std::string linear_before_inline = R"(
-    graph(%linear, %input, %weight, %bias):
-        %r = prim::CallFunction(%linear, %input, %weight, %bias)
-        return (%r))";
-  std::string prepacked_ops_pattern_before_inline = R"(
-    graph(%linear, %input, %weight, %bias):
-        %output_min_max : None = prim::Constant()
-        %packed_weight_bias = metal_prepack::linear_prepack(
-            %weight, %bias, %output_min_max, %output_min_max)
-        %res = metal_prepack::linear_run(%input, %packed_weight_bias)
-        return (%res))";
   std::string linear_pattern = R"(
     graph(%input, %weight, %bias):
         %r = aten::linear(%input, %weight, %bias)
@@ -46,22 +35,6 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
             %weight, %bias, %output_min_max, %output_min_max)
         %res = metal_prepack::linear_run(%input, %packed_weight_bias)
         return (%res))";
-
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear_value = match_vmap.at(vmap.at("linear"));
-    auto func_name = graph_rewrite_helper::getFuncName(linear_value);
-    if (func_name == "linear") {
-      return true;
-    }
-    return false;
-  };
-
-  SubgraphRewriter linear_call_fn_rewriter;
-  linear_call_fn_rewriter.RegisterRewritePattern(
-      linear_before_inline, prepacked_ops_pattern_before_inline);
-  linear_call_fn_rewriter.runOnGraph(graph, filter);
 
   SubgraphRewriter linear_rewriter;
   linear_rewriter.RegisterRewritePattern(linear_pattern, prepacked_ops_pattern);

@@ -5,9 +5,10 @@ from torch.fx.graph import (
 )
 from .quantization_types import Pattern
 from ..qconfig import QConfigAny
+from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
 from ..observer import ObserverBase
-
+import copy
 
 # TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
 QuantizeHandler = Any
@@ -24,32 +25,37 @@ def register_fusion_pattern(pattern):
     return insert
 
 def get_default_fusion_patterns() -> Dict[Pattern, QuantizeHandler]:
-    return DEFAULT_FUSION_PATTERNS
+    return copy.copy(DEFAULT_FUSION_PATTERNS)
 
 DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
-# a map from pattern to activation_post_process(observer/fake_quant) consstructor for output activation
+
+# Mapping from pattern to activation_post_process(observer/fake_quant) constructor for output activation
 # e.g. pattern: torch.sigmoid,
-#      output_activation_post_process: default_affine_fixed_qparam_fake_quant
-DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP = dict()
+#      output_activation_post_process: default_affine_fixed_qparams_fake_quant
+DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP = dict()
+DEFAULT_OUTPUT_OBSERVER_MAP = dict()
 
 # Register pattern for both static quantization and qat
-def register_quant_pattern(pattern, output_activation_post_process=None):
+def register_quant_pattern(pattern, fixed_qparams_observer=None):
     def insert(fn):
         DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
-        if output_activation_post_process is not None:
-            DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP[pattern] = output_activation_post_process
+        if fixed_qparams_observer is not None:
+            DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[pattern] = FixedQParamsFakeQuantize.with_args(observer=fixed_qparams_observer)
+            DEFAULT_OUTPUT_OBSERVER_MAP[pattern] = fixed_qparams_observer
         return fn
     return insert
 
 # Get patterns for both static quantization and qat
 def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
-    return DEFAULT_QUANTIZATION_PATTERNS
+    return copy.copy(DEFAULT_QUANTIZATION_PATTERNS)
 
 # a map from pattern to output activation post process constructor
 # e.g. torch.sigmoid -> default_affine_fixed_qparam_fake_quant
-def get_default_output_activation_post_process_map() -> Dict[Pattern, ObserverBase]:
-    return DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP
-
+def get_default_output_activation_post_process_map(is_training) -> Dict[Pattern, ObserverBase]:
+    if is_training:
+        return copy.copy(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP)
+    else:
+        return copy.copy(DEFAULT_OUTPUT_OBSERVER_MAP)
 
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
@@ -57,3 +63,27 @@ def get_default_output_activation_post_process_map() -> Dict[Pattern, ObserverBa
 #     def __init__(...):
 #         ...
 #
+
+def sorted_patterns_dict(patterns_dict: Dict[Pattern, QuantizeHandler]) -> Dict[Pattern, QuantizeHandler]:
+    """
+    Return a sorted version of the patterns dictionary such that longer patterns are matched first,
+    e.g. match (F.relu, F.linear) before F.relu.
+    This works for current use cases, but we may need to have a more clever way to sort
+    things to address more complex patterns
+    """
+
+    def get_len(pattern):
+        """ this will calculate the length of the pattern by counting all the entries
+        in the pattern.
+        this will make sure (nn.ReLU, (nn.BatchNorm, nn.Conv2d)) comes before
+        (nn.BatchNorm, nn.Conv2d) so that we can match the former first
+        """
+        len = 0
+        if isinstance(pattern, tuple):
+            for item in pattern:
+                len += get_len(item)
+        else:
+            len += 1
+        return len
+
+    return OrderedDict(sorted(patterns_dict.items(), key=lambda kv: -get_len(kv[0]) if isinstance(kv[0], tuple) else 1))

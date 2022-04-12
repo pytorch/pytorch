@@ -7,15 +7,6 @@
 namespace torch {
 namespace jit {
 
-/** Swap functional linear CallFunctions to aten::linear
- *  so that it can survive inline, since quant fusion need to
- *  recognize linear as one op instead of a complicated if block
- */
-TORCH_API void SwapFunctionalLinear(std::shared_ptr<Graph>& graph);
-/** Swap all functional linear CallFunctions in module
- */
-TORCH_API void SwapFunctionalLinear(Module& module);
-
 /** Replicate quantize node for prim::If blocks, so that we can match
  *  quantization patterns in prim::If blocks
  */

@@ -2,8 +2,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
@@ -301,7 +302,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
 
@@ -462,6 +463,99 @@ void PackedLinearWeightFp16::set_bias(c10::optional<at::Tensor> bias) {
 }
 
 #endif // USE_FBGEMM
+
+#if AT_MKLDNN_ENABLED()
+template <bool ReluFused>
+at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
+    at::Tensor input,
+    bool reduce_range) {
+  // Dynamic: fp32 * int8 -> fp32
+  using at::Tensor;
+
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "The dimension of input tensor should be larger than or equal to 2");
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Float,
+      "qlinear_dynamic (ONEDNN): data type of input should be float.");
+
+  // Input -> uint8
+  auto input_contig = input.contiguous();
+  const int64_t dim = input.dim();
+  auto input_reshaped =
+      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
+  auto input_dims = input_reshaped.sizes().vec();
+  auto input_data_type = dnnl::memory::data_type::f32;
+  auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
+  ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  ideep::tensor x;
+  x.init(input_desc, input_contig.data_ptr());
+  // Find quantization parameters
+  float x_max = 0, x_min = 0;
+  if (input.numel() > 0) {
+    x_min = input_contig.min().item<float>();
+    x_max = input_contig.max().item<float>();
+  }
+  const int precision = 8;
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/0,
+      /*qmax=*/(1 << precision) - 1,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+  const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, q_params.zero_point);
+  // weights, dst
+  auto w = *(weight_.get());
+  auto dst_dims = {x.get_dim(0), w.get_dim(1)};
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/q_params.scale);
+  const ideep::scale_t& weights_scales = w.get_scale();
+  // Compute -> f32
+  // Use ideep::matmul_forward instead of ideep::inner_product_forward,
+  // since the latter does not support asymmetric quantization
+  // Allocate output Tensor
+  at::Tensor output = at::empty(dst_dims, input.options().dtype(at::kFloat));
+  if (output.numel() == 0) return output;
+  ideep::tensor y({dst_dims, ideep::tensor::data_type::f32,
+                   {output.strides().cbegin(), output.strides().cend()}},
+                  output.data_ptr());
+  if (bias_.has_value()) {
+    // Bias might be modified outside (e.g. by quantization bias correction).
+    // If so, update the prepacked bias as well.
+    if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
+    }
+    const ideep::tensor b = bias_.value();
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f,
+                                      src_scales, weights_scales, ideep::scale_t(),
+                                      src_zero_point, ideep::zero_point_t(), op_attr);
+  } else {
+    ideep::matmul_forward::compute_v2(x, w, y, 1.0f, 1.0f,
+                                      src_scales, weights_scales, ideep::scale_t(),
+                                      src_zero_point, ideep::zero_point_t(), op_attr);
+  }
+  auto out_sizes = input.sizes().vec();
+  out_sizes.back() = w.get_dim(1);
+  if (output.sizes().vec() == out_sizes)
+    return output;
+  return output.reshape(out_sizes);
+}
+
+at::Tensor PackedLinearWeightsOnednn::apply_dynamic(
+    at::Tensor input,
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/false>(
+      std::move(input), reduce_range);
+}
+
+at::Tensor PackedLinearWeightsOnednn::apply_dynamic_relu(
+    at::Tensor input,
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/true>(
+      std::move(input), reduce_range);
+}
+
+#endif // #if AT_MKLDNN_ENABLED()
 
 namespace at {
 namespace native {

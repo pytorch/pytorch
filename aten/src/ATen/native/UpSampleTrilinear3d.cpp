@@ -90,7 +90,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_trilinear3d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
@@ -102,7 +102,7 @@ Tensor upsample_trilinear3d(
 
 Tensor upsample_trilinear3d_backward(
     const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {

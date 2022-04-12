@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 namespace torch {
 namespace jit {
@@ -110,7 +110,7 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
   const TensorView* consumer_tv_ = nullptr;
 };
 
-std::string toString(const PairwiseRootDomainMap& root_map);
+TORCH_CUDA_CU_API std::string toString(const PairwiseRootDomainMap& root_map);
 
 //! Represents an iteration domain of a TensorDomain. Only used for
 //! root domain mapping.
@@ -187,6 +187,7 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
   using IterVisitor::handle;
   void handle(ReductionOp* op) override;
   void handle(WelfordOp* op) override;
+  void handle(MmaOp* op) override;
 
   void handleReductionOutput(TensorView* out_tv);
 
@@ -206,7 +207,7 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
 //! This will create mappings between i0, i2 and i4.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   friend class ComputeAtRootDomainMapBuilder;
-  friend std::string toString(const ComputeAtRootDomainMap&);
+  friend TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap&);
 
  public:
   //! Builds a mapping table by analyzing the current
@@ -327,7 +328,7 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   std::unordered_set<IterDomain*> window_axes_;
 };
 
-std::string toString(const ComputeAtRootDomainMap& root_map);
+TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap& root_map);
 
 //! Create a DisjointSet of root IterDomains by traversing the
 //! current fusion entirely. IterDomains that can be mapped each
@@ -346,6 +347,12 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
 
   //! Set a pair of producer-consumer domain keys as mappable
   void setMapped(const DomainKey& producer, const DomainKey& consumer);
+
+  //! Records two domains are invalid to map
+  void setInvalid(const DomainKey& key1, const DomainKey& key2);
+
+  //! Check if no pair of domains is invalid to map
+  bool isInvalid(const std::vector<DomainKey>& domains) const;
 
   //! Track a pair of producer-consumer domains as potentially mappable. Inserts
   //! entries into pending_map_, but does not add anything into the root_map_
@@ -387,7 +394,19 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     mapPointwiseOrReductionOp(wop);
   }
 
+  void handle(MmaOp* wop) override {
+    mapPointwiseOrReductionOp(wop);
+  }
+
   void handle(ShiftOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
+
+  void handle(ViewDtypeOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
+
+  void handle(ViewOp* op) override {
     mapPointwiseOrReductionOp(op);
   }
 
@@ -411,10 +430,13 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
 
  private:
   ComputeAtRootDomainMap& root_map_;
-  //! Keep track of what we want to try and map. Set in attemptToProveId.
+  //! Keep track of what we want to try and map
   DomainKeyMap<DomainKeySet> pending_map_;
   std::unordered_set<Expr*> visited_;
+  //! Helper class to find invalid mappings due to reductions
   UnmappableReductionDomains incompatible_domains_;
+  //! Running vector of domain pairs that are invalid to map
+  std::vector<std::pair<DomainKey, DomainKey>> invalid_mappings_;
 
   //! Disable UnmappableReductions check, should
   //!  always be false for compute_at use cases

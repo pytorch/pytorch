@@ -85,7 +85,6 @@ class AutocastTestLists(object):
             # the current  _convolution
             ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
                                                               (0, 0), 1, False, True, True, True)),
-            ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
             ("conv3d", conv_args_fp32[2]),
@@ -94,14 +93,6 @@ class AutocastTestLists(object):
             ("conv_transpose2d", conv_args_fp32[1]),
             ("conv_transpose3d", conv_args_fp32[2]),
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
-            # deprecated cudnn_convolutions with bias
-            ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1),
-                                                                             (1, 1), 1, False, True), TEST_WITH_ROCM),
-            # deprecated cudnn_convolutions with no allow_tf32 flag
-            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
-            # the current cudnn_convolutions
             ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True, True), TEST_WITH_ROCM),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1),
                                                                  (1, 1), 1, False, True, True), TEST_WITH_ROCM),
@@ -110,6 +101,7 @@ class AutocastTestLists(object):
             ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
             ("addr", mat0_fp32 + pointwise0_fp32 + pointwise1_fp32),
             ("matmul", mat0_fp32 + mat1_fp32),
+            ("einsum", "bkhd,bqhd->bqkh", mat0_fp32 + mat1_fp32),
             ("mm", mat0_fp32 + mat1_fp32),
             ("mv", mat0_fp32 + pointwise0_fp32),
             ("chain_matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
@@ -336,7 +328,8 @@ class AutocastCPUTestLists(object):
         self.nn_fp32 = [
             ("avg_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
-            ("gelu", dummy_bf16[3]),
+            ("gelu", dummy_bf16[3], {"approximate": 'none'}),
+            ("gelu", dummy_bf16[3], {"approximate": 'tanh'}),
             ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
             ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
             ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),
