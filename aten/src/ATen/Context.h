@@ -80,6 +80,9 @@ class TORCH_API Context {
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
+  static bool hasIPU() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
+  }
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
@@ -293,6 +296,10 @@ static inline bool hasCUDA() {
 
 static inline bool hasHIP() {
   return globalContext().hasHIP();
+}
+
+static inline bool hasIPU() {
+  return globalContext().hasIPU();
 }
 
 static inline bool hasXLA() {
