@@ -1,6 +1,12 @@
 import torch
 from torch import nn, Tensor
 
+try:
+    import functorch
+    has_functorch = True
+except ImportError:
+    has_functorch = False
+
 import torchaudio_models as models
 
 from utils import extract_weights, load_weights, GetterReturnType
@@ -50,6 +56,12 @@ def get_deepspeech(device: torch.device) -> GetterReturnType:
 
     model = models.DeepSpeech(rnn_type=nn.LSTM, labels=labels, rnn_hidden_size=1024, nb_layers=5,
                               audio_conf=audio_conf, bidirectional=True)
+
+    if has_functorch:
+        from functorch.experimental import replace_all_batch_norm_modules_
+
+        replace_all_batch_norm_modules_(model)
+
     model = model.to(device)
     criterion = nn.CTCLoss()
     params, names = extract_weights(model)
