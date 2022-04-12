@@ -42,7 +42,21 @@ class Conf(object):
             "rocm:" + self.gpu_version.strip("rocm") if self.gpu_version.startswith("rocm") else self.gpu_version)
         docker_distro_suffix = alt_docker_suffix if self.pydistro != "conda" else (
             "cuda" if alt_docker_suffix.startswith("cuda") else "rocm")
-        return miniutils.quote("pytorch/" + docker_distro_prefix + "-" + docker_distro_suffix)
+
+        docker_digest_map = {
+            "binary_linux_manywheel_3_6m_cu111_devtoolset7_nightly_build" : 
+                "@sha256:3a9c1537a6ae97a36ea29c6bad6e9bbd3dbd18e4f34fbce30f176bcbb10c12d8",
+            "binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_build" : 
+                "@sha256:2277f8c324c3928cc0baa574591a32cbec1f32979d40f8c15b41584171819169",
+            "binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build" : 
+                "@sha256:0e8df61551e084c9fe26ac1c9c009136ea4376c62ea55884e1c96bb74415353f",
+            "binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build" : 
+                "@sha256:2277f8c324c3928cc0baa574591a32cbec1f32979d40f8c15b41584171819169"
+        }
+        build_name = self.gen_build_name("build", nightly=True)
+        docker_digest = docker_digest_map.get(build_name, "")
+
+        return miniutils.quote("pytorch/" + docker_distro_prefix + "-" + docker_distro_suffix + docker_digest)
 
     def get_name_prefix(self):
         return "smoke" if self.smoke else "binary"
@@ -100,7 +114,7 @@ class Conf(object):
                 if self.os == "windows":
                     job_def["executor"] = "windows-with-nvidia-gpu"
                 else:
-                    job_def["resource_class"] = "gpu.medium"
+                    job_def["resource_class"] = "gpu.nvidia.small"
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])

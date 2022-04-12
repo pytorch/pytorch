@@ -8,9 +8,6 @@
 version: 2.1
 
 parameters:
-  run_binary_tests:
-    type: boolean
-    default: false
   run_build:
     type: boolean
     default: true
@@ -32,6 +29,12 @@ executors:
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
+  
+  windows-2xlarge-cpu-with-nvidia-cuda:
+    machine:
+      resource_class: windows.2xlarge
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
 

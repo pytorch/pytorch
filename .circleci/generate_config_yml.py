@@ -106,10 +106,28 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
+    # Schedule LTS branch to build every 2 weeks
+    # (on the 1st and 15th of every month at 1:30AM)
+    # on workflow "binary_builds".
+    lts_binary_builds_schedule = [
+        {
+            "schedule": {
+                "cron": "\"30 1 1,15 * *\"",
+                "filters": {
+                    "branches": {
+                        "only": [
+                            "lts/release/1.8"
+                        ]
+                    }
+                }
+            },
+        }
+    ]
+
     return {
         "workflows": {
             "binary_builds": {
-                "when": r"<< pipeline.parameters.run_binary_tests >>",
+                "triggers": lts_binary_builds_schedule,
                 "jobs": [f() for f in binary_build_functions],
             },
             "build": {

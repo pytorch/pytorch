@@ -13,7 +13,11 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     IF EXIST %CONDA_PARENT_DIR%\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\Miniconda3 )
-    curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
+    if "%PYTHON_VERSION%"=="3.6" (
+        curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-py37_4.10.3-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
+    ) else (
+        curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
+    )
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
     %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\Miniconda3
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
@@ -39,7 +43,7 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest coverage
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2,<0.9.0" psutil pillow unittest-xml-reporting pytest coverage
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 set DISTUTILS_USE_SDK=1

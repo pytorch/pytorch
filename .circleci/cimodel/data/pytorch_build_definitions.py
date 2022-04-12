@@ -182,7 +182,7 @@ def gen_dependent_configs(xenial_parent_config):
         (["multigpu"], "large"),
         (["nogpu", "NO_AVX2"], None),
         (["nogpu", "NO_AVX"], None),
-        (["slow"], "medium"),
+        (["slow"], "nvidia.small"),
     ]
 
     configs = []
@@ -340,7 +340,7 @@ def instantiate_configs():
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
-            gpu_resource = "medium"
+            gpu_resource = "nvidia.small"
 
         c = Conf(
             distro_name,

@@ -14,7 +14,7 @@ get_runtime_of_command () {
   if [[ $runtime == *"Error"* ]]; then
     exit 1
   fi
-  runtime=${runtime#+++ $@}
+  runtime=${runtime#+++ "$@"}
   runtime=$(python -c "print($runtime)")
 
   echo $runtime

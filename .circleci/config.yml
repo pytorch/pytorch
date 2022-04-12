@@ -8,9 +8,6 @@
 version: 2.1
 
 parameters:
-  run_binary_tests:
-    type: boolean
-    default: false
   run_build:
     type: boolean
     default: true
@@ -32,6 +29,12 @@ executors:
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
+  
+  windows-2xlarge-cpu-with-nvidia-cuda:
+    machine:
+      resource_class: windows.2xlarge
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
 
@@ -443,7 +446,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -524,7 +527,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -841,7 +844,7 @@ jobs:
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -904,7 +907,7 @@ jobs:
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -957,6 +960,7 @@ jobs:
     <<: *binary_mac_params
     macos:
       xcode: "12.0"
+      resource_class: "large"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -1084,7 +1088,7 @@ jobs:
         default: ""
       executor:
         type: string
-        default: "windows-xlarge-cpu-with-nvidia-cuda"
+        default: "windows-2xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
@@ -1197,7 +1201,7 @@ jobs:
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters:
       branch:
         type: string
@@ -1226,7 +1230,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1271,7 +1275,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1370,7 +1374,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1459,7 +1463,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1495,7 +1499,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1537,7 +1541,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1693,7 +1697,7 @@ jobs:
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1731,7 +1735,7 @@ jobs:
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1778,7 +1782,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: medium
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1823,7 +1827,7 @@ jobs:
   # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: medium
     steps:
     - checkout
@@ -1886,7 +1890,7 @@ jobs:
           type: string
           default: ""
       machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
@@ -1902,7 +1906,10 @@ jobs:
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+              export AWS_REGION=us-east-1
+              aws ecr get-login-password --region $AWS_REGION|docker login --username AWS \
+                       --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
               set -x
               # Check if image already exists, if it does then skip building it
               if docker manifest inspect "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${IMAGE_NAME}:${DOCKER_TAG}"; then
@@ -1935,7 +1942,7 @@ jobs:
               cd .circleci/docker && ./build_docker.sh
   docker_for_ecr_gc_build_job:
       machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
       steps:
         - checkout
         - run:
@@ -1947,9 +1954,12 @@ jobs:
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+              export AWS_REGION=us-east-1
+              aws ecr get-login-password --region $AWS_REGION|docker login --username AWS \
+                       --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
               set -x
-              docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+              docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/gc/ecr
   ecr_gc_job:
       parameters:
         project:
@@ -2004,7 +2014,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
+          docker_image: "pytorch/manylinux-cuda102@sha256:2277f8c324c3928cc0baa574591a32cbec1f32979d40f8c15b41584171819169"
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m cpu devtoolset7"
@@ -2048,7 +2058,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
+          docker_image: "pytorch/manylinux-cuda102@sha256:2277f8c324c3928cc0baa574591a32cbec1f32979d40f8c15b41584171819169"
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -2092,7 +2102,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda111"
+          docker_image: "pytorch/manylinux-cuda111@sha256:3a9c1537a6ae97a36ea29c6bad6e9bbd3dbd18e4f34fbce30f176bcbb10c12d8"
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu111_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m cu111 devtoolset7"
@@ -2968,7 +2978,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda102"
+          docker_image: "pytorch/manylinux-cuda102@sha256:2277f8c324c3928cc0baa574591a32cbec1f32979d40f8c15b41584171819169"
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m cpu devtoolset7"
@@ -3020,9 +3030,9 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda102"
+          docker_image: "pytorch/manylinux-cuda102@sha256:2277f8c324c3928cc0baa574591a32cbec1f32979d40f8c15b41584171819169"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -3037,7 +3047,7 @@ workflows:
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m cu102 devtoolset7"
@@ -3052,7 +3062,7 @@ workflows:
             - binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m cu102 devtoolset7"
@@ -3067,7 +3077,7 @@ workflows:
             - binary_linux_manywheel_3_9m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_6m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.6m cu111 devtoolset7"
@@ -3080,9 +3090,9 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_manywheel_3_6m_cu111_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda111"
+          docker_image: "pytorch/manylinux-cuda111@sha256:3a9c1537a6ae97a36ea29c6bad6e9bbd3dbd18e4f34fbce30f176bcbb10c12d8"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m cu111 devtoolset7"
@@ -3097,7 +3107,7 @@ workflows:
             - binary_linux_manywheel_3_7m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m cu111 devtoolset7"
@@ -3112,7 +3122,7 @@ workflows:
             - binary_linux_manywheel_3_8m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m cu111 devtoolset7"
@@ -3127,7 +3137,7 @@ workflows:
             - binary_linux_manywheel_3_9m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_test
           build_environment: "conda 3.6 cpu devtoolset7"
@@ -3194,7 +3204,7 @@ workflows:
             - binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu102 devtoolset7"
@@ -3209,7 +3219,7 @@ workflows:
             - binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_8_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.8 cu102 devtoolset7"
@@ -3224,7 +3234,7 @@ workflows:
             - binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_9_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.9 cu102 devtoolset7"
@@ -3239,7 +3249,7 @@ workflows:
             - binary_linux_conda_3_9_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_6_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.6 cu111 devtoolset7"
@@ -3254,7 +3264,7 @@ workflows:
             - binary_linux_conda_3_6_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_7_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu111 devtoolset7"
@@ -3269,7 +3279,7 @@ workflows:
             - binary_linux_conda_3_7_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_8_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.8 cu111 devtoolset7"
@@ -3284,7 +3294,7 @@ workflows:
             - binary_linux_conda_3_8_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_9_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.9 cu111 devtoolset7"
@@ -3299,7 +3309,7 @@ workflows:
             - binary_linux_conda_3_9_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cpu devtoolset7"
@@ -3371,7 +3381,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -3387,7 +3397,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -3403,7 +3413,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -3419,7 +3429,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -3435,7 +3445,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-with-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -3451,7 +3461,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-without-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -3467,7 +3477,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-with-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -3483,7 +3493,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-without-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -3555,7 +3565,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -3571,7 +3581,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -3587,7 +3597,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -3603,7 +3613,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -3619,7 +3629,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -3635,7 +3645,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -3651,7 +3661,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -3667,7 +3677,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - binary_windows_test:
           name: binary_windows_wheel_3_6_cpu_nightly_test
           build_environment: "wheel 3.6 cpu"
@@ -5294,7 +5304,13 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: libtorch
           upload_subfolder: cu111
-    when: << pipeline.parameters.run_binary_tests >>
+    triggers:
+      - schedule:
+          cron: "30 1 1,15 * *"
+          filters:
+            branches:
+              only:
+                - lts/release/1.8
   build:
     jobs:
       - docker_build_job:
@@ -5569,7 +5585,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2
           requires:
@@ -5577,7 +5593,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test2"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_multigpu_test
           requires:
@@ -5631,7 +5647,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-slow-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - pytorch_linux_build:
           name: pytorch_libtorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           requires:
@@ -5669,7 +5685,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - pytorch_linux_build:
           name: pytorch_libtorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_build
           requires:
@@ -5754,7 +5770,7 @@ workflows:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_jit_legacy_test
           requires:
             - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
           use_cuda_docker_runtime: "1"
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
@@ -5843,7 +5859,7 @@ workflows:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
           requires:
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_build
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
           use_cuda_docker_runtime: "1"
       - binary_linux_test:
           build_environment: libtorch 3.7m cpu devtoolset7
@@ -6080,7 +6096,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_7m_cu102_devtoolset7_nightly
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -6092,7 +6108,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_8m_cu102_devtoolset7_nightly
           build_environment: "manywheel 3.8m cu102 devtoolset7"
@@ -6104,7 +6120,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_9m_cu102_devtoolset7_nightly
           build_environment: "manywheel 3.9m cu102 devtoolset7"
@@ -6116,7 +6132,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_6m_cu111_devtoolset7_nightly
           build_environment: "manywheel 3.6m cu111 devtoolset7"
@@ -6128,7 +6144,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_7m_cu111_devtoolset7_nightly
           build_environment: "manywheel 3.7m cu111 devtoolset7"
@@ -6140,7 +6156,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_8m_cu111_devtoolset7_nightly
           build_environment: "manywheel 3.8m cu111 devtoolset7"
@@ -6152,7 +6168,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_9m_cu111_devtoolset7_nightly
           build_environment: "manywheel 3.9m cu111 devtoolset7"
@@ -6164,7 +6180,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_6_cpu_devtoolset7_nightly
           build_environment: "conda 3.6 cpu devtoolset7"
@@ -6216,7 +6232,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu102_devtoolset7_nightly
           build_environment: "conda 3.7 cu102 devtoolset7"
@@ -6228,7 +6244,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_8_cu102_devtoolset7_nightly
           build_environment: "conda 3.8 cu102 devtoolset7"
@@ -6240,7 +6256,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_9_cu102_devtoolset7_nightly
           build_environment: "conda 3.9 cu102 devtoolset7"
@@ -6252,7 +6268,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_6_cu111_devtoolset7_nightly
           build_environment: "conda 3.6 cu111 devtoolset7"
@@ -6264,7 +6280,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu111_devtoolset7_nightly
           build_environment: "conda 3.7 cu111 devtoolset7"
@@ -6276,7 +6292,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_8_cu111_devtoolset7_nightly
           build_environment: "conda 3.8 cu111 devtoolset7"
@@ -6288,7 +6304,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_conda_3_9_cu111_devtoolset7_nightly
           build_environment: "conda 3.9 cu111 devtoolset7"
@@ -6300,7 +6316,7 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps
           build_environment: "libtorch 3.7m cpu devtoolset7"
@@ -6357,7 +6373,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -6370,7 +6386,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -6383,7 +6399,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -6396,7 +6412,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-with-deps
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -6409,7 +6425,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-without-deps
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -6422,7 +6438,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-with-deps
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -6435,7 +6451,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-without-deps
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -6448,7 +6464,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -6505,7 +6521,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -6518,7 +6534,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -6531,7 +6547,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -6544,7 +6560,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -6557,7 +6573,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -6570,7 +6586,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -6583,7 +6599,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_linux_test:
           name: smoke_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -6596,7 +6612,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          resource_class: gpu.nvidia.small
       - smoke_mac_test:
           name: smoke_macos_wheel_3_6_cpu_nightly
           build_environment: "wheel 3.6 cpu"

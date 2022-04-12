@@ -1081,7 +1081,12 @@ class TestLinalg(TestCase):
         a = torch.eye(3, dtype=dtype, device=device)
         a[-1, -1] = 0  # make 'a' singular
         for p in norm_types:
-            run_test_case(a, p)
+            try:
+                run_test_case(a, p)
+            except np.linalg.LinAlgError:
+                # Numpy may fail to converge for some BLAS backends (although this is very rare)
+                # See the discussion in https://github.com/pytorch/pytorch/issues/67675
+                pass
 
         # test for 0x0 matrices. NumPy doesn't work for such input, we return 0
         input_sizes = [(0, 0), (2, 5, 0, 0)]
@@ -1247,7 +1252,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     def test_norm_extreme_values(self, device):
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
-        matrix_ords = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf]
+        # matrix_ords 'nuc', 2, -2 are skipped currently
+        # See issue https://github.com/pytorch/pytorch/issues/71911
+        matrix_ords = ['fro', 1, inf, -1, -inf]
         vectors = []
         matrices = []
         for pair in itertools.product([inf, -inf, 0.0, nan, 1.0], repeat=2):
@@ -1278,8 +1285,8 @@ class TestLinalg(TestCase):
             x_n = x.cpu().numpy()
             for ord in matrix_ords:
                 msg = f'ord={ord}, matrix={matrix}'
-                result = torch.linalg.norm(x, ord=ord)
                 result_n = np.linalg.norm(x_n, ord=ord)
+                result = torch.linalg.norm(x, ord=ord)
 
                 if is_broken_matrix_norm_case(ord, x):
                     continue

@@ -882,15 +882,25 @@ class TensorExprFuser {
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
+        auto const& device = tt->device();
 
         // All tensors must be typed.
-        if (!st) {
+        if (!st || !device) {
           return false;
         }
 
         // Byte tensors introduce too many corner cases in type promotion.
         // Better not to try to handle them.
         if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // Float16 support has some issues (see e.g. #61336 and #61382), so for
+        // now it's disabled. There seem to be some problems in HalfRewriter,
+        // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
+        // additionally disable it until we either move to a more stable version
+        // or find workarounds.
+        if (*st == c10::ScalarType::Half) {
           return false;
         }
 

@@ -20,6 +20,10 @@ change. This file contains two types of randomized tests:
    it's fine to increment the seed of the failing test (but you shouldn't need
    to increment it more than once; otherwise something is probably actually
    wrong).
+
+3. `test_geometric_sample`, `test_binomial_sample` and `test_poisson_sample`
+   are validated against `scipy.stats.` which are not guaranteed to be identical
+   across different versions of scipy (namely, they yield invalid results in 1.7+)
 """
 
 import math

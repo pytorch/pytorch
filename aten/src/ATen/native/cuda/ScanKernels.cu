@@ -4,7 +4,7 @@
 #include <THC/THCNumerics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
-#include <cub/device/device_scan.cuh>
+#include <ATen/cuda/CubUtils.cuh>
 
 
 namespace at { namespace native {
