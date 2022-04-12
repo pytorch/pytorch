@@ -24,12 +24,11 @@
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
 // fuser and IR parser
-#include "test_gpu_validator.h"
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -2033,38 +2032,6 @@ TEST_F(NVFuserTest, FusionShiftSyncPlacement2_CUDA) {
   testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionShiftSyncPlacement3_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
-  auto tv2 = add(tv1, IrBuilder::create<Double>(2));
-  auto tv3 = shift(tv2, {1});
-  fusion.addOutput(tv3);
-
-  // This doesn't work. syncthreads is needed between tv1 and tv2, but
-  // both the loop extent of both tv1 and tv2 has halo, so the loop is
-  // not eliminated even though it is parallelized. Moving syncthreads
-  // out of the loop would make it placed before tv1, which would make
-  // it meaningless.
-  // Ideally, an exception should be thrown at this computeAt, but at
-  // this point, the fusion is not yet parallelized, nor memory type
-  // is set, so this computeAt itself is not an error yet.
-  tv1->computeAt(tv2, -1);
-
-  tv1->setMemoryType(MemoryType::Shared);
-  tv2->setMemoryType(MemoryType::Shared);
-
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
-
-  // The error should be detected when the fusion is lowered.
-  ASSERT_ANY_THROW(fusion.printKernel());
-}
-
 // Based on original CUDA provided by Vishal Mehta.
 // Major differences with the original version:
 // - The original version uses additional 2 warps to load the halos
@@ -3985,7 +3952,12 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   auto ref_N = at::ones({}, options_int) * (numel_x - 2) * (numel_y - 2);
 
   testValidate(
-      &fusion, outputs, inputs, {ref_avg, ref_M2, ref_N}, __LINE__, __FILE__);
+      fe.kernel(),
+      outputs,
+      inputs,
+      {ref_avg, ref_M2, ref_N},
+      __LINE__,
+      __FILE__);
 }
 
 // Shift indexing and predication with contiguous merge
@@ -5362,6 +5334,45 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   auto t2 = sum(t1, {-2, -1});
   auto t3 = t2 / 9;
   auto ref = t3;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = shift(tv1, {1});
+  auto tv3 = shift(tv1, {-1});
+  auto tv4 = add(tv1, tv2);
+  auto tv5 = add(tv4, tv3);
+  fusion.addOutput(tv5);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv5->split(-1, 1024);
+  tv5->split(-1, 2);
+  TransformPropagator::from(tv5);
+
+  tv0->computeAt(tv5, 1);
+
+  tv5->axis(1)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1024 * 32}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto outputs = fe.runFusion(inputs);
+
+  auto ref = t0 + shift(t0, {1}) + shift(t0, {-1});
 
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
