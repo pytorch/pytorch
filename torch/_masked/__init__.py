@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from re import I
 from typing import Optional, Tuple, List, Union, Any
 
 import warnings
