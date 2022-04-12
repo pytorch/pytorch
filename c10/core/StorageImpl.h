@@ -35,7 +35,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   struct use_byte_size_t {};
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
+      use_byte_size_t /*use_byte_size*/,
       size_t size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
@@ -52,7 +52,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
+      use_byte_size_t /*use_byte_size*/,
       size_t size_bytes,
       at::Allocator* allocator,
       bool resizable)

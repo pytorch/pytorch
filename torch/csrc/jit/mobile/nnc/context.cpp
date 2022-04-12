@@ -41,7 +41,17 @@ c10::IValue InputSpec::serialize() const {
 }
 
 bool InputSpec::validate(const at::Tensor& input) const {
-  return input.sizes() == sizes_ && input.scalar_type() == dtype_;
+  if (sizes_.size() != input.sizes().size() || input.scalar_type() != dtype_) {
+    return false;
+  }
+  auto spec_sizes = sizes_;
+  for (int i = 0; i < spec_sizes.size(); i++) {
+    // InputSpec size 0 means that the dimension is dynamic
+    if (spec_sizes[i] != 0 && spec_sizes[i] != input.sizes()[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 OutputSpec::OutputSpec(const c10::IValue& value) {
@@ -136,6 +146,14 @@ Function::Function(const c10::IValue& value) {
 
   // memory_plan_
   memory_plan_ = MemoryPlan(dict.at("memory_plan"));
+
+  // symbolic shape positions
+  for (const auto& sym_shape_pos :
+       dict.at("sym_shape_pos").toTupleRef().elements()) {
+    auto sym_shape_elements = sym_shape_pos.toTupleRef().elements();
+    sym_shape_positions_.emplace_back(
+        sym_shape_elements[0].toInt(), sym_shape_elements[1].toInt());
+  }
 }
 
 c10::IValue Function::serialize() const {
@@ -185,18 +203,20 @@ void Function::init_execution_state() const {
   ExecutionState state;
   memory_plan_.allocate(&state);
 
-  // The arguments vector consists of 4 sections: inputs, outputs, parameters
-  // and buffers.
+  // The arguments vector consists of 5 sections: inputs, symbolic shapes,
+  // outputs, parameters and buffers.
   auto input_args = input_specs_.size();
+  auto sym_shape_args = sym_shape_positions_.size();
   auto output_args = output_specs_.size();
   auto param_args = parameters_.size();
   auto buffer_args = state.preallocations_.size();
 
   auto& arguments = state.arguments_;
-  arguments.reserve(input_args + output_args + param_args + buffer_args);
+  arguments.reserve(
+      input_args + sym_shape_args + output_args + param_args + buffer_args);
 
   // Keep empty slots to fill in inputs/outputs pointers at execution time.
-  arguments.resize(input_args + output_args);
+  arguments.resize(input_args + sym_shape_args + output_args);
 
   // Fill in parameters as untyped raw pointers.
   // The underlying storage of the parameters should be owned by `parameters_`,
@@ -233,7 +253,7 @@ c10::impl::GenericList Function::run(
 
   // Fill in input tensors.
   TORCH_CHECK(
-      input_specs_.size() == (inputs.size() + sym_shape_positions_.size()),
+      input_specs_.size() == inputs.size(),
       "Input size doesn't match the spec, expect: ",
       input_specs_.size(),
       " actual: ",

@@ -1,6 +1,7 @@
 import random
 
-from torch.utils.data import MapDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe
 from typing import Iterator, List, Optional, TypeVar
 
 
@@ -23,6 +24,13 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
     Args:
         datapipe: MapDataPipe being shuffled
         indices: a list of indices of the MapDataPipe. If not provided, we assume it uses 0-based indexing
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp = SequenceWrapper(range(10))
+        >>> shuffle_dp = dp.shuffle()
+        >>> list(shuffle_dp)
+        [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
     """
     datapipe: MapDataPipe[T_co]
 

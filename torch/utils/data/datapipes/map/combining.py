@@ -1,4 +1,5 @@
-from torch.utils.data import MapDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe
 from typing import Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -16,6 +17,14 @@ class ConcaterMapDataPipe(MapDataPipe):
 
     Args:
         datapipes: Map DataPipes being concatenated
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp1 = SequenceWrapper(range(3))
+        >>> dp2 = SequenceWrapper(range(3))
+        >>> concat_dp = dp1.concat(dp2)
+        >>> list(concat_dp)
+        [0, 1, 2, 0, 1, 2]
     """
     datapipes: Tuple[MapDataPipe]
     length: int
@@ -53,6 +62,14 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
 
     Args:
         *datapipes: Map DataPipes being aggregated
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp1 = SequenceWrapper(range(3))
+        >>> dp2 = SequenceWrapper(range(10, 13))
+        >>> zip_dp = dp1.zip(dp2)
+        >>> list(zip_dp)
+        [(0, 10), (1, 11), (2, 12)]
     """
     datapipes: Tuple[MapDataPipe[T_co], ...]
     length: int

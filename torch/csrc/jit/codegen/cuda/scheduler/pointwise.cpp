@@ -22,6 +22,145 @@ namespace {
 // constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
 // Unused at the moment, commenting for clang tidy
 constexpr int64_t kThreadX = 128;
+
+// DomainMap uses the ComputeAtMap to find a reference TensorView
+// that maps to all iterDomains in the fusion.
+class DomainMap {
+ public:
+  DomainMap(Fusion* fusion)
+      : fusion_(fusion),
+        ca_index_map_(ComputeAtMap(ComputeAtMap::MappingMode::INDEX)) {
+    ca_index_map_.build(fusion);
+    view_tvs_ = scheduler_utils::getViewTVs(fusion);
+  }
+
+  // The pointwise scheduler heuristics requires a minimum number of axes.
+  // The output reference tensor should respect this requirement.
+  TensorView* findReferenceTensorView(int minimum_num_axes = 0) const {
+    for (auto output_tv :
+         ir_utils::filterByType<TensorView>(fusion_->outputs())) {
+      if (isValidReference(output_tv) &&
+          hasMinimumSize(output_tv, minimum_num_axes) &&
+          !output_tv->isFusionInput()) {
+        return output_tv;
+      }
+    }
+    return nullptr;
+  }
+
+  static bool hasReferenceTensorView(Fusion* fusion) {
+    FusionGuard fg(fusion);
+    DomainMap domain_map(fusion);
+    return domain_map.findReferenceTensorView() != nullptr;
+  }
+
+  // Determine if output TensorView is a valid reference tensor for this fusion.
+  // The reference tensor must map to all the iterDomains in each input.
+  bool isValidReference(TensorView* output_tv) const {
+    if (output_tv->isFusionInput()) {
+      return false;
+    }
+    for (auto input_tv :
+         ir_utils::filterByType<TensorView>(fusion_->inputs())) {
+      if (input_tv->uses().empty()) {
+        continue;
+      }
+
+      if (fusion_->getOutputAlias(output_tv) == input_tv) {
+        continue;
+      }
+
+      if (!areAllMapped(input_tv, output_tv)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+ private:
+  bool hasMinimumSize(TensorView* tv, int num_axes) const {
+    TORCH_INTERNAL_ASSERT(tv != nullptr);
+    return (num_axes == 0 || tv->getMaybeRFactorDomain().size() > num_axes);
+  }
+
+  // Determine if all iterDomains are mapped between input and output tvs
+  bool areAllMapped(TensorView* input_tv, TensorView* output_tv) const {
+    // Get concrete IDs for input root or rfactor domain
+    std::unordered_set<IterDomain*> in_concrete_ids;
+    for (auto in_id : input_tv->getMaybeRFactorDomain()) {
+      if (!ca_index_map_.getConcreteMappedID(in_id)->isBroadcast() &&
+          !in_id->isReduction()) {
+        in_concrete_ids.insert(ca_index_map_.getConcreteMappedID(in_id));
+      }
+    }
+
+    // Erase all input concrete IDs mapped to the output domain
+    // Ignore unresolved broadcast dimensions
+    for (auto out_id : output_tv->getMaybeRFactorDomain()) {
+      if (!out_id->isBroadcast()) {
+        if (!eraseIfMapped(in_concrete_ids, out_id)) {
+          eraseIfMappedThroughView(in_concrete_ids, out_id);
+        }
+      }
+    }
+    return in_concrete_ids.empty();
+  }
+
+  // Erase input concrete ID if it is mapped to output ID
+  bool eraseIfMapped(
+      std::unordered_set<IterDomain*>& in_concrete_ids,
+      IterDomain* out_id) const {
+    auto out_concrete_id = ca_index_map_.getConcreteMappedID(out_id);
+    auto in_concrete_id_iter = in_concrete_ids.find(out_concrete_id);
+    bool found_match = in_concrete_id_iter != in_concrete_ids.end();
+    if (found_match) {
+      in_concrete_ids.erase(in_concrete_id_iter);
+    }
+    return found_match;
+  }
+
+  // Check if in_id is mapped to out_id through any view rfactor domain
+  void eraseIfMappedThroughView(
+      std::unordered_set<IterDomain*>& in_concrete_ids,
+      IterDomain* out_id) const {
+    for (auto view : view_tvs_) {
+      // Find any ID in view rfactor domain that is mapped to output ID
+      auto view_rfactor_id = anyMapped(view->getRFactorDomain(), out_id);
+      if (view_rfactor_id == nullptr) {
+        continue;
+      }
+
+      if (view_rfactor_id->isRFactorProduct()) {
+        // Check if input ID is mapped to any input IDs of the view rfactor ID
+        auto root_inputs = InputsOf::outputs(fusion_, {view_rfactor_id});
+        auto filtered_root_ids =
+            ir_utils::filterByType<IterDomain>(root_inputs);
+        for (auto view_root_id : filtered_root_ids) {
+          eraseIfMapped(in_concrete_ids, view_root_id);
+        }
+      } else {
+        // Otherwise, the input ID must map to the view rfactor ID
+        eraseIfMapped(in_concrete_ids, view_rfactor_id);
+      }
+    }
+  }
+
+  // Find any id in domain that maps with target id
+  IterDomain* anyMapped(
+      const std::vector<IterDomain*> domain,
+      IterDomain* target) const {
+    for (auto id : domain) {
+      if (ca_index_map_.areMapped(id, target)) {
+        return id;
+      }
+    }
+    return nullptr;
+  }
+
+  Fusion* fusion_ = nullptr;
+  ComputeAtMap ca_index_map_;
+  std::vector<TensorView*> view_tvs_;
+};
 } // namespace
 
 c10::optional<PointwiseParams> getPointwiseHeuristics(
@@ -43,9 +182,17 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   int max_dims = -1;
 
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
-  auto out_tvs_it = ir_utils::filterByType<TensorView>(fusion->outputs());
   // Will want to access this with direct indexing later, convert now.
-  std::vector<TensorView*> out_tvs(out_tvs_it.begin(), out_tvs_it.end());
+  std::vector<TensorView*> out_tvs;
+  // Only use valid reference tensors during heuristics analysis
+  DomainMap domain_map(fusion);
+  for (auto out_tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
+    if (domain_map.isValidReference(out_tv)) {
+      out_tvs.push_back(out_tv);
+    }
+  }
+  TORCH_INTERNAL_ASSERT(
+      !out_tvs.empty(), "No valid reference outputs were found!");
 
   for (auto out_tv : out_tvs) {
     int n_dims = 0;
@@ -62,29 +209,6 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   }
 
   TORCH_INTERNAL_ASSERT(largest_out != nullptr);
-
-  // If zero dimensional, return default parameters
-  if (TensorDomain::noReductions(
-          TensorDomain::noBroadcasts(largest_out->domain()->domain()))
-          .size() == 0) {
-    auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
-        HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
-      return std::make_unique<std::vector<TensorView*>>();
-    });
-    vectorizable_inputs_outputs_entry.get();
-
-    auto broadcast_byte_multiples_entry =
-        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
-            data_cache, []() {
-              return std::make_unique<
-                  std::vector<scheduler_utils::BroadcastMultiple>>();
-            });
-    broadcast_byte_multiples_entry.get();
-
-    PointwiseParams params;
-    params.tag = "Pointwise heuristics";
-    return params;
-  }
 
   const int64_t device_multiprocessor_count =
       (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -118,9 +242,34 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
         runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
-        "Error inferring size for pointwise scheduler.");
+        "Error inferring size for pointwise scheduler: ",
+        ref_root[ref_i]->extent()->toInlineString());
     elem_counts[ref_i] = inferred_val.value();
     n_elems *= inferred_val.value();
+  }
+
+  // If zero dimensional or zero size, return default parameters
+  if (TensorDomain::noReductions(
+          TensorDomain::noBroadcasts(largest_out->domain()->domain()))
+              .size() == 0 ||
+      n_elems == 0) {
+    auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
+        HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
+      return std::make_unique<std::vector<TensorView*>>();
+    });
+    vectorizable_inputs_outputs_entry.get();
+
+    auto broadcast_byte_multiples_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
+            data_cache, []() {
+              return std::make_unique<
+                  std::vector<scheduler_utils::BroadcastMultiple>>();
+            });
+    broadcast_byte_multiples_entry.get();
+
+    PointwiseParams params;
+    params.tag = "Pointwise heuristics";
+    return params;
   }
 
   // Don't unroll at the cost of getting a full wave on the GPU
@@ -369,127 +518,11 @@ size_t nRootDims(const TensorView* tv) {
   }
   return tv_n_dims;
 }
-
-// DomainMap uses the ComputeAtMap to find a reference TensorView
-// that maps to all iterDomains in the fusion.
-class DomainMap {
- public:
-  DomainMap(Fusion* fusion)
-      : fusion_(fusion),
-        ca_index_map_(ComputeAtMap(ComputeAtMap::MappingMode::INDEX)) {
-    ca_index_map_.build(fusion);
-    view_tvs_ = scheduler_utils::getViewTVs(fusion);
-  }
-
-  TensorView* findReferenceTensorView() const {
-    auto fusion_outputs = fusion_->outputs();
-    for (auto output_tv : ir_utils::filterByType<TensorView>(fusion_outputs)) {
-      if (isValidReference(output_tv)) {
-        return output_tv;
-      }
-    }
-    return nullptr;
-  }
-
- private:
-  // Determine if output TensorView is a valid reference tensor for this fusion.
-  // The reference tensor must map to all the iterDomains in each input.
-  bool isValidReference(TensorView* output_tv) const {
-    auto fusion_inputs = fusion_->inputs();
-    for (auto input_tv : ir_utils::filterByType<TensorView>(fusion_inputs)) {
-      if (input_tv->uses().empty()) {
-        continue;
-      }
-
-      if (fusion_->getOutputAlias(output_tv) == input_tv) {
-        continue;
-      }
-
-      if (!areAllMapped(input_tv, output_tv)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // Determine if all iterDomains are mapped between input and output tvs
-  bool areAllMapped(TensorView* input_tv, TensorView* output_tv) const {
-    // Get concrete IDs for input root or rfactor domain
-    std::unordered_set<IterDomain*> in_concrete_ids;
-    for (auto in_id : input_tv->getMaybeRFactorDomain()) {
-      if (!in_id->isBroadcast() && !in_id->isReduction()) {
-        in_concrete_ids.insert(ca_index_map_.getConcreteMappedID(in_id));
-      }
-    }
-
-    // Erase all input concrete IDs mapped to the output domain
-    for (auto out_id : output_tv->getMaybeRFactorDomain()) {
-      if (!out_id->isBroadcast() && !out_id->isReduction()) {
-        if (!eraseIfMapped(in_concrete_ids, out_id)) {
-          eraseIfMappedThroughView(in_concrete_ids, out_id);
-        }
-      }
-    }
-    return in_concrete_ids.empty();
-  }
-
-  // Erase input concrete ID if it is mapped to output ID
-  bool eraseIfMapped(
-      std::unordered_set<IterDomain*>& in_concrete_ids,
-      IterDomain* out_id) const {
-    auto out_concrete_id = ca_index_map_.getConcreteMappedID(out_id);
-    auto in_concrete_id_iter = in_concrete_ids.find(out_concrete_id);
-    bool found_match = in_concrete_id_iter != in_concrete_ids.end();
-    if (found_match) {
-      in_concrete_ids.erase(in_concrete_id_iter);
-    }
-    return found_match;
-  }
-
-  // Check if in_id is mapped to out_id through any view rfactor domain
-  void eraseIfMappedThroughView(
-      std::unordered_set<IterDomain*>& in_concrete_ids,
-      IterDomain* out_id) const {
-    for (auto view : view_tvs_) {
-      // Find any ID in view rfactor domain that is mapped to output ID
-      auto view_rfactor_id = anyMapped(view->getRFactorDomain(), out_id);
-      if (view_rfactor_id == nullptr) {
-        continue;
-      }
-
-      if (view_rfactor_id->isRFactorProduct()) {
-        // Check if input ID is mapped to any input IDs of the view rfactor ID
-        auto root_inputs = InputsOf::outputs(fusion_, {view_rfactor_id});
-        auto filtered_root_ids =
-            ir_utils::filterByType<IterDomain>(root_inputs);
-        for (auto view_root_id : filtered_root_ids) {
-          eraseIfMapped(in_concrete_ids, view_root_id);
-        }
-      } else {
-        // Otherwise, the input ID must map to the view rfactor ID
-        eraseIfMapped(in_concrete_ids, view_rfactor_id);
-      }
-    }
-  }
-
-  // Find any id in domain that maps with target id
-  IterDomain* anyMapped(
-      const std::vector<IterDomain*> domain,
-      IterDomain* target) const {
-    for (auto id : domain) {
-      if (ca_index_map_.areMapped(id, target)) {
-        return id;
-      }
-    }
-    return nullptr;
-  }
-
-  Fusion* fusion_ = nullptr;
-  ComputeAtMap ca_index_map_;
-  std::vector<TensorView*> view_tvs_;
-};
-
 } // namespace
+
+bool hasReferenceTensorView(Fusion* fusion) {
+  return DomainMap::hasReferenceTensorView(fusion);
+}
 
 // TODO: Inline intermediate operations (avoid inlining unrolled/vectorized
 // input/output caches)
@@ -503,7 +536,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // maybe has_reduction for scheduling should be done on a per output tensor
   // basis.
   TORCH_INTERNAL_ASSERT(
-      !fusion->hasReduction(), "This scheduler only handles pointwise ops.");
+      ir_utils::getReductionOps(fusion /*, ignore_trivial=true */).empty(),
+      "This scheduler only handles pointwise ops.");
 
   // For intermediate outputs, apply cache_fork
   auto outs = fusion->outputs();
@@ -543,7 +577,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   }
 
   DomainMap domain_map(fusion);
-  TensorView* reference_tv = domain_map.findReferenceTensorView();
+  TensorView* reference_tv =
+      domain_map.findReferenceTensorView(params.break_point);
 
   TORCH_INTERNAL_ASSERT(
       reference_tv != nullptr,
@@ -576,7 +611,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
 
   // Figure out which inputs to cache for unrolling or vectorization
   for (auto inp : input_tvs) {
-    if (inp->uses().empty()) {
+    if (inp->uses().empty() || inp->isFusionOutput()) {
       continue;
     }
     cached_inputs.emplace_back(inp->cache_after());
@@ -727,19 +762,33 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(3)->parallelize(ParallelType::TIDx);
     }
   }
+
   TransformPropagator::from(reference_tv);
   scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
 
   if (params.vectorize) {
     // Grab all tensor views that should be vectorized
-    auto vectorizable_inputs_outputs =
+    auto vectorized_tvs =
         scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
+    // Going to move inputs to consumers of inputs, need a copy as we'll modify
+    // the original.
+    {
+      auto vectorized_tvs_copy = vectorized_tvs;
+      for (auto inp : vectorized_tvs_copy) {
+        if (!inp->isFusionInput()) {
+          continue;
+        }
+        vectorized_tvs.erase(
+            std::find(vectorized_tvs.begin(), vectorized_tvs.end(), inp));
+        auto consumer_tvs = ir_utils::consumerTvsOf(inp);
+        vectorized_tvs.insert(
+            vectorized_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
+      }
+    }
     // Clear vectorize on tensors that shouldn't have it
     for (auto tv : all_tvs) {
-      if (std::find(
-              vectorizable_inputs_outputs.begin(),
-              vectorizable_inputs_outputs.end(),
-              tv) == vectorizable_inputs_outputs.end()) {
+      if (std::find(vectorized_tvs.begin(), vectorized_tvs.end(), tv) ==
+          vectorized_tvs.end()) {
         for (auto id : tv->domain()->domain()) {
           if (id->getParallelType() == ParallelType::Vectorize) {
             id->parallelize(ParallelType::Serial);

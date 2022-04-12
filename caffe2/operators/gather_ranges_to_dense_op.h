@@ -146,6 +146,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           auto& key = Input(KEY);
           auto* key_data = key.template data<int64_t>();
           vector<std::pair<int64_t, const char*>> buffer;
+          buffer.reserve(rangeLength);
           for (const auto b_i : c10::irange(rangeLength)) {
             int64_t one_key_item = key_data[rangeStart + b_i];
             auto* one_data_item = rawData + (rangeStart + b_i) * itemsize;
