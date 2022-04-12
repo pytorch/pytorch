@@ -704,6 +704,64 @@ class TestIndexing(TestCase):
             # check 4: numpy compositionality
             self.assertEqual(nt[nm, 0], nt[:, :, 0][nm])
 
+    # one mask tensor (2d), different index types
+    # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
+    # This checks that `dim_ptr` is incremented correctly for the 2-dim bool
+    # index case when the tensor index is followed by different index types.
+    @dtypes(torch.float)
+    def test_advancedindex_dim_1m_2d_diff_types_bool(self, device, dtype):
+        t = torch.arange(0, 24, device=device, dtype=dtype).view(4, 3, 2)
+
+        values = (
+            # tensor, mask
+            # case 0: everything
+            (t,
+             torch.ones(4, 3, device=device, dtype=dtype)),
+
+            # case 1: nothing
+            (t,
+             torch.zeros(4, 3, device=device, dtype=dtype)),
+
+            # case 2: random
+            (t,
+             torch.tensor(
+                 [[0, 0, 1],
+                  [0, 1, 0],
+                  [0, 0, 0],
+                  [0, 0, 1]],
+                 device=device, dtype=dtype)),
+        )
+
+        for tv, mv in values:
+            t = tv
+            m = mv > 0
+
+            nt = np.array(tv.cpu())
+            nm = np.array(mv.cpu()) > 0
+
+            # https://github.com/pytorch/pytorch/issues/71673
+            # case 0: integer
+            self.assertEqual(
+                t[m, 0],
+                torch.tensor(nt[nm, 0], device=device, dtype=dtype))
+            # case 1: slice
+            self.assertEqual(
+                t[m, :],
+                torch.tensor(nt[nm, :], device=device, dtype=dtype))
+            # case 2: ellipsis
+            self.assertEqual(
+                t[m, ...],
+                torch.tensor(nt[nm, ...], device=device, dtype=dtype))
+            # case 3: none
+            self.assertEqual(
+                t[m, None],
+                torch.tensor(nt[nm, None], device=device, dtype=dtype))
+            # case 4: bool
+            self.assertEqual(
+                t[m, True],
+                torch.tensor(nt[nm, True], device=device, dtype=dtype))
+            # case 5: tensor (omitted, checked by other tests below)
+
     # one mask tensor (2d), mask is not the very first index
     # See NOTE [ `dim_ptr` and index tensors in advanced indexing ]
     # This checks that `dim_ptr` is incremented correctly for the 2-dim bool
