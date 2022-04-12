@@ -1,46 +1,132 @@
-name: 'Close stale pull requests'
+# A workflow that implements similar logic to actions/stale.
+#
+# Compared to actions/stale, it is implemented to make API requests proportional
+# to the number of stale PRs, not the total number of issues in the repo. This
+# is because PyTorch has a lot of issues/PRs, so the actions/stale runs into
+# rate limits way too quickly.
+#
+# The behavior is:
+# - If a PR is not labeled stale, after 60 days inactivity label the PR as stale and comment about it.
+# - If a PR is labeled stale, after 30 days inactivity close the PR.
+# - `high priority` and `no-stale` PRs are exempt.
+
+name: Close stale pull requests
+
 on:
-  schedule:
-    # TODO: Reduce frequency once we work through the backlog of pull requests
-    - cron: '0 * * * *'
-  workflow_dispatch:
+  pull_request:
+  # schedule:
+  # - cron: 0 0 * * *  # once a day
 
 jobs:
   stale:
-    if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/stale@v4.1.0
+      - uses: actions/github-script@v6
         with:
-          stale-pr-message: >
-            Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
-            Feel free to remove the `Stale` label if you feel this was a mistake. <br>
-            `Stale` pull requests will automatically be closed 30 days after being marked `Stale` <br>
-          exempt-pr-labels: "no-stale,open source,high priority"
-          days-before-pr-stale: 60
-          days-before-pr-close: 90
-          days-before-issue-stale: -1
-          days-before-issue-close: -1
-          ascending: true
-          repo-token: ${{ secrets.GH_STALEBOT_TOKEN }}
-          operations-per-run: 1000
-  stale-open-source:
-    if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
-    steps:
-      - uses: actions/stale@v4.1.0
-        with:
-          stale-pr-message: >
-            Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
-            Feel free to remove the `Stale` label if you feel this was a mistake. <br>
-            If you are unable to remove the `Stale` label please contact a maintainer in order to do so. <br>
-            `Stale` pull requests will automatically be closed 30 days after being marked `Stale` <br>
-          exempt-pr-labels: "no-stale,high priority"
-          only-labels: "open source"
-          days-before-pr-stale: 60
-          days-before-pr-close: 90
-          days-before-issue-stale: -1
-          days-before-issue-close: -1
-          ascending: true
-          repo-token: ${{ secrets.GH_STALEBOT_TOKEN }}
-          operations-per-run: 1000
+          github-token: ${{ secrets.GH_STALEBOT_TOKEN }}
+          script: |
+            // If a PRs not labeled stale, label them stale after no update for 60 days.
+            const STALE_LABEL_THRESHOLD_MS = 1000 * 60 * 60 * 24 * 60;
+            // For PRs already labeled stale, close after not update for 30 days.
+            const STALE_CLOSE_THRESHOLD_MS = 1000 * 60 * 60 * 24 * 30;
+
+            const STALE_MESSAGE =
+              "Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>" +
+              "Feel free to remove the `Stale` label if you feel this was a mistake. <br>" +
+              "If you are unable to remove the `Stale` label please contact a maintainer in order to do so. <br>" +
+              "If you want the bot to never mark this PR stale again, add the `no-stale` label.<br>" +
+              "`Stale` pull requests will automatically be closed after 30 days of inactivity.<br>";
+            const MAX_API_REQUESTS = 100;
+
+            let numAPIRequests = 0;
+            let numProcessed = 0;
+
+            async function processPull(pull) {
+              core.info(`[${pull.number}] URL: ${pull.html_url}`);
+              const labels = pull.labels.map((label) => label.name);
+
+              // Skip if certain labels are present.
+              if (labels.includes("no-stale") || labels.includes("high priority")) {
+                core.info(`[${pull.number}] Skipping because PR has an exempting label.`);
+                return false;
+              }
+
+              // Check if the PR is stale, according to our configured thresholds.
+              let staleThresholdMillis;
+              if (labels.includes("Stale")) {
+                core.info(`[${pull.number}] PR is labeled stale, checking whether we should close it.`);
+                staleThresholdMillis = STALE_CLOSE_THRESHOLD_MS;
+              } else {
+                core.info(`[${pull.number}] Checking whether to label PR as stale.`);
+                staleThresholdMillis = STALE_LABEL_THRESHOLD_MS;
+              }
+
+              const millisSinceLastUpdated =
+                new Date().getTime() - new Date(pull.updated_at).getTime();
+
+              if (millisSinceLastUpdated < staleThresholdMillis) {
+                core.info(`[${pull.number}] Skipping because PR was updated recently`);
+                return false;
+              }
+
+              // At this point, we know we should do something.
+              // For PRs already labeled stale, close them.
+              if (labels.includes("Stale")) {
+                core.info(`[${pull.number}] Closing PR.`);
+                // numAPIRequests += 1;
+                // await github.issues.update({
+                //   owner: "pytorch",
+                //   repo: "pytorch",
+                //   issue_number: pull.number,
+                //   state: "closed",
+                // });
+              } else {
+                // For PRs not labeled stale, label them stale.
+                core.info(`[${pull.number}] Labeling PR as stale.`);
+
+                // numAPIRequests += 1;
+                // await github.issues.createComment({
+                //   owner: "pytorch",
+                //   repo: "pytorch",
+                //   issue_number: pull.number,
+                //   body: STALE_MESSAGE,
+                // });
+
+                // numAPIRequests += 1;
+                // await github.issues.addLabels({
+                //   owner: "pytorch",
+                //   repo: "pytorch",
+                //   issue_number: pull.number,
+                //   labels: ["Stale"],
+                // });
+              }
+              numProcessed += 1;
+            }
+
+            for await (const response of octokit.paginate.iterator(
+              github.rest.pulls.list,
+              {
+                owner: "pytorch",
+                repo: "pytorch",
+                state: "open",
+                sort: "created",
+                direction: "asc",
+                per_page: 100,
+              }
+            )) {
+              numAPIRequests += 1;
+              if (numAPIRequests > MAX_API_REQUESTS) {
+                core.info("Max API requests exceeded, exiting.");
+              }
+
+              const pulls = response.data;
+              // Awaiting in a loop is intentional here. We want to serialize execution so
+              // that log groups are printed correctl
+              for (const pull of pulls) {
+                await core.group(`Processing PR #${pull.number}`, async () => {
+                  await processPull(pull);
+                });
+              }
+            }
+            core.info(`Processed ${numProcessed} PRs total.`);
