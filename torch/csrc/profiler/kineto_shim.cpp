@@ -251,6 +251,16 @@ void addMetadataJson(const std::string& key, const std::string& value) {
 #endif // USE_KINETO
 }
 
+void profilerStep() {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    libkineto::api().activityProfiler().step();
+  } else {
+    LOG(WARNING) << "Profiler is not initialized: skipping step() invocation";
+  }
+#endif // USE_KINETO
+}
+
 } // namespace profiler
 } // namespace autograd
 } // namespace torch
