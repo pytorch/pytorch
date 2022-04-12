@@ -69,7 +69,7 @@ class IndexCompute : public BackwardVisitor {
   void handle(Expr*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
-  Val* getExtent(IterDomain* id);
+  Val* getExtent(IterDomain* id) const;
 
   //! True if a domain is not used to index
   bool isZero(IterDomain* id) const;
@@ -105,6 +105,9 @@ class IndexCompute : public BackwardVisitor {
   // IDs that are a result of contiguous merges
   std::unordered_set<IterDomain*> contig_ids;
 
+  // Map from root to contig domains
+  std::unordered_map<IterDomain*, IterDomain*> root_to_contig_id_;
+
   // Mentions if we should propagate an index down a particular IterDomain path
   // if there's an option
   std::unordered_set<IterDomain*> preferred_paths_;
@@ -130,6 +133,10 @@ class IndexCompute : public BackwardVisitor {
     return zero_merged_in_;
   }
 
+  const std::unordered_map<IterDomain*, IterDomain*>& rootToContigID() const {
+    return root_to_contig_id_;
+  }
+
   // Propagate back from _td using initial_index_map
   IndexCompute(
       const TensorDomain* _td,
@@ -148,7 +155,7 @@ class IndexCompute : public BackwardVisitor {
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
       const std::vector<bool>& _root_contiguity,
       const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
-          {});
+          {}) const;
 
   virtual void run();
 };
