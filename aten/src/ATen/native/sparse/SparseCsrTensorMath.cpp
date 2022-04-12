@@ -1284,6 +1284,14 @@ struct ReductionAddOp {
   inline scalar_t identity() const { return 0; }
 };
 
+template <typename scalar_t>
+struct ReductionMulOp {
+  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+    return a * b;
+  }
+  inline scalar_t identity() const { return 1; }
+};
+
 }  // namespace
 
 Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
@@ -1294,6 +1302,18 @@ Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool ke
     kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cpu",
     [&] {
       result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, ReductionAddOp<scalar_t>());
+    });
+  return result;
+}
+
+Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+  ScalarType dtype_ = dtype.value_or(input.scalar_type());
+  Tensor input_ = input.to(dtype_);
+  Tensor result;
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+    kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_prod_cpu",
+    [&] {
+      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
     });
   return result;
 }
