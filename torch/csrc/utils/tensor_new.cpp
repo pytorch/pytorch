@@ -357,6 +357,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
         c10::DispatchKey::HIP,
         c10::DispatchKey::XLA,
         c10::DispatchKey::Lazy,
+        c10::DispatchKey::IPU,
         c10::DispatchKey::XPU,
         c10::DispatchKey::HPU,
     });
@@ -981,7 +982,7 @@ Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int6
   }
 
   TORCH_CHECK_VALUE(
-      static_cast<size_t>(offset) + actual_count * elsize <= len,
+      static_cast<size_t>(offset) + actual_count * elsize <= static_cast<size_t>(len),
       "requested buffer length (", actual_count, " * ", elsize, " bytes) "
       "after offset (", offset, " bytes) must not be greater than actual "
       "buffer length (", len, " bytes)");
