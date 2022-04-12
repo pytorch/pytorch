@@ -114,26 +114,25 @@ namespace native {
 
 DEFINE_DISPATCH(qr_orthogonalization_stub);
 
-Tensor& qr_orthogonalization(const Tensor& A, Tensor& out, const float epsilon){
-    TORCH_CHECK(A.device().is_cuda(), "Input tensor device must be CUDA")
-    TORCH_CHECK(A.is_contiguous(), "Input must be contiguous")
-    TORCH_CHECK(A.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
-    
-    const uint m = A.size(0);
-    const uint n = A.size(1);
+Tensor& qr_orthogonalization_out(const Tensor& self, const double epsilon, Tensor& out){
+    TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
+    TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
+    TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
+    TORCH_CHECK(self.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
 
-    if (out.size(0) == 0) {
-      out = at::empty({m, n}, A.options());
-    }
-    else{
-        TORCH_CHECK(out.device().is_cuda(), "Output tensor device must be CUDA")
-        TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
-        TORCH_CHECK(A.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
-    }
+    const uint m = self.size(0);
+    const uint n = self.size(1);
         
-    Tensor vs = at::zeros_like(A);
-    qr_orthogonalization_stub(A.device().type(), A, out, vs, epsilon);
+    Tensor vs = at::zeros_like(self);
 
+    qr_orthogonalization_stub(self.device().type(), self, out, vs, epsilon);
+
+    return out;
+}
+
+Tensor qr_orthogonalization(const Tensor& self, const double epsilon){
+    Tensor out = at::empty(self.sizes(), self.options());
+    qr_orthogonalization_out(self, epsilon, out);
     return out;
 }
 
