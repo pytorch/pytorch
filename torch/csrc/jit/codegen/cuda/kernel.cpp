@@ -49,12 +49,16 @@ class KernelIrScanner : private IrVisitor {
       handle(out);
     }
   }
-  void handle(Sync* sync) final {
+  void handle(BlockSync* sync) final {
     // TODO: Move to a dedicated validation pass
     // which is not on the common execution/compilation path
     if (sync->isWarHazardSync()) {
       ++summary_.war_hazard_syncs_count;
     }
+  }
+
+  void handle(GridSync* sync) final {
+    summary_.has_cooperative_grid_reduction = true;
   }
 
   void handle(Allocate* allocate) final {
@@ -276,6 +280,12 @@ void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
   warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
   ValidateAllocation::validate(this);
   analyze();
+  // Make sure this is after analyze as it sets summary_
+  summary_.vectorized_accesses = GpuLower::current()->vectorizedAccesses();
+  summary_.vectorized_set_info = GpuLower::current()->vectorizedSetInfo();
+  summary_.sync_map = GpuLower::current()->syncMap();
+  summary_.parallel_dimension_map_ =
+      GpuLower::current()->parallelDimensionMap();
 }
 
 void Kernel::analyze() {
@@ -343,6 +353,10 @@ void Kernel::registerExpr(Expr* expr) {
   // Register expr is explicitly non-SSA when coming from a kernel. This is
   // detected inside Fusion::registerExpr
   Fusion::registerExpr(expr);
+}
+
+std::vector<Expr*>& KernelInternalProxy::topLevelExprs() {
+  return kernel_->top_level_exprs_;
 }
 
 } // namespace kir
