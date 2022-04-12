@@ -32,6 +32,7 @@ struct CudaFuserInterface {
   bool (*fn_can_fuse_n)(const Node*) = nullptr;
   void (*fn_insert_profile_inodes)(ProfilingRecord* pr) = nullptr;
   bool (*fn_profile_n)(const Node*) = nullptr;
+  bool (*fn_skip_n)(const std::string&, bool flip) = nullptr;
 };
 
 // Get interface, this is used by registration and user facing API internally
@@ -43,6 +44,8 @@ TORCH_API void fuseGraph(std::shared_ptr<Graph>&);
 TORCH_API bool canFuseNode(const Node* node);
 TORCH_API void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr);
 TORCH_API bool profileNode(const Node* node);
+
+TORCH_API bool skipNode(const std::string& symbol_str, bool flip = true);
 
 TORCH_API bool complyWith(
     const at::Tensor& tensor,

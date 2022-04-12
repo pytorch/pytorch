@@ -11,6 +11,9 @@ namespace cuda {
 
 void debugPrint(const c10::TensorTypePtr& type);
 
+bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+
 bool is_cpu_scalar(const at::Tensor& tensor);
 bool is_cpu_scalar(const c10::TensorType& tensor_type);
 
@@ -46,6 +49,9 @@ bool useFallback();
 
 // Returns if unrolling should not be used for kernels with RNG in them.
 bool disableRNGUnrolling();
+
+//! Returns if index hoisting should be disabled
+TORCH_CUDA_CU_API bool disableIndexHoisting();
 
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
