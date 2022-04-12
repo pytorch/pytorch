@@ -167,17 +167,21 @@ struct LocalDomainSorter {
         concrete_id_dependencies_.end()) {
       const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
       // if id0 depends on id1 it means id1 is outside id0, so id1 < id0
-      return !dependencies_0.count(concrete_id_1);
+      if (dependencies_0.count(concrete_id_1)) {
+        return false;
+      }
     }
 
     if (concrete_id_dependencies_.find(concrete_id_1) !=
         concrete_id_dependencies_.end()) {
       const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
       // if id1 depends on id0 it means id1 is inside id0, so id0 < id1
-      return dependencies_1.count(concrete_id_0);
+      if (dependencies_1.count(concrete_id_0)) {
+        return true;
+      }
     }
 
-    return true;
+    return false;
   }
 
   const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
