@@ -1147,7 +1147,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
                 [ -0.2850,   4.2573,  -3.5997]])
     """
     if has_torch_function_variadic(a, b):
-        return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
+        return handle_torch_function(tensordot, (a, b), a, b, dims=dims, out=out)
 
     if not isinstance(dims, (tuple, list, torch.Tensor, int)):
         raise RuntimeError("tensordot expects dims to be int or "

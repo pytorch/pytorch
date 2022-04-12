@@ -50,7 +50,7 @@ torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
       auto scalarType = ts_data->scalar.value().type();
       if (isFloatingType(scalarType)) {
         param->setType(c10::FloatType::get());
-      } else if (isIntegralType(scalarType) || (scalarType == c10::kBool)) {
+      } else if (isIntegralType(scalarType, /*includeBool=*/true)) {
         param->setType(c10::IntType::get());
       } else {
         TORCH_CHECK(

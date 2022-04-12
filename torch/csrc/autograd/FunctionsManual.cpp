@@ -189,7 +189,12 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
   return norm_backward(grad, self, p_, norm, {}, true);
 }
 
-Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+Tensor norm_backward(
+    Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: We mask fill the NaNs in the output to be zero but still do float division
+  //     by zero, which ASAN complains about. One way to appease ASAN is to fill the problematic
+  //     values with something arbitrary before the division, but we decide not to due to
+  //     the perf hit. Instead we just silence ASAN where necessary
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -205,31 +210,35 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    self_scaled = self;
-    scale_v = grad / norm;
+    return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
     const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
       self_isnan.logical_and(norm_isnan) :
       self_isnan.logical_and_(norm_isnan);
-    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
+    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
     self_scaled = self.sgn() * is_eq_max;
-    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    auto nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
+    return self_scaled * scale_v;
+  } else if (p < 1.0) {
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
+    return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   } else {
-    self_scaled = self * self.abs().pow(p - 2);
+    self_scaled = self * self.abs().pow_(p - 2);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   }
-  // handle case at 0 where we return a subgradient containing 0
-  scale_v.masked_fill_(norm == 0, 0);
-  return self_scaled * scale_v;
 }
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
@@ -780,7 +789,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
@@ -4733,7 +4742,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -4756,7 +4765,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
@@ -5282,6 +5291,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result) {
   Tensor grad_self, grad_src;
 
@@ -5302,7 +5312,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (grad * result).gather(dim, index) / src;
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = ones_like(grad);
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
@@ -5314,6 +5324,10 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
   }
 
   return std::make_tuple(grad_self, grad_src);
