@@ -144,14 +144,21 @@ jobs:
           )
           docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Store Core dumps on S3
-        uses: seemethere/upload-artifact-s3@v3
+        uses: seemethere/upload-artifact-s3@v4
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
@@ -173,13 +180,12 @@ jobs:
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         shell: bash
         run: |
           set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
-          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
