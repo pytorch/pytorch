@@ -207,7 +207,7 @@ def cpp_string(s: str) -> str:
 # and similar functional combinators.
 
 def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
-    if backends is None:
+    if len(backends) == 0:
         return []
     else:
         return [backend.dispatch_key for backend in backends] + [
@@ -237,7 +237,7 @@ def static_dispatch_ops_header(
 
     output = []
     for index in backend_index:
-        dispatch_key = get_static_dispatch_backend(f, backend_index)
+        dispatch_key = get_static_dispatch_backend(f, index)
         if dispatch_key is not None:
             output.append(f'#include <ATen/ops/{f.root_name}_{dispatch_key.lower()}_dispatch.h>')
     return '\n'.join(output)
@@ -263,7 +263,7 @@ def generate_static_dispatch(
     backend_index: Optional[BackendIndex]
 ) -> str:
     if backend_index is None or f.manual_kernel_registration:
-        return None
+        return ""
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
     exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
@@ -291,7 +291,7 @@ def static_dispatch(
         f: NativeFunction, cpp_sig: CppSignature,
         *, method: bool, backend_indices: List[BackendIndex]
 ) -> Optional[str]:
-    if backend_indices is None or f.manual_kernel_registration:
+    if len(backend_indices) == 0 or f.manual_kernel_registration:
         return None
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
@@ -304,7 +304,8 @@ def static_dispatch(
     elif len(keys) == 0:
         return generate_static_dispatch(f, cpp_sig, method=method, backend_index=backend_indices[0])
     else:
-        return f'TORCH_CHECK(false, "Static dispatch does not support backends with multiple kernels");'
+        return f'TORCH_CHECK(false, "Static dispatch does not support backends \
+                {backend_indices} with multiple kernels");'
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
@@ -1790,7 +1791,7 @@ def main() -> None:
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
 
-    static_dispatch_idx: List[BackendIndex] = None
+    static_dispatch_idx: List[BackendIndex] = []
     if options.static_dispatch_backend:
         static_dispatch_idx = [backend_indices[DispatchKey.parse(key)] for key in options.static_dispatch_backend]
 
