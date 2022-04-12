@@ -14,12 +14,18 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void setupInstanceNorm(Fusion* fusion, DataType dtype) {
+static void setupInstanceNorm(
+    Fusion* fusion,
+    DataType dtype,
+    bool channels_last_3d = false) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   FusionGuard fg(fusion);
 
   auto input = makeContigTensor(4, dtype);
+  if (channels_last_3d) {
+    input = makeContigTensor(5, dtype);
+  }
   auto weight = makeContigTensor(1, dtype);
   auto bias = makeContigTensor(1, dtype);
   auto running_mean = makeContigTensor(1, DataType::Float);
@@ -51,7 +57,8 @@ static void setupInstanceNorm(Fusion* fusion, DataType dtype) {
       running_var,
       kTraining,
       momentum_ptr,
-      eps_ptr);
+      eps_ptr,
+      channels_last_3d);
 
   auto output = unaryOp(UnaryOpType::Relu, norm.output);
 
@@ -67,7 +74,8 @@ static void setupInstanceNorm(Fusion* fusion, DataType dtype) {
 static void NvFuserScheduler_InstanceNorm(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
-    DataType dtype) {
+    DataType dtype,
+    bool channels_last_3d = false) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   std::vector<int64_t> input_shape{
@@ -76,17 +84,25 @@ static void NvFuserScheduler_InstanceNorm(
       benchmark_state.range(1),
       benchmark_state.range(1)};
 
+  std::vector<int64_t> input_shape_3d{
+      benchmark_state.range(0),
+      benchmark_state.range(1),
+      benchmark_state.range(1),
+      benchmark_state.range(1),
+      benchmark_state.range(2)};
+
   // inputs
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   auto fp32_options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_weight = at::ones({input_shape[1]}, options);
-  at::Tensor at_bias = at::zeros({input_shape[1]}, options);
-  at::Tensor at_mean = at::zeros({input_shape[1]}, fp32_options);
-  at::Tensor at_var = at::ones({input_shape[1]}, fp32_options);
+  at::Tensor at_x =
+      at::randn(channels_last_3d ? input_shape_3d : input_shape, options);
+  at::Tensor at_weight = at::ones({benchmark_state.range(2)}, options);
+  at::Tensor at_bias = at::zeros({benchmark_state.range(2)}, options);
+  at::Tensor at_mean = at::zeros({benchmark_state.range(2)}, fp32_options);
+  at::Tensor at_var = at::ones({benchmark_state.range(2)}, fp32_options);
 
   std::vector<c10::IValue> aten_inputs = {
       at_x, at_weight, at_bias, at_mean, at_var};
@@ -94,9 +110,11 @@ static void NvFuserScheduler_InstanceNorm(
 
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
 
-  const size_t kSize =
-      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
-  const size_t kChannels = input_shape[1];
+  const size_t kSize = channels_last_3d
+      ? input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] *
+          input_shape[4]
+      : input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t kChannels = benchmark_state.range(2);
 
   // Read: x, weight, bias, running_mean, running_var
   // Write: y, running_mean, running_var
@@ -108,7 +126,8 @@ static void NvFuserScheduler_InstanceNorm(
 
 static void Baseline_InstanceNorm(
     benchmark::State& benchmark_state,
-    DataType dtype) {
+    DataType dtype,
+    bool channels_last_3d = false) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   std::vector<int64_t> input_shape{
@@ -116,6 +135,14 @@ static void Baseline_InstanceNorm(
       benchmark_state.range(2),
       benchmark_state.range(1),
       benchmark_state.range(1)};
+  std::vector<int64_t> input_shape_3d{
+      benchmark_state.range(0),
+      benchmark_state.range(2),
+      benchmark_state.range(1),
+      benchmark_state.range(1),
+      benchmark_state.range(1),
+  };
+
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
   const auto aten_dtype = data_type_to_aten(dtype);
@@ -126,10 +153,15 @@ static void Baseline_InstanceNorm(
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_weight = at::ones({input_shape[1]}, options);
-  at::Tensor at_bias = at::zeros({input_shape[1]}, options);
-  at::Tensor at_mean = at::zeros({input_shape[1]}, fp32_options);
-  at::Tensor at_var = at::ones({input_shape[1]}, fp32_options);
+  if (channels_last_3d) {
+    at_x = at::randn(
+        input_shape_3d,
+        options.memory_format(c10::MemoryFormat::ChannelsLast3d));
+  }
+  at::Tensor at_weight = at::ones({benchmark_state.range(2)}, options);
+  at::Tensor at_bias = at::zeros({benchmark_state.range(2)}, options);
+  at::Tensor at_mean = at::zeros({benchmark_state.range(2)}, fp32_options);
+  at::Tensor at_var = at::ones({benchmark_state.range(2)}, fp32_options);
 
   auto ato_weight = c10::optional<at::Tensor>(at_weight);
   auto ato_bias = c10::optional<at::Tensor>(at_bias);
@@ -159,9 +191,11 @@ static void Baseline_InstanceNorm(
     cudaDeviceSynchronize();
   }
 
-  const size_t kSize =
-      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
-  const size_t kChannels = input_shape[1];
+  const size_t kSize = channels_last_3d
+      ? input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] *
+          input_shape[4]
+      : input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t kChannels = benchmark_state.range(2);
 
   // Read: x, weight, bias, running_mean, running_var
   // Write: y, running_mean, running_var
@@ -181,6 +215,11 @@ static void Baseline_InstanceNorm_fp16(benchmark::State& benchmark_state) {
   Baseline_InstanceNorm(benchmark_state, DataType::Half);
 }
 
+static void Baseline_InstanceNorm_fp32_channels_last_3d(
+    benchmark::State& benchmark_state) {
+  Baseline_InstanceNorm(benchmark_state, DataType::Float, true);
+}
+
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
@@ -192,6 +231,43 @@ NVFUSER_BENCHMARK_DEFINE(
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp32)
     // ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_InstanceNorm3d_channels_last_fp32,
+    setupInstanceNorm,
+    NvFuserScheduler_InstanceNorm,
+    DataType::Float,
+    true);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm3d_channels_last_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{1, 8}, {128, 128}, {32, 32}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm3d_channels_last_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{1, 8}, {64, 64}, {64, 64}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm3d_channels_last_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{1, 8}, {32, 32}, {128, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm3d_channels_last_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{1, 8}, {16, 16}, {256, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm3d_channels_last_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{1, 8}, {4, 8}, {320, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -217,6 +293,30 @@ BENCHMARK(Baseline_InstanceNorm_fp32)
 BENCHMARK(Baseline_InstanceNorm_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_InstanceNorm_fp32_channels_last_3d)
+    ->RangeMultiplier(2)
+    ->Ranges({{2, 8}, {128, 128}, {32, 32}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_InstanceNorm_fp32_channels_last_3d)
+    ->RangeMultiplier(2)
+    ->Ranges({{2, 8}, {64, 64}, {64, 64}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_InstanceNorm_fp32_channels_last_3d)
+    ->RangeMultiplier(2)
+    ->Ranges({{2, 8}, {16, 16}, {256, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_InstanceNorm_fp32_channels_last_3d)
+    ->RangeMultiplier(2)
+    ->Ranges({{2, 8}, {4, 8}, {320, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
