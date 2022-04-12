@@ -115,7 +115,7 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
                     var_types = var_types + (f.func.returns[arg_idx].type,)
 
     assert var_types is not None, "No matching output for forward derivative definition"
-    fwd_deriv = ForwardDerivative(
+    return ForwardDerivative(
         formula=formula,
         var_names=var_names,
         var_types=var_types,
@@ -123,8 +123,6 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
         required_inputs_primal=None,
         required_original_self_value=False,
         is_reusing_outplace_formula=False)
-
-    return fwd_deriv
 
 def postprocess_forward_derivatives(
     f: NativeFunction,
@@ -347,7 +345,7 @@ def create_differentiability_info(
         args_with_derivatives_set: Set[str] = set()
 
         all_arg_names = [a.name for a in cpp_arguments(f)]
-
+        all_ret_names = [r.name for r in f.func.returns]  # only used for the assert below
         # output_differentiability is captured from the enclosed
         # scope. Don't modify it.
         #
@@ -371,6 +369,11 @@ def create_differentiability_info(
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
+
+            for name in names:
+                assert not (name in all_arg_names and name in all_ret_names), (
+                    f"While processing the derivative formula for '{f.func.name}' wrt '{name}', "
+                    f"expected '{name}' to not be both an input arg and named return. ")
 
             if is_forward_derivative_definition(all_arg_names, names):
                 forward_derivatives.append(create_forward_derivative(f, formula, names))
