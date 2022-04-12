@@ -118,7 +118,7 @@ class MixedPrecision:
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
 
-    .. note:: In ``summon_full_params``, parameters are summoned in full
+    .. note:: In ``_summon_full_params``, parameters are summoned in full
         precision but buffers are not.
 
     .. note:: Parameters and buffers are checkpointed in full precision. For
@@ -510,7 +510,7 @@ class FullyShardedDataParallel(nn.Module):
 
         Compared to ``torch.nn.Module.apply``, this version additionally gathers
         the full parameters before applying ``fn``. It should not be called from
-        within another ``summon_full_params`` context.
+        within another ``_summon_full_params`` context.
 
         Args:
             fn (:class:`Module` -> None): function to be applied to each submodule
@@ -520,10 +520,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState_.IDLE)
-        with self.summon_full_params(recurse=False, writeback=True):
+        with self._summon_full_params(recurse=False, writeback=True):
             ret = super().apply(fn)
 
-        # Reset lazy init that might be called by summon_full_params, since
+        # Reset lazy init that might be called by _summon_full_params, since
         # it could have set is_root incorrectly for non-root FSDP instances.
         if uninitialized and self._is_root:
             for module in self.fsdp_modules(self):
@@ -1063,12 +1063,12 @@ class FullyShardedDataParallel(nn.Module):
         """
         Hook that runs after model.state_dict() is called before returning result to
         user. For FSDP, we may have to clone the tensors in state_dict as params go
-        back to sharded version after summon_full_params ends, and also remove
+        back to sharded version after _summon_full_params ends, and also remove
         "_fsdp_wrapped_module" prefix.
         """
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
         for key in state_dict.keys():
-            # Due to recursive call of summon_full_params, avoid unnecessasry
+            # Due to recursive call of _summon_full_params, avoid unnecessasry
             # reclone of tensors in case they have already been cloned.
             if (
                 not getattr(state_dict[key], "_has_been_cloned", False)
@@ -1193,7 +1193,7 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             summon_ctx = (
-                self.summon_full_params(recurse=False, writeback=False)
+                self._summon_full_params(recurse=False, writeback=False)
                 if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
                 contextlib.suppress()
             )
@@ -1202,7 +1202,7 @@ class FullyShardedDataParallel(nn.Module):
                 # original user module specified types for checkpoint. We take care to
                 # recast in post_state_dict_hook for consistency with the fact that
                 # buffers stay casted after forward/backward. We must have the
-                # call here instead of above because summon_full_params itself
+                # call here instead of above because _summon_full_params itself
                 # calls _lazy_init() which would cast the buffers.
                 if self.mixed_precision is not None and self._is_root:
                     self._cast_buffers(
@@ -1341,7 +1341,7 @@ class FullyShardedDataParallel(nn.Module):
         torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Note that it needs writeback=True to persist
-            with self.summon_full_params(writeback=True):
+            with self._summon_full_params(writeback=True):
                 return super().load_state_dict(state_dict, *args)
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
@@ -1431,63 +1431,13 @@ class FullyShardedDataParallel(nn.Module):
             p._local_shard.copy_(chunk)  # type: ignore[attr-defined]
 
     @contextlib.contextmanager
-    def summon_full_params(
+    def _summon_full_params(
         self,
         recurse: bool = True,
         writeback: bool = True,
         rank0_only: bool = False,
         offload_to_cpu: bool = False,
-    ) -> Generator:
-        r""" A context manager to expose full params for the current FSDP
-        instance. Can be useful *after* forward/backward for a model to get
-        the params for additional processing or checking.
-
-        .. note:: This can be used on inner FSDPs.
-        .. note:: This can *not* be used within a forward or backward pass. Nor
-            can forward and backward be started from within this context.
-        .. note:: Parameters will revert to their local shards after the context
-            manager exits, storage behavior is the same as forward.
-        .. note:: The full parameters can be modified, but only the portion
-            corresponding to the local param shard will persist after the
-            context manager exits (unless ``writeback=False``, in which case
-            changes will be discarded). In the case where FSDP does not shard
-            the parameters, currently only when ``world_size == 1``, the
-            modification is persisted regardless of ``writeback``.
-
-        .. warning:: Note that ``rank0_only=True`` in conjunction with
-            ``writeback=True`` is not currently supported and will raise an
-            error. This is because model parameter shapes would be different
-            across ranks within the context, and writing to them can lead to
-            inconsistency across ranks when the context is exited.
-
-        ..warning:: Note that ``offload_to_cpu`` and ``rank0_only=False`` will
-            result in full parameters being redundantly copied to CPU memory for
-            GPUs that reside on the same machine, which may incur the risk of
-            CPU OOM. It is recommended to use ``offload_to_cpu`` with
-            ``rank0_only=True``.
-
-        Args:
-            recurse (bool, Optional): recursively summon all params for nested
-                FSDP instances (default: True)
-            writeback (bool, Optional): if ``False``, modifications to params are
-                discarded after the context manager exists;
-                disabling this can be slightly more efficient (default: True)
-            rank0_only (bool, Optional): if ``True``, full parameters are
-                materialized on only global rank 0. This means that within the
-                context, only rank 0 will have full parameters and the other
-                ranks will have sharded parameters. Note that setting
-                ``rank0_only=True`` with ``writeback=True`` is not supported,
-                as model parameter shapes will be different across ranks
-                within the context, and writing to them can lead to
-                inconsistency across ranks when the context is exited.
-            offload_to_cpu (bool, optional): If ``True``, full parameters are
-                offloaded to CPU. Note that this offloading currently only
-                occurs if the parameter is sharded (which is only not the case
-                for world_size = 1). It is recommended to use ``offload_to_cpu``
-                with ``rank0_only=True`` to avoid redundant copies of model
-                parameters being offloaded to the same CPU memory.
-        """
-
+    ):
         if writeback and rank0_only:
             raise ValueError(
                 "writeback=True and rank0_only=True is not supported, as model "
@@ -1527,7 +1477,7 @@ class FullyShardedDataParallel(nn.Module):
                 # Summon all params for any nested FSDP instances.
                 for module in self.fsdp_modules(self):
                     stack.enter_context(
-                        module.summon_full_params(
+                        module._summon_full_params(
                             recurse=False,
                             writeback=writeback,
                             rank0_only=rank0_only,
@@ -1606,6 +1556,90 @@ class FullyShardedDataParallel(nn.Module):
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
 
+    @staticmethod
+    @contextlib.contextmanager
+    def summon_full_params(
+        module,
+        recurse: bool = True,
+        writeback: bool = True,
+        rank0_only: bool = False,
+        offload_to_cpu: bool = False,
+    ) -> Generator:
+        r""" A context manager to expose full params for FSDP instances.
+        Can be useful *after* forward/backward for a model to get
+        the params for additional processing or checking. It can take a non-FSDP
+        module and will summon full params for all contained FSDP modules as
+        well as their children, depending on the ``recurse`` argument.
+
+        .. note:: This can be used on inner FSDPs.
+        .. note:: This can *not* be used within a forward or backward pass. Nor
+            can forward and backward be started from within this context.
+        .. note:: Parameters will revert to their local shards after the context
+            manager exits, storage behavior is the same as forward.
+        .. note:: The full parameters can be modified, but only the portion
+            corresponding to the local param shard will persist after the
+            context manager exits (unless ``writeback=False``, in which case
+            changes will be discarded). In the case where FSDP does not shard
+            the parameters, currently only when ``world_size == 1``, the
+            modification is persisted regardless of ``writeback``.
+        .. note:: This method works on modules which are not FSDP themselves but
+            may contain multiple independent FSDP units. In that case, the given
+            arguments will apply to all contained FSDP units.
+
+        .. warning:: Note that ``rank0_only=True`` in conjunction with
+            ``writeback=True`` is not currently supported and will raise an
+            error. This is because model parameter shapes would be different
+            across ranks within the context, and writing to them can lead to
+            inconsistency across ranks when the context is exited.
+
+        ..warning:: Note that ``offload_to_cpu`` and ``rank0_only=False`` will
+            result in full parameters being redundantly copied to CPU memory for
+            GPUs that reside on the same machine, which may incur the risk of
+            CPU OOM. It is recommended to use ``offload_to_cpu`` with
+            ``rank0_only=True``.
+
+        Args:
+            recurse (bool, Optional): recursively summon all params for nested
+                FSDP instances (default: True).
+            writeback (bool, Optional): if ``False``, modifications to params are
+                discarded after the context manager exists;
+                disabling this can be slightly more efficient (default: True)
+            rank0_only (bool, Optional): if ``True``, full parameters are
+                materialized on only global rank 0. This means that within the
+                context, only rank 0 will have full parameters and the other
+                ranks will have sharded parameters. Note that setting
+                ``rank0_only=True`` with ``writeback=True`` is not supported,
+                as model parameter shapes will be different across ranks
+                within the context, and writing to them can lead to
+                inconsistency across ranks when the context is exited.
+            offload_to_cpu (bool, optional): If ``True``, full parameters are
+                offloaded to CPU. Note that this offloading currently only
+                occurs if the parameter is sharded (which is only not the case
+                for world_size = 1). It is recommended to use ``offload_to_cpu``
+                with ``rank0_only=True`` to avoid redundant copies of model
+                parameters being offloaded to the same CPU memory.
+        """
+        # Note that we specify root_only as FSDP roots will handle summoning
+        # child FSDP instances based on recurse argument.
+        fsdp_modules = FullyShardedDataParallel.fsdp_modules(
+            module, root_only=True
+        )
+        # Summon all params for all FSDP instances
+        with contextlib.ExitStack() as stack:
+            for module in fsdp_modules:
+                stack.enter_context(
+                    module._summon_full_params(
+                        recurse=recurse,
+                        writeback=writeback,
+                        rank0_only=rank0_only,
+                        offload_to_cpu=offload_to_cpu,
+                    )
+                )
+            # Yield to the caller, with full params in all FSDP instances.
+            yield
+        # Exiting from the ExitStack will reshard all params.
+        return
+
     def named_buffers(
         self,
         *args,
@@ -1614,7 +1648,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Overrides :meth:`named_buffers()` to intercept buffer names and
         remove all occurrences of the FSDP-specific flattened buffer prefix
-        when inside the :meth:`summon_full_params` context manager.
+        when inside the :meth:`_summon_full_params` context manager.
         """
         in_summon_full_params = getattr(self, "training_state", None) == \
             TrainingState_.SUMMON_FULL_PARAMS
@@ -1633,7 +1667,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Overrides :meth:`named_parameters()` to intercept parameter names and
         remove all occurrences of the FSDP-specific flattened parameter prefix
-        when inside the :meth:`summon_full_params` context manager.
+        when inside the :meth:`_summon_full_params` context manager.
         """
         # Determine which logic to use based on the context at call time
         in_summon_full_params = getattr(self, "training_state", None) == \
@@ -2065,12 +2099,12 @@ class FullyShardedDataParallel(nn.Module):
         """
         Gather all shards of params.
         """
-        # summon_full_params must do a full precision rebuild even under mixed
+        # _summon_full_params must do a full precision rebuild even under mixed
         # precision, because it is used for e.g. checkpoint where we'd like to
         # checkpoint in full precision.
         force_full_precision = (self.training_state == TrainingState_.SUMMON_FULL_PARAMS)
         # full param output tensors and a flag indicating whether
-        # summon_full_params can free them or not. It is possible that we can't
+        # _summon_full_params can free them or not. It is possible that we can't
         # free the full param, which currently occurs when the returned
         # parameter points to the unsharded param when world_size == 1, or when
         # we're returning the full parameter and reshard_after_forward=False
@@ -2143,8 +2177,8 @@ class FullyShardedDataParallel(nn.Module):
                     if self.mixed_precision and force_full_precision:
                         # p._full_param_padded has the reduced precision type,
                         # but we need full precision rebuild as we're in
-                        # summon_full_params. Note that this is why
-                        # summon_full_params collects locally used params from
+                        # _summon_full_params. Note that this is why
+                        # _summon_full_params collects locally used params from
                         # _rebuild_full_params instead of relying on
                         # p._full_param_padded, as it may not always be
                         # allocated such as during mixed precision.
@@ -2161,7 +2195,7 @@ class FullyShardedDataParallel(nn.Module):
                     # The full parameter, which can be freed. Note that we
                     # append here before update_p_data so as to not saved the
                     # tensor with padding trimmed, which causes issues with
-                    # writeback in summon_full_params.
+                    # writeback in _summon_full_params.
                     output_tensors.append((output_tensor, True))
                     # Set p.data = output_tensor (with padding trimmed)
                     self._update_p_data(p, output_tensor=output_tensor)
@@ -2783,6 +2817,9 @@ def _get_param_to_unflat_param_names(
     parameters, these mapped-to lists always contain a single element. The
     unflattened parameter names should match the keys of the model state dict.
 
+    For shared parameters, only the first parameter name is included (following
+    the ``torch.nn.Module.parameters()`` order).
+
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
@@ -2804,15 +2841,15 @@ def _get_param_to_unflat_param_names(
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
-                assert param not in param_to_unflat_param_names, \
-                    f"Incorrect recursion; already visited {param_name}"
-                if isinstance(param, FlatParameter):
-                    param_to_unflat_param_names[param] = [
-                        clean_param_name(prefix, param_info)
-                        for param_info in param._param_infos
-                    ]
-                else:
-                    param_to_unflat_param_names[param] = [prefix + param_name]
+                prefixed_param_names = [
+                    clean_param_name(prefix, param_info)
+                    for param_info in param._param_infos
+                ] if isinstance(param, FlatParameter) else [prefix + param_name]
+                # If this parameter has already been visited, then it is a
+                # shared parameter; then, only take the first parameter name
+                is_shared_param = param in param_to_unflat_param_names
+                if not is_shared_param:
+                    param_to_unflat_param_names[param] = prefixed_param_names
 
         for submodule_name, submodule in module.named_children():
             if submodule is not None:
