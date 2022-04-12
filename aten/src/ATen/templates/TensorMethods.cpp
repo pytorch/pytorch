@@ -7,9 +7,7 @@ namespace at {
    template <>                                                       \
    TORCH_API T* TensorBase::data_ptr() const {                       \
      TORCH_CHECK(                                                    \
-         scalar_type() == ScalarType::name                           \
-         || (isQIntType(scalar_type())                               \
-         && toUnderlying(scalar_type()) == ScalarType::name),        \
+         scalar_type() == ScalarType::name,                          \
          "expected scalar type "                                     \
          #name                                                       \
          " but found ",                                              \
