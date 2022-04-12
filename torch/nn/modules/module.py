@@ -198,7 +198,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
         instead of this since the former takes care of running the
         registered hooks while the latter silently ignores them.
     """
-    raise NotImplementedError
+    raise NotImplementedError(f"Module [{type(self).__name__}] is missing the required \"forward\" function")
 
 
 class Module:
