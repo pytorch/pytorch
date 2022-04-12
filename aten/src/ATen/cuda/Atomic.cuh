@@ -4,6 +4,8 @@
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 
+#include <ATen/NumericUtils.h>
+
 template <typename T>
 struct AtomicFPOp;
 
@@ -350,21 +352,21 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
-                                  return max(bsum, val);
+                                  return at::_isnan(val) ? val : std::max(bsum, val);
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMax(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return max(bsum, val);
+                                      return at::_isnan(val) ? val : std::max(bsum, val);
                                     });
 }
 
 inline __device__ double gpuAtomicMax(double * address, double val) {
   return AtomicFPOp<double>()(address, val,
                               [](double val, unsigned long long int assumed) {
-                                return __double_as_longlong(max(val, __longlong_as_double(assumed)));
+                                return __double_as_longlong(at::_isnan(val) ? val : std::max(__longlong_as_double(assumed), val));
                               });
 }
 
@@ -377,7 +379,7 @@ inline __device__ float gpuAtomicMax(float * address, float val) {
   do {
     assumed = old;
     old = atomicCAS(address_as_ull, assumed,
-                    __float_as_int(max(val, __int_as_float(assumed))));
+                    __float_as_int(at::_isnan(val) ? val : std::max(__int_as_float(assumed), val)));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);
@@ -390,21 +392,21 @@ inline __device__ float gpuAtomicMax(float * address, float val) {
 inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
-                                  return min(bsum, val);
+                                  return at::_isnan(val) ? val : std::min(bsum, val);
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMin(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return min(bsum, val);
+                                      return at::_isnan(val) ? val : std::min(bsum, val);
                                     });
 }
 
 inline __device__ double gpuAtomicMin(double * address, double val) {
   return AtomicFPOp<double>()(address, val,
                               [](double val, unsigned long long int assumed) {
-                                return __double_as_longlong(min(val, __longlong_as_double(assumed)));
+                                return __double_as_longlong(at::_isnan(val) ? val : std::min(__longlong_as_double(assumed), val));
                               });
 }
 
@@ -417,7 +419,7 @@ inline __device__ float gpuAtomicMin(float * address, float val) {
   do {
     assumed = old;
     old = atomicCAS(address_as_ull, assumed,
-                    __float_as_int(min(val, __int_as_float(assumed))));
+                    __float_as_int(at::_isnan(val) ? val : std::min(__int_as_float(assumed), val)));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);

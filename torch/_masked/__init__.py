@@ -516,21 +516,34 @@ def _sparse_coo_reduction_helper(op,
                                  mask_input: Tensor,
                                  dim_: Tuple[int, ...],
                                  keepdim: bool,
-                                 reduce: str) -> Tensor:
+                                 dtype: Optional[DType] = None) -> Tensor:
+    reduce = op.__name__
+    assert reduce in {'sum', 'prod', 'mean', 'amax', 'amin'}, \
+        "op must be one of torch.sum, torch.prod, torch.mean, torch.amax or torch.amin"
+    output_dtype = dtype
+    if output_dtype is None:
+        if mask_input.is_floating_point() or mask_input.is_complex():
+            output_dtype = mask_input.dtype
+        else:
+            # promote integer types to int64
+            output_dtype = torch.int64
+
+    if mask_input.ndim == 0:
+        return mask_input.clone().to(dtype=output_dtype)
+
     values, indices = mask_input._values(), mask_input._indices()
-    new_values, new_indices = None, None
     num_sparse_dims = mask_input.sparse_dim()
     reduced_sparse_dims = []
     retained_sparse_dims = []
     reduced_dense_dims = []
 
-    if mask_input.ndim == 0:
-        return mask_input.clone()
+    if values.dtype != output_dtype:
+        values = values.to(output_dtype)
 
     if keepdim:
-        shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
+        output_shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
     else:
-        shape = tuple(mask_input.shape[i] for i in range(mask_input.ndim) if i not in dim_)
+        output_shape = tuple(mask_input.shape[i] for i in range(mask_input.ndim) if i not in dim_)
 
     for d in dim_:
         if d < num_sparse_dims:
@@ -538,46 +551,60 @@ def _sparse_coo_reduction_helper(op,
         else:
             reduced_dense_dims.append(d + 1 - num_sparse_dims)
 
+    # Reduce dense dimensions
     if len(reduced_dense_dims) > 0:
-        if reduce == "sum":
-            new_values = op(new_values, dim=dd, keepdim=reduced_dense_dims, dtype=mask_input.dtype)
-        else:
+        new_values = values
+        if reduce == "prod":
+            # Workaround https://github.com/pytorch/pytorch/issues/56586
             for dd in reversed(reduced_dense_dims):
-                new_values = op(new_values, dim=dd, keepdim=bool(keepdim), dtype=mask_input.dtype)
+                new_values = op(new_values, dim=dd, keepdim=bool(keepdim))
+        else:
+            new_values = op(new_values, dim=reduced_dense_dims, keepdim=bool(keepdim))
     else:
         new_values = values.clone()
 
-    reduce_all_sparse_dims = len(reduced_sparse_dims) == num_sparse_dims
-
-    if (reduce_all_sparse_dims):
-        new_values = op(new_values, dim=0, dtype=mask_input.dtype)
+    # Reduce sparse dimensions
+    if len(reduced_sparse_dims) == num_sparse_dims:
+        if reduce in {'amax', 'amin'} and new_values.size(0) == 0:
+            # IndexError: amax(): Expected reduction dim 0 to have non-zero size.
+            # sum() and prod() return the reduction identity when dim 0 has size 0 but amax/amin do not
+            new_values = _reduction_identity(reduce, new_values)
+        else:
+            new_values = op(new_values, dim=0)
         if (keepdim):
             for _ in range(num_sparse_dims):
                 new_values = new_values.unsqueeze(0)
-        return new_values.to_sparse()
-
-    new_indices = indices.clone()
-    if keepdim:
-        new_indices[reduced_sparse_dims, :] = 0
+        return new_values.to(dtype=output_dtype).to_sparse()
     else:
-        retained_sparse_dims = [i for i in range(num_sparse_dims) if i not in set(reduced_sparse_dims)]
-        new_indices = new_indices.index_select(0, torch.tensor(retained_sparse_dims).to(mask_input.device))
+        new_indices = indices.clone()
+        if keepdim:
+            new_indices[reduced_sparse_dims, :] = 0
+        else:
+            if (len(reduced_sparse_dims) > 0):
+                retained_sparse_dims = [i for i in range(num_sparse_dims) if i not in set(reduced_sparse_dims)]
+                new_indices = new_indices.index_select(0, torch.tensor(retained_sparse_dims).to(mask_input.device))
 
+    # Use scatter_reduce to reduce items in the new_values tensor that correspond to the same indices in new_indices
     if (new_indices.numel() > 0):
+        # lexsort indices and get index tensor for scatter reduction
         new_indices, inverse_indices = torch.unique(new_indices, return_inverse=True, dim=1)
         out_shape = list(new_values.shape)
         out_shape[0] = new_indices.shape[1]
         for _ in range(new_values.ndim - 1):
             inverse_indices = inverse_indices.unsqueeze(-1)
         scatter_indices = inverse_indices.expand(new_values.shape)
-        # temporary workaround for issue with bfloat16
-        dtype = mask_input.dtype
-        if dtype in {torch.bfloat16}:
+        # FIXME: temporary workaround for issue with bfloat16
+        # remove this when acctype is implemented for scatter_reduce
+        input_dtype = mask_input.dtype
+        if input_dtype in {torch.bfloat16}:
             new_values = new_values.to(torch.float)
-            new_values = new_values.new_empty(out_shape).scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False).to(dtype=dtype)
+            out = new_values.new_empty(out_shape)
+            new_values = out.scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False).to(dtype=input_dtype)
         else:
-            new_values = new_values.new_empty(out_shape).scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False)
-    return torch.sparse_coo_tensor(new_indices, new_values, shape, dtype=mask_input.dtype, device=mask_input.device)
+            out = new_values.new_empty(out_shape)
+            new_values = out.scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False)
+
+    return torch.sparse_coo_tensor(new_indices, new_values, output_shape, dtype=output_dtype, device=mask_input.device)
 
 
 def _sparse_csr_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
@@ -738,6 +765,7 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
     if mask is None:
         return input
     canonical_mask = _input_mask(input, mask=mask)
+    # print(canonical_mask)
     if callable(op):
         fill_value = _reduction_identity(op.__name__, input, *args)
         return _where(canonical_mask, input, fill_value)
@@ -754,15 +782,24 @@ def sum(input: Tensor,
         mask: Optional[Tensor] = None) -> Tensor:
     # __doc__ is generated by _apply_docstring_templates decorator
     if dtype is None:
-        dtype = input.dtype
+        # promote integer types to int64 when output dtype is not specified
+        if input.layout == torch.sparse_csr:
+            if input.dtype == torch.uint8:
+                # csr.to(dtype=torch.int64) is not implemented, so
+                # using coo.to on input to ensure the promoted dtype
+                input = input.to_sparse_coo().to(dtype=torch.int64).to_sparse_csr()
+            else:
+                dtype = input.dtype
+        else:
+            dtype = input.dtype
+            if not input.is_floating_point() and not input.is_complex():
+                dtype = torch.int64
     dim_ = _canonical_dim(dim, input.ndim)
-
     mask_input = _combine_input_and_mask(sum, input, mask)
     if input.layout == torch.strided:
         return torch.sum(mask_input, dim_, bool(keepdim), dtype=dtype)
-
     elif input.layout == torch.sparse_coo:
-        return _sparse_coo_reduction_helper(torch.sum, mask_input, dim_, keepdim, 'sum')
+        return _sparse_coo_reduction_helper(torch.sum, mask_input, dim_, bool(keepdim), dtype)
     elif input.layout == torch.sparse_csr:
         return torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
     else:
@@ -777,18 +814,31 @@ def prod(input: Tensor,
          dtype: Optional[DType] = None,
          mask: Optional[Tensor] = None) -> Tensor:
     # __doc__ is generated by _apply_docstring_templates decorator
+
+    # FIXME: _combine_input_and_mask currently returns the input if mask=None
+    # however, 0s are meaningful for sparse_coo prod/max/min so for now we materialize the whole
+    # tensor. There might be a more efficient method of achieving this without
+    # materializing all the zeros
+    if (mask is None and input.layout == torch.sparse_coo):
+        mask = torch.ones(input.shape, dtype=torch.bool, device=input.device)
+
     mask_input = _combine_input_and_mask(prod, input, mask)
+    dim_ = _canonical_dim(dim, input.ndim)
     if input.layout == torch.strided:
-        dim_ = _canonical_dim(dim, input.ndim)
         # Workaround https://github.com/pytorch/pytorch/issues/56586
         result = mask_input
         for d in reversed(dim_):
             result = result.prod(dim=d, keepdim=bool(keepdim))
+        # Ensure promotion of integer types to int64 for the case when dim_ was empty
+        if len(dim_) == 0 and not result.is_floating_point() and not result.is_complex():
+            result = result.to(dtype=torch.int64)
         if dtype is not None:
             result = result.to(dtype=dtype)
         return result
+    elif input.layout == torch.sparse_coo:
+        return _sparse_coo_reduction_helper(torch.prod, mask_input, dim_, bool(keepdim), dtype)
     else:
-        raise ValueError(f'masked prod expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked prod expects strided or sparse_coo tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -810,12 +860,25 @@ def amax(input: Tensor,
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+        if not input.is_floating_point() and not input.is_complex():
+            # promote integer types to int64
+            dtype = torch.int64
+
+    # FIXME: _combine_input_and_mask currently returns the input if mask=None
+    # however, 0s are meaningful for sparse_coo prod/max/min so for now we materialize the whole
+    # tensor. There might be a more efficient method of achieving this without
+    # materializing all the zeros
+    if (mask is None and input.layout == torch.sparse_coo):
+        mask = torch.ones(input.shape, dtype=torch.bool, device=input.device)
+
     mask_input = _combine_input_and_mask(amax, input, mask)
+    dim_ = _canonical_dim(dim, mask_input.ndim)
     if input.layout == torch.strided:
-        dim_ = _canonical_dim(dim, mask_input.ndim)
         return torch.amax(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    elif input.layout == torch.sparse_coo:
+        return _sparse_coo_reduction_helper(torch.amax, mask_input, dim_, bool(keepdim), dtype)
     else:
-        raise ValueError(f'masked amax expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked amax expects strided or sparse_coo tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -837,12 +900,25 @@ def amin(input: Tensor,
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+        if not input.is_floating_point() and not input.is_complex():
+            # promote integer types to int64
+            dtype = torch.int64
+
+    # FIXME: _combine_input_and_mask currently returns the input if mask=None
+    # however, 0s are meaningful for sparse_coo prod/max/min so for now we materialize the whole
+    # tensor. There might be a more efficient method of achieving this without
+    # materializing all the zeros
+    if (mask is None and input.layout == torch.sparse_coo):
+        mask = torch.ones(input.shape, dtype=torch.bool, device=input.device)
+
     mask_input = _combine_input_and_mask(amin, input, mask)
+    dim_ = _canonical_dim(dim, mask_input.ndim)
     if input.layout == torch.strided:
-        dim_ = _canonical_dim(dim, mask_input.ndim)
         return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    elif input.layout == torch.sparse_coo:
+        return _sparse_coo_reduction_helper(torch.amin, mask_input, dim_, bool(keepdim), dtype)
     else:
-        raise ValueError(f'masked amin expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked amin expects strided or sparse_coo tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
