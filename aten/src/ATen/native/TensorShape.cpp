@@ -1633,7 +1633,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       };
 
-      const auto offset_counts_per_thread = [&get_counts, size](
+      const auto counts_per_thread = [&get_counts, size](
           const Tensor& idx,
           bool is_sorted = false,
           int64_t grain_size = at::internal::GRAIN_SIZE
@@ -1653,38 +1653,92 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
               /*is_sorted=*/is_sorted, /*run_in_parallel=*/false);
         });
 
-        return counts_per_thread.cumsum_(/*dim=*/0);
+        return counts_per_thread;
       };
 
-      auto dim_indices_offset_counts_per_thread = offset_counts_per_thread(
+      auto dim_indices_counts_per_thread = counts_per_thread(
           dim_indices,
           /*is_sorted=*/self.is_coalesced() && dim == 0
           /*grain_size = at::internal::GRAIN_SIZE*/
       );
+      auto dim_indices_offset_counts_per_thread = dim_indices_counts_per_thread.cumsum(0);
 
-      auto index_offset_counts_per_thread = offset_counts_per_thread(
+      auto index_offset_counts_per_thread = counts_per_thread(
           index,
           /*is_sorted=*/false
           /*grain_size = at::internal::GRAIN_SIZE*/
-      );
+      ).cumsum_(0);
 
       const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1).clone();
       const auto index_counts = index_offset_counts_per_thread.select(0, -1).clone();
       const auto intersection_counts = dim_indices_counts.mul(index_counts);
+      const auto res_len = intersection_counts.sum().item<int64_t>();
+      // Short-circuit if empty intersection
+      if (!res_len) {
+        auto empty_idx = at::empty({0}, index.options());
+        return std::make_tuple(empty_idx, empty_idx);
+      }
       const auto intersection_offsets = intersection_counts.cumsum(0);
-      const auto res_nnz = intersection_counts.sum().item<int64_t>();
+
+      // dim_indices_order_idx is a tensor that is used to map idx -> i
+      // such that dim_indices[i] == idx
+      const auto dim_indices_order_idx = [&](int64_t grain_size = at::internal::GRAIN_SIZE) -> Tensor {
+        const auto dim_indices_intersection_counts = dim_indices_counts.mul(index_counts > 0);
+        const auto dim_indices_intersection_offsets = dim_indices_intersection_counts.cumsum(0);
+        const auto dim_indices_order_idx_len = dim_indices_intersection_offsets.data_ptr<int64_t>()[size - 1];
+        auto dim_indices_order_idx = at::empty({dim_indices_order_idx_len}, dim_indices.options());
+
+        const auto* ptr_dim_indices = dim_indices.data_ptr<int64_t>();
+        const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
+        const auto* ptr_dim_indices_intersection_offsets = dim_indices_intersection_offsets.data_ptr<int64_t>();
+        const auto* ptr_dim_indices_intersection_counts = dim_indices_intersection_counts.data_ptr<int64_t>();
+        auto* ptr_dim_indices_order_idx = dim_indices_order_idx.data_ptr<int64_t>();
+        at::parallel_for(0, nnz, grain_size, [&](int64_t start, int64_t end) {
+            const auto tid = at::get_thread_num();
+            auto ptr_tid_dim_indices = ptr_dim_indices + start;
+            const auto* ptr_tid_dim_indices_counts_per_thread
+              = dim_indices_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_dim_indices_offset_counts_per_thread
+              = dim_indices_offset_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+            auto tid_local_count = at::zeros({size}, dim_indices.options());
+            auto* ptr_tid_local_count = tid_local_count.data_ptr<int64_t>();
+
+            for (const auto i : c10::irange(start, end)) {
+              const auto idx = *ptr_tid_dim_indices++;
+              const auto idx_intersection_count = ptr_intersection_counts[idx];
+              // continue if not in intersection
+              if (!idx_intersection_count) continue;
+              const auto global_idx_offset
+                = ptr_dim_indices_intersection_offsets[idx]
+                - ptr_dim_indices_intersection_counts[idx];
+              const auto local_tid_idx_offset
+                = ptr_tid_dim_indices_offset_counts_per_thread[idx]
+                - ptr_tid_dim_indices_counts_per_thread[idx];
+              auto& tid_idx_count = ptr_tid_local_count[idx];
+              ptr_dim_indices_order_idx[global_idx_offset + local_tid_idx_offset + tid_idx_count] = i;
+              ++tid_idx_count;
+            }
+        });
+
+        return dim_indices_order_idx;
+      }();
+
+      std::cout << "intersection_counts " << intersection_counts << std::endl;
+      std::cout << "dim_indices " << dim_indices << std::endl;
+      std::cout << "dim_indices_order_idx " << dim_indices_order_idx << std::endl;
+      std::cout << std::endl;
 
       const auto index_from_intersection = [
         &intersection_counts,
         &intersection_offsets,
-        res_nnz
+        res_len
       ](
           const Tensor& idx,
           Tensor& idx_offset_counts_per_thread,
           const Tensor& other_idx_counts,
           int64_t grain_size = at::internal::GRAIN_SIZE
       ) -> Tensor {
-        auto res_index = at::empty({res_nnz}, idx.options());
+        auto res_index = at::empty({res_len}, idx.options());
         auto idx_offsets_per_thread = idx_offset_counts_per_thread.mul_(other_idx_counts);
 
         const auto idx_len = idx.numel();
