@@ -3,6 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/ITensorListRef.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorIterator.h>
 
