@@ -4397,7 +4397,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_inf_quick_patch(self):
-        a=torch.tensor([-float('inf'), -float('inf'), 4.0], device="cuda")
+        x = torch.tensor([-float('inf'), -float('inf'), 4.0], device="cuda")
 
         def fn_amax(x):
             return x.amax(dim=0)
@@ -4406,7 +4406,7 @@ class TestCudaFuser(JitTestCase):
             return x.amin(dim=0)
 
         def fn_add(x):
-            return x.relu()+float('nan')
+            return x.relu() + float('nan')
 
         with nvfuser_singleton_fusion(True):
             for t in [fn_amax, fn_amin, fn_add]:
