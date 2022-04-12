@@ -36,9 +36,6 @@ struct LayerNormKernelImplInternal {
       Tensor* mean,
       Tensor* rstd) {
     using Vec = vec::Vectorized<T>;
-    DCHECK_EQ(X.numel(), M * N);
-    DCHECK(!gamma.defined() || gamma.numel() == N);
-    DCHECK(!beta.defined() || beta.numel() == N);
     const T* X_data = X.data_ptr<T>();
     const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
     const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
@@ -101,9 +98,6 @@ struct LayerNormKernelImplInternal<BFloat16, T_ACC> {
       Tensor* rstd) {
     using bVec = vec::Vectorized<BFloat16>;
     using fVec = vec::Vectorized<float>;
-    DCHECK_EQ(X.numel(), M * N);
-    DCHECK(!gamma.defined() || gamma.numel() == N);
-    DCHECK(!beta.defined() || beta.numel() == N);
     const BFloat16* X_data = X.data_ptr<BFloat16>();
     const T_ACC* gamma_data = gamma.defined() ? gamma.data_ptr<T_ACC>() : nullptr;
     const T_ACC* beta_data = beta.defined() ? beta.data_ptr<T_ACC>() : nullptr;
@@ -195,6 +189,9 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
+  DCHECK_EQ(X.numel(), M * N);
+  DCHECK(!gamma.defined() || gamma.numel() == N);
+  DCHECK(!beta.defined() || beta.numel() == N);
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
       "LayerNormKernelImpl", [&]() {
     using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/false>;
