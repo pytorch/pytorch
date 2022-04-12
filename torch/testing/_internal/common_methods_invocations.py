@@ -14798,7 +14798,7 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
                        # TODO: FIXME: sigmoid fails on complex inputs that require grad
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+                    #    DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.complex64]),
@@ -14812,7 +14812,7 @@ op_db: List[OpInfo] = [
                        # "RuntimeError: Expected to not find "sigmoid" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,

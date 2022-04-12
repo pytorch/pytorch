@@ -84,7 +84,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_)                   \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -93,6 +93,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
+  _(std::complex<at::Half>, ComplexHalf)                           \
   _(std::complex<float>, ComplexFloat)                             \
   _(std::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
@@ -263,7 +264,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -746,6 +747,12 @@ std::string generate_code(
     env.s("traits_string", "");
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
+  }
+  if (f_inputs_type == "std::complex<Half>" || result_type == "std::complex<Half>" || dynamic_casting) {
+    env.s("traits_string", get_traits_string());
+    env.s("half_string", jiterator_half_support_literal);
+    env.s("complex_body_string", get_complex_body_string()+get_complex_half_body_string());
+    env.s("complex_math_string", get_complex_math_string());
   }
 
   if (!vectorized) {

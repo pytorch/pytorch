@@ -69,7 +69,8 @@ class TestCommon(TestCase):
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
-        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device) else ())
+        device_type = torch.device(device).type
+        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device_type) else ())
 
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(
@@ -712,7 +713,7 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @ops(op_db, allowed_dtypes=(torch.complex32,))
+    @ops(op_db, dtypes=OpDTypes.supported, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")

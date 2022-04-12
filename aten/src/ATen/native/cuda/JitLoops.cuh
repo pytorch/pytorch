@@ -75,7 +75,7 @@ void jitted_gpu_kernel(
     const std::string& f,
     at::cuda::jit::BinaryFuncVariant scalar_pos =
         at::cuda::jit::BinaryFuncVariant::NoScalar,
-    at::opmath_type<f_inputs_type> scalar_val = 0,
+    f_inputs_type scalar_val = f_inputs_type{0},
     std::tuple<Args...> extra_args = std::make_tuple()) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
@@ -132,7 +132,7 @@ void jitted_gpu_kernel(
         /*f_inputs_type=*/f_inputs_type,
         arity,
         at::cuda::jit::BinaryFuncVariant::NoScalar>(
-        iter, f, needs_dynamic_casting, /*scalar_val=*/0, extra_args);
+        iter, f, needs_dynamic_casting, /*scalar_val=*/scalar_val, extra_args);
   } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
     jitted_gpu_kernel_impl<
         /*name*/ name,
