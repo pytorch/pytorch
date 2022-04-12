@@ -451,8 +451,9 @@ class KLDivLoss(_Loss):
         >>> target = F.softmax(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
 
+        >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
         >>> log_target = F.log_softmax(torch.rand(3, 5))
-        >>> output = kl_loss(input, log_target, log_target=True)
+        >>> output = kl_loss(input, log_target)
     """
     __constants__ = ['reduction']
 
@@ -1216,7 +1217,7 @@ class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
-    using the cosine distance, and is typically used for learning nonlinear
+    using the cosine similarity, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
     The loss function for each sample is:
