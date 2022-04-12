@@ -587,7 +587,7 @@ const std::string complex_half_body = R"ESCAPE(
 namespace std {
 template <>
 struct alignas(2) complex<at::Half> {
-  at::Half real_; 
+  at::Half real_;
   at::Half imag_;
 
   // Constructors
