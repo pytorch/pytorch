@@ -9,6 +9,7 @@ from typing import Callable
 import inspect
 import json
 import os
+import unittest
 
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
@@ -279,6 +280,7 @@ class TestPublicBindings(TestCase):
         msg = f"torch._C had bindings that are not present in the allowlist:\n{difference}"
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "Distributed is not importable")
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`
