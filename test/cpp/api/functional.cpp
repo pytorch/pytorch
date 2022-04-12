@@ -1322,6 +1322,23 @@ TEST_F(FunctionalTest, Linear) {
   }
 }
 
+TEST_F(FunctionalTest, Bias) {
+  {
+    const auto x = torch::arange(100., 106).resize_({3, 2});
+    const auto b = torch::arange(300., 302);
+    const auto y = F::bias(x, b);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2}));
+    const auto y_exp = torch::tensor(
+      {{400, 402},
+       {402, 404},
+       {404, 406}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(FunctionalTest, Embedding) {
   const auto input = torch::tensor({{1,2,4,5}, {4,3,2,9}}, torch::kLong);
   auto weight = torch::empty({10, 3});

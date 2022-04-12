@@ -65,6 +65,10 @@ Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optiona
   return output;
 }
 
+Tensor bias(const Tensor& input, const Tensor& bias) {
+  return at::add(input, bias);
+}
+
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum

@@ -6,6 +6,9 @@ namespace nn {
 LinearOptions::LinearOptions(int64_t in_features, int64_t out_features)
  : in_features_(in_features), out_features_(out_features) {}
 
+BiasOptions::BiasOptions(int64_t num_features)
+ : num_features_(num_features) {}
+
 BilinearOptions::BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features)
   : in1_features_(in1_features), in2_features_(in2_features), out_features_(out_features) {}
 

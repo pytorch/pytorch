@@ -28,6 +28,20 @@ struct TORCH_API LinearOptions {
 
 // ============================================================================
 
+/// Options for the `Bias` module.
+///
+/// Example:
+/// ```
+/// Bias model(BiasOptions(5));
+/// ```
+struct TORCH_API BiasOptions {
+  BiasOptions(int64_t num_features);
+  /// size of each input sample
+  TORCH_ARG(int64_t, num_features);
+};
+
+// ============================================================================
+
 /// Options for the `Flatten` module.
 ///
 /// Example:

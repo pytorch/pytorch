@@ -1098,6 +1098,26 @@ TEST_F(ModulesTest, Linear) {
   }
 }
 
+TEST_F(ModulesTest, Bias) {
+  {
+    Bias model(5);
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.size(0), 10);
+    ASSERT_EQ(y.size(1), 5);
+
+    ASSERT_EQ(model->bias.grad().numel(), 5);
+
+    auto y_exp = torch::add(model->bias, x);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, LocalResponseNorm) {
   {
     LocalResponseNorm model(LocalResponseNormOptions(2));

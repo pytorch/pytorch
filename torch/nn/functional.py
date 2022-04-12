@@ -1951,6 +1951,24 @@ Shape:
 """)
 
 
+bias = _add_docstr(
+    torch._C._nn.bias,
+    r"""
+bias(input, bias) -> Tensor
+
+Applies a bias to the incoming data: :math:`y = x + b`.
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+Shape:
+
+    - Input: :math:`(*, num\_features)` where `*` means any number of
+      additional dimensions, including none
+    - Bias: :math:`(num\_features)`
+    - Output: :math:`(*, num\_features)`
+""")
+
+
 bilinear = _add_docstr(
     torch.bilinear,
     r"""

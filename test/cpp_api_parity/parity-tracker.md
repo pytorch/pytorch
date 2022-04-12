@@ -97,6 +97,7 @@ torch::nn::TransformerEncoderLayer|Yes|No
 torch::nn::TransformerDecoderLayer|Yes|No
 torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
+torch::nn::Bias|Yes|No
 torch::nn::Bilinear|Yes|No
 torch::nn::Flatten|Yes|No
 torch::nn::Unflatten|Yes|No
@@ -207,6 +208,7 @@ F::layer_norm|Yes|No
 F::local_response_norm|Yes|No
 F::normalize|Yes|No
 F::linear|Yes|No
+F::bias|Yes|No
 F::bilinear|Yes|No
 F::dropout|Yes|No
 F::alpha_dropout|Yes|No

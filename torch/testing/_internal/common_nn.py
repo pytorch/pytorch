@@ -4256,6 +4256,16 @@ new_module_tests = [
         tf32_precision=0.005,
     ),
     dict(
+        module_name='Bias',
+        constructor_args=(5),
+        cpp_constructor_args='torch::nn::BiasOptions(5)',
+        input_fn=lambda: torch.rand(5),
+        reference_fn=lambda i, p, _: i + p[0],
+        desc="no_batch_dim",
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
         module_name='Flatten',
         cpp_constructor_args='torch::nn::FlattenOptions().start_dim(-3).end_dim(-1)',
         constructor_args=(-3, -1),

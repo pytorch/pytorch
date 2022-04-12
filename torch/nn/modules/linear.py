@@ -108,6 +108,51 @@ class Linear(Module):
         )
 
 
+class Bias(Module):
+    r"""Applies a bias to the incoming data: :math:`y = x + b`
+
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    Args:
+        num_features: size of its vector parameter
+
+    Shape:
+        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
+          dimensions including none and :math:`H_{in} = \text{num\_features}`.
+        - Output: :math:`(*, H_{in})` where the dimensions
+          are the same shape as the input and :math:`H_{in} = \text{num\_features}`.
+
+    Attributes:
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in\_features}}`
+
+    Examples::
+
+        >>> m = nn.Bias(5)
+        >>> input = torch.randn(128, 5)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([128, 5])
+    """
+    __constants__ = ['num_features']
+    num_features: int
+    bias: Tensor
+
+    def __init__(self, num_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(Bias, self).__init__()
+        self.num_features = num_features
+        self.bias = Parameter(torch.randn(num_features, **factory_kwargs))
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.bias(input, self.bias)
+
+    def extra_repr(self) -> str:
+        return 'num_features={}'.format(self.num_features)
+
+
 # This class exists solely to avoid triggering an obscure error when scripting
 # an improperly quantized attention layer. See this issue for details:
 # https://github.com/pytorch/pytorch/issues/58969
