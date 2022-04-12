@@ -337,24 +337,30 @@ class _DataPipeMeta(GenericMeta):
         return hash((self.__name__, self.type))
 
 
-def simplify_value_name(value) -> str:
-    if inspect.isfunction(value):
-        return value.__name__
+def _simplify_obj_name(obj) -> str:
+    """
+    Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
+    """
+    if inspect.isfunction(obj):
+        return obj.__name__
     try:
-        return str(value.__class__.__qualname__)
+        return str(obj.__class__.__qualname__)
     except Exception as _:
-        return str(value)
+        return str(obj)
 
 
-def get_input_args(obj):
+def _generate_input_args_string(obj):
+    """
+    Generate a string for the input arguments of an object.
+    """
     signature = inspect.signature(obj.__class__)
     input_param_names = set()
     for param_name, _ in signature.parameters.items():
         input_param_names.add(param_name)
     result = []
-    for name, value in inspect.getmembers(obj):
+    for name, obj in inspect.getmembers(obj):
         if name in input_param_names:
-            result.append((name, simplify_value_name(value)))
+            result.append((name, _simplify_obj_name(obj)))
     return ', '.join([f'{name}={value}' for name, value in result])
 
 
@@ -398,11 +404,10 @@ def hook_iterator(namespace, profile_name):
             except DataPipeException:
                 raise
             except Exception as e:
+                # TODO: Simplify the trackback message to skip over `response = gen.send(None)`
+                #       Part of https://github.com/pytorch/data/issues/284
                 datapipe = args[0]
-                # Short version, but requires custom __repr__ for each DataPipe class
-                # msg = f"thrown by {datapipe}"
-                # Long version with all input arguments
-                msg = f"thrown by __iter__ of {datapipe.__class__.__name__}({get_input_args(datapipe)})"
+                msg = f"thrown by __iter__ of {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
                 raise DataPipeException(msg, e) from e
 
         namespace['__iter__'] = wrap_generator
