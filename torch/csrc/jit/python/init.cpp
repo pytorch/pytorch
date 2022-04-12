@@ -873,7 +873,10 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_fuse_tensorexprs",
-          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
+          [](std::shared_ptr<Graph>& g) {
+            FuseTensorExprs(g);
+            RemoveTensorTypeSpecializations(g);
+          })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, const std::vector<at::Tensor>& inps) {
@@ -1345,11 +1348,15 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
-  m.def("parse_ir", [](const std::string& input) {
-    auto graph = std::make_shared<Graph>();
-    parseIR(input, &*graph);
-    return graph;
-  });
+  m.def(
+      "parse_ir",
+      [](const std::string& input, bool parse_tensor_constants) {
+        auto graph = std::make_shared<Graph>();
+        parseIR(input, &*graph, parse_tensor_constants);
+        return graph;
+      },
+      py::arg("input"),
+      py::arg("parse_tensor_constants") = false);
   m.def("parse_schema", parseSchema);
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
