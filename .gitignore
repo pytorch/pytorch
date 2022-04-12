@@ -35,6 +35,7 @@ aten/src/ATen/cuda/CUDAConfig.h
 benchmarks/.data
 caffe2/cpp_test/
 dist/
+docs/build/
 docs/cpp/src
 docs/src/**/*
 docs/cpp/build
@@ -140,6 +141,7 @@ scripts/release_notes/*.json
 compile_commands.json
 *.egg-info/
 docs/source/scripts/activation_images/
+docs/source/scripts/quantization_backend_configs/
 
 ## General
 
@@ -310,7 +312,7 @@ bazel-*
 *.zip
 
 # core dump files
-core.*
+**/core.[1-9]*
 
 # Generated if you use the pre-commit script for clang-tidy
 pr.diff

@@ -715,8 +715,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
             window=window, center=center, pad_mode=pad_mode, normalized=normalized,
             onesided=onesided, return_complex=return_complex)
-    # TODO: after having proper ways to map Python strings to ATen Enum, move
-    #       this and F.pad to ATen.
+    # NOTE: Do not edit. This code will be removed once the forward-compatibility
+    #       period is over for PR #73432
     if center:
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
@@ -1147,7 +1147,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
                 [ -0.2850,   4.2573,  -3.5997]])
     """
     if has_torch_function_variadic(a, b):
-        return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
+        return handle_torch_function(tensordot, (a, b), a, b, dims=dims, out=out)
 
     if not isinstance(dims, (tuple, list, torch.Tensor, int)):
         raise RuntimeError("tensordot expects dims to be int or "
