@@ -780,7 +780,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
@@ -4733,7 +4733,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -4756,7 +4756,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
@@ -5282,6 +5282,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result) {
   Tensor grad_self, grad_src;
 
@@ -5302,7 +5303,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (grad * result).gather(dim, index) / src;
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = ones_like(grad);
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
@@ -5314,6 +5315,10 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
   }
 
   return std::make_tuple(grad_self, grad_src);
