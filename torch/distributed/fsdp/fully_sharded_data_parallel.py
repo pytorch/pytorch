@@ -45,7 +45,6 @@ from .flatten_params_wrapper import (
     FlattenParamsWrapper,
 )
 from .optim_utils import (
-    OPTIM_TARGET_RANK,
     _flatten_optim_state,
     _get_flat_param_to_fsdp_module,
     _get_param_id_to_param,
@@ -1074,8 +1073,17 @@ class FullyShardedDataParallel(nn.Module):
             if (
                 not getattr(state_dict[key], "_has_been_cloned", False)
             ):
-                state_dict[key] = state_dict[key].clone().detach()
-                state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                try:
+                    state_dict[key] = state_dict[key].clone().detach()
+                    state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                except BaseException as e:
+                    warnings.warn(
+                        f"Failed to clone() tensor with name {key}. This may mean "
+                        "that this state_dict entry could point to invalid memory "
+                        "regions after returning from state_dict() call if this "
+                        "parameter is managed by FSDP. Please check clone "
+                        f"implementation of {key}. Error: {str(e)}"
+                    )
 
         _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
         return state_dict
@@ -1184,20 +1192,12 @@ class FullyShardedDataParallel(nn.Module):
 
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
-                with self.summon_full_params(recurse=False, writeback=False):
-                    # Since buffers are not sharded and stay casted, restore them to their
-                    # original user module specified types for checkpoint. We take care to
-                    # recast in post_state_dict_hook for consistency with the fact that
-                    # buffers stay casted after forward/backward. We must have the
-                    # call here instead of above because summon_full_params itself
-                    # calls _lazy_init() which would cast the buffers.
-                    if self.mixed_precision is not None and self._is_root:
-                        self._cast_buffers(
-                            dtype=self._orig_buffer_dtypes, recurse=False
-                        )
-                    state_dict = super().state_dict(*args, **kwargs)
-            else:
+            summon_ctx = (
+                self.summon_full_params(recurse=False, writeback=False)
+                if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
+                contextlib.suppress()
+            )
+            with summon_ctx:
                 # Since buffers are not sharded and stay casted, restore them to their
                 # original user module specified types for checkpoint. We take care to
                 # recast in post_state_dict_hook for consistency with the fact that
@@ -2366,6 +2366,7 @@ class FullyShardedDataParallel(nn.Module):
         optim_input: Optional[Union[
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
+        rank0_only: bool = True,
     ) -> Dict[str, Any]:
         """
         Consolidates the full optimizer state on rank 0 and returns it
@@ -2375,7 +2376,9 @@ class FullyShardedDataParallel(nn.Module):
         contained in ``model`` are mapped back to their unflattened parameters.
 
         .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used.
+            primitives are used. However, if ``rank0_only=True``, then the
+            state dict is only populated on rank 0, and all other ranks return
+            an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -2401,12 +2404,16 @@ class FullyShardedDataParallel(nn.Module):
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
                 ``model.parameters()``. (Default: ``None``)
+            rank0_only (bool): If ``True``, saves the populated :class:`dict`
+                only on rank 0; if ``False``, saves it on all ranks. (Default:
+                ``True``)
 
         Returns:
-            full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
-                state for ``model`` 's original unflattened parameters and
-                including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict`.
+            Dict[str, Any]: A :class:`dict` containing the optimizer state for
+            ``model`` 's original unflattened parameters and including keys
+            "state" and "param_groups" following the convention of
+            :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
+            then nonzero ranks return an empty :class:`dict`.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2414,7 +2421,7 @@ class FullyShardedDataParallel(nn.Module):
         group = model.process_group if hasattr(model, "process_group") \
             else None  # not all `torch.nn.Module`s have `process_group`
         rank = dist.get_rank(group)
-        to_save = rank == OPTIM_TARGET_RANK
+        to_save = not rank0_only or rank == 0
         full_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
         full_osd_state = full_osd["state"] if to_save else None  # alias
 
@@ -2437,7 +2444,7 @@ class FullyShardedDataParallel(nn.Module):
                     f"param: {param}"
                 unflat_state = _unflatten_optim_state(
                     flat_param_to_fsdp_module[param], param,
-                    osd_state[flat_param_id],
+                    osd_state[flat_param_id], to_save,
                 )
                 if to_save:
                     assert len(unflat_state) == len(unflat_param_names) and \
@@ -2532,10 +2539,9 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            sharded_optim_state_dict (Dict[str, Any]): The full optimizer
-                state dict remapped to flattened parameters instead of
-                unflattened parameters and restricted to only include this
-                rank's part of the optimizer state.
+            Dict[str, Any]: The full optimizer state dict remapped to flattened
+            parameters instead of unflattened parameters and restricted to only
+            include this rank's part of the optimizer state.
         """
         full_osd = full_optim_state_dict  # alias
         if "state" not in full_osd or "param_groups" not in full_osd:
@@ -2634,8 +2640,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> wrapped_optim.load_state_dict(sharded_osd)
 
         Returns:
-            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
-                using the parameter keys specified by ``optim_state_key_type``.
+            Dict[str, Any]: The optimizer state dict re-keyed using the
+            parameter keys specified by ``optim_state_key_type``.
         """
         assert optim_state_key_type in \
             (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)

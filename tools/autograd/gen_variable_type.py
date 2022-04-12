@@ -111,6 +111,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
     'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
+    'cholesky_inverse',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -359,12 +360,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${name} that does not support it ${msg}");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${name} that does not support it ${msg}");
 }
 """)
 
@@ -952,9 +953,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
         def get_msg() -> str:
             if is_out_fn:
-                msg = name + " (because it is an out= function)"
+                msg = "because it is an out= function"
             else:
-                msg = name
+                msg = ("because it has not been implemented yet.\\nPlease file an issue "
+                       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+                       "so that we can prioritize its implementation.")
             return msg
         res = ""
         to_check: List[str] = []
@@ -964,13 +967,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name))
             elif is_tensor_list_type(inp.type):
                 cond = FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp="_t")
-                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, msg=get_msg())
+                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, name=name, msg=get_msg())
             else:
                 raise RuntimeError(f'Unsupported input type for "{name}" when forbidding forward AD usage.')
 
         if len(to_check) > 0:
             cond = " || ".join(to_check)
-            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, msg=get_msg())
+            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name, msg=get_msg())
         return res
 
     body: List[str] = []

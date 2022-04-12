@@ -173,8 +173,7 @@ mobile::Code compileGraphToMobileCode(
       }
       mobile_code.operator_input_sizes_.emplace_back(num_args.value_or(-1));
       mobile_code.op_names_.emplace_back(opname);
-      auto func = mobile::makeOperatorFunction(
-          opname, num_args, compilation_options.model_version);
+      auto func = mobile::makeOperatorFunction(opname, num_args);
       TORCH_INTERNAL_ASSERT(
           func.has_value(),
           "Operator with name: ",
@@ -377,6 +376,8 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
+
+  m.set_bytecode_version(options.model_version);
   return m;
 }
 
