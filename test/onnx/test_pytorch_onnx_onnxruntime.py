@@ -3541,6 +3541,33 @@ class _TestONNXRuntime:
         x = torch.randn(3, 3)
         self.run_test(MyReluModule(), x)
 
+    def test_clip_int(self):
+        class MyClipInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.clamp(x, 0, 1)
+        self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int64))
+
+    def test_relu_int(self):
+        self.run_test(torch.nn.ReLU(), torch.randn(3, 3).to(torch.int32))
+
+    def test_pad_int(self):
+        class MyPadInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.pad(x, (1, 1))
+        self.run_test(MyPadInt(), torch.randn(3, 3).to(torch.int32))
+
+    def test_min_int(self):
+        class MyMinInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.min(x, x + 1)
+        self.run_test(MyMinInt(), torch.randn(3, 3).to(torch.int32))
+
+    def test_max_int(self):
+        class MyMaxnInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.max(x, x + 1)
+        self.run_test(MyMaxnInt(), torch.randn(3, 3).to(torch.int32))
+
     @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):
         class Model(torch.nn.Module):
