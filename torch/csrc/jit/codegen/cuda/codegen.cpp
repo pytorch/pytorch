@@ -378,8 +378,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
     } else if (d->isConst()) {
-      const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
-      code_ << std::setprecision(digits) << *d->value();
+      auto val = *d->value();
+      // note: default inf/nan doesn't work and should be replaced with macros
+      // `NAN`, `POS_INFINITY` and `NEG_INFINITY` instead.
+      if (val == INFINITY) {
+        code_ << "POS_INFINITY";
+      } else if (val == -INFINITY) {
+        code_ << "NEG_INFINITY";
+      } else if (std::isnan(val)) {
+        code_ << "NAN";
+      } else {
+        const int digits =
+            std::numeric_limits<Double::ScalarType>::max_digits10;
+        code_ << std::setprecision(digits) << val;
+      }
     } else {
       code_ << varName(d);
     }

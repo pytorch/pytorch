@@ -4391,6 +4391,27 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(prof.events().table().find("fallback"), -1)
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_inf_quick_patch(self):
+        a=torch.tensor([-float('inf'), -float('inf'), 4.0], device="cuda")
+
+        def fn_amax(x):
+            return x.amax(dim=0)
+
+        def fn_amin(x):
+            return x.amin(dim=0)
+
+        def fn_add(x):
+            return x.relu()+float('nan')
+
+        with nvfuser_singleton_fusion(True):
+            for t in [fn_amax, fn_amin, fn_add]:
+                t_jit = torch.jit.script(t)
+                self._run_helper(t_jit, t, x)
+
+
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
