@@ -8,6 +8,7 @@
 
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
 namespace c10 {
@@ -41,7 +42,7 @@ Tensor NestedTensor_add_NestedTensor_in_place(
     const Tensor& self,
     const Tensor& other);
 
-Tensor NestedTensor_batch_offsets_from_size_tensor(
+TORCH_API Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements);
 
