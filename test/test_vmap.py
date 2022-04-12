@@ -9,6 +9,7 @@ import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
+from torch.testing._internal.common_cuda import with_tf32_off
 import types
 
 
@@ -877,6 +878,7 @@ class TensorFactory:
 #
 # check_view: Test if the first returned output is a view of the first input
 # check_propagates_grad: Test if the operation propagates gradients.
+@with_tf32_off
 def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
                check_view=False, check_propagates_grad=True):
     result = vmap(op, in_dims, out_dims)(*inputs)
