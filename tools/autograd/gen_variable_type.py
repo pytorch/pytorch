@@ -949,7 +949,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     tuple_type = TupleCType([BaseCType(tensorT)] * len(derivative.var_types))
                     opt_res_grad_type = OptionalCType(tuple_type).cpp_type()
                     for idx, single_res in enumerate(res):
-                        fw_grad_setters.append(FW_DERIVATIVE_SETTER_MULTI_OUTPUT.substitute(idx=idx, all_res='_'.join(res), out_arg=single_res))
+                        fw_grad_setters.append(FW_DERIVATIVE_SETTER_MULTI_OUTPUT.substitute(idx=idx, all_res='_'.join(res),
+                                                                                            out_arg=single_res))
             elif isinstance(derivative.var_types[0], ListType) and derivative.var_types[0].is_tensor_like():
                 assert len(derivative.var_types) == 1, "Expected number of outputs to be 1 if function returns ListType"
                 opt_res_grad_type = OptionalCType(VectorCType(BaseCType(tensorT))).cpp_type()
@@ -962,7 +963,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(
                 fw_grad_opt_definition=fw_grad_opt_definition,
-                requires_fw_grad=get_any_has_forward_grad_name(derivative.var_names), formula=derivative.formula, out_arg='_'.join(res),
+                requires_fw_grad=get_any_has_forward_grad_name(derivative.var_names),
+                formula=derivative.formula,
+                out_arg='_'.join(res),
                 unpacked_arguments=unpacked_arguments))
 
         # Set all the grads at the end to avoid: https://github.com/pytorch/pytorch/issues/67367

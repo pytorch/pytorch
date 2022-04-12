@@ -162,7 +162,7 @@ def postprocess_forward_derivatives(
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
             if ((not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1
-                or len(forward_derivatives[0].var_names) > 1):
+               or len(forward_derivatives[0].var_names) > 1):
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as element_wise but this only "
                                    "works for functions with a single differentiable input and a "
@@ -265,6 +265,7 @@ def is_forward_derivative_definition(all_arg_names: List[str], names: Tuple[str,
             return True
         else:
             return False
+    raise RuntimeError("Expected `names` to be non-empty")
 
 def create_differentiability_info(
     defn: Dict[Any, Any],
