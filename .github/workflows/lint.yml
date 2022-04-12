@@ -26,7 +26,6 @@ jobs:
           set -eux
           python3 -m tools.linter.clang_tidy.generate_build_files
           python3 -m tools.generate_torch_version --is_debug=false
-          python3 -m tools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
 
           # TODO lint_paths.txt is unnecessarily complicated. We need it for now
           # because generated .pyi files are .gitignored. In the future it would
@@ -41,7 +40,7 @@ jobs:
 
           git grep -Il . >> lint_paths.txt
       - name: Run lintrunner
-        run: lintrunner -vv --paths-from lint_paths.txt
+        run: lintrunner --paths-from lint_paths.txt
       - name: Store annotations
         if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository}}
         run: |
@@ -61,7 +60,6 @@ jobs:
           linter_output_path: annotations.json
           commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
-
 
   quick-checks:
     name: quick-checks
