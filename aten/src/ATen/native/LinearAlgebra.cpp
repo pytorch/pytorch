@@ -1428,7 +1428,6 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   Tensor& self_or_result = const_cast<Tensor&>(self_or_result_);
-  CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
 
   const auto batch1_sizes = batch1.sizes();
   const auto batch2_sizes = batch2.sizes();
