@@ -5,57 +5,64 @@
 ONNXIFI a Caffe2 net
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
 import caffe2.python._import_c_extension as C
-import numpy as np
 
 
-def _infer_shapes(pred_net, inputs):
-    workspace.RunNetOnce(pred_net)
-    hints = {}
-    for op in pred_net.op:
-        for o in op.output:
-            if o not in hints:
-                blob = workspace.FetchBlob(o)
-                if hasattr(blob, 'shape'):
-                    hints[o] = blob.shape
-        for i in op.input:
-            if i not in hints:
-                blob = workspace.FetchBlob(i)
-                if hasattr(blob, 'shape'):
-                    hints[i] = blob.shape
+def onnxifi_set_option(option_name, option_value):
+    """
+    Set onnxifi option
+    """
+    return C.onnxifi_set_option(option_name, str(option_value))
 
-    return hints
 
+def onnxifi_get_option(option_name):
+    """
+    Get onnxifi option
+    """
+    return C.onnxifi_get_option(option_name)
 
 def onnxifi_caffe2_net(
         pred_net,
         input_shapes,
-        populate_shapes=False,
-        debug=False):
+        max_batch_size=1,
+        max_seq_size=1,
+        debug=False,
+        use_onnx=True,
+        merge_fp32_inputs_into_fp16=False,
+        adjust_batch=True,
+        block_list=None,
+        weight_names=None,
+        net_ssa_rewritten=False,
+        timeout=0):
     """
-    Transfrom the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
+    Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
-    # Hacky way to infer shapes as not all our operators have shape inference function.
-    # Normally this is not needed
-    shape_hints = {}
-    if populate_shapes:
-        input_data = {}
+    shape_hints = caffe2_pb2.TensorBoundShapes()
+    if type(input_shapes) is caffe2_pb2.TensorBoundShapes:
+        shape_hints = input_shapes
+    elif type(input_shapes) is dict:
         for k, v in input_shapes.items():
-            input_data[k] = np.random.randn(*v).astype(np.float32)
-        shape_hints = _infer_shapes(pred_net, input_data)
-
-    for k, v in input_shapes.items():
-        shape_hints[k] = v
+            tbs = caffe2_pb2.TensorBoundShape()
+            tbs.name = k
+            tbs.shape.dims.extend(v)
+            tbs.dim_type.extend([caffe2_pb2.TensorBoundShape.CONSTANT] * len(tbs.shape.dims))
+            tbs.dim_type[0] = caffe2_pb2.TensorBoundShape.BATCH
+            shape_hints.shapes.extend([tbs])
+        shape_hints.max_batch_size = max_batch_size
+        shape_hints.max_feature_len = max_seq_size
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
-                             shape_hints,
-                             debug)
+                             shape_hints.SerializeToString(),
+                             block_list if block_list else [],
+                             weight_names if weight_names is not None else [],
+                             max_batch_size,
+                             max_seq_size,
+                             timeout,
+                             adjust_batch,
+                             debug,
+                             merge_fp32_inputs_into_fp16,
+                             net_ssa_rewritten,
+                             use_onnx)
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)
     return pred_net_cut

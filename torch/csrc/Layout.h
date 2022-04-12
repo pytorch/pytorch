@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <ATen/Layout.h>
 
@@ -11,6 +11,7 @@ const int LAYOUT_NAME_LEN = 64;
 struct THPLayout {
   PyObject_HEAD
   at::Layout layout;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[LAYOUT_NAME_LEN + 1];
 };
 

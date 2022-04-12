@@ -9,11 +9,10 @@ template <>
 template <typename T>
 bool ModOp<CPUContext>::DoRunWithType() {
   auto& data = Input(DATA);
-  auto N = data.size();
+  auto N = data.numel();
   const auto* data_ptr = data.template data<T>();
 
-  auto* output = Output(0);
-  output->ResizeLike(Input(DATA));
+  auto* output = Output(0, Input(DATA).sizes(), at::dtype<T>());
   auto* output_ptr = output->template mutable_data<T>();
 
   for (auto i = 0; i < N; i++) {
@@ -25,8 +24,6 @@ bool ModOp<CPUContext>::DoRunWithType() {
   }
   return true;
 }
-
-namespace {
 
 REGISTER_CPU_OPERATOR(Mod, ModOp<CPUContext>);
 OPERATOR_SCHEMA(Mod)
@@ -96,5 +93,4 @@ X after running op:
     .Output(0, "Y", "*(type: Tensor`<int>`)* Output tensor of data with modulo operation applied.");
 
 SHOULD_NOT_DO_GRADIENT(ModOp);
-} // namespace
 } // namespace caffe2

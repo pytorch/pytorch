@@ -2,9 +2,13 @@
 
 // Provides conversions between Python tensor objects and at::Tensor.
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <ATen/Device.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
+#include <c10/core/Backend.h>
+#include <c10/core/Layout.h>
 
 #include <memory>
 #include <string>
@@ -12,28 +16,23 @@
 struct THPDtype;
 struct THPLayout;
 
-namespace at {
-enum class Backend;
-enum class ScalarType;
+namespace c10 {
 struct Storage;
-struct Type;
-} // namespace at
+}
 
 namespace torch {
 // Register a PyTypeObject* with the given attributes
 void registerStoragePyTypeObject(
-    PyTypeObject *pytype, const std::string& name,
-    bool is_cuda, bool is_sparse);
+    PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType);
 
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
-void registerLayoutObject(THPLayout *layout, at::Backend backend);
+void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
 PyObject* createPyObject(const at::Storage& storage);
 at::Storage createStorage(PyObject* obj);
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, bool& is_typed_storage);
 bool isStorage(PyObject* obj);
 
-THPDtype* getDtype(at::ScalarType scalarType);
-THPLayout* getLayout(at::Backend backend);
-at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device);
-at::Device::Type getDeviceType(const at::Type& type);
+THPDtype* getTHPDtype(at::ScalarType scalarType);
+THPLayout* getTHPLayout(at::Layout layout);
 }  // namespace torch

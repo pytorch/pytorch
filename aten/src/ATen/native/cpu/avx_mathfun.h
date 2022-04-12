@@ -30,28 +30,19 @@
   (this is the zlib license)
 */
 
-#include "Intrinsics.h"
+#include <ATen/native/cpu/Intrinsics.h>
 
-/* yes I know, the top of this file is quite ugly */
+/* The original source of this file has been modified. */
+#if defined(CPU_CAPABILITY_AVX2)
+
 #if defined(__GNUC__)
 # define ALIGN32_BEG __attribute__((aligned(32)))
 #elif defined(_WIN32)
 # define ALIGN32_BEG __declspec(align(32))
 #endif
 
-/* __m128 is ugly to write */
-typedef __m256  v8sf; // vector of 8 float (avx)
-typedef __m256i v8si; // vector of 8 int   (avx)
-typedef __m128i v4si; // vector of 8 int   (avx)
-
-#define _PI32AVX_CONST(Name, Val)                                            \
-  static const ALIGN32_BEG int _pi32avx_##Name[4] = { Val, Val, Val, Val }
-
-_PI32AVX_CONST(1, 1);
-_PI32AVX_CONST(inv1, ~1);
-_PI32AVX_CONST(2, 2);
-_PI32AVX_CONST(4, 4);
-
+typedef __m256  v8sf; // vector of 8 float (avx2)
+typedef __m256i v8si; // vector of 8 int   (avx2)
 
 /* declare some AVX constants -- why can't I figure a better way to do that? */
 #define _PS256_CONST(Name, Val)                                            \
@@ -90,67 +81,6 @@ _PS256_CONST(cephes_log_p7, - 2.4999993993E-1);
 _PS256_CONST(cephes_log_p8, + 3.3333331174E-1);
 _PS256_CONST(cephes_log_q1, -2.12194440e-4);
 _PS256_CONST(cephes_log_q2, 0.693359375);
-
-#ifndef __AVX2__
-
-typedef union imm_xmm_union {
-  v8si imm;
-  v4si xmm[2];
-} imm_xmm_union;
-
-#define COPY_IMM_TO_XMM(imm_, xmm0_, xmm1_) {    \
-    imm_xmm_union u __attribute__((aligned(32)));  \
-    u.imm = imm_;				   \
-    xmm0_ = u.xmm[0];                            \
-    xmm1_ = u.xmm[1];                            \
-}
-
-#define COPY_XMM_TO_IMM(xmm0_, xmm1_, imm_) {                       \
-    imm_xmm_union u __attribute__((aligned(32))); \
-    u.xmm[0]=xmm0_; u.xmm[1]=xmm1_; imm_ = u.imm; \
-  }
-
-
-#define AVX2_BITOP_USING_SSE2(fn) \
-static inline v8si _mm256_##fn(v8si x, int a) \
-{ \
-  /* use SSE2 instruction to perform the bitop AVX2 */ \
-  v4si x1, x2; \
-  v8si ret; \
-  COPY_IMM_TO_XMM(x, x1, x2); \
-  x1 = _mm_##fn(x1,a); \
-  x2 = _mm_##fn(x2,a); \
-  COPY_XMM_TO_IMM(x1, x2, ret); \
-  return(ret); \
-}
-
-#warning "Using SSE2 to perform AVX2 bitshift ops"
-AVX2_BITOP_USING_SSE2(slli_epi32)
-AVX2_BITOP_USING_SSE2(srli_epi32)
-
-#define AVX2_INTOP_USING_SSE2(fn) \
-static inline v8si _mm256_##fn(v8si x, v8si y) \
-{ \
-  /* use SSE2 instructions to perform the AVX2 integer operation */ \
-  v4si x1, x2; \
-  v4si y1, y2; \
-  v8si ret; \
-  COPY_IMM_TO_XMM(x, x1, x2); \
-  COPY_IMM_TO_XMM(y, y1, y2); \
-  x1 = _mm_##fn(x1,y1); \
-  x2 = _mm_##fn(x2,y2); \
-  COPY_XMM_TO_IMM(x1, x2, ret); \
-  return(ret); \
-}
-
-#warning "Using SSE2 to perform AVX2 integer ops"
-AVX2_INTOP_USING_SSE2(and_si128)
-AVX2_INTOP_USING_SSE2(andnot_si128)
-AVX2_INTOP_USING_SSE2(cmpeq_epi32)
-AVX2_INTOP_USING_SSE2(sub_epi32)
-AVX2_INTOP_USING_SSE2(add_epi32)
-
-#endif /* __AVX2__ */
 
 
 /* natural logarithm computed for 8 simultaneous float
@@ -228,8 +158,8 @@ inline v8sf log256_ps(v8sf x) {
   return x;
 }
 
-_PS256_CONST(exp_hi,	88.3762626647949f);
-_PS256_CONST(exp_lo,	-88.3762626647949f);
+_PS256_CONST(exp_hi,        88.3762626647949f);
+_PS256_CONST(exp_lo,        -88.3762626647949f);
 
 _PS256_CONST(cephes_LOG2EF, 1.44269504088896341);
 _PS256_CONST(cephes_exp_C1, 0.693359375);
@@ -260,7 +190,7 @@ inline v8sf exp256_ps(v8sf x) {
 
   tmp = _mm256_floor_ps(fx);
 
-  /* if greater, substract 1 */
+  /* if greater, subtract 1 */
   //v8sf mask = _mm256_cmpgt_ps(tmp, fx);
   v8sf mask = _mm256_cmp_ps(tmp, fx, _CMP_GT_OS);
   mask = _mm256_and_ps(mask, one);
@@ -326,11 +256,6 @@ inline v8sf sin256_ps(v8sf x) { // any x
   v8sf xmm1, xmm2 = _mm256_setzero_ps(), xmm3, sign_bit, y;
   v8si imm0, imm2;
 
-#ifndef __AVX2__
-  v4si imm0_1, imm0_2;
-  v4si imm2_1, imm2_2;
-#endif
-
   sign_bit = x;
   /* take the absolute value */
   x = _mm256_and_ps(x, *(v8sf*)_ps256_inv_sign_mask);
@@ -346,7 +271,6 @@ inline v8sf sin256_ps(v8sf x) { // any x
     If we don't have AVX, let's perform them using SSE2 directives
   */
 
-#ifdef __AVX2__
   /* store the integer part of y in mm0 */
   imm2 = _mm256_cvttps_epi32(y);
   /* j=(j+1) & (~1) (see the cephes sources) */
@@ -366,35 +290,6 @@ inline v8sf sin256_ps(v8sf x) { // any x
   */
   imm2 = _mm256_and_si256(imm2, *(v8si*)_pi32_256_2);
   imm2 = _mm256_cmpeq_epi32(imm2,*(v8si*)_pi32_256_0);
-#else
-  /* we use SSE2 routines to perform the integer ops */
-  COPY_IMM_TO_XMM(_mm256_cvttps_epi32(y),imm2_1,imm2_2);
-
-  imm2_1 = _mm_add_epi32(imm2_1, *(v4si*)_pi32avx_1);
-  imm2_2 = _mm_add_epi32(imm2_2, *(v4si*)_pi32avx_1);
-
-  imm2_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_inv1);
-  imm2_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_inv1);
-
-  COPY_XMM_TO_IMM(imm2_1,imm2_2,imm2);
-  y = _mm256_cvtepi32_ps(imm2);
-
-  imm0_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_4);
-  imm0_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_4);
-
-  imm0_1 = _mm_slli_epi32(imm0_1, 29);
-  imm0_2 = _mm_slli_epi32(imm0_2, 29);
-
-  COPY_XMM_TO_IMM(imm0_1, imm0_2, imm0);
-
-  imm2_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_2);
-  imm2_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_2);
-
-  imm2_1 = _mm_cmpeq_epi32(imm2_1, _mm_setzero_si128());
-  imm2_2 = _mm_cmpeq_epi32(imm2_2, _mm_setzero_si128());
-
-  COPY_XMM_TO_IMM(imm2_1, imm2_2, imm2);
-#endif
 
   v8sf swap_sign_bit = _mm256_castsi256_ps(imm0);
   v8sf poly_mask = _mm256_castsi256_ps(imm2);
@@ -453,18 +348,12 @@ inline v8sf cos256_ps(v8sf x) { // any x
   v8sf xmm1, xmm2 = _mm256_setzero_ps(), xmm3, y;
   v8si imm0, imm2;
 
-#ifndef __AVX2__
-  v4si imm0_1, imm0_2;
-  v4si imm2_1, imm2_2;
-#endif
-
   /* take the absolute value */
   x = _mm256_and_ps(x, *(v8sf*)_ps256_inv_sign_mask);
 
   /* scale by 4/Pi */
   y = _mm256_mul_ps(x, *(v8sf*)_ps256_cephes_FOPI);
 
-#ifdef __AVX2__
   /* store the integer part of y in mm0 */
   imm2 = _mm256_cvttps_epi32(y);
   /* j=(j+1) & (~1) (see the cephes sources) */
@@ -479,39 +368,6 @@ inline v8sf cos256_ps(v8sf x) { // any x
   /* get the polynom selection mask */
   imm2 = _mm256_and_si256(imm2, *(v8si*)_pi32_256_2);
   imm2 = _mm256_cmpeq_epi32(imm2, *(v8si*)_pi32_256_0);
-#else
-
-  /* we use SSE2 routines to perform the integer ops */
-  COPY_IMM_TO_XMM(_mm256_cvttps_epi32(y),imm2_1,imm2_2);
-
-  imm2_1 = _mm_add_epi32(imm2_1, *(v4si*)_pi32avx_1);
-  imm2_2 = _mm_add_epi32(imm2_2, *(v4si*)_pi32avx_1);
-
-  imm2_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_inv1);
-  imm2_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_inv1);
-
-  COPY_XMM_TO_IMM(imm2_1,imm2_2,imm2);
-  y = _mm256_cvtepi32_ps(imm2);
-
-  imm2_1 = _mm_sub_epi32(imm2_1, *(v4si*)_pi32avx_2);
-  imm2_2 = _mm_sub_epi32(imm2_2, *(v4si*)_pi32avx_2);
-
-  imm0_1 = _mm_andnot_si128(imm2_1, *(v4si*)_pi32avx_4);
-  imm0_2 = _mm_andnot_si128(imm2_2, *(v4si*)_pi32avx_4);
-
-  imm0_1 = _mm_slli_epi32(imm0_1, 29);
-  imm0_2 = _mm_slli_epi32(imm0_2, 29);
-
-  COPY_XMM_TO_IMM(imm0_1, imm0_2, imm0);
-
-  imm2_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_2);
-  imm2_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_2);
-
-  imm2_1 = _mm_cmpeq_epi32(imm2_1, _mm_setzero_si128());
-  imm2_2 = _mm_cmpeq_epi32(imm2_2, _mm_setzero_si128());
-
-  COPY_XMM_TO_IMM(imm2_1, imm2_2, imm2);
-#endif
 
   v8sf sign_bit = _mm256_castsi256_ps(imm0);
   v8sf poly_mask = _mm256_castsi256_ps(imm2);
@@ -571,12 +427,6 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   v8sf xmm1, xmm2, xmm3 = _mm256_setzero_ps(), sign_bit_sin, y;
   v8si imm0, imm2, imm4;
 
-#ifndef __AVX2__
-  v4si imm0_1, imm0_2;
-  v4si imm2_1, imm2_2;
-  v4si imm4_1, imm4_2;
-#endif
-
   sign_bit_sin = x;
   /* take the absolute value */
   x = _mm256_and_ps(x, *(v8sf*)_ps256_inv_sign_mask);
@@ -586,7 +436,6 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   /* scale by 4/Pi */
   y = _mm256_mul_ps(x, *(v8sf*)_ps256_cephes_FOPI);
 
-#ifdef __AVX2__
   /* store the integer part of y in imm2 */
   imm2 = _mm256_cvttps_epi32(y);
 
@@ -606,38 +455,7 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   imm2 = _mm256_and_si256(imm2, *(v8si*)_pi32_256_2);
   imm2 = _mm256_cmpeq_epi32(imm2, *(v8si*)_pi32_256_0);
   //v8sf poly_mask = _mm256_castsi256_ps(imm2);
-#else
-  /* we use SSE2 routines to perform the integer ops */
-  COPY_IMM_TO_XMM(_mm256_cvttps_epi32(y),imm2_1,imm2_2);
 
-  imm2_1 = _mm_add_epi32(imm2_1, *(v4si*)_pi32avx_1);
-  imm2_2 = _mm_add_epi32(imm2_2, *(v4si*)_pi32avx_1);
-
-  imm2_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_inv1);
-  imm2_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_inv1);
-
-  COPY_XMM_TO_IMM(imm2_1,imm2_2,imm2);
-  y = _mm256_cvtepi32_ps(imm2);
-
-  imm4_1 = imm2_1;
-  imm4_2 = imm2_2;
-
-  imm0_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_4);
-  imm0_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_4);
-
-  imm0_1 = _mm_slli_epi32(imm0_1, 29);
-  imm0_2 = _mm_slli_epi32(imm0_2, 29);
-
-  COPY_XMM_TO_IMM(imm0_1, imm0_2, imm0);
-
-  imm2_1 = _mm_and_si128(imm2_1, *(v4si*)_pi32avx_2);
-  imm2_2 = _mm_and_si128(imm2_2, *(v4si*)_pi32avx_2);
-
-  imm2_1 = _mm_cmpeq_epi32(imm2_1, _mm_setzero_si128());
-  imm2_2 = _mm_cmpeq_epi32(imm2_2, _mm_setzero_si128());
-
-  COPY_XMM_TO_IMM(imm2_1, imm2_2, imm2);
-#endif
   v8sf swap_sign_bit_sin = _mm256_castsi256_ps(imm0);
   v8sf poly_mask = _mm256_castsi256_ps(imm2);
 
@@ -653,22 +471,9 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   x = _mm256_add_ps(x, xmm2);
   x = _mm256_add_ps(x, xmm3);
 
-#ifdef __AVX2__
   imm4 = _mm256_sub_epi32(imm4, *(v8si*)_pi32_256_2);
   imm4 =  _mm256_andnot_si256(imm4, *(v8si*)_pi32_256_4);
   imm4 = _mm256_slli_epi32(imm4, 29);
-#else
-  imm4_1 = _mm_sub_epi32(imm4_1, *(v4si*)_pi32avx_2);
-  imm4_2 = _mm_sub_epi32(imm4_2, *(v4si*)_pi32avx_2);
-
-  imm4_1 = _mm_andnot_si128(imm4_1, *(v4si*)_pi32avx_4);
-  imm4_2 = _mm_andnot_si128(imm4_2, *(v4si*)_pi32avx_4);
-
-  imm4_1 = _mm_slli_epi32(imm4_1, 29);
-  imm4_2 = _mm_slli_epi32(imm4_2, 29);
-
-  COPY_XMM_TO_IMM(imm4_1, imm4_2, imm4);
-#endif
 
   v8sf sign_bit_cos = _mm256_castsi256_ps(imm4);
 
@@ -713,3 +518,5 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   *s = _mm256_xor_ps(xmm1, sign_bit_sin);
   *c = _mm256_xor_ps(xmm2, sign_bit_cos);
 }
+
+#endif // CPU_CAPABILITY_AVX2

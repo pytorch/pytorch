@@ -5,6 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -16,12 +17,12 @@ class CeilOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
 
-    const float* Xdata = X.template data<float>();
-    float* Ydata = Y->template mutable_data<float>();
-    for (int i = 0; i < X.size(); ++i) {
+    auto *const Y = Output(0, X.sizes(), at::dtype<float>());
+
+    const float *const Xdata = X.template data<float>();
+    float *const Ydata = Y->template mutable_data<float>();
+    for (const auto i : c10::irange(X.numel())) {
       Ydata[i] = std::ceil(Xdata[i]);
     }
     return true;

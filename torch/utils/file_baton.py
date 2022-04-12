@@ -42,6 +42,8 @@ class FileBaton:
             time.sleep(self.wait_seconds)
 
     def release(self):
-        '''Releaes the baton and removes its file.'''
-        os.close(self.fd)
+        '''Releases the baton and removes its file.'''
+        if self.fd is not None:
+            os.close(self.fd)
+
         os.remove(self.lock_file_path)

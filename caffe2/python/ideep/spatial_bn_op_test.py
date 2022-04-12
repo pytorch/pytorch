@@ -1,19 +1,18 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-from caffe2.python import brew, core, workspace
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.model_helper import ModelHelper
 import caffe2.python.ideep_test_util as mu
 
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestSpatialBN(hu.HypothesisTestCase):
     @given(size=st.integers(7, 10),
            input_channels=st.integers(7, 10),
@@ -23,6 +22,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            inplace=st.sampled_from([True, False]),
            **mu.gcs)
+    @settings(deadline=1000)
     def test_spatialbn_test_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, gc, dc):
@@ -101,6 +101,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            **mu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):

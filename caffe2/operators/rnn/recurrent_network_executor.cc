@@ -31,6 +31,12 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor<CPUContext>(
  * Run forwardpass with T timesteps.
  */
 bool ThreadedRecurrentNetworkExecutor::Run(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
+
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
   finished_timesteps_ = 0;
@@ -52,6 +58,12 @@ bool ThreadedRecurrentNetworkExecutor::Run(int T) {
  * Run backward pass with T timesteps.
  */
 bool ThreadedRecurrentNetworkExecutor::RunBackwards(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
+
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
   finished_timesteps_ = 0;
@@ -165,6 +177,7 @@ void ThreadedRecurrentNetworkExecutor::WorkerFunction() {
 
     try {
       RunOp(job, id);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (job.op_idx == timestep_ops_template_.size() - 1) {
         finished_timesteps_.fetch_add(1);
       }
@@ -193,8 +206,10 @@ void ThreadedRecurrentNetworkExecutor::_Exec() {
 
   // Start threads if not started
   std::unique_lock<std::mutex> lk(countdown_mtx_);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   while (workers_.size() < num_threads_) {
     VLOG(1) << "Start RNN worker " << workers_.size() << " / " << num_threads_;
+    // NOLINTNEXTLINE(modernize-use-emplace)
     workers_.push_back(
         std::thread(&ThreadedRecurrentNetworkExecutor::WorkerFunction, this));
   }

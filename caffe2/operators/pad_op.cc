@@ -43,6 +43,7 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
               int h = ph - pad_t();
               int w = pw - pad_l();
               Ydata[ph * padded_width + pw] =
+                  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
                   (h < 0 || w < 0 || h >= height || w >= width)
                   ? value_
                   : Xdata[h * width + w];
@@ -193,8 +194,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        Xdata += X.size() / X.dim32(0);
-        Ydata += Y->size() / Y->dim32(0);
+        Xdata += X.numel() / X.dim32(0);
+        Ydata += Y->numel() / Y->dim32(0);
       }
       break;
     case PadMode::REFLECT:
@@ -217,8 +218,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        Xdata += X.size() / X.dim32(0);
-        Ydata += Y->size() / Y->dim32(0);
+        Xdata += X.numel() / X.dim32(0);
+        Ydata += Y->numel() / Y->dim32(0);
       }
       break;
     case PadMode::EDGE:
@@ -235,8 +236,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        Xdata += X.size() / X.dim32(0);
-        Ydata += Y->size() / Y->dim32(0);
+        Xdata += X.numel() / X.dim32(0);
+        Ydata += Y->numel() / Y->dim32(0);
       }
       break;
   }
@@ -246,12 +247,14 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
-      dY.dim32(1),
-      dY.dim32(2) - pad_t() - pad_b(),
-      dY.dim32(3) - pad_l() - pad_r());
+
+  auto* dX = Output(
+      0,
+      {dY.dim32(0),
+       dY.dim32(1),
+       dY.dim32(2) - pad_t() - pad_b(),
+       dY.dim32(3) - pad_l() - pad_r()},
+      at::dtype<float>());
   int padded_height = dY.dim32(2);
   int padded_width = dY.dim32(3);
   int channels = dX->dim32(1);
@@ -260,7 +263,7 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  math::Set<float, CPUContext>(dX->size(), 0, dXdata, &context_);
+  math::Set<float, CPUContext>(dX->numel(), 0, dXdata, &context_);
   // The main loop
   switch (mode_) {
     case PadMode::CONSTANT:
@@ -326,12 +329,14 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
-      dY.dim32(1) - pad_t() - pad_b(),
-      dY.dim32(2) - pad_l() - pad_r(),
-      dY.dim32(3));
+
+  auto* dX = Output(
+      0,
+      {dY.dim32(0),
+       dY.dim32(1) - pad_t() - pad_b(),
+       dY.dim32(2) - pad_l() - pad_r(),
+       dY.dim32(3)},
+      at::dtype<float>());
   int padded_height = dY.dim32(1);
   int padded_width = dY.dim32(2);
   int channels = dY.dim32(3);
@@ -340,7 +345,7 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  math::Set<float, CPUContext>(dX->size(), 0, dXdata, &context_);
+  math::Set<float, CPUContext>(dX->numel(), 0, dXdata, &context_);
 
   switch (mode_) {
     case PadMode::CONSTANT:
@@ -359,8 +364,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        dXdata += dX->size() / dX->dim32(0);
-        dYdata += dY.size() / dY.dim32(0);
+        dXdata += dX->numel() / dX->dim32(0);
+        dYdata += dY.numel() / dY.dim32(0);
       }
       break;
     case PadMode::REFLECT:
@@ -383,8 +388,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        dXdata += dX->size() / dX->dim32(0);
-        dYdata += dY.size() / dY.dim32(0);
+        dXdata += dX->numel() / dX->dim32(0);
+        dYdata += dY.numel() / dY.dim32(0);
       }
       break;
     case PadMode::EDGE:
@@ -402,8 +407,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        dXdata += dX->size() / dX->dim32(0);
-        dYdata += dY.size() / dY.dim32(0);
+        dXdata += dX->numel() / dX->dim32(0);
+        dYdata += dY.numel() / dY.dim32(0);
       }
       break;
   }
@@ -418,7 +423,9 @@ std::vector<TensorShape> PadImageOp<float, CPUContext>::PadTensorInference(
 }
 
 REGISTER_CPU_OPERATOR(PadImage, PadImageOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(PadImageGradient, PadImageGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    PadImageGradient,
+    PadImageGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(PadImage)
     .NumInputs(1)
@@ -444,7 +451,7 @@ values and stride sizes defined by the ConvPoolOpBase operator.
         "the tensor. Dimensions will vary based on various pad and stride "
         "sizes.");
 
-OPERATOR_SCHEMA(PadImageGradient).NumInputs(1).NumOutputs(1);
+GRADIENT_OPERATOR_SCHEMA(PadImageGradient).NumInputs(1).NumOutputs(1);
 
 class GetPadImageGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

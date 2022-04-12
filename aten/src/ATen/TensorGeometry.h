@@ -1,14 +1,21 @@
 #pragma once
 
-#include <ATen/Type.h>
-#include <ATen/WrapDimUtils.h>
+#include <c10/core/WrapDimMinimal.h>
+#include <ATen/core/TensorBase.h>
 
 namespace at {
 
-struct AT_API TensorGeometry {
+// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
+// Although we cache is_contiguous in tensor now, this is till useful because it
+// allows checking if a particular geometry is contiguous without explicitly
+// constructing a tensor, e.g., when you want to choose a kernel strategy based
+// on whether a subgeometry is contiguous.
+TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
+
+struct TORCH_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
-  explicit TensorGeometry(IntList sizes)
+  explicit TensorGeometry(IntArrayRef sizes)
     : sizes_(sizes.vec())
     , strides_(sizes.size())
     , storage_offset_(0) {
@@ -21,7 +28,7 @@ struct AT_API TensorGeometry {
       numel_ = expected_stride;
   }
 
-  explicit TensorGeometry(const Tensor& t)
+  explicit TensorGeometry(const TensorBase& t)
     : sizes_(t.sizes().vec())
     , strides_(t.strides().vec())
     , storage_offset_(t.storage_offset())
@@ -30,27 +37,24 @@ struct AT_API TensorGeometry {
   // true if the tensor is contiguous
   bool is_contiguous() const;
 
-  // creates a new tensor with the sizes and strides of the source
-  Tensor zeros_with_stride(const Type& type) const;
-
   int64_t dim() const { return sizes_.size(); }
   int64_t size(int64_t dim) const {
-    dim = maybe_wrap_dim(dim, this->dim());
+    dim = c10::maybe_wrap_dim(dim, this->dim());
     return sizes_.at(static_cast<size_t>(dim));
   }
-  IntList sizes() const { return IntList{ sizes_ }; }
+  IntArrayRef sizes() const { return IntArrayRef{ sizes_ }; }
   int64_t stride(int64_t dim) const {
-    dim = maybe_wrap_dim(dim, this->dim());
+    dim = c10::maybe_wrap_dim(dim, this->dim());
     return strides_.at(static_cast<size_t>(dim));
   }
-  IntList strides() const { return IntList{ strides_ }; }
+  IntArrayRef strides() const { return IntArrayRef{ strides_ }; }
   int64_t storage_offset() const { return storage_offset_; }
   int64_t numel() const { return numel_; }
 
   TensorGeometry transpose(int64_t dim0, int64_t dim1) {
     TensorGeometry r = *this; // copy
-    AT_CHECK(dim0 < dim(), "transpose: dim0=", dim0, " out of range (dim=", dim(), ")")
-    AT_CHECK(dim1 < dim(), "transpose: dim1=", dim1, " out of range (dim=", dim(), ")")
+    TORCH_CHECK(dim0 < dim(), "transpose: dim0=", dim0, " out of range (dim=", dim(), ")")
+    TORCH_CHECK(dim1 < dim(), "transpose: dim1=", dim1, " out of range (dim=", dim(), ")")
     std::swap(r.sizes_[dim0], r.sizes_[dim1]);
     std::swap(r.strides_[dim0], r.strides_[dim1]);
     return r;

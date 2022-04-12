@@ -20,8 +20,7 @@ __device__ T bilinear_interpolate(
     const int height,
     const int width,
     T y,
-    T x,
-    const int index /* index for debug only*/) {
+    T x) {
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
     // empty
@@ -81,7 +80,8 @@ __global__ void RoIAlignRotatedForward(
     const int pooled_width,
     const int sampling_ratio,
     const T* bottom_rois,
-    T* top_data) {
+    T* top_data,
+    bool continuous_coordinate) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // (n, c, ph, pw) is an element in the pooled output
     int pw = index % pooled_width;
@@ -93,15 +93,18 @@ __global__ void RoIAlignRotatedForward(
     int roi_batch_ind = offset_bottom_rois[0];
 
     // Do not round
-    T roi_center_w = offset_bottom_rois[1] * spatial_scale;
-    T roi_center_h = offset_bottom_rois[2] * spatial_scale;
+    T roi_offset = continuous_coordinate ? T(0.5) : 0;
+    T roi_center_w = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    T roi_center_h = offset_bottom_rois[2] * spatial_scale - roi_offset;
     T roi_width = offset_bottom_rois[3] * spatial_scale;
     T roi_height = offset_bottom_rois[4] * spatial_scale;
     T theta = offset_bottom_rois[5] * M_PI / 180.0;
 
-    // Force malformed ROIs to be 1x1
-    roi_width = max(roi_width, (T)1.);
-    roi_height = max(roi_height, (T)1.);
+    if (!continuous_coordinate) { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = c10::cuda::compat::max(roi_width, (T)1.);
+      roi_height = c10::cuda::compat::max(roi_height, (T)1.);
+    }
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -141,7 +144,7 @@ __global__ void RoIAlignRotatedForward(
         T y = yy * cosTheta - xx * sinTheta + roi_center_h;
 
         T val = bilinear_interpolate(
-            offset_bottom_data, height, width, y, x, index);
+            offset_bottom_data, height, width, y, x);
         output_val += val;
       }
     }
@@ -154,28 +157,32 @@ __global__ void RoIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
-  auto* Y = Output(0); // RoI pooled data
 
   CAFFE_ENFORCE_EQ(order_, StorageOrder::NCHW, "RoIAlign CUDA impl needs NCHW");
 
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
     // Handle empty rois
-    Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    Output(
+        0,
+        {0, X.dim32(1), pooled_height_, pooled_width_},
+        at::dtype<float>()); // RoI pooled data
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   CAFFE_ENFORCE_EQ(R.dim32(1), 6);
 
   assert(sampling_ratio_ >= 0);
 
-  Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-  int output_size = Y->size();
+  auto* Y = Output(
+      0,
+      {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
+      at::dtype<float>()); // RoI pooled data
+
+  int output_size = Y->numel();
   RoIAlignRotatedForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),
          CAFFE_CUDA_NUM_THREADS,
@@ -191,9 +198,17 @@ bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
           pooled_width_,
           sampling_ratio_,
           R.data<float>(),
-          Y->mutable_data<float>());
+          Y->mutable_data<float>(),
+          aligned_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
 REGISTER_CUDA_OPERATOR(RoIAlignRotated, RoIAlignRotatedOp<float, CUDAContext>);
 } // namespace caffe2
+
+using RoIAlignRotatedOpFloatCUDA =
+    caffe2::RoIAlignRotatedOp<float, caffe2::CUDAContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(RoIAlignRotated, RoIAlignRotatedOpFloatCUDA);

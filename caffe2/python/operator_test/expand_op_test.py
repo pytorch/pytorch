@@ -1,17 +1,18 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
-from hypothesis import given
+
+
+
+
+from caffe2.python import core
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestExpandOp(hu.HypothesisTestCase):
+class TestExpandOp(serial.SerializedTestCase):
     def _rand_shape(self, X_shape, max_length):
         length = np.random.randint(max_length)
         shape = np.ones(length, dtype=np.int64)
@@ -39,7 +40,7 @@ class TestExpandOp(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, shape], [0])
         self.assertGradientChecks(gc, op, [X, shape], 0, [0])
 
-    @given(X=hu.tensor(max_dim=5, dtype=np.float32),
+    @serial.given(X=hu.tensor(max_dim=5, dtype=np.float32),
            **hu.gcs)
     def test_expand_rand_shape(self, X, gc, dc):
         shape = self._rand_shape(X.shape, 5)
@@ -58,6 +59,7 @@ class TestExpandOp(hu.HypothesisTestCase):
                              np.ones([1, 4, 1, 2]),
                              np.ones([4, 1, 2])]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_expand_nonrand_shape2(self, X, gc, dc):
         self._run_expand_op_test(X, [4, 1, 2, 2], gc, dc)
         self._run_expand_op_test(X, [4, -1, 2, 2], gc, dc)

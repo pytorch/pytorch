@@ -57,11 +57,12 @@ TEST(TimeObserverTest, Test3Seconds) {
   ws.CreateBlob("in");
   NetDef net_def;
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws));
-  auto net_ob = caffe2::make_unique<TimeObserver>(net.get());
+  auto net_ob = std::make_unique<TimeObserver>(net.get());
   const auto* ob = net_ob.get();
   net->AttachObserver(std::move(net_ob));
   net->Run();
   CAFFE_ENFORCE(ob);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
   LOG(INFO) << "av time children: " << ob->average_time_children();
   LOG(INFO) << "av time: " << ob->average_time();
   CAFFE_ENFORCE(ob->average_time_children() > 3000);

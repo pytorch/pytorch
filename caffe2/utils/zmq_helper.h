@@ -26,7 +26,7 @@ class ZmqContext {
  private:
   void* ptr_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(ZmqContext);
+  C10_DISABLE_COPY_AND_ASSIGN(ZmqContext);
 };
 
 class ZmqMessage {
@@ -48,14 +48,14 @@ class ZmqMessage {
 
  private:
   zmq_msg_t msg_;
-  AT_DISABLE_COPY_AND_ASSIGN(ZmqMessage);
+  C10_DISABLE_COPY_AND_ASSIGN(ZmqMessage);
 };
 
 class ZmqSocket {
  public:
   explicit ZmqSocket(int type)
       : context_(1), ptr_(zmq_socket(context_.ptr(), type)) {
-    CAFFE_ENFORCE(ptr_ != nullptr, "Faild to create zmq socket.");
+    CAFFE_ENFORCE(ptr_ != nullptr, "Failed to create zmq socket.");
   }
 
   ~ZmqSocket() {

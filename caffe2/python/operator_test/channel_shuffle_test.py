@@ -1,23 +1,20 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import numpy as np
+
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core
-from hypothesis import given
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
+import numpy as np
+from caffe2.python import core
 
 
-class ChannelShuffleOpsTest(hu.HypothesisTestCase):
+class ChannelShuffleOpsTest(serial.SerializedTestCase):
     def _channel_shuffle_nchw_ref(self, X, group):
         dims = X.shape
         N = dims[0]
         C = dims[1]
         G = group
         K = int(C / G)
-        X = X.reshape(N, G, K, -1)
+        X = X.reshape(N, G, K, np.prod(dims[2:]))
         Y = np.transpose(X, axes=(0, 2, 1, 3))
         return [Y.reshape(dims)]
 
@@ -27,13 +24,19 @@ class ChannelShuffleOpsTest(hu.HypothesisTestCase):
         C = dims[-1]
         G = group
         K = int(C / G)
-        X = X.reshape(N, -1, G, K)
+        X = X.reshape(N, np.prod(dims[1:-1]), G, K)
         Y = np.transpose(X, axes=(0, 1, 3, 2))
         return [Y.reshape(dims)]
 
-    @given(N=st.integers(1, 5), G=st.integers(1, 5), K=st.integers(1, 5),
-           H=st.integers(1, 5), W=st.integers(1, 5),
-           order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @serial.given(
+        N=st.integers(0, 5),
+        G=st.integers(1, 5),
+        K=st.integers(1, 5),
+        H=st.integers(1, 5),
+        W=st.integers(1, 5),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs
+    )
     def test_channel_shuffle(self, N, G, K, H, W, order, gc, dc):
         C = G * K
         if order == "NCHW":
@@ -41,13 +44,7 @@ class ChannelShuffleOpsTest(hu.HypothesisTestCase):
         else:
             X = np.random.randn(N, H, W, C).astype(np.float32)
 
-        op = core.CreateOperator(
-            "ChannelShuffle",
-            ["X"],
-            ["Y"],
-            group=G,
-            order=order,
-        )
+        op = core.CreateOperator("ChannelShuffle", ["X"], ["Y"], group=G, order=order)
 
         def channel_shuffle_ref(X):
             if order == "NCHW":

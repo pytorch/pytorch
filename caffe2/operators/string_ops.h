@@ -11,7 +11,7 @@ namespace caffe2 {
  * into the elementwise Functor provided, and gathers the results of each
  * call into the resulting array. Use it as an adaptor if you want to create
  * a UnaryElementwiseOp that acts on each element of the tensor per function
- * call -- this is resonable for complex types where vectorization wouldn't
+ * call -- this is reasonable for complex types where vectorization wouldn't
  * be much of a gain, performance-wise.
  */
 template <typename Functor>
@@ -20,7 +20,7 @@ struct ForEach {
 
   template <typename In, typename Out, typename Context>
   bool operator()(int n, const In* in, Out* out, Context* /*c*/) {
-    for (int i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       out[i] = functor(in[i]);
     }
     return true;
@@ -41,8 +41,9 @@ class StringJoinOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  StringJoinOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit StringJoinOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         delimiter_(
             this->template GetSingleArgument<std::string>("delimiter", ",")),
         axis_(this->template GetSingleArgument<int>("axis", 0)) {

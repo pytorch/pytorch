@@ -1,8 +1,13 @@
 #include "predictor_config.h"
+
+#include <atomic>
+
 #include "caffe2/core/init.h"
+#include "caffe2/utils/proto_utils.h"
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
+
 namespace caffe2 {
 
 namespace {
@@ -66,10 +71,11 @@ PredictorConfig makePredictorConfig(
   if (run_init) {
     CAFFE_ENFORCE(ws.RunNetOnce(init_net));
   }
-#if CAFFE2_MOBILE
+#ifdef C10_MOBILE
   GlobalInit();
 #endif
-  if (optimization) {
+  if (optimization &&
+      !ArgumentHelper::HasArgument(*config.predict_net, "disable_nomnigraph")) {
 #ifdef CAFFE2_OPTIMIZER
     try {
       *config.predict_net =
@@ -78,7 +84,11 @@ PredictorConfig makePredictorConfig(
       LOG(WARNING) << "Optimization pass failed: " << e.what();
     }
 #else
-    LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+    static std::atomic<bool> warningEmitted{};
+    // Emit the log only once.
+    if (!warningEmitted.exchange(true)) {
+      LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+    }
 #endif
   }
   return config;

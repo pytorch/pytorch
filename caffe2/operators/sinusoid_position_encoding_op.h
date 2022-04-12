@@ -2,7 +2,9 @@
 #define CAFFE2_OPERATORS_SINUSOID_POSITION_ENCODING_OP_H_
 
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #endif // _MSC_VER
 #include <cmath>
 
@@ -16,14 +18,13 @@ namespace caffe2 {
 template <class Context>
 class SinusoidPositionEncodingOp : public Operator<Context> {
  public:
-  SinusoidPositionEncodingOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        embedding_size_(this->template GetSingleArgument<int>(
-            "embedding_size",
-            100)),
+  template <class... Args>
+  explicit SinusoidPositionEncodingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        embedding_size_(
+            this->template GetSingleArgument<int>("embedding_size", 100)),
         alpha_(this->template GetSingleArgument<float>("alpha", 10000)),
-        amplitude_(
-            this->template GetSingleArgument<float>("amplitude", 1)) {}
+        amplitude_(this->template GetSingleArgument<float>("amplitude", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -34,13 +35,12 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& positions = Input(0);
-    auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(positions.ndim(), 2, "POSITIONS should be a 2-D tensor");
+    CAFFE_ENFORCE_EQ(positions.dim(), 2, "POSITIONS should be a 2-D tensor");
 
-    auto shape = positions.dims();
+    auto shape = positions.sizes().vec();
     shape.push_back(embedding_size_);
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<float>());
 
     int M = shape[0];
     int K = shape[1];
@@ -51,7 +51,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
     float max_alpha_pow =
         ((float)embedding_size_ - 1.0f) / (float)embedding_size_;
 
-    for (int i = 0; i < M; ++i) {
+    for (const auto i : c10::irange(M)) {
       float pos = (float)idxs[i * K];
 
       // Compute the embedding for position i, example 0 first
@@ -72,7 +72,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
       row_array = amplitude_ * row_array.sin().eval();
 
       // Copy the embedding to position i in the other examples
-      for (int j = 1; j < K; ++j) {
+      for (const auto j : c10::irange(1, K)) {
         int base = i * K * embedding_size_;
         std::copy(
             &out[base],

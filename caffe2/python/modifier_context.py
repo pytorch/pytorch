@@ -1,9 +1,9 @@
 # @package modifier_context
 # Module caffe2.python.modifier_context
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 
 DEFAULT_MODIFIER = 'DEFAULT'
@@ -43,7 +43,7 @@ class ModifierContext(object):
 class UseModifierBase(object):
     '''
     context class to allow setting the current context.
-    Example useage with layer:
+    Example usage with layer:
         modifiers = {'modifier1': modifier1, 'modifier2': modifier2}
         with Modifiers(modifiers):
             modifier = ModifierContext.current().get_modifier('modifier1')

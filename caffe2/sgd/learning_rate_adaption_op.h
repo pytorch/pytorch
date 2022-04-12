@@ -21,7 +21,7 @@ void lr_update(
   float x = 0;
   float y = 0, z = 0;
   const float kEps = 1e-12f;
-  for (auto i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     x += grad[i] * effgrad[i];
     if (normalized_lr_adaption) {
       y += grad[i] * grad[i];
@@ -49,11 +49,11 @@ class LearningRateAdaptionOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(EFFGRAD).size());
+    CAFFE_ENFORCE(Input(LR).numel() == 1);
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(EFFGRAD).numel());
     Output(OUTPUT_LR)->ResizeLike(Input(LR));
     lr_update<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(GRAD).template data<T>(),
         Input(EFFGRAD).template data<T>(),
         Input(LR).template data<T>(),

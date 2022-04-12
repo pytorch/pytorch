@@ -1,12 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, scope
 from caffe2.python.modeling.parameter_sharing import (
     ParameterSharing,
 )
+from caffe2.python.optimizer import AdagradOptimizer, AdamOptimizer
 from caffe2.python.layer_test_util import LayersTestCase
 
 
@@ -114,7 +115,7 @@ class ParameterSharingTest(LayersTestCase):
                 self.assertEquals(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
-                with self.assertRaisesRegexp(ValueError, 'Got inconsistent shapes .*'):
+                with self.assertRaisesRegex(ValueError, 'Got inconsistent shapes .*'):
                     self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims + 1
@@ -148,3 +149,84 @@ class ParameterSharingTest(LayersTestCase):
             sorted(op_outputs),
             ['global_scope/shared_fc/b', 'global_scope/shared_fc/w']
         )
+
+    def test_layer_shared_parameter_optim_validator(self):
+        """
+        This test is to cover the _validate_param_optim function in
+        layer_model_helper class.
+        """
+
+        output_dims = 2
+
+        adagrad_optim = AdagradOptimizer(
+            alpha=0.004,
+            epsilon=0.02,
+        )
+
+        self.model.default_optimizer = adagrad_optim
+
+        # the following covers the branch -- optim is None
+        with scope.NameScope('global_scope_0'):
+            with ParameterSharing({'scope_1': 'scope_0'}):
+                with scope.NameScope('scope_0'):
+                    fc1_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims,
+                        weight_optim=self.model.NoOptim,
+                    )
+
+                with scope.NameScope('scope_1'), self.assertRaises(Exception):
+                    fc2_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims
+                    )
+
+        # the following covers the branch -- optim is NoOptim
+        with scope.NameScope('global_scope_1'):
+            with ParameterSharing({'scope_1': 'scope_0'}):
+                with scope.NameScope('scope_0'):
+                    fc1_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims,
+                        weight_optim=None,
+                    )
+
+                with scope.NameScope('scope_1'), self.assertRaises(Exception):
+                    fc2_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims,
+                        weight_optim=self.model.NoOptim,
+                    )
+
+        # the following covers the branch -- optim is an instance of Optimizer
+        adagrad_optim_2 = AdagradOptimizer(
+            alpha=0.005,
+            epsilon=0.02,
+        )
+
+        adam_optim = AdamOptimizer()
+
+        self.model.default_optimizer = adagrad_optim_2
+
+        with scope.NameScope('global_scope_2'):
+            with ParameterSharing({'scope_1': 'scope_0', 'scope_2': 'scope_0'}):
+                with scope.NameScope('scope_0'):
+                    fc1_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims,
+                        weight_optim=None,   # it will use adagrad_optim_2
+                    )
+
+                with scope.NameScope('scope_1'), self.assertRaises(Exception):
+                    fc2_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims,
+                        weight_optim=adagrad_optim,
+                    )
+
+                with scope.NameScope('scope_2'), self.assertRaises(Exception):
+                    fc2_output = self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims,
+                        weight_optim=adam_optim,
+                    )

@@ -41,17 +41,22 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
    ENDIF (OMAP4_TRUE)
 
 ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Darwin")
+   IF(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+      set(NEON_FOUND true CACHE BOOL "NEON available on ARM64")
+   ENDIF()
    EXEC_PROGRAM("/usr/sbin/sysctl -n machdep.cpu.features" OUTPUT_VARIABLE
       CPUINFO)
 
-   #neon instruction can be found on the majority part of modern ARM processor
-   STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "neon" "${NEON_THERE}" NEON_TRUE)
-   IF (NEON_TRUE)
-      set(NEON_FOUND true CACHE BOOL "NEON available on host")
-   ELSE (NEON_TRUE)
-      set(NEON_FOUND false CACHE BOOL "NEON available on host")
-   ENDIF (NEON_TRUE)
+   IF(NOT CPUINFO STREQUAL "")
+       #neon instruction can be found on the majority part of modern ARM processor
+       STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE ${CPUINFO})
+       STRING(COMPARE EQUAL "neon" "${NEON_THERE}" NEON_TRUE)
+       IF (NEON_TRUE)
+          set(NEON_FOUND true CACHE BOOL "NEON available on host")
+       ELSE (NEON_TRUE)
+          set(NEON_FOUND false CACHE BOOL "NEON available on host")
+       ENDIF (NEON_TRUE)
+   ENDIF()
 
 ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Windows")
    # TODO

@@ -5,6 +5,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 template <typename Context>
@@ -47,7 +49,8 @@ class EnqueueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(InputSize() > 1);
     auto queue = Operator<Context>::Inputs()[0]
                      ->template Get<std::shared_ptr<BlobsQueue>>();
-    CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
+    CAFFE_ENFORCE(
+        queue && static_cast<size_t>(OutputSize()) == queue->getNumBlobs());
     return queue->blockingWrite(this->Outputs());
   }
 
@@ -68,7 +71,8 @@ class DequeueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(InputSize() == 1);
     auto queue =
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
-    CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
+    CAFFE_ENFORCE(
+        queue && static_cast<size_t>(OutputSize()) == queue->getNumBlobs());
     return queue->blockingRead(this->Outputs(), timeout_secs_);
   }
 
@@ -104,14 +108,20 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(queue);
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
-        OutputSize() == size + 1,
-        "Expected " + caffe2::to_string(size + 1) + ", " +
-            " got: " + caffe2::to_string(size));
+        static_cast<size_t>(OutputSize()) == size + 1,
+        "Expected " + c10::to_string(size + 1) + ", " +
+            " got: " + c10::to_string(size));
     bool status = queue->blockingWrite(this->Outputs());
     Output(size)->Resize();
     math::Set<bool, Context>(
         1, !status, Output(size)->template mutable_data<bool>(), &context_);
     return true;
+  }
+
+  void Cancel() override {
+    auto queue = Operator<Context>::Inputs()[0]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+    queue->close();
   }
 };
 
@@ -133,38 +143,38 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     if (blobs_.size() != size) {
       blobs_.resize(size);
       blobPtrs_.resize(size);
-      for (int col = 0; col < size; ++col) {
+      for (auto col : c10::irange(size)) {
         blobPtrs_.at(col) = &blobs_.at(col);
       }
     }
 
     const int kTensorGrowthPct = 40;
-    for (int i = 0; i < numRecords_; ++i) {
+    for (const auto i : c10::irange(numRecords_)) {
       if (!queue->blockingRead(blobPtrs_)) {
         // if we read at least one record, status is still true
         return i > 0;
       }
-      for (int col = 0; col < size; ++col) {
+      for (auto col : c10::irange(size)) {
         auto* out = this->Output(col);
         const auto& in = blobPtrs_.at(col)->template Get<Tensor>();
         if (i == 0) {
           out->CopyFrom(in);
         } else {
-          auto oldSize = out->size();
+          auto oldSize = out->numel();
 
           CAFFE_ENFORCE(
-              in.ndim() > 0,
+              in.dim() > 0,
               "Empty tensor to dequeue at column ",
               col,
               " within ",
               size,
               " total columns");
 
-          out->Extend(in.dims()[0], kTensorGrowthPct, &context_);
+          out->Extend(in.sizes()[0], kTensorGrowthPct);
           auto* dst =
-              (char*)out->raw_mutable_data() + oldSize * in.meta().itemsize();
+              (char*)out->raw_mutable_data() + oldSize * in.dtype().itemsize();
           context_.template CopyItems<Context, Context>(
-              in.meta(), in.size(), in.raw_data(), dst);
+              in.meta(), in.numel(), in.raw_data(), dst);
         }
       }
     }
@@ -192,6 +202,12 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     return true;
   }
 
+  void Cancel() override {
+    auto queue = Operator<Context>::Inputs()[0]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+    queue->close();
+  }
+
  private:
   int numRecords_;
   std::vector<Blob> blobs_;
@@ -217,7 +233,7 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     float sum = accumulate(weights.begin(), weights.end(), 0.0f);
     CAFFE_ENFORCE(sum > 0.0f, "Sum of weights must be positive");
     cumProbs_.resize(weights.size());
-    for (int i = 0; i < weights.size(); i++) {
+    for (auto i : c10::irange(weights.size())) {
       cumProbs_[i] = weights[i] / sum;
       CAFFE_ENFORCE_GE(
           cumProbs_[i], 0.0f, "Each probability must be non-negative");
@@ -244,8 +260,8 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
     bool status = queue->blockingRead(this->Outputs());
     if (table_idx_blob_ >= 0) {
-      auto* table_idx_blob_out = Output(table_idx_blob_);
-      table_idx_blob_out->Resize(1);
+      auto* table_idx_blob_out =
+          Output(table_idx_blob_, {1}, at::dtype<int32_t>());
       int32_t* data = table_idx_blob_out->template mutable_data<int32_t>();
       data[0] = idx;
     }

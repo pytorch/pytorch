@@ -1,14 +1,13 @@
+#include "caffe2/onnx/backend.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
-#if !CAFFE2_MOBILE
+#ifndef C10_MOBILE
 #include "onnx/checker.h"
-#include "onnx/optimizer/optimize.h"
 #endif
 
 #include "google/protobuf/io/coded_stream.h"
@@ -16,6 +15,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -64,24 +64,9 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
       {DeviceType::CUDA, caffe2::DeviceType::CUDA}};
   caffe2::DeviceOption d;
   d.set_device_type(static_cast<int32_t>(m.at(onnx_device.type)));
-  d.set_cuda_gpu_id(onnx_device.device_id);
+  d.set_device_id(onnx_device.device_id);
   return d;
 }
-
-#if !CAFFE2_MOBILE
-ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
-  std::vector<std::string> passes{"fuse_consecutive_transposes",
-                                  "eliminate_nop_transpose",
-                                  "fuse_transpose_into_gemm"};
-
-  if (init) {
-    passes.emplace_back("split_init");
-  } else {
-    passes.emplace_back("split_predict");
-  }
-  return ::ONNX_NAMESPACE::optimization::Optimize(input, passes);
-}
-#endif
 
 template <class T, class U>
 U LookUpWithDefault(
@@ -96,7 +81,9 @@ U LookUpWithDefault(
   }
 }
 
-void UpdateNames(std::shared_ptr<DummyName> dummy, const caffe2::OperatorDef& op) {
+void UpdateNames(
+    std::shared_ptr<DummyName> dummy,
+    const caffe2::OperatorDef& op) {
   for (const auto& n : op.input()) {
     dummy->AddName(n);
   }
@@ -213,8 +200,8 @@ OnnxAttributes::get(const std::string& key) const {
 }
 
 template <>
-::google::protobuf::RepeatedField<float>
-OnnxAttributes::get(const std::string& key) const {
+::google::protobuf::RepeatedField<float> OnnxAttributes::get(
+    const std::string& key) const {
   ::google::protobuf::RepeatedField<float> value;
   const auto it = onnx_attrs_.find(key);
   if (it != onnx_attrs_.end()) {
@@ -300,7 +287,11 @@ Caffe2Backend::get_renamed_operators() const {
       {"Less", "LT"},
       {"Greater", "GT"},
       {"Unsqueeze", "ExpandDims"},
-      {"Tile", "NumpyTile"}};
+      {"Tile", "NumpyTile"},
+      {"DynamicSlice", "Slice"},
+      {"ConstantOfShape", "ConstantFill"},
+      {"RandomNormal", "GaussianFill"},
+      {"RandomNormalLike", "GaussianFill"}};
   return kRenamedOperators;
 }
 
@@ -316,11 +307,12 @@ const std::
     Caffe2Backend::get_per_op_renamed_attrs() const {
   const static std::
       unordered_map<std::string, std::unordered_map<std::string, std::string>>
-          kPerOpRenamedAttrs = {{"Squeeze", {{"axes", "dims"}}},
-                                {"Unsqueeze", {{"axes", "dims"}}},
-                                {"Transpose", {{"perm", "axes"}}},
-                                {"ConvTranspose", {{"output_padding", "adjs"}}},
-                                {"Selu", {{"gamma", "scale"}}}};
+          kPerOpRenamedAttrs = {
+              {"Squeeze", {{"axes", "dims"}}},
+              {"Unsqueeze", {{"axes", "dims"}}},
+              {"Transpose", {{"perm", "axes"}}},
+              {"ConvTranspose", {{"output_padding", "adjs"}}},
+              {"Selu", {{"gamma", "scale"}}}};
 
   return kPerOpRenamedAttrs;
 }
@@ -337,16 +329,19 @@ Caffe2Backend::get_special_operators() const {
               {"ArgMin", &Caffe2Backend::CreateArgMaxMin},
               {"Cast", &Caffe2Backend::CreateCast},
               {"Constant", &Caffe2Backend::CreateConstant},
+              {"ConstantOfShape", &Caffe2Backend::CreateConstantOfShape},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
-              {"AveragePool", &Caffe2Backend::CreatePadPool},
-              {"GlobalAveragePool", &Caffe2Backend::CreatePadPool},
+              {"AveragePool", &Caffe2Backend::CreateConvPoolOpBase},
+              {"GlobalAveragePool", &Caffe2Backend::CreateConvPoolOpBase},
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
+              {"Int8Reshape", &Caffe2Backend::CreateReshape},
               {"Gather", &Caffe2Backend::CreateGather},
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
               {"Concat", &Caffe2Backend::CreateConcat},
+              {"Int8Concat", &Caffe2Backend::CreateConcat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
               {"Split", &Caffe2Backend::CreateSplit},
@@ -355,7 +350,13 @@ Caffe2Backend::get_special_operators() const {
               {"MatMul", &Caffe2Backend::CreateMatMul},
               {"Upsample", &Caffe2Backend::CreateUpsample},
               {"Dropout", &Caffe2Backend::CreateDropout},
-              {"LRN", &Caffe2Backend::CreateLRN}};
+              {"LRN", &Caffe2Backend::CreateLRN},
+              {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
+              {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
+              {"RandomNormalLike", &Caffe2Backend::CreateRandomNormal},
+              {"Where", &Caffe2Backend::CreateWhereOp},
+              {"NonZero", &Caffe2Backend::CreateNonZeroOp},
+              {"Multinomial", &Caffe2Backend::CreateMultinomialOp}};
   return kSpecialOperators;
 }
 
@@ -454,6 +455,30 @@ Caffe2Ops Caffe2Backend::CreateConstant(
   return ret;
 }
 
+Caffe2Ops Caffe2Backend::CreateConstantOfShape(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  CAFFE_ENFORCE_EQ(onnx_node->node.input_size(), 1);
+  CAFFE_ENFORCE_EQ(onnx_node->node.output_size(), 1);
+
+  Caffe2Ops ret;
+  auto* c2_op = ret.ops.Add();
+  const auto* value = onnx_node->attributes.get<const TensorProto*>("value");
+  if (value) {
+    BuildTensorFillingOp(
+        c2_op, *value, onnx_node->node.output(0), onnx_node->node.input(0));
+  } else {
+    c2_op->set_type("ConstantFill");
+    c2_op->add_input(onnx_node->node.input(0));
+    c2_op->add_output(onnx_node->node.output(0));
+    auto c2_input_as_shape = c2_op->add_arg();
+    c2_input_as_shape->set_name("input_as_shape");
+    c2_input_as_shape->set_i(1);
+  }
+
+  return ret;
+}
+
 //  Note [Caffe2 ConvPoolOpBase]
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //  To understand what is going on here, we have to talk a little bit about
@@ -515,65 +540,6 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
-Caffe2Ops Caffe2Backend::CreatePadPool(
-    OnnxNode* onnx_node,
-    const ConversionContext& ctx) {
-  auto& node = onnx_node->node;
-  auto& attributes = onnx_node->attributes;
-  Caffe2Ops ret;
-  // Pad
-  bool padding = false;
-  const std::string pad_name = ctx.opset_version() < 2 ? "paddings" : "pads";
-  const auto pad_input = dummy_->NewDummyName();
-  if (attributes.HasAttribute("count_include_pad") &&
-      attributes.HasAttribute(pad_name)) {
-    auto count_include_pad = attributes.get<int64_t>("count_include_pad", 0L);
-    ::google::protobuf::RepeatedField<::google::protobuf::int64> pads;
-    pads =
-        attributes
-            .get<::google::protobuf::RepeatedField<::google::protobuf::int64>>(
-                pad_name);
-    if (count_include_pad == 1 && pads.size() == 4 &&
-        !(pads.Get(0) == 0 && pads.Get(1) == 0 && pads.Get(2) == 0 &&
-          pads.Get(3) == 0)) {
-      padding = true;
-      attributes.remove(pad_name);
-      caffe2::Argument arg_pads;
-      arg_pads.add_ints(pads.Get(0));
-      arg_pads.add_ints(pads.Get(1));
-      arg_pads.add_ints(pads.Get(2));
-      arg_pads.add_ints(pads.Get(3));
-      arg_pads.set_name("pads");
-      auto* c2_op = ret.ops.Add();
-      BuildOperator(
-          c2_op, "PadImage", {node.input(0)}, {pad_input}, {arg_pads});
-    } else if (count_include_pad == 1) {
-      std::string str;
-      bool pads_flag = false;
-      str += "[";
-      for (const auto& i : pads) {
-        str += caffe2::to_string(i) + ",";
-        pads_flag = pads_flag || i > 0;
-      }
-      str += "]";
-      if (pads_flag == true) {
-        CAFFE_THROW(
-            "Caffe2 only supports padding 2D Tensor, whereas padding is ", str);
-      }
-    }
-  }
-  // Pool
-  auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, ctx);
-  auto* pool_op = c2_ops.ops.Mutable(0);
-  if (padding) {
-    pool_op->set_input(0, pad_input);
-  }
-  auto* c2_op = ret.ops.Add();
-  c2_op->CopyFrom(*pool_op);
-
-  return ret;
-}
-
 Caffe2Ops Caffe2Backend::CreateReshape(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
@@ -583,6 +549,131 @@ Caffe2Ops Caffe2Backend::CreateReshape(
   op->add_output(dummy_->NewDummyName());
 
   return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateRandomNormal(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto& attributes = onnx_node->attributes;
+
+  if (attributes.HasAttribute("seed")) {
+    CAFFE_THROW("Caffe2 GaussianFill does not support random seed");
+  }
+
+  if (attributes.HasAttribute("dtype")) {
+    if (attributes.get<int64_t>("dtype") != TensorProto::FLOAT) {
+      CAFFE_THROW("Caffe2 GaussianFill only support FLOAT dtype");
+    }
+    attributes.remove("dtype");
+  }
+  if (attributes.HasAttribute("scale")) {
+    auto scale = attributes.get<float>("scale");
+    auto* attr = attributes.AddRewrittenAttribute("std");
+    attr->set_f(scale);
+    attributes.remove("scale");
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
+}
+
+Caffe2Ops Caffe2Backend::CreateWhereOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // The native Caffe2 op doesn't support broadcasting, so we defer the handling
+  // of this op to the ATen library that does.
+  onnx::NodeProto converted;
+  converted.CopyFrom(onnx_node->node);
+  converted.set_op_type("ATen");
+  onnx::AttributeProto* attr = converted.add_attribute();
+  attr->set_name("operator");
+  attr->set_s("where");
+  OnnxNode new_node(converted);
+  return CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
+}
+
+Caffe2Ops Caffe2Backend::CreateNonZeroOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // Native Caffe2 doesn't support NonZero, fallback to ATen.
+  // ATen nonzero is equivalent to Transpose(ONNX::NonZero).
+  onnx::NodeProto converted;
+  converted.CopyFrom(onnx_node->node);
+
+  auto nonzero_output = dummy_->NewDummyName();
+  converted.set_output(0, nonzero_output);
+  converted.set_op_type("ATen");
+  onnx::AttributeProto* attr = converted.add_attribute();
+  attr->set_name("operator");
+  attr->set_s("nonzero");
+  OnnxNode new_node(converted);
+  auto ret = CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
+
+  auto* c2_transpose = ret.ops.Add();
+  BuildOperator(
+      c2_transpose, "Transpose", {nonzero_output}, {onnx_node->node.output(0)});
+  return ret;
+}
+
+Caffe2Ops Caffe2Backend::CreateMultinomialOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // Fallback to ATen.
+  // ATen::Multinomial takes probabilities as input, ONNX Multinomial expects
+  // input to be log probabilities.
+  Caffe2Ops ret;
+  auto c2_exp_output = dummy_->NewDummyName();
+  auto* c2_exp = ret.ops.Add();
+  BuildOperator(c2_exp, "Exp", {onnx_node->node.input(0)}, {c2_exp_output});
+
+  auto* c2_multinomial = ret.ops.Add();
+  caffe2::Argument c2_arg_op;
+  c2_arg_op.set_name("operator");
+  c2_arg_op.set_s("multinomial");
+  // ONNX Multinomial only supports replacement=True.
+  caffe2::Argument c2_arg_rep;
+  c2_arg_rep.set_name("replacement");
+  c2_arg_rep.set_i(1);
+  auto& onnx_attributes = onnx_node->attributes;
+  caffe2::Argument c2_arg_num;
+  c2_arg_num.set_name("num_samples");
+  c2_arg_num.set_i(onnx_attributes.get<int64_t>("sample_size"));
+
+  // ONNX Multinomial has attribute dtype in {int64, int32}, which specifies
+  // output datatype. ATen::Multinomial output dtype is always int64.
+  auto onnx_dtype =
+      onnx_attributes.get<int64_t>("dtype", TensorProto::UNDEFINED);
+  if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT64) {
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {onnx_node->node.output(0)},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
+  } else if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT32) {
+    auto c2_multinomial_output = dummy_->NewDummyName();
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {c2_multinomial_output},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
+
+    auto* c2_cast = ret.ops.Add();
+    caffe2::Argument to;
+    to.set_name("to");
+    to.set_i(caffe2::TensorProto::INT32);
+    BuildOperator(
+        c2_cast,
+        "Cast",
+        {c2_multinomial_output},
+        {onnx_node->node.output(0)},
+        {to});
+  } else {
+    CAFFE_THROW(
+        "ONNX does not support dtype other than int32/int64 in Multinomial, but get ",
+        onnx_dtype);
+  }
+
+  return ret;
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
@@ -596,10 +687,7 @@ Caffe2Ops Caffe2Backend::CreateReciprocal(
   Caffe2Ops ret;
   auto* c2_op = ret.ops.Add();
 
-  caffe2::Argument exponent;
-  exponent.set_name("exponent");
-  exponent.set_f(-1.0);
-  BuildOperator(c2_op, "Pow", {node.input(0)}, {node.output(0)}, {exponent});
+  BuildOperator(c2_op, "Reciprocal", {node.input(0)}, {node.output(0)}, {});
   return ret;
 }
 
@@ -627,7 +715,7 @@ Caffe2Ops Caffe2Backend::CreateGather(
     BuildOperator(c2_op, "BatchGather", inputs, outputs);
   } else {
     CAFFE_THROW(
-        "Caffe2 only supports Gather with axis being 1 or 2, ",
+        "Caffe2 only supports Gather with axis being 0 or 1, ",
         "whereas axis is ",
         axis);
   }
@@ -675,9 +763,8 @@ Caffe2Ops Caffe2Backend::CreateGemm(
   auto trans_a = onnx_node->attributes.get<int64_t>("transA", 0L);
   auto trans_b = onnx_node->attributes.get<int64_t>("transB", 0L);
   // Support broadcast by default when opset_version > 6.
-  auto broadcast =
-    onnx_node->attributes.get<int64_t>("broadcast",
-                                       (ctx.opset_version() > 6) ? 1L : 0L);
+  auto broadcast = onnx_node->attributes.get<int64_t>(
+      "broadcast", (ctx.opset_version() > 6) ? 1L : 0L);
 
   // If the c's shape information is available and c is a 1d tensor(except
   // c is a scalar), use FC aggressively.
@@ -707,7 +794,8 @@ Caffe2Ops Caffe2Backend::CreateGemm(
           input_b_vi_iter->second.type().tensor_type().shape();
       int input_b_last_dim_index = (trans_b) ? 0 : 1;
       // If b's last dim is not 1, skip FC.
-      if (input_b_shape.dim(input_b_last_dim_index).dim_value() != 1) {
+      if (input_b_shape.dim_size() <= input_b_last_dim_index ||
+          input_b_shape.dim(input_b_last_dim_index).dim_value() != 1) {
         return false;
       }
     }
@@ -720,7 +808,8 @@ Caffe2Ops Caffe2Backend::CreateGemm(
     if (trans_b) {
       BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
     } else {
-      BuildOperator(c2_op, "FCTransposed", {input_a, input_b, input_c}, {output});
+      BuildOperator(
+          c2_op, "FCTransposed", {input_a, input_b, input_c}, {output});
     }
   } else {
     auto ab = dummy_->NewDummyName();
@@ -843,7 +932,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   auto pos = args.find("starts");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      starts_vals.add_ints(i);
+      starts_vals.add_ints(i < 0 ? i - 1 : i);
     }
     args.erase(pos);
   }
@@ -853,7 +942,11 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   pos = args.find("ends");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      ends_vals.add_ints(i < 0 ? i - 1 : i);
+      if (i == std::numeric_limits<int64_t>::max()) {
+        ends_vals.add_ints(-1);
+      } else {
+        ends_vals.add_ints(i < 0 ? i - 1 : i);
+      }
     }
     args.erase(pos);
   }
@@ -893,7 +986,6 @@ Caffe2Ops Caffe2Backend::CreateSlice(
 
   auto starts_vals_tensor = dummy_->NewDummyName();
   auto starts_tensor = dummy_->NewDummyName();
-  auto casted_starts_tensor = dummy_->NewDummyName();
   c2_op = ret.ops.Add();
   {
     caffe2::Argument shape_starts;
@@ -930,12 +1022,9 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   caffe2::Argument to;
   to.set_name("to");
   to.set_i(static_cast<int64_t>(caffe2::TensorProto::INT32));
-  c2_op = ret.ops.Add();
-  BuildOperator(c2_op, "Cast", {starts_tensor}, {casted_starts_tensor}, {to});
 
   auto ends_vals_tensor = dummy_->NewDummyName();
   auto ends_tensor = dummy_->NewDummyName();
-  auto casted_ends_tensor = dummy_->NewDummyName();
   c2_op = ret.ops.Add();
   {
     caffe2::Argument shape_ends;
@@ -959,17 +1048,187 @@ Caffe2Ops Caffe2Backend::CreateSlice(
       "ScatterAssign",
       {ends_tensor, axes_tensor, ends_vals_tensor},
       {ends_tensor});
-  // Slice only accepts ends as int
-  c2_op = ret.ops.Add();
-  BuildOperator(c2_op, "Cast", {ends_tensor}, {casted_ends_tensor}, {to});
 
   // attach the original op at the end
   c2_op = ret.ops.Add();
   c2_op->CopyFrom(*op);
   c2_op->mutable_input()->Clear();
   c2_op->add_input(data);
-  c2_op->add_input(casted_starts_tensor);
-  c2_op->add_input(casted_ends_tensor);
+  c2_op->add_input(starts_tensor);
+  c2_op->add_input(ends_tensor);
+  c2_op->mutable_arg()->Clear();
+  for (const auto& kv : args) {
+    c2_op->add_arg()->CopyFrom(*kv.second);
+  }
+
+  return ret;
+}
+
+// Do the following:
+// for a given index tensor (i.e. `starts` or `ends`):
+// 1) Hilariously subtract 1 from the value if it is negative. This due to
+//    the behavior of Caffe2's slice operator not matching that of ONNX's slice
+// 2) Fully expand the index tensor out to the rank of the data tensor.
+//    pseudocode: indices_full = zeros(rank); indices_full[axes] = indices.int()
+std::string Caffe2Backend::PreprocessSliceIndexTensor(
+    OnnxNode* onnx_node,
+    Caffe2Ops& ret,
+    std::string indices_tensor,
+    std::string axes_tensor,
+    std::string rank_tensor,
+    std::string zero_tensor,
+    std::string one_tensor,
+    int default_value) {
+  auto indices_tensor_full = dummy_->NewDummyName();
+
+  {
+    caffe2::Argument value;
+    value.set_name("value");
+    value.set_i(default_value);
+    caffe2::Argument dtype;
+    dtype.set_name("dtype");
+    dtype.set_i(static_cast<int64_t>(caffe2::TensorProto::INT64));
+    caffe2::Argument input_as_shape;
+    input_as_shape.set_name("input_as_shape");
+    input_as_shape.set_i(1);
+    auto c2_op = ret.ops.Add();
+    BuildOperator(
+        c2_op,
+        "ConstantFill",
+        {rank_tensor},
+        {indices_tensor_full},
+        {value, dtype, input_as_shape});
+  }
+
+  // Subtract 1 from each element of the indices tensor that is negative
+  auto lt_tensor = dummy_->NewDummyName();
+  {
+    caffe2::Argument broadcast;
+    broadcast.set_name("broadcast");
+    broadcast.set_i(1);
+    auto c2_op = ret.ops.Add();
+    BuildOperator(
+        c2_op, "LT", {indices_tensor, zero_tensor}, {lt_tensor}, {broadcast});
+  }
+
+  auto sub_one_tensor = dummy_->NewDummyName();
+  {
+    caffe2::Argument broadcast;
+    broadcast.set_name("broadcast");
+    broadcast.set_i(1);
+    auto c2_op = ret.ops.Add();
+    BuildOperator(
+        c2_op,
+        "Sub",
+        {indices_tensor, one_tensor},
+        {sub_one_tensor},
+        {broadcast});
+  }
+
+  auto indices_tensor_adjusted = dummy_->NewDummyName();
+  auto c2_op = ret.ops.Add();
+  BuildOperator(
+      c2_op,
+      "Conditional",
+      {lt_tensor, sub_one_tensor, indices_tensor},
+      {indices_tensor_adjusted},
+      {});
+
+  // Fill in values specified from the partially-specified ONNX indices tensor
+  c2_op = ret.ops.Add();
+  BuildOperator(
+      c2_op,
+      "ScatterAssign",
+      {indices_tensor_full, axes_tensor, indices_tensor_adjusted},
+      {indices_tensor_full});
+
+  return indices_tensor_full;
+}
+
+Caffe2Ops Caffe2Backend::CreateDynamicSlice(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto op_tmp = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
+  CAFFE_ENFORCE_EQ(op_tmp.ops.size(), 1);
+  auto* op = op_tmp.ops.Mutable(0);
+  std::unordered_map<std::string, caffe2::Argument*> args;
+  for (auto& arg : *op->mutable_arg()) {
+    args.emplace(arg.name(), &arg);
+  }
+
+  CAFFE_ENFORCE_GE(op->input_size(), 1);
+  auto data = op->input(0);
+  Caffe2Ops ret;
+
+  // First get the shape of the input tensor
+  auto* c2_op = ret.ops.Add();
+  auto size_tensor = dummy_->NewDummyName();
+  BuildOperator(c2_op, "Shape", {data}, {size_tensor});
+
+  // Now get the rank of the tensor by getting the shape of the shape of
+  // the input tensor
+  c2_op = ret.ops.Add();
+  auto rank_tensor = dummy_->NewDummyName();
+  BuildOperator(c2_op, "Shape", {size_tensor}, {rank_tensor});
+
+  // Axes tensor will be used to populate the fully-specified starts and ends
+  // arguments to the caffe2 Slice operator.
+  std::string axes_tensor;
+  if (onnx_node->node.input_size() > 3) {
+    axes_tensor = onnx_node->node.input(3);
+  } else {
+    axes_tensor = dummy_->NewDummyName();
+    auto* c2_op = ret.ops.Add();
+    BuildOperator(c2_op, "Range", {rank_tensor}, {axes_tensor}, {});
+  }
+
+  // Useful int tensors
+  auto define_integer_constant = [this, &ret](int val) {
+    caffe2::Argument value;
+    value.set_name("value");
+    value.set_i(val);
+    caffe2::Argument dtype;
+    dtype.set_name("dtype");
+    dtype.set_i(static_cast<int64_t>(caffe2::TensorProto::INT64));
+    caffe2::Argument shape;
+    shape.set_name("shape");
+    shape.add_ints(1);
+    auto c2_op = ret.ops.Add();
+    auto name = dummy_->NewDummyName();
+    BuildOperator(c2_op, "ConstantFill", {}, {name}, {value, dtype, shape});
+    return name;
+  };
+
+  auto zero_tensor = define_integer_constant(0);
+  auto one_tensor = define_integer_constant(1);
+
+  auto starts_tensor_full = PreprocessSliceIndexTensor(
+      onnx_node,
+      ret,
+      onnx_node->node.input(1), // starts
+      axes_tensor,
+      rank_tensor,
+      zero_tensor,
+      one_tensor,
+      0);
+
+  auto ends_tensor_full = PreprocessSliceIndexTensor(
+      onnx_node,
+      ret,
+      onnx_node->node.input(2), // ends
+      axes_tensor,
+      rank_tensor,
+      zero_tensor,
+      one_tensor,
+      -1);
+
+  // attach the original op at the end
+  c2_op = ret.ops.Add();
+  c2_op->CopyFrom(*op);
+  c2_op->mutable_input()->Clear();
+  c2_op->add_input(data);
+  c2_op->add_input(starts_tensor_full);
+  c2_op->add_input(ends_tensor_full);
   c2_op->mutable_arg()->Clear();
   for (const auto& kv : args) {
     c2_op->add_arg()->CopyFrom(*kv.second);
@@ -992,7 +1251,8 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     attr->set_i(1);
   }
 
-  if (attributes.HasAttribute("spatial") && attributes.get<int64_t>("spatial") == 1) {
+  if (attributes.HasAttribute("spatial") &&
+      attributes.get<int64_t>("spatial") == 1) {
     attributes.remove("spatial");
   }
 
@@ -1034,11 +1294,14 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
   attributes.remove("mode");
-  if (ctx.opset_version() >= 7) {
-    const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+
+  if (ctx.opset_version() >= 7 && ctx.opset_version() < 9) {
+    const auto& scales =
+        attributes.get<::google::protobuf::RepeatedField<float>>("scales");
     if (scales.size() != 4) {
       CAFFE_THROW("The scales argument should have size 4");
-    } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
+    } else if (
+        !AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1)) {
       CAFFE_THROW("The first two elements in the scales argument must be 1");
     }
     attributes.remove("scales");
@@ -1051,6 +1314,37 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     c2_width->set_name("width_scale");
     c2_width->set_f(scales.Get(3));
     return c2_op;
+  } else if (ctx.opset_version() >= 9) {
+    const auto& node = onnx_node->node;
+    if (node.input_size() != 2) {
+      CAFFE_THROW("Expects 2 input in upsample after onnx version 9");
+    }
+    Caffe2Ops ret;
+
+    // Slice the input {1, 1, height, width} -> {height, width}
+    auto* c2_op = ret.ops.Add();
+    auto sliced_input = dummy_->NewDummyName();
+    caffe2::Argument arg_starts, arg_ends;
+    arg_starts.set_name("starts");
+    arg_starts.add_ints(2);
+    arg_ends.set_name("ends");
+    arg_ends.add_ints(-1);
+    BuildOperator(
+        c2_op,
+        "Slice",
+        {node.input(1)},
+        {sliced_input},
+        {arg_starts, arg_ends});
+
+    // Upsample
+    c2_op = ret.ops.Add();
+    BuildOperator(
+        c2_op,
+        "ResizeNearest",
+        {node.input(0), sliced_input},
+        {node.output(0)},
+        {});
+    return ret;
   }
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
@@ -1073,14 +1367,14 @@ Caffe2Ops Caffe2Backend::CreateLRN(
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   const auto& attributes = onnx_node->attributes;
   if (!attributes.HasAttribute("alpha")) {
-      auto* arg = c2_op.ops.Mutable(0)->add_arg();
-      arg->set_name("alpha");
-      arg->set_f(1e-4);
+    auto* arg = c2_op.ops.Mutable(0)->add_arg();
+    arg->set_name("alpha");
+    arg->set_f(1e-4);
   }
   if (!attributes.HasAttribute("beta")) {
-      auto* arg = c2_op.ops.Mutable(0)->add_arg();
-      arg->set_name("beta");
-      arg->set_f(0.75);
+    auto* arg = c2_op.ops.Mutable(0)->add_arg();
+    arg->set_name("beta");
+    arg->set_f(0.75);
   }
   return c2_op;
 }
@@ -1088,8 +1382,8 @@ Caffe2Ops Caffe2Backend::CreateLRN(
 //==============================================
 // Rest of the member functions for Caffe2Backend
 //==============================================
-std::unordered_set<std::string>
-Caffe2Backend::AllNamesInGraph(const GraphProto &graph) {
+std::unordered_set<std::string> Caffe2Backend::AllNamesInGraph(
+    const GraphProto& graph) {
   std::unordered_set<std::string> names;
 
   for (const auto& input : graph.input()) {
@@ -1131,6 +1425,7 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
   c2_op->mutable_output()->MergeFrom(node.output());
   c2_op->set_name(node.name());
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   const auto onnx_op_type = node.op_type();
   auto broken_version = caffe2::get_default(
       get_broken_operators(), onnx_op_type, std::numeric_limits<int>::max());
@@ -1146,8 +1441,7 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
   c2_op->set_type(
       caffe2::get_default(get_renamed_operators(), onnx_op_type, onnx_op_type));
   if (!IsOperator(c2_op->type())) {
-    CAFFE_THROW(
-        "Don't know how to translate op ", onnx_op_type);
+    CAFFE_THROW("Don't know how to translate op ", onnx_op_type);
   }
 
   auto mapper = [&, this](const std::string& k) {
@@ -1186,7 +1480,7 @@ void Caffe2Backend::CheckOpSchemaArguments(
     const caffe2::OpSchema& schema,
     const caffe2::OperatorDef& op) {
   const auto& schema_args = schema.args();
-  if (schema_args.size() > 0){
+  if (schema_args.size() > 0) {
     std::vector<std::string> argnames;
     std::transform(
         schema_args.begin(),
@@ -1200,12 +1494,16 @@ void Caffe2Backend::CheckOpSchemaArguments(
             "Don't know how to map unexpected argument ",
             arg.name(),
             " (from operator ",
-            op.type(), ")");
+            op.type(),
+            ")");
       }
     }
   } else {
-    // A number of C2 operators do not declare proper arguments. Let's log the error
-    VLOG(2) << "Operator " << op.type() << " does not declare arguments in its schema. Please file a Caffe2 issue.";
+    // A number of C2 operators do not declare proper arguments. Let's log the
+    // error
+    VLOG(2)
+        << "Operator " << op.type()
+        << " does not declare arguments in its schema. Please file a Caffe2 issue.";
   }
 }
 
@@ -1222,12 +1520,14 @@ Caffe2Ops Caffe2Backend::OnnxNodeToCaffe2Ops(
     res = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   }
 
-  for (const auto& result_op: res.ops){
+  for (const auto& result_op : res.ops) {
     const auto* schema = OpSchemaRegistry::Schema(result_op.type());
     if (schema) {
       CheckOpSchemaArguments(*schema, result_op);
     } else {
-      CAFFE_THROW("Caffe2 has no such operator, could not find schema for ", result_op.type());
+      CAFFE_THROW(
+          "Caffe2 has no such operator, could not find schema for ",
+          result_op.type());
     }
   }
   return res;
@@ -1243,14 +1543,9 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
-#if !CAFFE2_MOBILE
-  ModelProto init_model = OptimizeOnnx(onnx_model, true);
-  ModelProto pred_model = OptimizeOnnx(onnx_model, false);
-#else
   ModelProto init_model = ModelProto();
   ModelProto pred_model = onnx_model;
   pred_model.mutable_graph()->mutable_initializer()->Clear();
-#endif
 
   init_net->set_name(onnx_model.graph().name() + "_init");
   pred_net->set_name(onnx_model.graph().name() + "_predict");
@@ -1347,7 +1642,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   ModelProto onnx_model;
   ParseProtoFromLargeString(onnx_model_str, &onnx_model);
 
-#if !CAFFE2_MOBILE
+#ifndef C10_MOBILE
   ::ONNX_NAMESPACE::checker::check_model(onnx_model);
 #endif
 
@@ -1379,7 +1674,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
     }
   }
 
-  // TODO: avoid extra copy by directly feed initialiers to backend blobs
+  // TODO: avoid extra copy by directly feed initializers to backend blobs
   OnnxToCaffe2(
       &rep->init_net(),
       &rep->pred_net(),
@@ -1405,23 +1700,23 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
 }
 
 template <typename T>
-void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
-                                  caffe2::Argument* c2_values,
-                                  const TensorProto& onnx_tensor) {
+void ConvertIntegralValueToCaffe2(
+    caffe2::OperatorDef* c2_op,
+    caffe2::Argument* c2_values,
+    const TensorProto& onnx_tensor) {
   c2_op->set_type(
       onnx_tensor.data_type() == TensorProto::BOOL ? "GivenTensorBoolFill"
                                                    : "GivenTensorIntFill");
   ::google::protobuf::RepeatedField<T> tmp;
-  const ::google::protobuf::RepeatedField<T>* src =
-      &tmp;
+  const ::google::protobuf::RepeatedField<T>* src = &tmp;
   bool converted = TryConvertingTensorRawValues<T>(onnx_tensor, &tmp);
   if (converted) {
     for (const auto i : *src) {
       c2_values->add_ints(i);
     }
   } else {
-    const ::google::protobuf::RepeatedField<::google::protobuf::int32> *int32_src = \
-      &onnx_tensor.int32_data();
+    const ::google::protobuf::RepeatedField<::google::protobuf::int32>*
+        int32_src = &onnx_tensor.int32_data();
     for (const auto i : *int32_src) {
       c2_values->add_ints(i);
     }
@@ -1429,9 +1724,10 @@ void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
 }
 
 template <>
-void ConvertIntegralValueToCaffe2<::google::protobuf::int64>(caffe2::OperatorDef* c2_op,
-                                                             caffe2::Argument* c2_values,
-                                                            const TensorProto& onnx_tensor) {
+void ConvertIntegralValueToCaffe2<::google::protobuf::int64>(
+    caffe2::OperatorDef* c2_op,
+    caffe2::Argument* c2_values,
+    const TensorProto& onnx_tensor) {
   c2_op->set_type("GivenTensorInt64Fill");
   auto* ints = c2_values->mutable_ints();
   if (!TryConvertingTensorRawValues<::google::protobuf::int64>(
@@ -1441,9 +1737,10 @@ void ConvertIntegralValueToCaffe2<::google::protobuf::int64>(caffe2::OperatorDef
 }
 
 template <>
-void ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(caffe2::OperatorDef* c2_op,
-                                                              caffe2::Argument* c2_values,
-                                                              const TensorProto& onnx_tensor) {
+void ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(
+    caffe2::OperatorDef* c2_op,
+    caffe2::Argument* c2_values,
+    const TensorProto& onnx_tensor) {
   c2_op->set_type("GivenTensorInt64Fill");
   ::google::protobuf::RepeatedField<::google::protobuf::uint64> tmp;
   const ::google::protobuf::RepeatedField<::google::protobuf::uint64>* src =
@@ -1460,8 +1757,9 @@ void ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(caffe2::OperatorDe
 void Caffe2Backend::BuildTensorFillingOp(
     caffe2::OperatorDef* c2_op,
     const TensorProto& onnx_tensor,
-    const std::string& name) {
-  auto fill_name = name.empty() ? onnx_tensor.name() : name;
+    const std::string& output_name,
+    const std::string& shape_name) {
+  auto fill_name = output_name.empty() ? onnx_tensor.name() : output_name;
   CAFFE_ENFORCE(!fill_name.empty());
 
   if (onnx_tensor.has_segment()) {
@@ -1469,55 +1767,131 @@ void Caffe2Backend::BuildTensorFillingOp(
   }
 
   auto* c2_values = c2_op->add_arg();
-  c2_values->set_name("values");
-
-  if (onnx_tensor.data_type() == TensorProto::FLOAT) {
-    c2_op->set_type("GivenTensorFill");
-    auto* floats = c2_values->mutable_floats();
-    if (!TryConvertingTensorRawValues<float>(onnx_tensor, floats)) {
-      floats->CopyFrom(onnx_tensor.float_data());
+  // if shape_name is empty, we generate GivenTensorFill
+  // otherwise, we generate ConstantFill, which accept shape as input
+  if (shape_name.empty()) {
+    // GivenTensor*Fill uses values
+    c2_values->set_name("values");
+    if (onnx_tensor.data_type() == TensorProto::FLOAT) {
+      c2_op->set_type("GivenTensorFill");
+      auto* floats = c2_values->mutable_floats();
+      if (!TryConvertingTensorRawValues<float>(onnx_tensor, floats)) {
+        floats->CopyFrom(onnx_tensor.float_data());
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE) {
+      c2_op->set_type("GivenTensorDoubleFill");
+      ::google::protobuf::RepeatedField<double> tmp;
+      const ::google::protobuf::RepeatedField<double>* src = &tmp;
+      if (!TryConvertingTensorRawValues<double>(onnx_tensor, &tmp)) {
+        src = &onnx_tensor.double_data();
+      }
+      for (const auto i : *src) {
+        c2_values->add_floats(i);
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::INT64) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int64>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(
+          c2_op, c2_values, onnx_tensor);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
+    } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int8>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::uint8>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::INT8) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int8>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::UINT16) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::uint16>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::INT16) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int16>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::INT32) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int32>(
+          c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::STRING) {
+      c2_op->set_type("GivenTensorStringFill");
+      auto* strings = c2_values->mutable_strings();
+      strings->CopyFrom(onnx_tensor.string_data());
+    } else {
+      CAFFE_THROW("unrecognized tensor type: ", onnx_tensor.data_type());
     }
-  } else if (onnx_tensor.data_type() == TensorProto::DOUBLE) {
-    c2_op->set_type("GivenTensorDoubleFill");
-    ::google::protobuf::RepeatedField<double> tmp;
-    const ::google::protobuf::RepeatedField<double>* src = &tmp;
-    if (!TryConvertingTensorRawValues<double>(onnx_tensor, &tmp)) {
-      src = &onnx_tensor.double_data();
+    auto* c2_shape = c2_op->add_arg();
+    c2_shape->set_name("shape");
+    for (const auto d : onnx_tensor.dims()) {
+      c2_shape->add_ints(d);
     }
-    for (const auto i : *src) {
-      c2_values->add_floats(i);
-    }
-  } else if (onnx_tensor.data_type() == TensorProto::INT64) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int64>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::uint8>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::INT8) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::UINT16) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::uint16>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::INT16) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int16>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::INT32) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int32>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::STRING) {
-    c2_op->set_type("GivenTensorStringFill");
-    auto* strings = c2_values->mutable_strings();
-    strings->CopyFrom(onnx_tensor.string_data());
   } else {
-    CAFFE_THROW(
-        "unrecognized tensor type: ",
-        TensorProto::DataType_Name(onnx_tensor.data_type()));
+    int value_size = 1;
+    for (const auto d : onnx_tensor.dims()) {
+      value_size *= d;
+    }
+    CAFFE_ENFORCE(value_size == 1);
+    auto c2_input_as_shape = c2_op->add_arg();
+    c2_input_as_shape->set_name("input_as_shape");
+    c2_input_as_shape->set_i(1);
+    c2_values->set_name("value");
+    auto* c2_dtype = c2_op->add_arg();
+    c2_dtype->set_name("dtype");
+    if (onnx_tensor.data_type() == TensorProto::FLOAT) {
+      c2_dtype->set_i(caffe2::TensorProto::FLOAT);
+      if (onnx_tensor.float_data_size() > 0) {
+        c2_values->set_f(onnx_tensor.float_data(0));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(float));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        float f;
+        memcpy(&f, onnx_tensor.raw_data().c_str(), sizeof(float));
+        c2_values->set_f(f);
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE) {
+      c2_dtype->set_i(caffe2::TensorProto::DOUBLE);
+      if (onnx_tensor.double_data_size() > 0) {
+        c2_values->set_f(static_cast<float>(onnx_tensor.double_data(0)));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(double));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        double d;
+        memcpy(&d, onnx_tensor.raw_data().c_str(), sizeof(double));
+        c2_values->set_f(static_cast<float>(d));
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::INT64) {
+      c2_dtype->set_i(caffe2::TensorProto::INT64);
+      if (onnx_tensor.int64_data_size() > 0) {
+        c2_values->set_i(onnx_tensor.int64_data(0));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int64_t));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        int64_t i;
+        memcpy(&i, onnx_tensor.raw_data().c_str(), sizeof(int64_t));
+        c2_values->set_i(i);
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::INT32) {
+      c2_dtype->set_i(caffe2::TensorProto::INT32);
+      if (onnx_tensor.int32_data_size() > 0) {
+        c2_values->set_i(onnx_tensor.int32_data(0));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int32_t));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        int32_t i;
+        memcpy(&i, onnx_tensor.raw_data().c_str(), sizeof(int32_t));
+        c2_values->set_i(i);
+      }
+    } else {
+      // TODO: to support more data type
+      std::stringstream oss;
+      oss << "Unsupported dtype: " << onnx_tensor.data_type();
+      CAFFE_THROW(oss.str());
+    }
+    // ConstantFill uses value
+    c2_op->set_type("ConstantFill");
+    c2_op->add_input(shape_name);
   }
 
-  auto* c2_shape = c2_op->add_arg();
-  c2_shape->set_name("shape");
-  for (const auto d : onnx_tensor.dims()) {
-    c2_shape->add_ints(d);
-  }
   c2_op->add_output(fill_name);
 }
 

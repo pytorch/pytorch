@@ -9,7 +9,8 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 class Bernoulli(ExponentialFamily):
     r"""
-    Creates a Bernoulli distribution parameterized by `probs` or `logits`.
+    Creates a Bernoulli distribution parameterized by :attr:`probs`
+    or :attr:`logits` (but not both).
 
     Samples are binary (0 or 1). They take the value `1` with probability `p`
     and `0` with probability `1 - p`.
@@ -21,10 +22,11 @@ class Bernoulli(ExponentialFamily):
         tensor([ 0.])
 
     Args:
-        probs (Number, Tensor): the probabilty of sampling `1`
+        probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
-    arg_constraints = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     support = constraints.boolean
     has_enumerate_support = True
     _mean_carrier_measure = 0
@@ -44,6 +46,19 @@ class Bernoulli(ExponentialFamily):
         else:
             batch_shape = self._param.size()
         super(Bernoulli, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Bernoulli, _instance)
+        batch_shape = torch.Size(batch_shape)
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+            new._param = new.probs
+        if 'logits' in self.__dict__:
+            new.logits = self.logits.expand(batch_shape)
+            new._param = new.logits
+        super(Bernoulli, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -82,11 +97,11 @@ class Bernoulli(ExponentialFamily):
     def entropy(self):
         return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none')
 
-    def enumerate_support(self):
-        values = self._new((2,))
-        torch.arange(2, out=values)
+    def enumerate_support(self, expand=True):
+        values = torch.arange(2, dtype=self._param.dtype, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         return values
 
     @property

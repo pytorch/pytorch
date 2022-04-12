@@ -2,7 +2,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
-
+from typing import Dict
 
 class Independent(Distribution):
     r"""
@@ -31,7 +31,7 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
-    arg_constraints = {}
+    arg_constraints: Dict[str, constraints.Constraint] = {}
 
     def __init__(self, base_distribution, reinterpreted_batch_ndims, validate_args=None):
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
@@ -46,6 +46,16 @@ class Independent(Distribution):
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super(Independent, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Independent, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.base_dist = self.base_dist.expand(batch_shape +
+                                              self.event_shape[:self.reinterpreted_batch_ndims])
+        new.reinterpreted_batch_ndims = self.reinterpreted_batch_ndims
+        super(Independent, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @property
     def has_rsample(self):
         return self.base_dist.has_rsample
@@ -58,7 +68,10 @@ class Independent(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        return self.base_dist.support
+        result = self.base_dist.support
+        if self.reinterpreted_batch_ndims:
+            result = constraints.independent(result, self.reinterpreted_batch_ndims)
+        return result
 
     @property
     def mean(self):
@@ -82,7 +95,10 @@ class Independent(Distribution):
         entropy = self.base_dist.entropy()
         return _sum_rightmost(entropy, self.reinterpreted_batch_ndims)
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         if self.reinterpreted_batch_ndims > 0:
             raise NotImplementedError("Enumeration over cartesian product is not implemented")
-        return self.base_dist.enumerate_support()
+        return self.base_dist.enumerate_support(expand=expand)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '({}, {})'.format(self.base_dist, self.reinterpreted_batch_ndims)

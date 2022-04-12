@@ -1,11 +1,9 @@
 #pragma once
 
-#include "miopen-wrapper.h"
+#include <ATen/miopen/miopen-wrapper.h>
 #include <string>
 #include <stdexcept>
 #include <sstream>
-
-struct THCState;
 
 namespace at { namespace native {
 

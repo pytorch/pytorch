@@ -1,5 +1,7 @@
 #include <cpuinfo.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 
 #include "caffe2/core/logging.h"
@@ -73,13 +75,16 @@ uint32_t wipe_cache() {
         break;
     }
 #endif
-    LOG(INFO) << "Allocating cache wipe buffer of size" << wipe_size;
+    LOG(INFO) << "Allocating cache wipe buffer of size " << wipe_size;
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     wipe_buffer = static_cast<uint32_t*>(malloc(wipe_size));
     CAFFE_ENFORCE(wipe_buffer != nullptr);
   }
   uint32_t hash = 0;
   for (uint32_t i = 0; i * sizeof(uint32_t) < wipe_size; i += 8) {
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
     hash ^= wipe_buffer[i];
+    wipe_buffer[i] = hash;
   }
   /* Make sure compiler doesn't optimize the loop away */
   return hash;

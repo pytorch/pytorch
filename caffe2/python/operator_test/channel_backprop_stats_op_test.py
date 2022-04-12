@@ -1,24 +1,25 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from hypothesis import assume, given
-import hypothesis.strategies as st
-import numpy as np
+
+
+
+
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto import caffe2_pb2
+from hypothesis import given, settings
+import caffe2.python.serialized_test.serialized_test_util as serial
+import hypothesis.strategies as st
+import numpy as np
 import unittest
 
 
-class TestChannelBackpropStats(hu.HypothesisTestCase):
+class TestChannelBackpropStats(serial.SerializedTestCase):
     @given(
         size=st.integers(7, 10),
         inputChannels=st.integers(1, 10),
         batchSize=st.integers(1, 3),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def testChannelBackpropStats(self, size, inputChannels, batchSize, gc, dc):
 
         op = core.CreateOperator(

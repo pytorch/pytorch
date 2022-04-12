@@ -1,5 +1,5 @@
 #include "caffe2/operators/lengths_reducer_fused_8bit_rowwise_ops.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 
 namespace caffe2 {
 
@@ -32,7 +32,8 @@ stores quantized values, and then 4-byte scale and 4-byte bias).
         2,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Output(0, "output", "output");
+    .Output(0, "output", "output")
+    .InheritOnnxSchema();
 NO_GRADIENT(SparseLengthsSumFused8BitRowwise);
 
 REGISTER_CPU_OPERATOR(
@@ -41,7 +42,11 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsWeightedSumFused8BitRowwise)
     .NumInputs(4)
     .NumOutputs(1)
-    .DisallowInputFillers() // TODO: Enable the fillers
+    .WeightedValueKeyLengthInputFillers(
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::DATA,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::INDICES,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::LENGTHS,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::WEIGHTS)
     .SetDoc(R"DOC(
 Performs the same operation as SparseLengthsWeightedSum,
 but operating on 8-bit rowwise quantized matrices with fused storage
@@ -54,17 +59,17 @@ but operating on 8-bit rowwise quantized matrices with fused storage
         "operator FloatToFused8BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Output(0, "output", "output");
 
 NO_GRADIENT(SparseLengthsWeightedSumFused8BitRowwise);

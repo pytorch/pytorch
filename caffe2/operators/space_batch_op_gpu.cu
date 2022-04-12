@@ -65,7 +65,7 @@ void spaceToBatch<CUDAContext>(
   const int input_depth = input.dim32(1);
   const int input_height = input.dim32(2);
   const int input_width = input.dim32(3);
-  const int N = output->size();
+  const int N = output->numel();
   SpaceToBatch<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
@@ -85,6 +85,7 @@ void spaceToBatch<CUDAContext>(
       block_size,
       input.data<float>(),
       output->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 
@@ -139,8 +140,8 @@ void batchToSpace(
     int block_size,
     Tensor* output,
     CUDAContext* context) {
-  CAFFE_ENFORCE(input.ndim() == 4);
-  CAFFE_ENFORCE(output->ndim() == 4);
+  CAFFE_ENFORCE(input.dim() == 4);
+  CAFFE_ENFORCE(output->dim() == 4);
 
   const int output_batch = output->dim32(0);
   const int output_depth = output->dim32(1);
@@ -151,7 +152,7 @@ void batchToSpace(
   const int input_depth = input.dim32(1);
   const int input_height = input.dim32(2);
   const int input_width = input.dim32(3);
-  const int N = input.size();
+  const int N = input.numel();
   BatchToSpace<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
@@ -171,6 +172,7 @@ void batchToSpace(
       block_size,
       input.data<float>(),
       output->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(SpaceToBatch, SpaceToBatchOp<CUDAContext>);

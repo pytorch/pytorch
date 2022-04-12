@@ -58,7 +58,7 @@
 
 
 #include "caffe2/core/context_gpu.h"
-#include "upsample_nearest_op.h"
+#include "modules/detectron/upsample_nearest_op.h"
 
 namespace caffe2 {
 
@@ -125,7 +125,7 @@ bool UpsampleNearestOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
 
-  vector<TIndex> out_shape;
+  vector<int64_t> out_shape;
   for (int i = 0; i < X.ndim(); ++i) {
     out_shape.push_back(X.dim32(i));
   }
@@ -164,6 +164,8 @@ bool UpsampleNearestOp<float, CUDAContext>::RunOnDevice() {
 
   upscale<<<blocks, threads, 0, context_.cuda_stream()>>>(
       input_data, output_data, no_elements, scale_, d1, d2, d3);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -209,6 +211,7 @@ bool UpsampleNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   math::Set<float, CUDAContext>(no_elements, 0.f, gradInput_data, &context_);
   downscale<<<blocks, threads, 0, context_.cuda_stream()>>>(
       gradInput_data, gradOutput_data, no_elements, scale_, d1, d2, d3);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

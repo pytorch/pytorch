@@ -1,190 +1,212 @@
-import subprocess
-import re
-import os
-import sys
-import itertools
-from collections import defaultdict
+from torch.autograd.profiler_util import (
+    EventList, FunctionEvent, MemRecordsAcc, MEMORY_EVENT_NAME,
+    _filter_name, _filter_stack_entry, _rewrite_name
+)
 
+from torch.autograd import (
+    DeviceType, ProfilerActivity, ProfilerConfig, ProfilerState,
+    kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
+    _prepare_profiler, _supported_activities, _kineto_step,
+)
 import torch
-from torch._six import FileNotFoundError
+import torch.cuda
+from torch.futures import Future
+from typing import Any, Dict, List, Optional
+from warnings import warn
 
 
-class range(object):
-    def __init__(self, name):
-        self.name = name
+try:
+    # Available in Python >= 3.2
+    from contextlib import ContextDecorator
+except ImportError:
+    import functools
 
-    def __enter__(self):
-        torch.autograd._push_range(self.name)
+    class ContextDecorator(object):  # type: ignore[no-redef]
 
-    def __exit__(self, *args):
-        torch.autograd._pop_range()
-        return False
+        def __enter__(self):
+            raise NotImplementedError
 
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            raise NotImplementedError
 
-class EventList(list):
-    """A list of Events (for pretty printing)"""
-    def __init__(self, *args, **kwargs):
-        super(EventList, self).__init__(*args, **kwargs)
+        def __call__(self, func):
+            @functools.wraps(func)
+            def wrapped(*args, **kwargs):
+                with self:
+                    return func(*args, **kwargs)
 
-    def __str__(self):
-        return self.table()
-
-    def table(self, sort_by=None):
-        """Prints an EventList as a nicely formatted table.
-
-        Arguments:
-            sort_by (str, optional): Attribute used to sort entries. By default
-                they are printed in the same order as they were registered.
-                Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
-                ``cuda_time_total``, ``count``.
-
-        Returns:
-            A string containing the table.
-        """
-        return build_table(self, sort_by)
-
-    def export_chrome_trace(self, path):
-        """Exports an EventList as a Chrome tracing tools file.
-
-        The checkpoint can be later loaded and inspected under ``chrome://tracing`` URL.
-
-        Arguments:
-            path (str): Path where the trace will be written.
-        """
-        import json
-        with open(path, 'w') as f:
-            chrome_events = []
-            next_id = 0
-            for evt in self:
-                chrome_events.append(dict(
-                    name=evt.name,
-                    ph='X',
-                    ts=evt.cpu_interval.start,
-                    dur=evt.cpu_interval.elapsed_us(),
-                    tid=evt.thread,
-                    pid='CPU functions',
-                    args={},
-                ))
-                for k in evt.kernels:
-                    # 's' and 'f' draw Flow arrows from
-                    # the CPU launch to the GPU kernel
-                    chrome_events.append(dict(
-                        name=evt.name,
-                        ph='s',
-                        ts=evt.cpu_interval.start,
-                        tid=evt.thread,
-                        pid='CPU functions',
-                        id=next_id,
-                        cat='cpu_to_cuda',
-                        args={},
-                    ))
-                    chrome_events.append(dict(
-                        name=k.name,
-                        ph='f',
-                        ts=k.interval.start,
-                        tid=k.device,
-                        pid='CUDA functions',
-                        id=next_id,
-                        cat='cpu_to_cuda',
-                        args={},
-                    ))
-                    chrome_events.append(dict(
-                        name=k.name,
-                        ph='X',
-                        ts=k.interval.start,
-                        dur=k.interval.elapsed_us(),
-                        tid=k.device,
-                        pid='CUDA functions',
-                        args={},
-                    ))
-                    next_id += 1
-
-            json.dump(chrome_events, f)
-
-    def key_averages(self):
-        """Averages all function events over their keys.
-
-        Returns:
-            An EventList containing FunctionEventAvg objects.
-        """
-        stats = defaultdict(FunctionEventAvg)
-        for evt in self:
-            stats[evt.key] += evt
-        return EventList(stats.values())
-
-    def total_average(self):
-        """Averages all events.
-
-        Returns:
-            A FunctionEventAvg object.
-        """
-        total_stat = FunctionEventAvg()
-        for evt in self:
-            total_stat += evt
-            total_stat.key = None
-        total_stat.key = 'Total'
-        return total_stat
+            return wrapped
 
 
 class profile(object):
     """Context manager that manages autograd profiler state and holds a summary of results.
+    Under the hood it just records events of functions being executed in C++ and
+    exposes those events to Python. You can wrap any code into it and it will
+    only report runtime of PyTorch functions.
+    Note: profiler is thread local and is automatically propagated into the async tasks
 
-    Arguments:
+    Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
-            Default: ``True``.
 
         use_cuda (bool, optional): Enables timing of CUDA events as well using the cudaEvent API.
             Adds approximately 4us of overhead to each tensor operation.
-            Default: ``False``
+
+        record_shapes (bool, optional): If shapes recording is set, information
+            about input dimensions will be collected. This allows one to see which
+            dimensions have been used under the hood and further group by them
+            using prof.key_averages(group_by_input_shape=True). Please note that
+            shape recording might skew your profiling data. It is recommended to
+            use separate runs with and without shape recording to validate the timing.
+            Most likely the skew will be negligible for bottom most events (in a case
+            of nested function calls). But for higher level functions the total
+            self cpu time might be artificially increased because of the shape
+            collection.
+
+        with_flops (bool, optional): If with_flops is set, the profiler will estimate
+            the FLOPs (floating point operations) value using the operator's input shape.
+            This allows one to estimate the hardware performance. Currently,
+            this option only works for the matrix multiplication and 2D convolution operators.
+
+        profile_memory (bool, optional): track tensor memory allocation/deallocation.
+
+        with_stack (bool, optional): record source information (file and line number) for the ops.
+
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
+
+        use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
+
+        use_cpu (bool, optional): profile CPU events; setting to ``False`` requires
+            ``use_kineto=True`` and can be used to lower the overhead for GPU-only profiling.
 
     .. warning:
-        This context managers should not be called recursively, i.e. at most one
-        instance should be enabled at any given time.
+        Enabling memory profiling or source attribution incurs additional profiler
+        overhead
+
+    .. warning:
+        This context managers should not be called recursively, i.e. no nested
+        instances are allowed
+
+    .. warning:
+        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+        one cannot use the profiler with ``use_cuda = True`` to benchmark
+        DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
+        please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x ** 2
-        ...     y.backward()
+        >>>     for _ in range(100):  # any normal python code, really!
+        >>>         y = x ** 2
+        >>          y.backward()
         >>> # NOTE: some columns were removed for brevity
-        ... print(prof)
-        -------------------------------------  ---------------  ---------------
-        Name                                          CPU time        CUDA time
-        -------------------------------------  ---------------  ---------------
-        PowConstant                                  142.036us          0.000us
-        N5torch8autograd9GraphRootE                   63.524us          0.000us
-        PowConstantBackward                          184.228us          0.000us
-        MulConstant                                   50.288us          0.000us
-        PowConstant                                   28.439us          0.000us
-        Mul                                           20.154us          0.000us
-        N5torch8autograd14AccumulateGradE             13.790us          0.000us
-        N5torch8autograd5CloneE                        4.088us          0.000us
-    """
+        >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        -----------------------------------  ---------------  ---------------  ---------------
+        Name                                 Self CPU total   CPU time avg     Number of Calls
+        -----------------------------------  ---------------  ---------------  ---------------
+        mul                                  32.048ms         32.048ms         200
+        pow                                  27.041ms         27.041ms         200
+        PowBackward0                         9.727ms          55.483ms         100
+        torch::autograd::AccumulateGrad      9.148ms          9.148ms          100
+        torch::autograd::GraphRoot           691.816us        691.816us        100
+        -----------------------------------  ---------------  ---------------  ---------------
 
-    def __init__(self, enabled=True, use_cuda=False):
-        self.enabled = enabled
-        self.use_cuda = use_cuda
-        self.function_events = None
+    """
+    def __init__(
+            self,
+            enabled=True,
+            *,
+            use_cuda=False,
+            record_shapes=False,
+            with_flops=False,
+            profile_memory=False,
+            with_stack=False,
+            with_modules=False,
+            use_kineto=False,
+            use_cpu=True):
+        self.enabled: bool = enabled
         if not self.enabled:
             return
+        self.use_cuda = use_cuda
+        self.function_events: Optional[EventList] = None
         self.entered = False
+        self.record_shapes = record_shapes
+        self.with_flops = with_flops
+        self.record_shapes |= self.with_flops
+        self.profile_memory = profile_memory
+        self.with_stack = with_stack
+        self.with_modules = with_modules
+        self.use_cpu = use_cpu
+        self.kineto_results: Optional[_ProfilerResult] = None
+
+        if not self.use_cpu:
+            assert use_kineto, \
+                "Device-only events supported only with Kineto (use_kineto=True)"
+
+        if self.use_cuda and not torch.cuda.is_available():
+            warn("CUDA is not available, disabling CUDA profiling")
+            self.use_cuda = False
+
+        self.kineto_activities = set()
+        if self.use_cpu:
+            self.kineto_activities.add(ProfilerActivity.CPU)
+
+        self.profiler_kind = ProfilerState.KINETO
+        if self.use_cuda:
+            if (not use_kineto or ProfilerActivity.CUDA not in
+                    _supported_activities()):
+                assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
+                self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
+            else:
+                self.kineto_activities.add(ProfilerActivity.CUDA)
+
+        assert len(self.kineto_activities) > 0, \
+            "No activities specified for the profiler"
+
+
+    def config(self):
+        return ProfilerConfig(
+            self.profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            self.with_stack,
+            self.with_flops,
+            self.with_modules)
 
     def __enter__(self):
         if not self.enabled:
             return
         if self.entered:
-            raise RuntimeError("autograd profiler traces are not reentrant")
-        self.entered = True
-        profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
-            else torch.autograd.ProfilerState.CPU
-        torch.autograd._enable_profiler(profiler_kind)
+            raise RuntimeError("Profiler context manager is not reentrant")
+        self._prepare_trace()
+        self._start_trace()
         return self
+
+    def _prepare_trace(self):
+        self.entered = True
+        _prepare_profiler(self.config(), self.kineto_activities)
+
+    def _start_trace(self):
+        self.entered = True
+        _enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        records = torch.autograd._disable_profiler()
-        self.function_events = EventList(parse_cpu_trace(records))
+        if self.use_cuda:
+            torch.cuda.synchronize()
+        self.kineto_results = _disable_profiler()
+        parsed_results = self._parse_kineto_results(self.kineto_results)
+        self.function_events = EventList(
+            parsed_results,
+            use_cuda=self.use_cuda,
+            profile_memory=self.profile_memory,
+            with_flops=self.with_flops)
+        self.function_events._build_tree()
         return False
 
     def __repr__(self):
@@ -199,27 +221,259 @@ class profile(object):
 
     def _check_finish(self):
         if self.function_events is None:
-            raise RuntimeError("can't export a trace that didn't finish running")
+            raise RuntimeError("Profiler didn't finish running")
 
-    def table(self, sort_by=None):
+    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
         self._check_finish()
-        return self.function_events.table(sort_by)
+        assert self.function_events is not None
+        return self.function_events.table(
+            sort_by=sort_by, row_limit=row_limit, max_src_column_width=max_src_column_width, header=header,
+            top_level_events_only=top_level_events_only
+        )
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
         self._check_finish()
-        return self.function_events.export_chrome_trace(path)
+        if kineto_available():
+            self.kineto_results.save(path)  # type: ignore[union-attr]
+        else:
+            return self.function_events.export_chrome_trace(path)  # type: ignore[union-attr]
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
-    def key_averages(self):
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._check_finish()
-        return self.function_events.key_averages()
+        assert self.function_events is not None, "Expected profiling results"
+        assert self.with_stack, "export_stacks() requires with_stack=True"
+        return self.function_events.export_stacks(path, metric)
+
+    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
+        self._check_finish()
+        assert self.function_events is not None, "Expected profiling results"
+        return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
+
+    @property
+    def self_cpu_time_total(self):
+        """ Returns total time spent on CPU obtained as a sum of
+        all self times across all the events.
+        """
+        self._check_finish()
+        assert self.function_events is not None
+        return self.function_events.self_cpu_time_total
+
+    def _parse_kineto_results(self, result):
+        # result.events() has most of the events - PyTorch op-level and device-level events
+
+        trace_start_us = result.trace_start_us()
+        mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
+        mem_records_acc = MemRecordsAcc(mem_records)
+
+        def _cpu_memory_usage(mem_record):
+            return mem_record.nbytes() if \
+                mem_record.device_type() in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP] \
+                else 0
+
+        def _cuda_memory_usage(mem_record):
+            return mem_record.nbytes() if \
+                mem_record.device_type() in [DeviceType.CUDA, DeviceType.HIP] \
+                else 0
+
+        # Create and return FunctionEvent list
+        function_events = []
+        cuda_corr_map: Dict[int, List[FunctionEvent]] = {}
+        max_evt_id = 0
+        for kineto_event in result.events():
+            if _filter_name(kineto_event.name()):
+                continue
+            rel_start_us = kineto_event.start_us() - trace_start_us
+            rel_end_us = rel_start_us + kineto_event.duration_us()
+            abs_end_us = kineto_event.start_us() + kineto_event.duration_us()
+
+            cpu_memory_usage = 0
+            cuda_memory_usage = 0
+            if kineto_event.device_type() == DeviceType.CPU:
+                # find the corresponding memory allocation events
+                for mem_record in mem_records_acc.in_interval(kineto_event.start_us(), abs_end_us):
+                    cpu_memory_usage += _cpu_memory_usage(mem_record[0])
+                    cuda_memory_usage += _cuda_memory_usage(mem_record[0])
+                    mem_record[1] = True
+
+            is_async = kineto_event.is_async() or (
+                kineto_event.start_thread_id() != kineto_event.end_thread_id()
+            )
+
+            fe = FunctionEvent(
+                id=kineto_event.correlation_id(),
+                name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
+                trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
+                thread=kineto_event.start_thread_id(),
+                start_us=rel_start_us,
+                end_us=rel_end_us,
+                fwd_thread=kineto_event.fwd_thread_id(),
+                input_shapes=kineto_event.shapes(),
+                stack=[entry for entry in kineto_event.stack() if _filter_stack_entry(entry)],
+                scope=kineto_event.scope(),
+                cpu_memory_usage=cpu_memory_usage,
+                cuda_memory_usage=cuda_memory_usage,
+                is_async=is_async,
+                sequence_nr=kineto_event.sequence_nr(),
+                device_type=kineto_event.device_type(),
+                device_index=kineto_event.device_index(),
+                flops=kineto_event.flops(),
+            )
+            max_evt_id = fe.id if fe.id > max_evt_id else max_evt_id
+            if fe.device_type == DeviceType.CPU and not fe.is_async:
+                # Check if we have CUDA time as a fallback
+                cuda_time = kineto_event.cuda_elapsed_us()
+                if cuda_time > 0:
+                    fe.append_kernel(
+                        fe.name,
+                        fe.device_index,
+                        cuda_time)
+                    fe.is_legacy = True
+            function_events.append(fe)
+            corr_id = kineto_event.linked_correlation_id()
+            if corr_id > 0:
+                if corr_id not in cuda_corr_map:
+                    cuda_corr_map[corr_id] = []
+                cuda_corr_map[corr_id].append(fe)
+
+        # associate CUDA kernels and CUDA runtime (CPU) with CPU events
+        for fe in function_events:
+            if (fe.device_type == DeviceType.CPU and not fe.is_async and
+                    fe.id in cuda_corr_map):
+                for f_evt in cuda_corr_map[fe.id]:
+                    if f_evt.device_type == DeviceType.CUDA:
+                        fe.append_kernel(
+                            f_evt.name,
+                            f_evt.device_index,
+                            f_evt.time_range.end - f_evt.time_range.start)
+                    elif f_evt.device_type == DeviceType.CPU:
+                        # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
+                        # with the 'thread' of the corresponding linked PyTorch event to properly track
+                        # parents and children
+                        f_evt.thread = fe.thread
+
+        # output top-level memory events
+        for mem_record in mem_records:
+            if not mem_record[1]:
+                rel_start_us = mem_record[0].start_us() - trace_start_us
+                max_evt_id += 1
+                fe = FunctionEvent(
+                    id=max_evt_id,
+                    name=MEMORY_EVENT_NAME,
+                    trace_name=None,  # not outputting in the trace
+                    thread=mem_record[0].start_thread_id(),
+                    start_us=rel_start_us,
+                    end_us=rel_start_us,  # no duration
+                    fwd_thread=mem_record[0].start_thread_id(),
+                    input_shapes=[],
+                    stack=[],
+                    scope=0,  # RecordScope::FUNCTION
+                    cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
+                    cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
+                    is_async=False,
+                    sequence_nr=-1,
+                    device_type=DeviceType.CPU,
+                    device_index=0,
+                )
+                function_events.append(fe)
+
+        function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
+        return function_events
+
+
+class record_function(ContextDecorator):
+    """Context manager/function decorator that adds a label to a block of
+    Python code (or function) when running autograd profiler. It is
+    useful when tracing the code profile.
+
+    Args:
+        name (str): Label assigned to the block of code.
+        node_id (int): ID of node, for distributed profiling. Unset in
+        non-distributed cases.
+
+    Example:
+        >>> x = torch.randn((1, 1), requires_grad=True)
+        >>> with torch.autograd.profiler.profile() as prof:
+        ...     y = x ** 2
+        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
+        ...         z = y ** 3
+        ...     y.backward()
+        ...
+        >>> # NOTE: some columns were removed for brevity
+        >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        -----------------------------------  ---------------  ---------------  ---------------
+        Name                                 Self CPU total %  CPU time avg     Number of Calls
+        -----------------------------------  ---------------  ---------------  ---------------
+        pow                                  60.77%           47.470us         3
+        mul                                  21.73%           25.465us         2
+        PowBackward0                         12.03%           121.891us        1
+        torch::autograd::AccumulateGrad      2.70%            6.324us          1
+        label-z                              2.13%            12.421us         1
+        torch::autograd::GraphRoot           0.64%            1.503us          1
+        -----------------------------------  ---------------  ---------------  ---------------
+        Self CPU time total: 234.344us
+        CUDA time total: 0.000us
+
+    """
+    def __init__(self, name: str, args: Optional[str] = None):
+        self.name: str = name
+        self.args: Optional[str] = args
+        # Whether or not we should run record function's end callbacks when exiting.
+        self.run_callbacks_on_exit: bool = True
+        # TODO: TorchScript ignores standard type annotation here
+        # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
+        self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
+
+    def __enter__(self):
+        self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+        if self.run_callbacks_on_exit:
+            # Local variable is needed by TorchScript to refine Optional[T] to T
+            record = self.record
+            assert record is not None
+            torch.ops.profiler._record_function_exit(record)
+
+    def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
+        """
+        _call_end_callbacks_on_future is meant to be used for profiling async
+        calls that return a future. Calling this function will extend recording
+        beyond this scope, until the future is satisfied. It is useful for profiling
+        the end to end time of asynchronous calls. This function should only be called
+        once to attach the callback onto the future, and will throw if called multiple
+        times.
+
+        Args:
+            fut: (torch._C.Future): future for which to schedule
+            callback for.
+
+        Returns:
+            A future that completes with the value of the passed in future when
+            the profiling callbacks have ran.
+
+        """
+        # Throw if we have already attached a callback onto the future.
+        if not self.run_callbacks_on_exit:
+            raise RuntimeError("_call_end_callbacks_on_future can only be called once.")
+
+        # We are scheduling to run this RecordFunction's end callbacks when the
+        # passed in future completes, so don't run end callbacks on exit.
+        self.run_callbacks_on_exit = False
+
+        # Local variable is needed by TorchScript to refine Optional[T] to T
+        record = self.record
+        assert record is not None
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+        return profiled_future
 
 
 class emit_nvtx(object):
@@ -240,19 +494,73 @@ class emit_nvtx(object):
         This context manager should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
 
-    Arguments:
-        enabled (bool, optional): Setting this to False makes this context manager a no-op.
+    Args:
+        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
+        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+            each autograd op will append information about the sizes of Tensor arguments received
+            by that op, in the following format:
+            ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
+            Non-tensor arguments will be represented by ``[]``.
+            Arguments will be listed in the order they are received by the backend op.
+            Please note that this order may not match the order in which those arguments were passed
+            on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
 
     Example:
         >>> with torch.cuda.profiler.profile():
         ...     model(x) # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():
         ...         model(x)
+
+    **Forward-backward correlation**
+
+    When viewing a profile created using :class:`emit_nvtx` in the Nvidia Visual Profiler,
+    correlating each backward-pass op with the corresponding forward-pass op can be difficult.
+    To ease this task, :class:`emit_nvtx` appends sequence number information to the ranges it
+    generates.
+
+    During the forward pass, each function range is decorated with ``seq=<N>``.  ``seq`` is a running
+    counter, incremented each time a new backward Function object is created and stashed for backward.
+    Thus, the ``seq=<N>`` annotation associated with each forward function range tells you that
+    if a backward Function object is created by this forward function,
+    the backward object will receive sequence number N.
+    During the backward pass, the top-level range wrapping each C++ backward Function's
+    ``apply()`` call is decorated with ``stashed seq=<M>``.  ``M`` is the sequence number that
+    the backward object was created with.  By comparing ``stashed seq`` numbers in backward with ``seq``
+    numbers in forward, you can track down which forward op created each backward Function.
+
+    Any functions executed during the backward pass are also decorated with ``seq=<N>``.  During
+    default backward (with ``create_graph=False``) this information is irrelevant, and in fact,
+    ``N`` may simply be 0 for all such functions.  Only the top-level ranges associated with
+    backward Function objects' ``apply()`` methods are useful, as a way to correlate these Function
+    objects with the earlier forward pass.
+
+    **Double-backward**
+
+    If, on the other hand, a backward pass with ``create_graph=True`` is underway (in other words,
+    if you are setting up for a double-backward), each function's execution during backward
+    is given a nonzero, useful ``seq=<N>``.  Those functions may themselves create Function objects
+    to be executed later during double-backward, just as the original functions in the forward pass did.
+    The relationship between backward and double-backward is conceptually the same as the relationship
+    between forward and backward: The functions still emit current-sequence-number-tagged ranges,
+    the Function objects they create still stash those sequence numbers, and during the eventual
+    double-backward, the Function objects' ``apply()`` ranges are still tagged with ``stashed seq``
+    numbers, which can be compared to `seq` numbers from the backward pass.
+
+    .. warning:
+        The sequence number is thread-local, and some forward functions don't create an associated
+        backward Function object (instead delegating that to sub-functions further down the call chain).
+        For these reasons, the correspondence of stashed sequence numbers in
+        backward Function ``apply()`` ranges with `seq` numbers in forward-pass ranges is
+        not guaranteed to be 1 to 1.  The sequence numbers alone may not be enough to fully
+        disambiguate which forward function created which
+        backward Function object.  You may need to make a judgment based on analytic knowledge of what
+        the expected correspondence should be.
     """
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, record_shapes=False):
         self.enabled = enabled
         self.entered = False
+        self.record_shapes = record_shapes
 
     def __enter__(self):
         if not self.enabled:
@@ -261,206 +569,34 @@ class emit_nvtx(object):
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
-        torch.autograd._enable_profiler(torch.autograd.ProfilerState.NVTX)
+        _enable_profiler(
+            ProfilerConfig(
+                ProfilerState.NVTX,
+                self.record_shapes,
+                False,
+                False,
+                False,
+                False),
+            set()
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         torch.cuda.synchronize()
-        torch.autograd._disable_profiler()
+        _disable_profiler()
         return False
 
 
 def load_nvprof(path):
     """Opens an nvprof trace file and parses autograd annotations.
 
-    Arguments:
+    Args:
         path (str): path to nvprof trace
     """
     return EventList(parse_nvprof_trace(path))
 
-
-################################################################################
-# FunctionEvent
-
-def format_time(time_us):
-    """Defines how to format time in FunctionEvent"""
-    return '{:.3f}us'.format(time_us)
-
-
-def attr_formatter(name):
-    return property(lambda self: format_time(getattr(self, name)))
-
-
-class FormattedTimesMixin(object):
-    """Helpers for FunctionEvent and FunctionEventAvg.
-
-    The subclass should define `*_time_total` and `count` attributes.
-    """
-    cpu_time_str = attr_formatter('cpu_time')
-    cuda_time_str = attr_formatter('cuda_time')
-    cpu_time_total_str = attr_formatter('cpu_time_total')
-    cuda_time_total_str = attr_formatter('cuda_time_total')
-
-    @property
-    def cpu_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count
-
-    @property
-    def cuda_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count
-
-
-class Interval(object):
-    def __init__(self, start, end):
-        self.start = start
-        self.end = end
-
-    def elapsed_us(self):
-        return self.end - self.start
-
-
-class Kernel(object):
-    def __init__(self, name, device, interval):
-        self.name = name
-        self.device = device
-        self.interval = interval
-
-
-# TODO: record TID too
-class FunctionEvent(FormattedTimesMixin):
-    """Profiling information about a single function."""
-    def __init__(self, id, name, thread, cpu_start, cpu_end):
-        self.id = id
-        self.name = name
-        self.cpu_interval = Interval(cpu_start, cpu_end)
-        self.thread = thread
-        self.kernels = []
-        self.count = 1
-
-    def append_kernel(self, name, device, start, end):
-        self.kernels.append(Kernel(name, device, Interval(start, end)))
-
-    @property
-    def cuda_time_total(self):
-        return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
-
-    @property
-    def cpu_time_total(self):
-        return self.cpu_interval.elapsed_us()
-
-    @property
-    def key(self):
-        return self.name
-
-    def __repr__(self):
-        return '<FunctionEvent id={} cpu_time={} cuda_time={} name={} thread={}>'.format(
-            self.id, self.cpu_time_str, self.cuda_time_str, self.name, self.thread)
-
-
-class FunctionEventAvg(FormattedTimesMixin):
-    """Used to average stats over multiple FunctionEvent objects."""
-    def __init__(self):
-        self.key = None
-        self.count = self.cpu_time_total = self.cuda_time_total = 0
-
-    def __iadd__(self, other):
-        if self.key is None:
-            self.key = other.key
-        assert isinstance(other, FunctionEvent)
-        assert other.key == self.key
-        self.cpu_time_total += other.cpu_time
-        self.cuda_time_total += other.cuda_time
-        self.count += 1
-        return self
-
-    def __repr__(self):
-        return '<FunctionEventAvg cpu_time={} cuda_time={} key={}>'.format(
-            self.cpu_time_str, self.cuda_time_str, self.key)
-
-
-################################################################################
-# Utilities
-
-def demangle(name):
-    """Demangle a C++ identifier using c++filt"""
-    try:
-        with open(os.devnull, 'w') as devnull:
-            is_win = sys.platform == 'win32'
-            filt_cmd = ['undname', name] if is_win else ['c++filt', '-n', name]
-            orig_name = subprocess.check_output(filt_cmd, stderr=devnull).rstrip().decode("ascii")
-            orig_name = re.search('is :- \"(.*)"', orig_name).group(1) if is_win else orig_name
-            return orig_name
-    except (subprocess.CalledProcessError, AttributeError, FileNotFoundError, OSError):
-        return name
-
-
-class StringTable(defaultdict):
-    def __missing__(self, key):
-        self[key] = demangle(key)
-        return self[key]
-
-
-################################################################################
-# CPU checkpoints
-
-def parse_cpu_trace(thread_records):
-    next_id = 0
-    start_record = None
-    cuda_records = {}
-    functions = []
-    record_stack = []
-    string_table = StringTable()
-
-    # cuda start events and the overall profiler start event don't happen
-    # at exactly the same time because we need to record an event on each device
-    # and each record takes ~4us. So we adjust here by the difference
-    # adding the difference in CPU time between the profiler start event
-    # and the CPU time of the cuda start event for the device
-    def adjusted_time(cuda_record):
-        assert cuda_record.device() != -1
-        cuda_time_0 = cuda_records[cuda_record.device()]
-        return cuda_time_0.cuda_elapsed_us(cuda_record) + start_record.cpu_elapsed_us(cuda_time_0)
-
-    # '__start_profile' is not guarenteed to be first, so we must find it here
-    for record in itertools.chain(*thread_records):
-        if record.name() == '__start_profile':
-            start_record = record
-        elif record.name() == '__cuda_start_event':
-            assert record.device() != -1
-            cuda_records[record.device()] = record
-    assert start_record is not None
-
-    for record in itertools.chain(*thread_records):
-        if record.kind() == 'mark':
-            continue
-        elif record.kind() == 'push':
-            record_stack.append((next_id, record))
-            next_id += 1
-        elif record.kind() == 'pop':
-            function_id, start = record_stack.pop()
-            fe = FunctionEvent(
-                id=function_id,
-                name=string_table[start.name()],
-                thread=start.thread_id(),
-                cpu_start=start_record.cpu_elapsed_us(start),
-                cpu_end=start_record.cpu_elapsed_us(record))
-            if start.has_cuda():
-                cuda_start = adjusted_time(start)
-                cuda_end = adjusted_time(record)
-                fe.append_kernel(start.name(),
-                                 start.device(),
-                                 cuda_start,
-                                 cuda_end)
-            functions.append(fe)
-
-    functions.sort(key=lambda evt: evt.cpu_interval.start)
-    return functions
-
-
-################################################################################
-# CUDA checkpoints
 
 class EnforceUnique(object):
     """Raises an error if a key is seen more than once."""
@@ -481,7 +617,7 @@ def parse_nvprof_trace(path):
     # Parse strings table
     strings = {}
     for r in conn.execute("SELECT _id_ as id, value FROM StringTable"):
-        strings[r["id"]] = demangle(r["value"])
+        strings[r["id"]] = torch._C._demangle(r["value"])
 
     # First, find all functions and create FunctionEvents for them
     marker_query = """
@@ -499,9 +635,11 @@ def parse_nvprof_trace(path):
     for row in conn.execute(marker_query):
         unique.see(row['marker_id'])
         evt = FunctionEvent(id=row['marker_id'],
+                            node_id=0,  # missing a node_id when calling FunctionEvent. This is just to ensure
+                                        # that pytorch doesn't crash when creating a FunctionEvent() object
                             name=strings[row['name']],
-                            cpu_start=row['start_time'],
-                            cpu_end=row['end_time'],
+                            start_us=row['start_time'],
+                            end_us=row['end_time'],
                             thread=0)  # TODO: find in sqlite database
         functions.append(evt)
         functions_map[evt.id] = evt
@@ -524,52 +662,19 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        assert row['cbid'] == 13  # 13 == Launch
+        # 211 is cudaKernelLaunch for cuda >= 9.2
+        assert (row['cbid'] == 211)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,
-                          row['kernel_start'],
-                          row['kernel_end'])
+                          row['kernel_end'] - row['kernel_start'])
 
-    functions.sort(key=lambda evt: evt.cpu_interval.start)
+    functions.sort(key=lambda evt: evt.time_range.start)
     return functions
 
 
-################################################################################
-# Pretty printer
-
-def build_table(events, sort_by=None, header=None):
-    """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
-    if sort_by is not None:
-        events = sorted(events, key=lambda evt: getattr(evt, sort_by))
-
-    name_lengths = [len(evt.key) for evt in events]
-    if len(name_lengths) == 0:
-        return ""
-    max_name_length = max(name_lengths)
-    max_name_length += 4  # Add some nice padding
-    col_width = 15
-    col_format = '  {: >' + str(col_width) + '}'
-    row_format = '{: <' + str(max_name_length) + '}' + col_format * 5
-    header_sep = '-' * max_name_length + ('  ' + '-' * col_width) * 5
-
-    # Have to use a list because nonlocal is Py3 only...
-    result = ['']
-
-    def append(s):
-        result[0] += s
-        result[0] += '\n'
-
-    # Actual printing
-    if header is not None:
-        line_length = max_name_length + (col_width + 2) * 5
-        append('=' * line_length)
-        append(header)
-    append(header_sep)
-    append(row_format.format('Name', 'CPU time', 'CUDA time', 'Calls', 'CPU total', 'CUDA total'))
-    append(header_sep)
-    for evt in events:
-        append(row_format.format(evt.key, evt.cpu_time_str, evt.cuda_time_str,
-                                 evt.count, evt.cpu_time_total_str, evt.cuda_time_total_str))
-
-    return result[0]
+def kineto_step():
+    """ Notify kineto so it is aware of iteration boundaries for asynchronous
+        trace requests.
+    """
+    _kineto_step()

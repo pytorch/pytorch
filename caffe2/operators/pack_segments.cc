@@ -15,86 +15,105 @@ template <typename T, typename Data_T>
 bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
+
   Tensor* presence_mask = nullptr;
   if (return_presence_mask_) {
     presence_mask = Output(1);
   }
 
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
   T max_length = 0;
-  TIndex total_length = 0;
-  for (T i = 0; i < lengths.dim(0); ++i) {
+  int64_t total_length = 0;
+  for (T i = 0; i < lengths.size(0); ++i) {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
   }
   if (max_length_ != -1) {
-    // Final dim must be greater than the max_length
-    CAFFE_ENFORCE_GE(
-        max_length_,
-        max_length,
-        "Pre-defined max_length should be greater than the real max_length");
     max_length = max_length_;
   }
 
   // Total lengths must be the same as data.dims(0)
   CAFFE_ENFORCE_EQ(
-      data.dim(0),
+      data.size(0),
       total_length,
       " PackSegments requires that the sum of the lengths ",
       total_length,
       " is equal to the first data dimension ",
-      data.dim(0));
+      data.size(0));
 
-  auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
+  auto shape =
+      data.sizes().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
-  shape.insert(shape.begin(), lengths.size());
-  output->Resize(shape);
+  shape.insert(shape.begin(), lengths.numel());
+  auto* output = Output(0, shape, at::dtype(data.dtype()));
 
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
-    std::vector<caffe2::TIndex> presence_shape{lengths.size(), max_length};
+    std::vector<int64_t> presence_shape{lengths.numel(), max_length};
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
 
-  if (!data.dim(0)) {
+  if (!data.size(0)) {
     // Return empty output (with the proper shape)
     return true;
   }
 
   // Do padding
+  // Ignore string since math::Set does not support string.
+  // For all other cases, the behavior should mimic the GPU version where the
+  // padding is always zero for types other than float.
+  // TODO(xinyizhang): potentially restructure to clean up the logic here.
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
-        output->size(),
+        output->numel(),
         padding_,
         output->template mutable_data<float>(),
         &context_);
+  } else if (output->template IsType<int32_t>()) {
+    math::Set<int32_t, CPUContext>(
+        output->numel(),
+        0,
+        output->template mutable_data<int32_t>(),
+        &context_);
+  } else if (output->template IsType<int64_t>()) {
+    math::Set<int64_t, CPUContext>(
+        output->numel(),
+        0,
+        output->template mutable_data<int64_t>(),
+        &context_);
+  } else if (output->template IsType<char>()) {
+    math::Set<char, CPUContext>(
+        output->numel(), 0, output->template mutable_data<char>(), &context_);
   }
   if (return_presence_mask_) {
-    memset(presence_mask_data, (int)false, presence_mask->size());
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    memset(presence_mask_data, (int)false, presence_mask->numel());
   }
 
   auto block_size = data.size_from_dim(1);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  TIndex start = 0;
-  for (TIndex i = 0; i < lengths.dim(0); ++i) {
+  int64_t start = 0;
+  for (int64_t i = 0; i < lengths.size(0); ++i) {
+    auto len = l[i] <= max_length ? l[i] : max_length;
     context_.CopyItemsSameDevice(
-        data.meta(),
-        l[i] * block_size,
+        data.dtype(),
+        len * block_size,
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
     if (return_presence_mask_) {
-      memset(presence_mask_data + max_length * i, (int)true, l[i]);
+      // NOLINTNEXTLINE(clang-analyzer-unix.cstring.NullArg)
+      memset(presence_mask_data + max_length * i, (int)true, len);
     }
     start += l[i];
   }
@@ -117,40 +136,51 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
 
-  CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
   if (max_length_ != -1) {
     CAFFE_ENFORCE_EQ(
         max_length_,
-        data.dim(1),
+        data.size(1),
         "max_length should be equal to the second dimension of the packed segments");
   }
   const T* l = lengths.template data<T>();
 
-  TIndex total_l = std::accumulate(l, l + lengths.dim(0), (TIndex)0);
+  int64_t total_l = 0;
+  if (max_length_ != -1) {
+    for (int64_t i = 0; i < lengths.size(0); ++i) {
+      total_l += (int64_t)(l[i] <= max_length_ ? l[i] : max_length_);
+    }
+  } else {
+    total_l = std::accumulate(l, l + lengths.size(0), (int64_t)0);
+  }
 
-  auto shape = data.dims();
+  auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
-      shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
+      shape[0], lengths.size(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = total_l;
   output->Resize(shape);
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-  if (!(data.dim(0) && data.dim(1))) {
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
+  if (!(data.size(0) && data.size(1))) {
     return true;
   }
   auto block_size = data.size_from_dim(2);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  TIndex start = 0;
-  for (TIndex i = 0; i < lengths.dim(0); ++i) {
+  int64_t start = 0;
+  for (int64_t i = 0; i < lengths.size(0); ++i) {
+    auto len = l[i];
+    if (max_length_ != -1 && l[i] > max_length_) {
+      len = max_length_;
+    }
     context_.CopyItemsSameDevice(
-        data.meta(),
-        l[i] * block_size,
-        d + block_bytesize * data.dim(1) * i,
+        data.dtype(),
+        len * block_size,
+        d + block_bytesize * data.size(1) * i,
         out + block_bytesize * start);
-    start += l[i];
+    start += len;
   }
   return true;
 }
@@ -221,3 +251,23 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+  PackSegments,
+  "_caffe2::PackSegments("
+    "Tensor lengths, "
+    "Tensor tensor, "
+    "int max_length = -1, "
+    "bool pad_minf = False, "
+    "bool return_presence_mask = False"
+  ") -> (Tensor packed_tensor, Tensor presence_mask)",
+  caffe2::PackSegmentsOp<caffe2::CPUContext>);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+  UnpackSegments,
+  "_caffe2::UnpackSegments("
+    "Tensor lengths, "
+    "Tensor tensor, "
+    "int max_length = -1"
+  ") -> (Tensor packed_tensor)",
+  caffe2::UnpackSegmentsOp<caffe2::CPUContext>);

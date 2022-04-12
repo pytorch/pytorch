@@ -13,18 +13,19 @@
 # limitations under the License.
 ##############################################################################
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
+
+
+
+
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
-from hypothesis import given
 from functools import partial
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 def _unique_ref(x, return_inverse):
@@ -34,7 +35,7 @@ def _unique_ref(x, return_inverse):
     return ret
 
 
-class TestUniqueOps(hu.HypothesisTestCase):
+class TestUniqueOps(serial.SerializedTestCase):
     @given(
         X=hu.tensor1d(
             # allow empty
@@ -43,8 +44,9 @@ class TestUniqueOps(hu.HypothesisTestCase):
             # allow negatives
             elements=st.integers(min_value=-10, max_value=10)),
         return_remapping=st.booleans(),
-        **hu.gcs
+        **hu.gcs_no_hip
     )
+    @settings(deadline=10000)
     def test_unique_op(self, X, return_remapping, gc, dc):
         # impl of unique op does not guarantees return order, sort the input
         # so different impl return same outputs
@@ -67,3 +69,7 @@ class TestUniqueOps(hu.HypothesisTestCase):
             inputs=[X],
             reference=partial(_unique_ref, return_inverse=return_remapping),
         )
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

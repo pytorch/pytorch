@@ -1,35 +1,21 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core, workspace
 from caffe2.python.core import CreatePythonOperator
 import caffe2.python.hypothesis_test_util as hu
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
 
-if workspace.is_asan:
-    # Numba seems to be not compatible with ASAN (at least at Facebook)
-    # so if we are in asan mode, we disable Numba which further disables
-    # the numba python op test.
-    HAS_NUMBA = False
-else:
-    try:
-        import numba
-        HAS_NUMBA = True
-    except ImportError:
-        HAS_NUMBA = False
-
-
 class PythonOpTest(hu.HypothesisTestCase):
-    @unittest.skipIf(not HAS_NUMBA, "")
     @given(x=hu.tensor(),
            n=st.integers(min_value=1, max_value=20),
            w=st.integers(min_value=1, max_value=20))
-    def test_multithreaded_evaluation_numba_nogil(self, x, n, w):
-        @numba.jit(nopython=True, nogil=True)
+    @settings(deadline=10000)
+    def test_simple_python_op(self, x, n, w):
         def g(input_, output):
             output[...] = input_
 

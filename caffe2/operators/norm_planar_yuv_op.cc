@@ -12,26 +12,28 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
   USE_OPERATOR_FUNCTIONS(CPUContext);
   using Operator<CPUContext>::Operator;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& M = Input(1); // mean
     const auto& S = Input(2); // standard deviation
-    auto* Z = Output(0);
-    Z->ResizeLike(X);
 
-    CAFFE_ENFORCE(X.dims().size() == 4);
+    auto* Z = Output(0, X.sizes(), at::dtype<float>());
+
+    CAFFE_ENFORCE(X.sizes().size() == 4);
 
     const auto N = X.dim32(0);
-    auto C = X.dim(1);
-    const auto H = X.dim(2);
-    const auto W = X.dim(3);
-    CAFFE_ENFORCE(C == M.dim(1));
-    CAFFE_ENFORCE(C == S.dim(1));
+    auto C = X.size(1);
+    const auto H = X.size(2);
+    const auto W = X.size(3);
+    CAFFE_ENFORCE(C == M.size(1));
+    CAFFE_ENFORCE(C == S.size(1));
     const auto* Xdata = X.data<float>();
     auto* Zdata = Z->template mutable_data<float>();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     int offset = H * W;
     for (auto n = 0; n < N; n++) { // realistically N will always be 1
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       int batch_offset = n * C * offset;
       for (auto c = 0; c < C; c++) {
         ConstEigenVectorMap<float> channel_s(

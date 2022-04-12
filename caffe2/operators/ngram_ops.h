@@ -1,10 +1,11 @@
 #pragma once
 
-#include <vector>
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
+
+#include <vector>
 
 namespace caffe2 {
 template <typename F, typename T, class Context>
@@ -12,8 +13,9 @@ class NGramFromCategoricalOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  NGramFromCategoricalOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit NGramFromCategoricalOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         col_ids_(this->template GetRepeatedArgument<int>("col_ids")),
         categorical_limits_(
             this->template GetRepeatedArgument<int>("categorical_limits")),
@@ -34,9 +36,9 @@ class NGramFromCategoricalOp : public Operator<Context> {
     }
     int base = 1;
     int idx = 0;
-    for (int k = 0; k < col_num_; k++) {
+    for (const auto k : c10::irange(col_num_)) {
       int l = categorical_limits_[k];
-      for (int m = 0; m < l; m++) {
+      for (const auto m : c10::irange(l)) {
         int v = vals_[idx++];
         ngram_maps_[k][v] = m * base;
       }
@@ -46,17 +48,17 @@ class NGramFromCategoricalOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& floats = Input(0);
-    auto N = floats.dim(0);
+    auto N = floats.size(0);
     auto D = floats.size_from_dim(1);
     const F* floats_data = floats.template data<F>();
-    auto* output = Output(0);
-    output->Resize(N);
+
+    auto* output = Output(0, {N}, at::dtype<T>());
     auto* output_data = output->template mutable_data<T>();
-    math::Set<T, Context>(output->size(), 0, output_data, &context_);
+    math::Set<T, Context>(output->numel(), 0, output_data, &context_);
 
     CAFFE_ENFORCE_GT(D, max_col_id_);
-    for (int i = 0; i < N; i++) {
-      for (int k = 0; k < col_num_; k++) {
+    for (const auto i : c10::irange(N)) {
+      for (const auto k : c10::irange(col_num_)) {
         int j = col_ids_[k];
         int v = round(floats_data[i * D + j]);
         // for out-of-vocabulary values, we always treat them the same as the

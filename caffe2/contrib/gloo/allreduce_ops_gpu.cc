@@ -1,4 +1,4 @@
-#include "allreduce_ops.h"
+#include "caffe2/contrib/gloo/allreduce_ops.h"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/logging.h"
@@ -37,7 +37,7 @@ std::unique_ptr<::gloo::Algorithm> initializeAlgorithm(
 }
 
 /**
- * This is a helper function which attemtps to get a base value depending on the
+ * This is a helper function which attempts to get a base value depending on the
  * # of nodes. Larger the base the better performance (up to 4) is what we have
  * observed in gloo benchmarks. At the moment bcube works only if # nodes = base
  * ^ x. Where x is some constant. So, if # node don't match our expectation
@@ -84,7 +84,7 @@ void AllreduceOp<Context>::initializeBcube() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
         initializeAlgorithm<::gloo::CudaAllreduceBcube, ::gloo::float16>(
             gpu_direct_,
@@ -105,7 +105,7 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
       initializeAlgorithm<::gloo::CudaAllreduceHalvingDoubling, ::gloo::float16>(
         gpu_direct_,
@@ -126,7 +126,7 @@ void AllreduceOp<Context>::initializeRingFull() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
       initializeAlgorithm<::gloo::CudaAllreduceRing, ::gloo::float16>(
         gpu_direct_,
@@ -147,7 +147,7 @@ void AllreduceOp<Context>::initializeRingChunked() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
       initializeAlgorithm<::gloo::CudaAllreduceRingChunked, ::gloo::float16>(
         gpu_direct_,

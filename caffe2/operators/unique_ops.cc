@@ -26,13 +26,12 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   auto& inputTensor = Input(0);
   // use dim32 to enforce that it's fine to have remapping of type int
   int N = inputTensor.dim32(0);
-  CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
-  auto* uniqueTensor = Output(UNIQUE);
+  CAFFE_ENFORCE_EQ(inputTensor.dim(), 1, "Input should be a vector");
 
   int* remapping = nullptr;
   if (REMAPPING < OutputSize()) {
-    auto* remappingTensor = Output(REMAPPING);
-    remappingTensor->ResizeLike(inputTensor);
+    auto* remappingTensor =
+        Output(REMAPPING, inputTensor.sizes(), at::dtype<int>());
     remapping = remappingTensor->template mutable_data<int>();
   }
 
@@ -42,13 +41,14 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   order_.resize(N);
   std::iota(order_.begin(), order_.end(), 0);
   std::sort(order_.begin(), order_.end(), [input](const int x, const int y) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     return input[x] < input[y];
   });
   int K = N;
   for (int i = 1; i < N; ++i) {
     K -= input[order_[i]] == input[order_[i - 1]];
   }
-  uniqueTensor->Resize(K);
+  auto* uniqueTensor = Output(UNIQUE, {K}, at::dtype<T>());
   T* unique = uniqueTensor->template mutable_data<T>();
   K = 0;
   T prev = -1;

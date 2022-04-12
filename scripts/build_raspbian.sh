@@ -1,8 +1,8 @@
 #!/bin/bash
 ##############################################################################
-# Example command to build the android target.
+# Example command to build the Raspbian target.
 ##############################################################################
-# 
+#
 # This script shows how one can build a Caffe2 binary for raspbian. The build
 # is essentially much similar to a host build, with one additional change
 # which is to specify -mfpu=neon for optimized speed.
@@ -28,7 +28,7 @@ sudo apt-get install \
 # python dependencies
 sudo pip install hypothesis
 
-# Now, actually build the android target.
+# Now, actually build the raspbian target.
 echo "Building caffe2"
 cd $BUILD_ROOT
 

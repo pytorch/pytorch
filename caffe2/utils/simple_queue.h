@@ -5,7 +5,7 @@
 #include <mutex>  // NOLINT
 #include <queue>
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 namespace caffe2 {
 
@@ -69,7 +69,7 @@ class SimpleQueue {
   std::mutex mutex_;
   std::condition_variable cv_;
   std::queue<T> queue_;
-  bool no_more_jobs_;
+  bool no_more_jobs_{};
   // We do not allow copy constructors.
   SimpleQueue(const SimpleQueue& /*src*/) {}
 };

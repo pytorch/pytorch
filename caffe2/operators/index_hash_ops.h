@@ -1,9 +1,12 @@
 #ifndef CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 #define CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 
-#include "caffe2/core/asan.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(IndexHash);
 
 namespace caffe2 {
 
@@ -11,8 +14,9 @@ template <class Context>
 class IndexHashOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  IndexHashOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit IndexHashOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         seed_(this->template GetSingleArgument<int64_t>("seed", 0)),
         modulo_(this->template GetSingleArgument<int64_t>("modulo", 0)) {
     CAFFE_ENFORCE_GT(modulo_, 0, "MODULO should be > 0");
@@ -26,19 +30,20 @@ class IndexHashOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& indices = Input(INDICES);
-    auto* hashed_indices = Output(HASHED_INDICES);
-    hashed_indices->ResizeLike(indices);
+
+    auto* hashed_indices =
+        Output(HASHED_INDICES, indices.sizes(), at::dtype<T>());
 
     CAFFE_ENFORCE_GE(
         static_cast<int64_t>(std::numeric_limits<T>::max()),
         modulo_,
         "MODULO shouldn't be larger than the numeric limit of the indices");
 
-    auto N = indices.size();
+    auto N = indices.numel();
     auto* indices_data = indices.template data<T>();
     auto* hashed_indices_data = hashed_indices->template mutable_data<T>();
 
-    for (auto i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       hashed_indices_data[i] = hash(indices_data[i]);
     }
 
@@ -47,9 +52,11 @@ class IndexHashOp : public Operator<Context> {
 
  protected:
   template <typename T>
-  CAFFE2_NO_SANITIZE("signed-integer-overflow") T hash(T id) {
+  __ubsan_ignore_signed_int_overflow__
+  T hash(T id) {
     int8_t* bytes = (int8_t*)&id;
     T hashed = seed_ * 0xDEADBEEF;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
       hashed = hashed * 65537 + bytes[i];
     }

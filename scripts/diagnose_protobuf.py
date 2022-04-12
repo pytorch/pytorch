@@ -13,10 +13,6 @@ Usage:
     python scripts/diagnose_protobuf.py
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 import os
 import re
 from subprocess import Popen, PIPE
@@ -26,7 +22,7 @@ try:
     import google.protobuf
     python_version = google.protobuf.__version__
     python_protobuf_installed = True
-except ImportError: 
+except ImportError:
     print("DEBUG: cannot find python protobuf install.")
     python_protobuf_installed = False
 
@@ -50,7 +46,7 @@ else:
         print('DEBUG: err: ' + err)
         native_protobuf_installed = False
     else:
-        tmp = re.search('\d\.\d\.\d', out)
+        tmp = re.search(r'\d\.\d\.\d', out)
         if tmp:
             native_version = tmp.group(0)
             native_protobuf_installed = True
@@ -92,7 +88,3 @@ if python_protobuf_installed and native_protobuf_installed:
         print(VERSION_MISMATCH)
     else:
         print('All looks good.')
-
-
-
-

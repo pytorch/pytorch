@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import torch.nn.init as init
 
@@ -24,7 +23,7 @@ class SuperResolutionNet(nn.Module):
         return x
 
     def _initialize_weights(self):
-        init.orthogonal(self.conv1.weight, init.calculate_gain('relu'))
-        init.orthogonal(self.conv2.weight, init.calculate_gain('relu'))
-        init.orthogonal(self.conv3.weight, init.calculate_gain('relu'))
-        init.orthogonal(self.conv4.weight)
+        init.orthogonal_(self.conv1.weight, init.calculate_gain('relu'))
+        init.orthogonal_(self.conv2.weight, init.calculate_gain('relu'))
+        init.orthogonal_(self.conv3.weight, init.calculate_gain('relu'))
+        init.orthogonal_(self.conv4.weight)

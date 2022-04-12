@@ -12,13 +12,13 @@ namespace at { namespace native {
 Tensor cudnn_affine_grid_generator_forward(
     const Tensor& theta,
     int64_t N, int64_t C, int64_t H, int64_t W) {
-  throw std::runtime_error("cudnn_affine_grid_generator_forward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_affine_grid_generator_forward: ATen not compiled with cuDNN support");
 }
 
 Tensor cudnn_affine_grid_generator_backward(
     const Tensor& grad_theta,
     int64_t N, int64_t C, int64_t H, int64_t W) {
-  throw std::runtime_error("cudnn_affine_grid_generator_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_affine_grid_generator_backward: ATen not compiled with cuDNN support");
 }
 
 }}
@@ -52,14 +52,13 @@ Tensor cudnn_affine_grid_generator_forward(
     const Tensor& theta_t,
     int64_t N, int64_t C, int64_t H, int64_t W)
 {
-  setCuDNNStreamToCurrent();
-
-  TensorArg theta{ theta_t.contiguous(), "theta", 1 };
+  auto theta_t_contig = theta_t.contiguous();
+  TensorArg theta{ theta_t_contig, "theta", 1 };
   CheckedFrom c = "cudnn_affine_grid_generator_forward";
   checkContiguous(c, theta);
   checkSize(c, theta, {N, 2, 3});
 
-  auto grid_t = theta->type().tensor();
+  auto grid_t = at::empty({0}, theta->options());
   grid_t.resize_({N, H, W, 2});
 
   auto dataType = getCudnnDataType(*theta);
@@ -75,14 +74,13 @@ Tensor cudnn_affine_grid_generator_backward(
     const Tensor& grad_grid_t,
     int64_t N, int64_t C, int64_t H, int64_t W)
 {
-  setCuDNNStreamToCurrent();
-
-  TensorArg grad_grid{ grad_grid_t.contiguous(), "grad_grid", 1 };
+  auto grad_grid_contig = grad_grid_t.contiguous();
+  TensorArg grad_grid{ grad_grid_contig, "grad_grid", 1 };
   CheckedFrom c = "cudnn_affine_grid_generator_backward";
   checkContiguous(c, grad_grid);
   checkSize(c, grad_grid, {N, H, W, 2});
 
-  auto grad_theta_t = grad_grid->type().tensor();
+  auto grad_theta_t = at::empty({0}, grad_grid->options());
   grad_theta_t.resize_({N, 2, 3});
 
   auto dataType = getCudnnDataType(grad_theta_t);

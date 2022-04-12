@@ -1,11 +1,11 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
-#include <thread>  // NOLINT
+#include <thread> // NOLINT
 
 #include "caffe2/core/db.h"
-#include "caffe2/utils/zmq_helper.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/zmq_helper.h"
 
 namespace caffe2 {
 namespace db {
@@ -13,17 +13,18 @@ namespace db {
 class ZmqDBCursor : public Cursor {
  public:
   explicit ZmqDBCursor(const string& source)
-      : source_(source), socket_(ZMQ_PULL),
-        prefetched_(false), finalize_(false) {
+      : source_(source),
+        socket_(ZMQ_PULL),
+        prefetched_(false),
+        finalize_(false) {
     socket_.Connect(source_);
     // Start prefetching thread.
-    prefetch_thread_.reset(
-        new std::thread([this] { this->Prefetch(); }));
+    prefetch_thread_.reset(new std::thread([this] { this->Prefetch(); }));
     // obtain the first value.
     Next();
   }
 
-  ~ZmqDBCursor() {
+  ~ZmqDBCursor() override {
     finalize_ = true;
     prefetched_ = false;
     producer_.notify_one();
@@ -35,27 +36,35 @@ class ZmqDBCursor : public Cursor {
   void Seek(const string& /*key*/) override { /* do nothing */
   }
 
-  void SeekToFirst() override { /* do nothing */ }
+  void SeekToFirst() override { /* do nothing */
+  }
 
   void Next() override {
     std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
-    while (!prefetched_) consumer_.wait(lock);
+    while (!prefetched_)
+      consumer_.wait(lock);
     key_ = prefetch_key_;
     value_ = prefetch_value_;
     prefetched_ = false;
     producer_.notify_one();
   }
 
-  string key() override { return key_; }
-  string value() override { return value_; }
-  bool Valid() override { return true; }
+  string key() override {
+    return key_;
+  }
+  string value() override {
+    return value_;
+  }
+  bool Valid() override {
+    return true;
+  }
 
  private:
-
   void Prefetch() {
     while (!finalize_) {
       std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
-      while (prefetched_) producer_.wait(lock);
+      while (prefetched_)
+        producer_.wait(lock);
       if (finalize_) {
         return;
       }
@@ -86,12 +95,11 @@ class ZmqDBCursor : public Cursor {
 
 class ZmqDB : public DB {
  public:
-  ZmqDB(const string& source, Mode mode)
-      : DB(source, mode), source_(source) {
+  ZmqDB(const string& source, Mode mode) : DB(source, mode), source_(source) {
     CAFFE_ENFORCE(mode == READ, "ZeroMQ DB only supports read mode.");
   }
 
-  ~ZmqDB() {}
+  ~ZmqDB() override {}
 
   void Close() override {}
 
@@ -101,7 +109,7 @@ class ZmqDB : public DB {
 
   unique_ptr<Transaction> NewTransaction() override {
     CAFFE_THROW("ZeroMQ DB does not support writing with a transaction.");
-    return nullptr;  // dummy placeholder to suppress old compiler warnings.
+    return nullptr; // dummy placeholder to suppress old compiler warnings.
   }
 
  private:
@@ -112,5 +120,5 @@ REGISTER_CAFFE2_DB(ZmqDB, ZmqDB);
 // For lazy-minded, one can also call with lower-case name.
 REGISTER_CAFFE2_DB(zmqdb, ZmqDB);
 
-}  // namespace db
-}  // namespace caffe2
+} // namespace db
+} // namespace caffe2

@@ -14,7 +14,8 @@ RedisStoreHandler::RedisStoreHandler(
     std::string& prefix)
     : host_(host), port_(port), prefix_(prefix) {
   struct timeval tv = {
-      .tv_sec = 5, .tv_usec = 0,
+      .tv_sec = 5,
+      .tv_usec = 0,
   };
 
   redis_ = redisConnectWithTimeout(host.c_str(), port, tv);
@@ -51,9 +52,11 @@ void RedisStoreHandler::set(const std::string& name, const std::string& data) {
       " (perhaps you reused a run ID you have used before?)");
 }
 
-std::string RedisStoreHandler::get(const std::string& name) {
+std::string RedisStoreHandler::get(
+    const std::string& name,
+    const std::chrono::milliseconds& timeout) {
   // Block until key is set
-  wait({name});
+  wait({name}, timeout);
 
   auto key = compoundKey(name);
   void* ptr = redisCommand(redis_, "GET %b", key.c_str(), (size_t)key.size());
@@ -71,6 +74,16 @@ int64_t RedisStoreHandler::add(const std::string& name, int64_t value) {
   redisReply* reply = static_cast<redisReply*>(ptr);
   CAFFE_ENFORCE_EQ(reply->type, REDIS_REPLY_INTEGER);
   return reply->integer;
+}
+
+int64_t RedisStoreHandler::getNumKeys() {
+  CHECK(false) << "getNumKeys not implemented for RedisStoreHandler";
+  return 0;
+}
+
+bool RedisStoreHandler::deleteKey(const std::string& /* unused */) {
+  CHECK(false) << "deleteKey not implemented for RedisStoreHandler";
+  return false;
 }
 
 bool RedisStoreHandler::check(const std::vector<std::string>& names) {
@@ -107,10 +120,11 @@ void RedisStoreHandler::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      STORE_HANDLER_TIMEOUT("Wait timeout for name(s): ", Join(" ", names));
+      STORE_HANDLER_TIMEOUT(
+          "Wait timeout for name(s): ", c10::Join(" ", names));
     }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
-}
+} // namespace caffe2

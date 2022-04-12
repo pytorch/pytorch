@@ -18,7 +18,9 @@ using namespace nom;
 bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
   size_t convOrder = 0;
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::NNGraph::NodeRef convNode;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::Conv* conv;
     std::tie(conv, convNode) = node_pair;
 
@@ -44,10 +46,10 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
     CAFFE_ENFORCE(
         bnInputs.size() >= 5, "Invalid batch normalization input size");
 
-#define EXPOSE_TENSOR_DATA(name, index, inputs)                            \
-  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                  \
-  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");         \
-  auto name##Tensor = ws->GetBlob(name->getName())->GetMutableTensor(CPU); \
+#define EXPOSE_TENSOR_DATA(name, index, inputs)                                \
+  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                      \
+  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");             \
+  auto name##Tensor = BlobGetMutableTensor(ws->GetBlob(name->getName()), CPU); \
   auto name##Data = name##Tensor->mutable_data<float>();
 
     EXPOSE_TENSOR_DATA(filter, 1, convInputs);
@@ -63,6 +65,7 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
           dyn_cast<caffe2::Caffe2Annotation>(conv->getMutableAnnotation());
       NOM_REQUIRE_OR_CONT(annotation != nullptr);
       auto op = annotation->getOperatorDef();
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto convName = op.name();
 
       while (true) {
@@ -76,12 +79,13 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
           nn->dataFlow.createEdge(convBiasNode, convNode);
 
           auto* blob = ws->CreateBlob(convBiasName);
-          caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
+          caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
           CHECK_NOTNULL(tensor);
           // Get output channel
           size_t c = filterTensor->dim32(0);
           tensor->Resize(c);
-          tensor->mutable_data<float>();
+          float* tensor_data = tensor->mutable_data<float>();
+          memset(tensor_data, 0, tensor->nbytes());
           break;
         }
         convOrder++;

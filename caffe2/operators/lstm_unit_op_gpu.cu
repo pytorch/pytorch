@@ -138,23 +138,24 @@ void LSTMUnit<float, CUDAContext>(
       C,
       H,
       forget_bias);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
-void LSTMUnit<float16, CUDAContext>(
+void LSTMUnit<at::Half, CUDAContext>(
     int N,
     int D,
     int t,
-    const float16* H_prev,
-    const float16* C_prev,
-    const float16* X,
+    const at::Half* H_prev,
+    const at::Half* C_prev,
+    const at::Half* X,
     const int32_t* seqLengths,
     bool drop_states,
-    float16* C,
-    float16* H,
+    at::Half* C,
+    at::Half* H,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitKernel<float16, float><<<
+  LSTMUnitKernel<at::Half, float><<<
       CAFFE_GET_BLOCKS(N * D),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -170,6 +171,7 @@ void LSTMUnit<float16, CUDAContext>(
       C,
       H,
       forget_bias);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -210,27 +212,28 @@ void LSTMUnitGradient<float, CUDAContext>(
       C_prev_diff,
       X_diff,
       forget_bias);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
-void LSTMUnitGradient<float16, CUDAContext>(
+void LSTMUnitGradient<at::Half, CUDAContext>(
     int N,
     int D,
     int t,
-    const float16* C_prev,
-    const float16* X,
+    const at::Half* C_prev,
+    const at::Half* X,
     const int32_t* seqLengths,
-    const float16* C,
-    const float16* H,
-    const float16* C_diff,
-    const float16* H_diff,
+    const at::Half* C,
+    const at::Half* H,
+    const at::Half* C_diff,
+    const at::Half* H_diff,
     bool drop_states,
-    float16* H_prev_diff,
-    float16* C_prev_diff,
-    float16* X_diff,
+    at::Half* H_prev_diff,
+    at::Half* C_prev_diff,
+    at::Half* X_diff,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitGradientKernel<float16, float><<<
+  LSTMUnitGradientKernel<at::Half, float><<<
       CAFFE_GET_BLOCKS(N * D),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -250,17 +253,18 @@ void LSTMUnitGradient<float16, CUDAContext>(
       C_prev_diff,
       X_diff,
       forget_bias);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 }
 
 template <>
 bool LSTMUnitOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 template <>
 bool LSTMUnitGradientOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(LSTMUnit, LSTMUnitOp<CUDAContext>);

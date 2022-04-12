@@ -24,35 +24,56 @@ namespace caffe2 {
 template <>
 bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
+
+  if (InputSize() == 2) {
+    const auto& scales = Input(1);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
+  }
 
   const int batch_size = X.dim32(0);
   const int num_channels = X.dim32(1);
   const int input_height = X.dim32(2);
   const int input_width = X.dim32(3);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_width = input_width * width_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_height = input_height * height_scale_;
-  Y->Resize(batch_size, num_channels, output_height, output_width);
+  auto* Y = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
 
   const float* input = X.data<float>();
   float* output = Y->mutable_data<float>();
   int channels = num_channels * batch_size;
 
   const float rheight = (output_height > 1)
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? (float)(input_height - 1) / (output_height - 1)
       : 0.f;
   const float rwidth =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (output_width > 1) ? (float)(input_width - 1) / (output_width - 1) : 0.f;
   for (int h2 = 0; h2 < output_height; ++h2) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1r = rheight * h2;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const int h1 = h1r;
     const int h1p = (h1 < input_height - 1) ? 1 : 0;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1lambda = h1r - h1;
     const float h0lambda = (float)1. - h1lambda;
     for (int w2 = 0; w2 < output_width; ++w2) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1r = rwidth * w2;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const int w1 = w1r;
       const int w1p = (w1 < input_width - 1) ? 1 : 0;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1lambda = w1r - w1;
       const float w0lambda = (float)1. - w1lambda;
       const float* Xdata = &input[h1 * input_width + w1];
@@ -75,9 +96,17 @@ template <>
 bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
-  auto* dX = Output(0);
 
-  const auto& inputDims = dY.dims();
+  if (InputSize() == 3) {
+    const auto& scales = Input(2);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
+  }
+
+  const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0);
   const int num_channels = dY.dim32(1);
@@ -85,30 +114,41 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const int input_width = dY.dim32(3);
   const int output_height = X.dim32(2);
   const int output_width = X.dim32(3);
-  dX->Resize(batch_size, num_channels, output_height, output_width);
+  auto* dX = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
   math::Set<float, CPUContext>(
-      dX->size(), 0.0f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->mutable_data<float>(), &context_);
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = num_channels * batch_size;
 
   const float rheight = (input_height > 1)
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? (float)(output_height - 1) / (input_height - 1)
       : 0.f;
   const float rwidth =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (input_width > 1) ? (float)(output_width - 1) / (input_width - 1) : 0.f;
 
   for (int h2 = 0; h2 < input_height; ++h2) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1r = rheight * h2;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const int h1 = h1r;
     const int h1p = (h1 < output_height - 1) ? 1 : 0;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1lambda = h1r - h1;
     const float h0lambda = (float)1. - h1lambda;
     for (int w2 = 0; w2 < input_width; ++w2) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1r = rwidth * w2;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const int w1 = w1r;
       const int w1p = (w1 < output_width - 1) ? 1 : 0;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1lambda = w1r - w1;
       const float w0lambda = (float)1. - w1lambda;
       float* pos1 = &dXdata[h1 * output_width + w1];
@@ -134,7 +174,7 @@ REGISTER_CPU_OPERATOR(
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(UpsampleBilinear)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
@@ -146,11 +186,15 @@ output_width = floor(input_width * width_scale)
 output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
+    .Input(
+        1,
+        "scales",
+        "1D, 2-element, Scales tensor, [height_scale, width_scale]")
     .Output(0, "Y", "Output tensor");
 
 // Input: dY, output: dX
 OPERATOR_SCHEMA(UpsampleBilinearGradient)
-    .NumInputs(2)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension");
@@ -158,6 +202,15 @@ OPERATOR_SCHEMA(UpsampleBilinearGradient)
 class GetUpsampleBilinearGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    if (def_.input().size() == 2) {
+      // this is a hack to support the second input as dynamic
+      // width_scale and height_scale to align with onnx change
+      return SingleGradientDef(
+          "UpsampleBilinearGradient",
+          "",
+          vector<string>{GO(0), I(0), I(1)},
+          vector<string>{GI(0)});
+    }
     return SingleGradientDef(
         "UpsampleBilinearGradient",
         "",

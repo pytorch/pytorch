@@ -5,7 +5,8 @@ namespace caffe2 {
 template <>
 bool RangeFillOp<float, CPUContext>::Fill(Tensor* output) {
   float* data = output->template mutable_data<float>();
-  for (int i = 0; i < output->size(); ++i) {
+  for (int i = 0; i < output->numel(); ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     data[i] = i;
   }
   return true;
@@ -18,10 +19,10 @@ bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   T value = OperatorBase::GetSingleArgument<T>("value", 0);
   auto* data = output->template mutable_data<T>();
   // first fill everything with 0
-  math::Set<T, CPUContext>(output->size(), T(0), data, &context_);
+  math::Set<T, CPUContext>(output->numel(), T(0), data, &context_);
   // then calculate step size for diagonal
   auto step = GetStepSize(output);
-  for (TIndex i = 0; i < output->size(); i += step) {
+  for (int64_t i = 0; i < output->numel(); i += step) {
     math::Set<T, CPUContext>(1, value, data, &context_);
     data += step;
   }
@@ -40,7 +41,7 @@ REGISTER_CPU_OPERATOR(RangeFill, RangeFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsRangeFill, LengthsRangeFillOp<CPUContext>);
 
 OPERATOR_SCHEMA(ConstantFill)
-    .NumInputs(0, 1)
+    .NumInputs(0, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference<>)
@@ -65,6 +66,8 @@ provided, a shape argument should not be set)
 containing the desired output shape (the dimensions specified in `extra_shape`
 will also be appended)
 
+- If a second input V is passed, fill the output with the first element of V
+
 When specifying `dtype` argument, use the integer keys from the *DataType* enum
 in TensorProto:
 
@@ -83,7 +86,7 @@ message TensorProto {
     UINT16 = 8;  // uint16_t
     INT16 = 9;  // int16_t
     INT64 = 10;  // int64_t
-    FLOAT16 = 12;  // caffe2::__f16, caffe2::float16
+    FLOAT16 = 12;  // at::Half
     DOUBLE = 13;  // double
   }
 ```
@@ -298,11 +301,11 @@ op_2 = core.CreateOperator(
     input_as_shape=1
 )
 
-# Test arg-based op
+// Test arg-based op
 workspace.RunOperatorOnce(op_1)
 print("output (op_1):\n", workspace.FetchBlob("output"))
 
-# Test input-based op
+// Test input-based op
 workspace.ResetWorkspace()
 workspace.FeedBlob("shape", np.array([5,5]))
 workspace.FeedBlob("min", np.array(13.8, dtype=np.float32))
@@ -349,7 +352,7 @@ OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference<>)
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT32>)
     .SetDoc(R"DOC(
 Fill the output tensor with int32 samples from uniform distribution [`min`, `max`].
 
@@ -389,11 +392,11 @@ op_2 = core.CreateOperator(
     input_as_shape=1
 )
 
-# Test arg-based op
+// Test arg-based op
 workspace.RunOperatorOnce(op_1)
 print("output (op_1):\n", workspace.FetchBlob("output"))
 
-# Test input-based op
+// Test input-based op
 workspace.ResetWorkspace()
 workspace.FeedBlob("shape", np.array([5,5]))
 workspace.FeedBlob("min", np.array(13, dtype=np.int32))

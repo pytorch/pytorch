@@ -1,6 +1,6 @@
 import sys
 import json
-import numpy
+import math
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -35,13 +35,24 @@ else:
 print("population mean: ", mean)
 print("population sigma: ", sigma)
 
+# Let the test pass if baseline number is NaN (which happened in
+# the past when we didn't have logic for catching NaN numbers)
+if math.isnan(mean) or math.isnan(sigma):
+    mean = sys.maxsize
+    sigma = 0.001
+
 sample_stats_data = json.loads(args.sample_stats)
 
-sample_mean = sample_stats_data['mean']
-sample_sigma = sample_stats_data['sigma']
+sample_mean = float(sample_stats_data['mean'])
+sample_sigma = float(sample_stats_data['sigma'])
 
 print("sample mean: ", sample_mean)
 print("sample sigma: ", sample_sigma)
+
+if math.isnan(sample_mean):
+    raise Exception('''Error: sample mean is NaN''')
+elif math.isnan(sample_sigma):
+    raise Exception('''Error: sample sigma is NaN''')
 
 z_value = (sample_mean - mean) / sigma
 
@@ -50,8 +61,10 @@ print("z-value: ", z_value)
 if z_value >= 3:
     raise Exception('''\n
 z-value >= 3, there is high chance of perf regression.\n
-To reproduce this regression, run `cd .jenkins/pytorch/perf_test/ && bash ''' + test_name + '''.sh` on your local machine and compare the runtime before/after your code change.
-''')
+To reproduce this regression, run
+`cd .jenkins/pytorch/perf_test/ && bash {}.sh` on your local machine
+and compare the runtime before/after your code change.
+'''.format(test_name))
 else:
     print("z-value < 3, no perf regression detected.")
     if args.update:

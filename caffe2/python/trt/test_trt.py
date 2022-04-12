@@ -1,22 +1,21 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import onnx
 import onnx.defs
-from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
+from onnx.helper import make_node, make_graph, make_tensor_value_info, make_model
 from onnx.backend.base import namedtupledict
-from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
+from caffe2.python.models.download import ModelDownloader
 import caffe2.python.onnx.backend as c2
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_caffe2_net
 from caffe2.python.onnx.tests.test_utils import TestCase
 import numpy as np
 import os.path
-import json
 import time
 import unittest
 import tarfile
@@ -37,11 +36,12 @@ def _print_net(net):
             print("  output: {}".format(y))
 
 
-_BASE_URL = 'https://s3.amazonaws.com/download.onnx/models/opset_{}'.format(onnx.defs.onnx_opset_version())
+def _base_url(opset_version):
+    return 'https://s3.amazonaws.com/download.onnx/models/opset_{}'.format(opset_version)
 
 # TODO: This is copied from https://github.com/onnx/onnx/blob/master/onnx/backend/test/runner/__init__.py. Maybe we should
 # expose a model retrival API from ONNX
-def _download_onnx_model(model_name):
+def _download_onnx_model(model_name, opset_version):
     onnx_home = os.path.expanduser(os.getenv('ONNX_HOME', os.path.join('~', '.onnx')))
     models_dir = os.getenv('ONNX_MODELS',
                            os.path.join(onnx_home, 'models'))
@@ -60,7 +60,7 @@ def _download_onnx_model(model_name):
 
         # On Windows, NamedTemporaryFile can not be opened for a
         # second time
-        url = '{}/{}.tar.gz'.format(_BASE_URL, model_name)
+        url = '{}/{}.tar.gz'.format(_base_url(opset_version), model_name)
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
             download_file.close()
@@ -79,6 +79,9 @@ def _download_onnx_model(model_name):
     return model_dir
 
 class TensorRTOpTest(TestCase):
+    def setUp(self):
+        self.opset_version = onnx.defs.onnx_opset_version()
+
     def _test_relu_graph(self, X, batch_size, trt_max_batch_size):
         node_def = make_node("Relu", ["X"], ["Y"])
         Y_c2 = c2.run_node(node_def, {"X": X})
@@ -113,8 +116,8 @@ class TensorRTOpTest(TestCase):
         X = np.random.randn(52, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 52, 50)
 
-    def _test_onnx_importer(self, model_name, data_input_index = 0):
-        model_dir = _download_onnx_model(model_name)
+    def _test_onnx_importer(self, model_name, data_input_index, opset_version=onnx.defs.onnx_opset_version()):
+        model_dir = _download_onnx_model(model_name, opset_version)
         model_def = onnx.load(os.path.join(model_dir, 'model.onnx'))
         input_blob_dims = [int(x.dim_value) for x in model_def.graph.input[data_input_index].type.tensor_type.shape.dim]
         op_inputs = [x.name for x in model_def.graph.input]
@@ -129,6 +132,9 @@ class TensorRTOpTest(TestCase):
         ws = Workspace()
         with core.DeviceScope(device_option):
             ws.FeedBlob(op_inputs[data_input_index], data)
+            if opset_version >= 5:
+                # Some newer models from ONNX Zoo come with pre-set "data_0" input
+                ws.FeedBlob("data_0", data)
             ws.RunOperatorsOnce([op])
             output_values = [ws.FetchBlob(name) for name in op_outputs]
             Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
@@ -136,86 +142,44 @@ class TensorRTOpTest(TestCase):
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50(self):
-        self._test_onnx_importer('resnet50')
+        self._test_onnx_importer('resnet50', 0, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_bvlc_alexnet(self):
-        self._test_onnx_importer('bvlc_alexnet')
+        self._test_onnx_importer('bvlc_alexnet', 0, 9)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Unsqueeze op")
     def test_densenet121(self):
-        self._test_onnx_importer('densenet121', -1)
+        self._test_onnx_importer('densenet121', -1, 3)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
-        self._test_onnx_importer('inception_v1', -1)
+        self._test_onnx_importer('inception_v1', -3, 9)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Unsqueeze op")
     def test_inception_v2(self):
-        self._test_onnx_importer('inception_v2')
+        self._test_onnx_importer('inception_v2', 0, 9)
 
     @unittest.skip('Need to revisit our ChannelShuffle exporter to avoid generating 5D tensor')
     def test_shufflenet(self):
-        self._test_onnx_importer('shufflenet')
+        self._test_onnx_importer('shufflenet', 0)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_squeezenet(self):
-        self._test_onnx_importer('squeezenet', -1)
+        self._test_onnx_importer('squeezenet', -1, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg16(self):
-        self._test_onnx_importer('vgg16')
+        self._test_onnx_importer('vgg16', 0, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg19(self):
-        self._test_onnx_importer('vgg19', -1)
+        self._test_onnx_importer('vgg19', -2, 9)
+
 
 class TensorRTTransformTest(TestCase):
-    def _model_dir(self, model):
-        caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
-        models_dir = os.getenv('CAFFE2_MODELS', os.path.join(caffe2_home, 'models'))
-        return os.path.join(models_dir, model)
-
-    def _download(self, model):
-        model_dir = self._model_dir(model)
-        assert not os.path.exists(model_dir)
-        os.makedirs(model_dir)
-        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
-            url = getURLFromName(model, f)
-            dest = os.path.join(model_dir, f)
-            try:
-                try:
-                    downloadFromURLToFile(url, dest,
-                                          show_progress=False)
-                except TypeError:
-                    # show_progress not supported prior to
-                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
-                    # (Sep 17, 2017)
-                    downloadFromURLToFile(url, dest)
-            except Exception as e:
-                print("Abort: {reason}".format(reason=e))
-                print("Cleaning up...")
-                deleteDirectory(model_dir)
-                exit(1)
-
-    def _get_c2_model(self, model_name):
-        model_dir = self._model_dir(model_name)
-        if not os.path.exists(model_dir):
-            self._download(model_name)
-        c2_predict_pb = os.path.join(model_dir, 'predict_net.pb')
-        c2_predict_net = caffe2_pb2.NetDef()
-        with open(c2_predict_pb, 'rb') as f:
-            c2_predict_net.ParseFromString(f.read())
-        c2_predict_net.name = model_name
-
-        c2_init_pb = os.path.join(model_dir, 'init_net.pb')
-        c2_init_net = caffe2_pb2.NetDef()
-        with open(c2_init_pb, 'rb') as f:
-            c2_init_net.ParseFromString(f.read())
-        c2_init_net.name = model_name + '_init'
-
-        value_info = json.load(open(os.path.join(model_dir, 'value_info.json')))
-        return c2_init_net, c2_predict_net, value_info
+    def setUp(self):
+        self.model_downloader = ModelDownloader()
 
     def _add_head_tail(self, pred_net, new_head, new_tail):
         orig_head = pred_net.external_input[0]
@@ -241,14 +205,13 @@ class TensorRTTransformTest(TestCase):
         pred_net.op.extend([tail])
         pred_net.external_output[0] = new_tail
 
-
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50_core(self):
         N = 2
         warmup = 20
         repeat = 100
         print("Batch size: {}, repeat inference {} times, warmup {} times".format(N, repeat, warmup))
-        init_net, pred_net, _  = self._get_c2_model('resnet50')
+        init_net, pred_net, _ = self.model_downloader.get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
         input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"
@@ -314,5 +277,3 @@ class TensorRTTransformTest(TestCase):
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
-
-

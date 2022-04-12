@@ -1,36 +1,33 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
+
+import os
+import shutil
+import sys
+import tempfile
 import unittest
+
+import numpy as np
+from caffe2.proto import caffe2_pb2
+from caffe2.python import model_helper, workspace
+
+
 try:
     import lmdb
 except ImportError:
-    raise unittest.SkipTest('python-lmdb is not installed')
-
-import sys
-import os
-import shutil
-import tempfile
-
-from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, model_helper
-import numpy as np
+    raise unittest.SkipTest("python-lmdb is not installed")
 
 
 class VideoInputOpTest(unittest.TestCase):
-
     def create_a_list(self, output_file, line, n):
         # create a list that repeat a line n times
         # used for creating a list file for simple test input
-        with open(output_file, 'w') as file:
+        with open(output_file, "w") as file:
             for _i in range(n):
                 file.write(line)
 
     def create_video_db(self, list_file, output_file, use_list=False):
         # Write to lmdb database...
-        LMDB_MAP_SIZE = 1 << 40   # MODIFY
+        LMDB_MAP_SIZE = 1 << 40  # MODIFY
         env = lmdb.open(output_file, map_size=LMDB_MAP_SIZE)
         total_size = 0
 
@@ -40,7 +37,7 @@ class VideoInputOpTest(unittest.TestCase):
         index = 0
 
         with env.begin(write=True) as txn:
-            with open(list_file, 'r') as data:
+            with open(list_file, "r") as data:
                 for line in data:
                     p = line.split()
                     file_name = p[0]
@@ -48,7 +45,7 @@ class VideoInputOpTest(unittest.TestCase):
                     label = int(p[2])
 
                     if not use_list:
-                        with open(file_name, mode='rb') as file:
+                        with open(file_name, mode="rb") as file:
                             video_data = file.read()
                     else:
                         video_data = file_name
@@ -67,8 +64,8 @@ class VideoInputOpTest(unittest.TestCase):
                     start_frame_tensor.int32_data.append(start_frame)
 
                     txn.put(
-                        '{}'.format(index).encode('ascii'),
-                        tensor_protos.SerializeToString()
+                        "{}".format(index).encode("ascii"),
+                        tensor_protos.SerializeToString(),
                     )
                     index = index + 1
                     total_size = total_size + len(video_data) + sys.getsizeof(int)
@@ -79,9 +76,9 @@ class VideoInputOpTest(unittest.TestCase):
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
+            raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
+        line_str = "{} 0 {}\n".format(VIDEO, random_label)
         self.create_a_list(temp_list, line_str, 16)
         video_db_dir = tempfile.mkdtemp()
 
@@ -102,7 +99,8 @@ class VideoInputOpTest(unittest.TestCase):
             length_rgb=8,
             sampling_rate_rgb=1,
             decode_type=0,
-            video_res_type=0)
+            video_res_type=0,  # scale by scale_h and scale_w
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -120,9 +118,9 @@ class VideoInputOpTest(unittest.TestCase):
         clip_per_video = np.random.randint(2, 11)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
+            raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
+        line_str = "{} 0 {}\n".format(VIDEO, random_label)
         self.create_a_list(temp_list, line_str, 16)
         video_db_dir = tempfile.mkdtemp()
 
@@ -143,7 +141,8 @@ class VideoInputOpTest(unittest.TestCase):
             length_rgb=8,
             sampling_rate_rgb=1,
             decode_type=1,
-            video_res_type=0)
+            video_res_type=0,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -155,224 +154,14 @@ class VideoInputOpTest(unittest.TestCase):
         os.remove(temp_list)
         shutil.rmtree(video_db_dir)
 
-    # sample multiple clips uniformly from the video, rectangle cropping.
-    # VideoResType is USE_WIDTH_HEIGHT
-    def test_rgb_with_uniform_sampling_rectangle_cropping_use_width_height(self):
-        batch_size = 3
-        crop_height, crop_width = 112, 144
-        random_label = np.random.randint(0, 100)
-        clip_per_video = np.random.randint(2, 11)
-        VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
-        if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
-        temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
-        self.create_a_list(temp_list, line_str, 16)
-        video_db_dir = tempfile.mkdtemp()
-
-        self.create_video_db(temp_list, video_db_dir)
-        model = model_helper.ModelHelper(name="Video Loader from LMDB")
-        reader = model.CreateDB("sample", db=video_db_dir, db_type="lmdb")
-
-        # build the model
-        model.net.VideoInput(
-            reader,
-            ["data", "label"],
-            name="data",
-            batch_size=batch_size,
-            clip_per_video=clip_per_video,
-            crop_height=crop_height,
-            crop_width=crop_width,
-            scale_w=171,
-            scale_h=128,
-            length_rgb=8,
-            sampling_rate_rgb=1,
-            color_jitter=True,
-            color_lighting=True,
-            decode_type=1,
-            video_res_type=0)
-
-        workspace.RunNetOnce(model.param_init_net)
-        workspace.RunNetOnce(model.net)
-        data = workspace.FetchBlob("data")
-        label = workspace.FetchBlob("label")
-
-        np.testing.assert_equal(
-            label.shape, [batch_size * clip_per_video])
-        for i in range(batch_size * clip_per_video):
-            np.testing.assert_equal(label[i], random_label)
-        np.testing.assert_equal(
-            data.shape,
-            [batch_size * clip_per_video, 3, 8, crop_height, crop_width])
-        os.remove(temp_list)
-        shutil.rmtree(video_db_dir)
-
-    # sample multiple clips uniformly from the video, rectangle cropping.
-    # VideoResType is USE_MINIMAL_WIDTH_HEIGHT
-    def test_rgb_with_uniform_sampling_rectangle_cropping_use_minimal_width_height(
-        self
-    ):
-        batch_size = 3
-        height_min, width_min = 128, 166
-        crop_height, crop_width = 112, 144
-        random_label = np.random.randint(0, 100)
-        clip_per_video = np.random.randint(2, 11)
-        VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
-        if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
-        temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
-        self.create_a_list(temp_list, line_str, 16)
-        video_db_dir = tempfile.mkdtemp()
-
-        self.create_video_db(temp_list, video_db_dir)
-        model = model_helper.ModelHelper(name="Video Loader from LMDB")
-        reader = model.CreateDB("sample", db=video_db_dir, db_type="lmdb")
-
-        # build the model
-        model.net.VideoInput(
-            reader,
-            ["data", "label"],
-            name="data",
-            batch_size=batch_size,
-            clip_per_video=clip_per_video,
-            height_min=height_min,
-            width_min=width_min,
-            crop_height=crop_height,
-            crop_width=crop_width,
-            length_rgb=8,
-            sampling_rate_rgb=1,
-            color_jitter=True,
-            color_lighting=True,
-            decode_type=1,
-            video_res_type=1)
-
-        workspace.RunNetOnce(model.param_init_net)
-        workspace.RunNetOnce(model.net)
-        data = workspace.FetchBlob("data")
-        label = workspace.FetchBlob("label")
-
-        np.testing.assert_equal(
-            label.shape, [batch_size * clip_per_video])
-        for i in range(batch_size * clip_per_video):
-            np.testing.assert_equal(label[i], random_label)
-        np.testing.assert_equal(
-            data.shape,
-            [batch_size * clip_per_video, 3, 8, crop_height, crop_width])
-        os.remove(temp_list)
-        shutil.rmtree(video_db_dir)
-
-    # sample multiple clips uniformly from the video, while color jitterring
-    # and lighting are enabled
-    def test_rgb_with_uniform_sampling_color_jittering_lighting(self):
-        batch_size = 3
-        random_label = np.random.randint(0, 100)
-        clip_per_video = np.random.randint(2, 11)
-        VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
-        if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
-        temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
-        self.create_a_list(temp_list, line_str, 16)
-        video_db_dir = tempfile.mkdtemp()
-
-        self.create_video_db(temp_list, video_db_dir)
-        model = model_helper.ModelHelper(name="Video Loader from LMDB")
-        reader = model.CreateDB("sample", db=video_db_dir, db_type="lmdb")
-
-        # build the model
-        model.net.VideoInput(
-            reader,
-            ["data", "label"],
-            name="data",
-            batch_size=batch_size,
-            clip_per_video=clip_per_video,
-            crop_size=112,
-            scale_w=171,
-            scale_h=128,
-            length_rgb=8,
-            sampling_rate_rgb=1,
-            color_jitter=True,
-            color_lighting=True,
-            decode_type=1,
-            video_res_type=0)
-
-        workspace.RunNetOnce(model.param_init_net)
-        workspace.RunNetOnce(model.net)
-        data = workspace.FetchBlob("data")
-        label = workspace.FetchBlob("label")
-
-        np.testing.assert_equal(
-            label.shape, [batch_size * clip_per_video])
-        for i in range(batch_size * clip_per_video):
-            np.testing.assert_equal(label[i], random_label)
-
-        np.testing.assert_equal(
-            data.shape,
-            [batch_size * clip_per_video, 3, 8, 112, 112])
-        os.remove(temp_list)
-        shutil.rmtree(video_db_dir)
-
-    # sample multiple clips uniformly from the video
-    def test_rgb_with_uniform_sampling_and_multi_cropping(self):
-        # we take left-top, central-top, right-top, left-bottom, central-bottom,
-        # right-bottom and central-central croppings as well as their mirrorings
-        # In total, 14 croppings
-        multi_crop_count = 14
-        batch_size = 3
-        random_label = np.random.randint(0, 100)
-        clip_per_video = np.random.randint(2, 11)
-        VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
-        if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
-        temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
-        self.create_a_list(temp_list, line_str, 16)
-        video_db_dir = tempfile.mkdtemp()
-
-        self.create_video_db(temp_list, video_db_dir)
-        model = model_helper.ModelHelper(name="Video Loader from LMDB")
-        reader = model.CreateDB("sample", db=video_db_dir, db_type="lmdb")
-
-        # build the model
-        model.net.VideoInput(
-            reader,
-            ["data", "label"],
-            name="data",
-            batch_size=batch_size,
-            clip_per_video=clip_per_video,
-            crop_size=112,
-            scale_w=171,
-            scale_h=128,
-            length_rgb=8,
-            sampling_rate_rgb=1,
-            decode_type=1,
-            multi_crop=True,
-            video_res_type=0)
-
-        workspace.RunNetOnce(model.param_init_net)
-        workspace.RunNetOnce(model.net)
-        data = workspace.FetchBlob("data")
-        label = workspace.FetchBlob("label")
-
-        np.testing.assert_equal(
-            label.shape, [batch_size * clip_per_video * multi_crop_count])
-        for i in range(batch_size * clip_per_video * multi_crop_count):
-            np.testing.assert_equal(label[i], random_label)
-        np.testing.assert_equal(
-            data.shape,
-            [batch_size * clip_per_video * multi_crop_count, 3, 8, 112, 112])
-        os.remove(temp_list)
-        shutil.rmtree(video_db_dir)
-
     # test optical flow
     def test_optical_flow_with_temporal_jittering(self):
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
+            raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
+        line_str = "{} 0 {}\n".format(VIDEO, random_label)
         self.create_a_list(temp_list, line_str, 16)
         video_db_dir = tempfile.mkdtemp()
 
@@ -394,7 +183,8 @@ class VideoInputOpTest(unittest.TestCase):
             decode_type=0,
             video_res_type=0,
             get_rgb=False,
-            get_optical_flow=True)
+            get_optical_flow=True,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -406,18 +196,16 @@ class VideoInputOpTest(unittest.TestCase):
         os.remove(temp_list)
         shutil.rmtree(video_db_dir)
 
-    # test optical flow, rectangle cropping, VideoResType is
-    # USE_WIDTH_HEIGHT
-    def test_optical_flow_with_rectangle_cropping_use_width_height(self):
+    # test rgb output VideoResType is
+    # USE_SHORTER_EDGE
+    def test_rgb_use_shorter_edge(self):
         batch_size = 16
-        scale_h, scale_w = 128, 166
-        crop_height, crop_width = 112, 144
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
+            raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
+        line_str = "{} 0 {}\n".format(VIDEO, random_label)
         self.create_a_list(temp_list, line_str, batch_size)
         video_db_dir = tempfile.mkdtemp()
 
@@ -430,17 +218,17 @@ class VideoInputOpTest(unittest.TestCase):
             name="data",
             batch_size=batch_size,
             clip_per_video=1,
-            scale_h=scale_h,
-            scale_w=scale_w,
-            crop_height=crop_height,
-            crop_width=crop_width,
+            crop_size=112,
+            scale_w=171,
+            scale_h=128,
             length_of=8,
-            sampling_rate_of=1,
             frame_gap_of=1,
             decode_type=0,
-            video_res_type=0,
-            get_rgb=False,
-            get_optical_flow=True)
+            video_res_type=1,  # use shorter edge
+            get_rgb=True,
+            length_rgb=8,
+            short_edge=112,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -450,23 +238,20 @@ class VideoInputOpTest(unittest.TestCase):
         np.testing.assert_equal(label.shape, [batch_size])
         for i in range(batch_size):
             np.testing.assert_equal(label[i], random_label)
-        np.testing.assert_equal(
-            data.shape, [batch_size, 2, 8, crop_height, crop_width])
+        np.testing.assert_equal(data.shape, [batch_size, 3, 8, 112, 112])
         os.remove(temp_list)
         shutil.rmtree(video_db_dir)
 
-    # test optical flow, rectangle cropping, VideoResType is
-    # USE_MINIMAL_WIDTH_HEIGHT
-    def test_optical_flow_with_rectangle_cropping_use_minimal_width_height(self):
+    # test optical flow output VideoResType is
+    # USE_SHORTER_EDGE
+    def test_optical_flow_use_shorter_edge(self):
         batch_size = 16
-        height_min, width_min = 128, 166
-        crop_height, crop_width = 112, 144
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
         if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
+            raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
+        line_str = "{} 0 {}\n".format(VIDEO, random_label)
         self.create_a_list(temp_list, line_str, batch_size)
         video_db_dir = tempfile.mkdtemp()
 
@@ -479,17 +264,18 @@ class VideoInputOpTest(unittest.TestCase):
             name="data",
             batch_size=batch_size,
             clip_per_video=1,
-            height_min=height_min,
-            width_min=width_min,
-            crop_height=crop_height,
-            crop_width=crop_width,
+            crop_size=112,
+            scale_w=171,
+            scale_h=128,
             length_of=8,
             sampling_rate_of=1,
             frame_gap_of=1,
             decode_type=0,
-            video_res_type=1,
+            video_res_type=1,  # use shorter edge
             get_rgb=False,
-            get_optical_flow=True)
+            get_optical_flow=True,
+            short_edge=112,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -499,59 +285,7 @@ class VideoInputOpTest(unittest.TestCase):
         np.testing.assert_equal(label.shape, [batch_size])
         for i in range(batch_size):
             np.testing.assert_equal(label[i], random_label)
-        np.testing.assert_equal(
-            data.shape, [batch_size, 2, 8, crop_height, crop_width])
-        os.remove(temp_list)
-        shutil.rmtree(video_db_dir)
-
-    # test optical flow, multi-cropping
-    def test_optical_flow_with_multi_cropping(self):
-        multi_crop_count = 14
-        batch_size = 16
-        height_min, width_min = 128, 166
-        crop_height, crop_width = 112, 144
-        random_label = np.random.randint(0, 100)
-        VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
-        if not os.path.exists(VIDEO):
-            raise unittest.SkipTest('Missing data')
-        temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = '{} 0 {}\n'.format(VIDEO, random_label)
-        self.create_a_list(temp_list, line_str, batch_size)
-        video_db_dir = tempfile.mkdtemp()
-
-        self.create_video_db(temp_list, video_db_dir)
-        model = model_helper.ModelHelper(name="Video Loader from LMDB")
-        reader = model.CreateDB("sample", db=video_db_dir, db_type="lmdb")
-        model.net.VideoInput(
-            reader,
-            ["data", "label"],
-            name="data",
-            batch_size=batch_size,
-            clip_per_video=1,
-            height_min=height_min,
-            width_min=width_min,
-            crop_height=crop_height,
-            crop_width=crop_width,
-            length_of=8,
-            sampling_rate_of=1,
-            frame_gap_of=1,
-            decode_type=0,
-            multi_crop=True,
-            video_res_type=1,
-            get_rgb=False,
-            get_optical_flow=True)
-
-        workspace.RunNetOnce(model.param_init_net)
-        workspace.RunNetOnce(model.net)
-        data = workspace.FetchBlob("data")
-        label = workspace.FetchBlob("label")
-
-        np.testing.assert_equal(label.shape, [batch_size * multi_crop_count])
-        for i in range(batch_size * multi_crop_count):
-            np.testing.assert_equal(label[i], random_label)
-        np.testing.assert_equal(
-            data.shape,
-            [batch_size * multi_crop_count, 2, 8, crop_height, crop_width])
+        np.testing.assert_equal(data.shape, [batch_size, 2, 8, 112, 112])
         os.remove(temp_list)
         shutil.rmtree(video_db_dir)
 

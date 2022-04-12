@@ -5,6 +5,10 @@
 #include <vector>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(MergeIdLists);
 
 namespace caffe2 {
 
@@ -17,11 +21,10 @@ class MergeIdListsOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& first_lengths = Input(0);
-    CAFFE_ENFORCE_EQ(first_lengths.ndim(), 1, "LENGTHS should be 1-D");
-    const auto batch_size = first_lengths.size();
+    CAFFE_ENFORCE_EQ(first_lengths.dim(), 1, "LENGTHS should be 1-D");
+    const auto batch_size = first_lengths.numel();
 
-    auto* out_lengths = Output(0);
-    out_lengths->ResizeLike(first_lengths);
+    auto* out_lengths = Output(0, first_lengths.sizes(), at::dtype<int32_t>());
 
     auto* out_lengths_data = out_lengths->template mutable_data<int32_t>();
 
@@ -30,17 +33,17 @@ class MergeIdListsOp : public Operator<Context> {
      * and perform checks.
      */
     auto M = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < InputSize(); i += 2) {
       auto& lengths = Input(i);
-      CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS should be 1-D");
-      CAFFE_ENFORCE_EQ(lengths.size(), batch_size, "LENGTHS should be equal");
+      CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS should be 1-D");
+      CAFFE_ENFORCE_EQ(lengths.numel(), batch_size, "LENGTHS should be equal");
       auto& values = Input(i + 1);
-      CAFFE_ENFORCE_EQ(values.ndim(), 1, "VALUES should be 1-D");
-      M += values.size();
+      CAFFE_ENFORCE_EQ(values.dim(), 1, "VALUES should be 1-D");
+      M += values.numel();
     }
 
-    auto* out_values = Output(1);
-    out_values->Resize(M);
+    auto* out_values = Output(1, {M}, at::dtype<T>());
 
     T* out_values_data = out_values->template mutable_data<T>();
     auto pos = 0;
@@ -48,7 +51,7 @@ class MergeIdListsOp : public Operator<Context> {
     // TODO(badri): Use unordered_set if performance is an issue
     std::set<T> deduped;
     std::vector<int> offsets(InputSize(), 0);
-    for (auto sample = 0; sample < batch_size; sample++) {
+    for (const auto sample : c10::irange(batch_size)) {
       for (size_t i = 0; i < InputSize(); i += 2) {
         auto& lengths = Input(i);
         const auto* lengths_data = lengths.template data<int32_t>();

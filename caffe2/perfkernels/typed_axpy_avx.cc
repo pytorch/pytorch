@@ -1,21 +1,41 @@
-#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/cvtsh_ss_bugfix.h"
-#include "caffe2/perfkernels/typed_axpy.h"
-#include "caffe2/utils/math.h"
 
+#include <c10/util/Half.h>
 #include <emmintrin.h>
 #include <immintrin.h>
 
 namespace caffe2 {
 
-void TypedAxpy_float16_float__avx_f16c(
+void TypedAxpy__avx_f16c(int N, const float a, const float* x, float* y) {
+  int current = 0;
+  const int bound = (N % 8) ? N - 8 : N;
+  __m256 mma = _mm256_set1_ps(a);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  for (; current < bound; current += 8) {
+    _mm256_storeu_ps(
+        y + current,
+        _mm256_add_ps(
+            _mm256_mul_ps(mma, _mm256_loadu_ps(x + current)),
+            _mm256_loadu_ps(y + current)));
+  }
+
+  if (bound != N) {
+    while (current < N) {
+      y[current] += x[current] * a;
+      ++current;
+    }
+  }
+}
+
+void TypedAxpyHalffloat__avx_f16c(
     int N,
     const float a,
-    const float16* x,
+    const at::Half* x,
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.
-  while (N && (unsigned long)x % 16) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  while ((reinterpret_cast<unsigned long>(x) % 16) && N) {
     *(y++) += _cvtsh_ss((*(x++)).x) * a;
     --N;
   }
@@ -26,6 +46,7 @@ void TypedAxpy_float16_float__avx_f16c(
   int current = 0;
   const int bound = (N % 8) ? N - 8 : N;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (; current < bound; current += 8) {
     __m128i mmx_16 =
         _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + current));

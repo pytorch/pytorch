@@ -5,7 +5,7 @@
 #ifndef CAFFE2_RNN_NO_TEXT_FORMAT
 #endif
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_rnn_executor,
     true,
     "If set, uses special RNN executor for executing RecurrentNetworkOp");
@@ -80,6 +80,7 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
         argsHelper.GetRepeatedArgument<int32_t>("outputs_with_grads");
     CAFFE_ENFORCE(outputs_with_grads.size() > 0);
     for (auto id : outputs_with_grads) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       gradientInputs.push_back(GO(id));
     }
 
@@ -101,7 +102,7 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
       gradientOutputs.push_back(GI(id));
     }
 
-    VLOG(1) << "Gradient blobs: " << Join(", ", gradientOutputs);
+    VLOG(1) << "Gradient blobs: " << c10::Join(", ", gradientOutputs);
 
     return SingleGradientDef(
         "RecurrentNetworkGradient", "", gradientInputs, gradientOutputs);
@@ -227,6 +228,7 @@ void extractLinks(
       externalArg,
       " ",
       windowArg);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < internal.size(); ++i) {
     detail::Link l;
     l.internal = internal[i];

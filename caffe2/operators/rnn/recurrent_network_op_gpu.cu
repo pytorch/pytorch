@@ -43,38 +43,40 @@ void repeatCopy(
     CUDAContext* context) {
     initRecurrentInput_kernel<float><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
         n, src, dst);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 template <>
 void repeatCopy(
     size_t repeat_n,
     size_t n,
-    const float16* src,
-    float16* dst,
+    const at::Half* src,
+    at::Half* dst,
     CUDAContext* context) {
-    initRecurrentInput_kernel<float16><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+    initRecurrentInput_kernel<at::Half><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
         n, src, dst);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 }; // namespace detail
 
 template <>
 bool RecurrentNetworkOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 template <>
 bool RecurrentNetworkGradientOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 template <>
 bool AccumulateInputGradientOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(1));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(1));
 }
 
 template <>
 bool RNNApplyLinkOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(1));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(1));
 }
 
 REGISTER_CUDA_OPERATOR(

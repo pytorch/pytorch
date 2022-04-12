@@ -1,9 +1,21 @@
 #include <cub/block/block_reduce.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
+#if defined(USE_ROCM)
+#include <cfloat>
+#endif
+
+#if defined(USE_ROCM)
+namespace rocprim {
+#else
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+namespace at_cuda_detail {
+#endif
 namespace cub {
+#endif
 
 template <typename KeyT, typename ValueT>
 inline __host__ __device__ bool operator<(
@@ -14,6 +26,9 @@ inline __host__ __device__ bool operator<(
 }
 
 } // namespace cub
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+}  // namespace at_cuda_detail
+#endif
 
 namespace caffe2 {
 
@@ -161,9 +176,9 @@ __global__ void RMACRegionsKernel(
 template <>
 bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
   const auto& X = Input(0); // Input tensor
-  auto* output = Output(0); // RoIs
+   // RoIs
 
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     return true;
   }
 
@@ -174,7 +189,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
   // Compute number of regions
   int min_step = 1;
   int max_step = 6;
-  num_rois_.Resize(3); // num_rois, Wd, Hd
+  ReinitializeTensor(&num_rois_, {3}, at::dtype<int>().device(CUDA)); // num_rois, Wd, Hd
   NumRMACRegionsKernel<<<
       1,
       CAFFE_CUDA_NUM_THREADS,
@@ -187,6 +202,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
       overlap_,
       scales_,
       num_rois_.mutable_data<int>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Bit awkward, but the size of the output tensor depends on the output of
   // NumRMACRegionsKernel (number of RoIs), so need to copy that to CPU
@@ -194,7 +210,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
   int num_rois = 0;
   context_.CopyBytesToCPU(sizeof(int), num_rois_.data<int>(), &num_rois);
   int N = batch_size * num_rois;
-  output->Resize(N, 5); // [batch_id x1 y1 x2 y2]
+  auto* output = Output(0, {N, 5}, at::dtype<float>()); // [batch_id x1 y1 x2 y2]
 
   // Compute region coordinates
   RMACRegionsKernel<<<
@@ -203,6 +219,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       W, H, N, num_rois_.data<int>(), output->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

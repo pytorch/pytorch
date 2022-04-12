@@ -62,16 +62,18 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 template <typename T, bool KillWARDependency, class BinaryFunction>
 __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
-#if CUDA_VERSION >= 9000
-  T vote = __ballot_sync(__activemask(), in);
-#else
-  T vote = __ballot(in);
-#endif
+#if defined(USE_ROCM)
+  unsigned long long int vote = __ballot(in);
 
+  T index = __popcll(getLaneMaskLe() & vote);
+  T carry = __popcll(vote);
+#else
+  T vote = __ballot_sync(__activemask(), in);
   T index = __popc(getLaneMaskLe() & vote);
   T carry = __popc(vote);
+#endif  // USE_ROCM
 
-  int warp = threadIdx.x / 32;
+  int warp = threadIdx.x / kWarpSize;
 
   // Per each warp, write out a value
   if (getLaneId() == 0) {
@@ -84,7 +86,7 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
   // warp shuffle scan for CC 3.0+
   if (threadIdx.x == 0) {
     int current = 0;
-    for (int i = 0; i < blockDim.x / 32; ++i) {
+    for (int i = 0; i < blockDim.x / kWarpSize; ++i) {
       T v = smem[i];
       smem[i] = binop(smem[i], current);
       current = binop(current, v);
@@ -115,7 +117,11 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   *out -= (T) in;
 
   // The outgoing carry for all threads is the last warp's sum
-  *carry = smem[(blockDim.x / 32) - 1];
+#if defined(USE_ROCM)
+  *carry = smem[math::DivUp<int>(blockDim.x, kWarpSize) - 1];
+#else
+  *carry = smem[(blockDim.x / kWarpSize) - 1];
+#endif  // USE_ROCM
 
   if (KillWARDependency) {
     __syncthreads();

@@ -8,7 +8,7 @@
 namespace caffe2 {
 
 /**
- * Struct for operator in a timestep and its dependenceis.
+ * Struct for operator in a timestep and its dependencies.
  */
 struct RNNNetOperator {
   int order; // Position in the step net (i.e nth operator)
@@ -54,11 +54,12 @@ struct OpTask {
   int T; // number of timesteps in this execution
   int direction; // +1 for forward, -1 for backward pass
   int stream_id = -1; // only used by gpu version
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   OpTask() {}
   OpTask(int _timestep, int _op_idx, int _T, int _direction)
       : timestep(_timestep), op_idx(_op_idx), T(_T), direction(_direction) {
-    CHECK(direction == 1 || direction == -1);
-    CHECK(timestep >= 0 && timestep < _T);
+    CAFFE_ENFORCE(direction == 1 || direction == -1);
+    CAFFE_ENFORCE(timestep >= 0 && timestep < _T);
   }
 
   inline bool backward() {

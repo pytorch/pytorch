@@ -7,27 +7,7 @@ REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const vector<TensorShape>& in) {
-      ArgumentHelper helper(def);
-      const int axis = helper.GetSingleArgument<int>("axis", 1);
-      vector<TensorShape> out(1);
-      TIndex outer = 1;
-      TIndex inner = 1;
-      std::size_t index = 0;
-      for (auto d : in[0].dims()) {
-        if (index < axis) {
-          outer *= d;
-        } else {
-          inner *= d;
-        }
-        ++index;
-      }
-      out[0].set_data_type(in[0].data_type());
-      out[0].add_dims(outer);
-      out[0].add_dims(inner);
-      return out;
-    })
+    .TensorInferenceFunction(TensorInferenceForFlatten)
     .SetDoc(R"DOC(
 Flattens the input tensor into a 2D matrix. If input tensor has shape
 $(d_0, d_1, ..., d_n)$ then the output will have shape
@@ -77,10 +57,7 @@ Y: [[0.53432311 0.23734561 0.56481598 0.52152617 0.33662627 0.32472711
 </details>
 
 )DOC")
-    .Input(
-        0,
-        "X",
-        "*(type: Tensor)* Input Tensor of rank >= axis.")
+    .Input(0, "X", "*(type: Tensor)* Input Tensor of rank >= axis.")
     .Output(
         0,
         "Y",
@@ -92,7 +69,7 @@ Y: [[0.53432311 0.23734561 0.56481598 0.52152617 0.33662627 0.32472711
         "axis",
         "*(type: int; default: 1)* Indicates up to which input dimensions "
         "(exclusive) should be flattened to the outer dimension of the output.")
-    .InheritOnnxSchema("Flatten");
+    .InheritOnnxSchema();
 
 class GetFlattenGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

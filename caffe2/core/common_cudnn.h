@@ -4,17 +4,16 @@
 #include <array>
 #include <mutex>
 
-#include <cudnn.h>
-
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
 
 #ifndef CAFFE2_USE_CUDNN
 #error("This Caffe2 install is not built with cudnn, so you should not include this file.");
 #endif
+
+#include <cudnn.h>
 
 static_assert(
     CUDNN_VERSION >= 5000,
@@ -171,7 +170,7 @@ class cudnnTypeWrapper<double> {
 };
 
 template <>
-class cudnnTypeWrapper<float16> {
+class cudnnTypeWrapper<at::Half> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
   typedef const float ScalingParamType;
@@ -229,7 +228,7 @@ class cudnnTensorDescWrapper {
       return desc_;
     }
     CAFFE_ENFORCE_EQ(
-        dims.size(), 4, "Currently only 4-dimensional descriptor supported.");
+        dims.size(), 4U, "Currently only 4-dimensional descriptor supported.");
     format_ = format;
     type_ = type;
     dims_ = dims;
@@ -259,7 +258,7 @@ class cudnnTensorDescWrapper {
   cudnnTensorFormat_t format_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  AT_DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
 };
 
 class cudnnFilterDescWrapper {
@@ -283,7 +282,7 @@ class cudnnFilterDescWrapper {
       return desc_;
     }
     CAFFE_ENFORCE_EQ(
-        dims.size(), 4, "Currently only 4-dimensional descriptor supported.");
+        dims.size(), 4U, "Currently only 4-dimensional descriptor supported.");
     order_ = order;
     type_ = type;
     dims_ = dims;
@@ -313,7 +312,7 @@ class cudnnFilterDescWrapper {
   StorageOrder order_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  AT_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
 };
 
 

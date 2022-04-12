@@ -4,14 +4,16 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
 template <typename T, class Context>
 class SquaredL2DistanceOp : public Operator<Context> {
  public:
-  SquaredL2DistanceOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit SquaredL2DistanceOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -23,33 +25,33 @@ class SquaredL2DistanceOp : public Operator<Context> {
 template <typename T, class Context>
 class SquaredL2DistanceGradientOp final : public Operator<Context> {
  public:
-  SquaredL2DistanceGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit SquaredL2DistanceGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dDistance = Input(2);
-    auto* dX = Output(0);
-    auto* dY = Output(1);
-    int N = X.ndim() > 0 ? X.dim32(0) : 1;
-    int D = N > 0 ? X.size() / N : 0;
-    CAFFE_ENFORCE(X.ndim() == Y.ndim());
-    for (int i = 0; i < X.ndim(); ++i) {
+
+    int N = X.dim() > 0 ? X.dim32(0) : 1;
+    int D = N > 0 ? X.numel() / N : 0;
+    CAFFE_ENFORCE(X.dim() == Y.dim());
+    for (const auto i : c10::irange(X.dim())) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
     }
-    CAFFE_ENFORCE(dDistance.ndim() == 1);
+    CAFFE_ENFORCE(dDistance.dim() == 1);
     CAFFE_ENFORCE(dDistance.dim32(0) == N);
-    dX->ResizeLike(X);
-    dY->ResizeLike(Y);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    auto* dY = Output(1, Y.sizes(), at::dtype<T>());
     math::Sub<T, Context>(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         Y.template data<T>(),
         dX->template mutable_data<T>(),
         &context_);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       math::Scale<T, T, Context>(
           D,
           dDistance.template data<T>() + i,
@@ -59,7 +61,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     }
     // The gradient of the other side is basically the negative.
     math::Scale<T, T, Context>(
-        X.size(),
+        X.numel(),
         -1,
         dX->template data<T>(),
         dY->template mutable_data<T>(),
@@ -74,8 +76,9 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
 template <typename T, class Context>
 class L1DistanceOp : public Operator<Context> {
  public:
-  L1DistanceOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit L1DistanceOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -87,8 +90,9 @@ class L1DistanceOp : public Operator<Context> {
 template <typename T, class Context>
 class L1DistanceGradientOp : public Operator<Context> {
  public:
-  L1DistanceGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit L1DistanceGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -100,8 +104,9 @@ class L1DistanceGradientOp : public Operator<Context> {
 template <typename T, class Context>
 class DotProductOp : public Operator<Context> {
  public:
-  DotProductOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit DotProductOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -114,8 +119,9 @@ class DotProductOp : public Operator<Context> {
 template <typename T, class Context>
 class DotProductGradientOp final : public Operator<Context> {
  public:
-  DotProductGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit DotProductGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -128,10 +134,12 @@ class DotProductGradientOp final : public Operator<Context> {
 template <typename T, class Context>
 class DotProductWithPaddingOp : public Operator<Context> {
  public:
-  DotProductWithPaddingOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit DotProductWithPaddingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {
+  }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -146,8 +154,9 @@ class DotProductWithPaddingOp : public Operator<Context> {
 template <typename T, class Context>
 class CosineSimilarityOp : public Operator<Context> {
  public:
-  CosineSimilarityOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit CosineSimilarityOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -157,14 +166,15 @@ class CosineSimilarityOp : public Operator<Context> {
   OUTPUT_TAGS(COS_OUT);
 
  private:
-  Tensor aux_{Context::GetDeviceType()};
+  Tensor aux_;
 };
 
 template <typename T, class Context>
 class CosineSimilarityGradientOp final : public Operator<Context> {
  public:
-  CosineSimilarityGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit CosineSimilarityGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -174,29 +184,30 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
   OUTPUT_TAGS(DER_X_OUT, DER_Y_OUT);
 
  private:
-  Tensor aux_{Context::GetDeviceType()};
+  Tensor aux_;
 };
 
 template <typename T, class Context>
 class DotProductWithPaddingGradientOp final : public Operator<Context> {
  public:
-  DotProductWithPaddingGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit DotProductWithPaddingGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {
+  }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& X = Input(X_IN);
     auto& Y = Input(Y_IN);
     auto& dDot = Input(DER_DOT_IN);
-    auto* dX = Output(DER_X_OUT);
-    auto* dY = Output(DER_Y_OUT);
+
     int N, D, DX, DY, restD;
-    if (X.size() > 0) {
-      N = X.ndim() > 0 ? X.dim32(0) : 1;
-      DX = X.size() / N;
-      DY = Y.size() / N;
+    if (X.numel() > 0) {
+      N = X.dim() > 0 ? X.dim32(0) : 1;
+      DX = X.numel() / N;
+      DY = Y.numel() / N;
     } else {
       N = 0;
       DX = 0;
@@ -205,19 +216,19 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE(!replicate_ || DX % DY == 0 || DY % DX == 0);
     D = std::min(DX, DY);
     restD = std::max(DX, DY) - D;
-    CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
     CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
-    CAFFE_ENFORCE_EQ(dDot.ndim(), 1);
+    CAFFE_ENFORCE_EQ(dDot.dim(), 1);
     CAFFE_ENFORCE_EQ(dDot.dim32(0), N);
-    dX->ResizeLike(X);
-    dY->ResizeLike(Y);
+    auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<T>());
+    auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<T>());
 
     const auto* X_data = X.template data<T>();
     const auto* Y_data = Y.template data<T>();
     const auto* dDot_data = dDot.template data<T>();
     auto* dX_data = dX->template mutable_data<T>();
     auto* dY_data = dY->template mutable_data<T>();
-    for (int i = 0; i < N; ++i) { // TODO: multithreading
+    for (const auto i : c10::irange(N)) { // TODO: multithreading
       auto offsetX = i * DX;
       auto offsetY = i * DY;
       if (replicate_) {
@@ -249,7 +260,8 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
               DS, dDot_data[i], S_data, dL_data + j * DS, &context_);
           math::Scale<T, T, Context>(
               DS, dDot_data[i], L_data + j * DS, tmp_data.data(), &context_);
-          math::Axpy<T, Context>(DS, 1.0, tmp_data.data(), dS_data, &context_);
+          math::Axpy<float, T, Context>(
+              DS, 1.0, tmp_data.data(), dS_data, &context_);
         }
       } else {
         math::Scale<T, T, Context>(

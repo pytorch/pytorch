@@ -6,7 +6,7 @@ namespace caffe2 {
 
 TEST(EventCPUTest, EventBasics) {
   DeviceOption device_option;
-  device_option.set_device_type(CPU);
+  device_option.set_device_type(PROTO_CPU);
   Event event(device_option);
   CPUContext context;
 
@@ -20,6 +20,22 @@ TEST(EventCPUTest, EventBasics) {
   event.Record(CPU, &context);
   event.SetFinished();
   event.Wait(CPU, &context);
+}
+
+TEST(EventCPUTest, EventErrors) {
+  DeviceOption device_option;
+  device_option.set_device_type(PROTO_CPU);
+  Event event(device_option);
+
+  event.SetFinished();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_THROW(event.SetFinished("error"), caffe2::EnforceNotMet);
+  ASSERT_EQ(event.ErrorMessage(), "No error");
+
+  event.Reset();
+  event.SetFinished("error 1");
+  event.SetFinished("error 2");
+  ASSERT_EQ(event.ErrorMessage(), "error 1");
 }
 
 } // namespace caffe2

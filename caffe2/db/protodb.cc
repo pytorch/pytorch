@@ -1,27 +1,38 @@
 #include <unordered_set>
 
 #include "caffe2/core/db.h"
-#include "caffe2/utils/proto_utils.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 namespace db {
 
 class ProtoDBCursor : public Cursor {
  public:
-  explicit ProtoDBCursor(const TensorProtos* proto)
-    : proto_(proto), iter_(0) {}
-  ~ProtoDBCursor() {}
+  explicit ProtoDBCursor(const TensorProtos* proto) : proto_(proto), iter_(0) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~ProtoDBCursor() override {}
 
   void Seek(const string& /*str*/) override {
     CAFFE_THROW("ProtoDB is not designed to support seeking.");
   }
 
-  void SeekToFirst() override { iter_ = 0; }
-  void Next() override { ++iter_; }
-  string key() override { return proto_->protos(iter_).name(); }
-  string value() override { return proto_->protos(iter_).SerializeAsString(); }
-  bool Valid() override { return iter_ < proto_->protos_size(); }
+  void SeekToFirst() override {
+    iter_ = 0;
+  }
+  void Next() override {
+    ++iter_;
+  }
+  string key() override {
+    return proto_->protos(iter_).name();
+  }
+  string value() override {
+    return SerializeAsString_EnforceCheck(
+        proto_->protos(iter_), "ProtoDBCursor");
+  }
+  bool Valid() override {
+    return iter_ < proto_->protos_size();
+  }
 
  private:
   const TensorProtos* proto_;
@@ -36,8 +47,11 @@ class ProtoDBTransaction : public Transaction {
       existing_names_.insert(tensor.name());
     }
   }
-  ~ProtoDBTransaction() { Commit(); }
-  void Put(const string& key, const string& value) override {
+  ~ProtoDBTransaction() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    Commit();
+  }
+  void Put(const string& key, string&& value) override {
     if (existing_names_.count(key)) {
       CAFFE_THROW("An item with key ", key, " already exists.");
     }
@@ -60,7 +74,7 @@ class ProtoDBTransaction : public Transaction {
   TensorProtos* proto_;
   std::unordered_set<string> existing_names_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(ProtoDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(ProtoDBTransaction);
 };
 
 class ProtoDB : public DB {
@@ -74,7 +88,10 @@ class ProtoDB : public DB {
     }
     LOG(INFO) << "Opened protodb " << source;
   }
-  ~ProtoDB() { Close(); }
+  ~ProtoDB() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    Close();
+  }
 
   void Close() override {
     if (mode_ == NEW || mode_ == WRITE) {
@@ -98,5 +115,5 @@ REGISTER_CAFFE2_DB(ProtoDB, ProtoDB);
 // For lazy-minded, one can also call with lower-case name.
 REGISTER_CAFFE2_DB(protodb, ProtoDB);
 
-}  // namespace db
-}  // namespace caffe2
+} // namespace db
+} // namespace caffe2

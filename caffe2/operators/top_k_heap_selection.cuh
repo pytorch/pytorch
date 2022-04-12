@@ -71,8 +71,10 @@ __device__ inline void warpHeapInsert(K k, V v, K* keyHeap, V* valueHeap) {
   // (0 12 3456)
   // log2(8 / 2) = 2 levels of interior nodes for heap size 8 (0 and 12)
   int i = 0;
+#if !defined(USE_ROCM)
 #pragma unroll
-  for (int levels = 0; levels < math::integerLog2(HeapSize / 2); ++levels) {
+#endif
+  for (int levels = 0; levels < math::IntegerLog2(HeapSize / 2); ++levels) {
     int leftChild = i * 2 + 1;
     int rightChild = leftChild + 1;
     K leftKey = keyHeap[leftChild];
@@ -112,11 +114,20 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   bool wantInsert = Dir ? (k > keyHeapHead) : (k < keyHeapHead);
 
   // Find out all the lanes that have elements to add to the heap
-#if CUDA_VERSION >= 9000
-  unsigned int vote = __ballot_sync(__activemask(), wantInsert);
+#if defined(USE_ROCM)
+  unsigned long long int vote = __ballot(wantInsert);
+
+  if (!vote) {
+    // Everything the warp has is smaller than our heap
+    return;
+  }
+
+  // Otherwise, we want to serialize execution of the threads
+  // that have elements
+  int index = __popcll(getLaneMaskLt() & vote);
+  int total = __popcll(vote);
 #else
-  unsigned int vote = __ballot(wantInsert);
-#endif
+  unsigned int vote = __ballot_sync(__activemask(), wantInsert);
 
   if (!vote) {
     // Everything the warp has is smaller than our heap
@@ -127,6 +138,7 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   // that have elements
   int index = __popc(getLaneMaskLt() & vote);
   int total = __popc(vote);
+#endif  // _USE_ROCM
 
   // FIXME: try switch statement and explicitly handle cases
   // FIXME: how do cases work?
@@ -249,12 +261,16 @@ __global__ void selectRowsViaHeap(
   V vals[Unroll];
 
   for (int i = threadIdx.x; i < n; i += blockDim.x * Unroll) {
+#if !defined(USE_ROCM)
 #pragma unroll
+#endif
     for (int j = 0; j < Unroll; ++j) {
       vals[j] = inputStart[i + j * blockDim.x];
     }
 
+#if !defined(USE_ROCM)
 #pragma unroll
+#endif
     for (int j = 0; j < Unroll; ++j) {
       heap.add(vals[j], (IndexType)i + j * blockDim.x);
     }

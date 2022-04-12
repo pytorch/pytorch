@@ -12,7 +12,7 @@ CAFFE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
 
-CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
 // implementation as well as a portable choice to store data.
@@ -21,12 +21,15 @@ CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 class MiniDBCursor : public Cursor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit MiniDBCursor(FILE* f, std::mutex* mutex)
-    : file_(f), lock_(*mutex), valid_(true) {
+      : file_(f), lock_(*mutex), valid_(true) {
     // We call Next() to read in the first entry.
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Next();
   }
-  ~MiniDBCursor() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~MiniDBCursor() override {}
 
   void Seek(const string& /*key*/) override {
     LOG(FATAL) << "MiniDB does not support seeking to a specific key.";
@@ -77,7 +80,9 @@ class MiniDBCursor : public Cursor {
     return string(value_.data(), value_len_);
   }
 
-  bool Valid() override { return valid_; }
+  bool Valid() override {
+    return valid_;
+  }
 
  private:
   FILE* file_;
@@ -92,12 +97,13 @@ class MiniDBCursor : public Cursor {
 class MiniDBTransaction : public Transaction {
  public:
   explicit MiniDBTransaction(FILE* f, std::mutex* mutex)
-    : file_(f), lock_(*mutex) {}
-  ~MiniDBTransaction() {
+      : file_(f), lock_(*mutex) {}
+  ~MiniDBTransaction() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
 
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     int key_len = key.size();
     int value_len = value.size();
     CAFFE_ENFORCE_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
@@ -119,7 +125,7 @@ class MiniDBTransaction : public Transaction {
   FILE* file_;
   std::lock_guard<std::mutex> lock_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
 };
 
 class MiniDB : public DB {
@@ -140,7 +146,10 @@ class MiniDB : public DB {
     CAFFE_ENFORCE(file_, "Cannot open file: " + source);
     VLOG(1) << "Opened MiniDB " << source;
   }
-  ~MiniDB() { Close(); }
+  ~MiniDB() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    Close();
+  }
 
   void Close() override {
     if (file_) {
@@ -170,11 +179,12 @@ REGISTER_CAFFE2_DB(MiniDB, MiniDB);
 REGISTER_CAFFE2_DB(minidb, MiniDB);
 
 void DBReaderSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CAFFE_ENFORCE(blob.IsType<DBReader>());
-  auto& reader = blob.Get<DBReader>();
+  CAFFE_ENFORCE(typeMeta.Match<DBReader>());
+  const auto& reader = *static_cast<const DBReader*>(pointer);
   DBReaderProto proto;
   proto.set_name(name);
   proto.set_source(reader.source_);
@@ -185,8 +195,8 @@ void DBReaderSerializer::Serialize(
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type("DBReader");
-  blob_proto.set_content(proto.SerializeAsString());
-  acceptor(name, blob_proto.SerializeAsString());
+  blob_proto.set_content(SerializeAsString_EnforceCheck(proto));
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 }
 
 void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
@@ -199,10 +209,9 @@ void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
 
 namespace {
 // Serialize TensorCPU.
-REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()),
-                         DBReaderSerializer);
+REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()), DBReaderSerializer);
 REGISTER_BLOB_DESERIALIZER(DBReader, DBReaderDeserializer);
-}  // namespace
+} // namespace
 
-}  // namespace db
-}  // namespace caffe2
+} // namespace db
+} // namespace caffe2

@@ -1,9 +1,9 @@
 ## @package lstm_benchmark
 # Module caffe2.python.lstm_benchmark
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace, core, utils, rnn_cell, model_helper
@@ -225,7 +225,7 @@ def Caffe2LSTM(args):
                 "Max usage differs from current total usage: {} > {}".
                 format(stats['max_total'], stats['total'])
             )
-            log.warning("This means that costly deallocations occured.")
+            log.warning("This means that costly deallocations occurred.")
 
     return time.time() - start_time
 
@@ -341,7 +341,7 @@ if __name__ == '__main__':
         '--caffe2_gpu_memory_tracking=1'] + extra_args)
 
     device = core.DeviceOption(
-        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 4)
+        workspace.GpuDeviceType if args.gpu else caffe2_pb2.CPU, 4)
 
     with core.DeviceScope(device):
         Benchmark(args)

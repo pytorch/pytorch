@@ -6,6 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -14,8 +15,9 @@ template <class Context>
 class NumpyTileOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  NumpyTileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit NumpyTileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~NumpyTileOp() {}
 
   bool RunOnDevice() override {
@@ -24,11 +26,15 @@ class NumpyTileOp : public Operator<Context> {
 
     // Check that the `repeats` tensor has the correct rank, has a number of
     // elements equal to the number of axes of `input`.
-    CAFFE_ENFORCE_EQ(repeats.ndim(), 1, "repeats input must be a 1-d tensor");
-    CAFFE_ENFORCE_EQ(repeats.size(), input.ndim(), "repeats input have the same"
-                            " number of elements as `inputs` has dimensions.");
-    const int64_t *repeats_data = repeats.template data<int64_t>();
-    for (size_t i=0; i<repeats.size(); ++i) {
+    CAFFE_ENFORCE_EQ(repeats.dim(), 1, "repeats input must be a 1-d tensor");
+    CAFFE_ENFORCE_EQ(
+        repeats.numel(),
+        input.dim(),
+        "repeats input have the same"
+        " number of elements as `inputs` has dimensions.");
+    const int64_t* repeats_data = repeats.template data<int64_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto i : c10::irange(repeats.numel())) {
       CAFFE_ENFORCE_GE(repeats_data[i], 0);
     }
 
@@ -39,8 +45,8 @@ class NumpyTileOp : public Operator<Context> {
     // output tensor.
     Tensor *src = &buffer, *dst = output;
     src->CopyFrom(input);
-    vector<TIndex> output_dims(input.dims());
-    for (size_t i = 0; i < repeats.size(); ++i) {
+    vector<int64_t> output_dims(input.sizes().vec());
+    for (const auto i : c10::irange(repeats.numel())) {
       if (repeats_data[i] == 1) {
         continue;
       }
@@ -60,11 +66,10 @@ class NumpyTileOp : public Operator<Context> {
        * proceed to the next row, until the end. outer_dim = 3, inner_dim = 10.
        */
       const char* src_data = static_cast<const char*>(src->raw_data());
-      char* dst_data =
-          static_cast<char*>(dst->raw_mutable_data(src->meta()));
+      char* dst_data = static_cast<char*>(dst->raw_mutable_data(src->dtype()));
 
       DoTile(
-          src->meta(),
+          src->dtype(),
           src->itemsize(),
           outer_dim,
           inner_dim,
@@ -72,10 +77,10 @@ class NumpyTileOp : public Operator<Context> {
           src_data,
           dst_data);
 
-        output_dims[i] *= repeats_data[i];
-        dst->Reshape(output_dims);
+      output_dims[i] *= repeats_data[i];
+      dst->Reshape(output_dims);
 
-        std::swap(src, dst);
+      std::swap(src, dst);
     }
 
     // NB: because we have the swap at the end of the above loop, our real
@@ -89,15 +94,17 @@ class NumpyTileOp : public Operator<Context> {
 
  private:
   void DoTile(
-      const TypeMeta& meta,
+      const TypeMeta meta,
       int item_size,
       int outer_dim,
       int inner_dim,
       int64_t num_tiles,
       const char* input_data,
       char* output_data) {
-    for (auto i = 0; i < outer_dim; ++i) {
-      for (auto t = 0; t < num_tiles; ++t) {
+    for (const auto i : c10::irange(outer_dim)) {
+      (void)i; // Suppress unused variable warning
+      for (const auto t : c10::irange(num_tiles)) {
+        (void)t; // Suppress unused variable warning
         context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
         output_data += inner_dim * item_size;
       }

@@ -1,24 +1,32 @@
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NamedTensorUtils.h>
+#include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
+template<bool inplace>
+using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
+
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
-  AT_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
+  TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (int64_t i = 2; i < input.dim(); ++i)
+  for (const auto i : c10::irange(2, input.dim())) {
+    (void)i; //Suppress unused variable warning
     sizes.push_back(1);
-  return at::empty(sizes, input.options());
+  }
+  return input.new_empty(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return input.is_cuda() && p > 0 && p < 1;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -36,10 +44,9 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 }
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
-typename std::conditional<inplace, Tensor&, Tensor>::type
-_dropout_impl(T& input, double p, bool train) {
-  AT_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
-  if (p == 0 || !train) {
+Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
+  TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
+  if (p == 0 || !train || input.numel() == 0) {
     return input;
   }
 
@@ -48,7 +55,7 @@ _dropout_impl(T& input, double p, bool train) {
   }
 
   at::Tensor b; // used for alpha_dropout only
-  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input);
+  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
@@ -66,10 +73,9 @@ _dropout_impl(T& input, double p, bool train) {
   }
 }
 
-#define ALIAS_SPECIALIZATION(ALIAS_NAME, IS_FEATURE, IS_ALPHA)                 \
-template <bool inplace, typename... Args>                                      \
-typename std::conditional<inplace, Tensor&, Tensor>::type                      \
-ALIAS_NAME(Args&&... args) {                                                   \
+#define ALIAS_SPECIALIZATION(ALIAS_NAME, IS_FEATURE, IS_ALPHA)                      \
+template <bool inplace, typename... Args>                                           \
+Ctype<inplace> ALIAS_NAME(Args&&... args) {                                         \
   return _dropout_impl<IS_FEATURE, IS_ALPHA, inplace>(std::forward<Args>(args)...); \
 }
 
@@ -80,11 +86,44 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 } // anomymous namepsace
 
-Tensor dropout(const Tensor& input, double p, bool train) {
-  if (train && is_fused_kernel_acceptable(input, p)) {
-    return std::get<0>(input._fused_dropout(1 - p));
+std::tuple<Tensor,Tensor>
+native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
+  if (input.numel() == 0) {
+    return std::make_tuple(input, at::empty_like(input, input.options()));
   }
-  return _dropout<false>(input, p, train);
+
+  Tensor mask;
+  Tensor output;
+
+  if (!train.has_value() || *train) {
+    double p1m = 1. - p;
+    // Check for probability of zero to avoid divide by zero and NaN results
+    double scale = p1m == 0 ? 0. : 1. / p1m;
+    mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    mask.bernoulli_(p1m);
+    output = input.mul(mask).mul_(scale);
+  } else {
+    mask = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    output = input.clone();
+  }
+  return std::make_tuple(output, mask);
+}
+
+Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, double scale) {
+  Tensor result = grad * mask * scale;
+  return result;
+}
+
+Tensor dropout(const Tensor& input, double p, bool train) {
+  auto result = [&]() {
+    NoNamesGuard guard;
+    if (train && is_fused_kernel_acceptable(input, p)) {
+      return std::get<0>(at::native_dropout(input, p, train));
+    }
+    return _dropout<false>(input, p, train);
+  }();
+  namedinference::propagate_names(result, input);
+  return result;
 }
 
 Tensor& dropout_(Tensor& input, double p, bool train) {
@@ -115,4 +154,5 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

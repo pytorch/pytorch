@@ -13,6 +13,7 @@ struct TextFileReaderInstance {
       char escape,
       const std::string& filename,
       int numPasses,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<int>& types)
       : fileReader(filename),
         tokenizer(Tokenizer(delims, escape), &fileReader, numPasses),
@@ -38,8 +39,9 @@ struct TextFileReaderInstance {
 
 class CreateTextFileReaderOp : public Operator<CPUContext> {
  public:
-  CreateTextFileReaderOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit CreateTextFileReaderOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         filename_(GetSingleArgument<string>("filename", "")),
         numPasses_(GetSingleArgument<int>("num_passes", 1)),
         fieldTypes_(GetRepeatedArgument<int>("field_types")) {
@@ -48,6 +50,7 @@ class CreateTextFileReaderOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<TextFileReaderInstance>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<TextFileReaderInstance>(new TextFileReaderInstance(
             {'\n', '\t'}, '\0', filename_, numPasses_, fieldTypes_));
     return true;
@@ -69,9 +72,10 @@ inline void convert(
       static_cast<std::string*>(dst)->assign(src_start, src_end);
     } break;
     case TensorProto_DataType_FLOAT: {
-      // TODO(azzolini): avoid copy, use faster convertion
+      // TODO(azzolini): avoid copy, use faster conversion
       std::string str_copy(src_start, src_end);
       const char* src_copy = str_copy.c_str();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       char* src_copy_end;
       float val = strtof(src_copy, &src_copy_end);
       if (src_copy == src_copy_end) {
@@ -86,8 +90,9 @@ inline void convert(
 
 class TextFileReaderReadOp : public Operator<CPUContext> {
  public:
-  TextFileReaderReadOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit TextFileReaderReadOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         batchSize_(GetSingleArgument<int>("batch_size", 1)) {}
 
   bool RunOnDevice() override {
@@ -98,6 +103,7 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
         OperatorBase::Input<std::unique_ptr<TextFileReaderInstance>>(0).get();
 
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         instance->fieldTypes.size() == numFields,
         "Invalid number of outputs. Expected " +
             to_string(instance->fieldTypes.size()) + " got " +
@@ -118,8 +124,10 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
       std::lock_guard<std::mutex> guard(instance->globalMutex_);
 
       bool finished = false;
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       Token token;
       while (!finished && (rowsRead < batchSize_)) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int field;
         for (field = 0; field < numFields; ++field) {
           finished = !instance->tokenizer.next(token);
@@ -133,7 +141,6 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
                   (field > 0 && token.startDelimId == 1),
               "Invalid number of columns at row ",
               instance->rowsRead + rowsRead + 1);
-          const auto& meta = instance->fieldMetas[field];
           char*& data = datas[field];
           convert(
               (TensorProto_DataType)instance->fieldTypes[field],
@@ -156,7 +163,7 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
   }
 
  private:
-  TIndex batchSize_;
+  int64_t batchSize_;
 };
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<TextFileReaderInstance>);
@@ -167,6 +174,7 @@ REGISTER_CPU_OPERATOR(TextFileReaderRead, TextFileReaderReadOp);
 OPERATOR_SCHEMA(CreateTextFileReader)
     .NumInputs(0)
     .NumOutputs(1)
+    .ScalarType(TensorProto::UNDEFINED)
     .SetDoc("Create a text file reader. Fields are delimited by <TAB>.")
     .Arg("filename", "Path to the file.")
     .Arg("num_passes", "Number of passes over the file.")

@@ -2,11 +2,8 @@
 
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-
-#include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
+#include <torch/optim/serialize.h>
+#include <torch/serialize/archive.h>
 
 #include <deque>
 #include <functional>
@@ -16,59 +13,80 @@
 namespace torch {
 namespace optim {
 
-struct LBFGSOptions {
-  LBFGSOptions(double learning_rate);
-  TORCH_ARG(double, learning_rate);
+struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
+  LBFGSOptions(double lr = 1);
+  TORCH_ARG(double, lr) = 1;
   TORCH_ARG(int64_t, max_iter) = 20;
-  TORCH_ARG(int64_t, max_eval) = 25;
-  TORCH_ARG(float, tolerance_grad) = 1e-5;
-  TORCH_ARG(float, tolerance_change) = 1e-9;
-  TORCH_ARG(size_t, history_size) = 100;
+  TORCH_ARG(c10::optional<int64_t>, max_eval) = c10::nullopt;
+  TORCH_ARG(double, tolerance_grad) = 1e-7;
+  TORCH_ARG(double, tolerance_change) = 1e-9;
+  TORCH_ARG(int64_t, history_size) = 100;
+  TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
+ public:
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
+  ~LBFGSOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
-class LBFGS : public LossClosureOptimizer {
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSParamState> {
+  TORCH_ARG(int64_t, func_evals) = 0;
+  TORCH_ARG(int64_t, n_iter) = 0;
+  TORCH_ARG(double, t);
+  TORCH_ARG(double, prev_loss);
+  TORCH_ARG(Tensor, d) = {};
+  TORCH_ARG(Tensor, H_diag) = {};
+  TORCH_ARG(Tensor, prev_flat_grad) = {};
+  TORCH_ARG(std::deque<Tensor>, old_dirs);
+  TORCH_ARG(std::deque<Tensor>, old_stps);
+  TORCH_ARG(std::deque<Tensor>, ro);
+  TORCH_ARG(c10::optional<std::vector<Tensor>>, al) = c10::nullopt;
+
  public:
-  template <typename ParameterContainer>
-  explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
-      : LossClosureOptimizer(std::forward<ParameterContainer>(parameters)),
-        options(options),
-        ro(options.history_size_),
-        al(options.history_size_) {}
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs);
+  ~LBFGSParamState() override = default;
+};
 
-  torch::Tensor step(LossClosure closure) override;
+class TORCH_API LBFGS : public Optimizer {
+ public:
+   explicit LBFGS(std::vector<OptimizerParamGroup> param_groups,
+       LBFGSOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
+     TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
+     if (defaults.max_eval() == c10::nullopt) {
+       auto max_eval_val = (defaults.max_iter() * 5) / 4;
+       static_cast<LBFGSOptions&>(param_groups_[0].options()).max_eval(max_eval_val);
+       static_cast<LBFGSOptions&>(*defaults_.get()).max_eval(max_eval_val);
+     }
+     _numel_cache = c10::nullopt;
+   }
+   explicit LBFGS(
+       std::vector<Tensor> params,
+       // NOLINTNEXTLINE(performance-move-const-arg)
+       LBFGSOptions defaults = {}) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  LBFGSOptions options;
-
-  template <class Archive>
-  void serialize(Archive& ar) {
-    ar(CEREAL_NVP(d));
-    ar(CEREAL_NVP(t));
-    ar(CEREAL_NVP(H_diag));
-    ar(CEREAL_NVP(prev_flat_grad));
-    ar(CEREAL_NVP(prev_loss));
-    ar(CEREAL_NVP(old_dirs));
-    ar(CEREAL_NVP(old_stps));
-  }
+  Tensor step(LossClosure closure) override;
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
 
  private:
-  friend class cereal::access;
-  LBFGS() : options(0) {}
+  c10::optional<int64_t> _numel_cache;
+  int64_t _numel();
+  Tensor _gather_flat_grad();
+  void _add_grad(const double step_size, const Tensor& update);
+  std::tuple<double, Tensor> _directional_evaluate(
+    const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d);
+  void _set_param(const std::vector<Tensor>& params_data);
+  std::vector<Tensor> _clone_param();
 
-  Tensor gather_flat_grad();
-  void add_grad(const torch::Scalar& step_size, const Tensor& update);
-
-  Tensor d{torch::empty({0})};
-  Tensor H_diag{torch::empty({0})};
-  Tensor prev_flat_grad{torch::empty({0})};
-  torch::Scalar t{0};
-  torch::Scalar prev_loss{0};
-  std::vector<Tensor> ro;
-  std::vector<Tensor> al;
-  std::deque<Tensor> old_dirs;
-  std::deque<Tensor> old_stps;
-  int64_t func_evals{0};
-  int64_t state_n_iter{0};
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
+  }
 };
-
 } // namespace optim
 } // namespace torch

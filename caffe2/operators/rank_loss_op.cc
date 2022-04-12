@@ -23,21 +23,21 @@ template <typename T, class Context>
 bool PairWiseLossOp<T, Context>::RunOnDevice() {
   auto& X = Input(XVALUE);
   auto& label = Input(LABEL);
-  auto* Y = Output(YVALUE);
 
-  int N = X.ndim() > 0 ? X.dim32(0) : 0;
+  int N = X.dim() > 0 ? X.dim32(0) : 0;
   if (N == 0) {
-    Y->Resize(0);
-    Y->template mutable_data<T>();
+    // Set correct data type for output
+    Output(YVALUE, {0}, at::dtype<T>());
     return true;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const int32_t* lengths_vec;
   int len_size = 1;
   if (InputSize() > LENGTHS) {
     auto& lengths = Input(LENGTHS);
-    CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-    len_size = lengths.size();
+    CAFFE_ENFORCE_EQ(lengths.dim(), 1);
+    len_size = lengths.numel();
     lengths_vec = lengths.template data<int32_t>();
     int len_sum = 0;
     if (len_size > 0) {
@@ -49,12 +49,12 @@ bool PairWiseLossOp<T, Context>::RunOnDevice() {
   }
 
   // a total of len_size sessions
-  Y->Resize(len_size);
+  auto* Y = Output(YVALUE, {len_size}, at::dtype<T>());
   auto* Ydata = Y->template mutable_data<T>();
 
-  int D = X.size() / N;
+  int D = X.numel() / N;
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   CAFFE_ENFORCE_EQ(1, D); // only support one class at the moment
 
@@ -89,26 +89,27 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
   auto& X = Input(XVALUE);
   auto& label = Input(LABEL);
   auto& dY = Input(DYVALUE);
-  auto* dX = Output(DXVALUE);
-  int N = X.ndim() > 0 ? X.dim32(0) : 0;
-  CAFFE_ENFORCE_EQ(N, X.size());
+
+  int N = X.dim() > 0 ? X.dim32(0) : 0;
+  CAFFE_ENFORCE_EQ(N, X.numel());
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  dX->ResizeLike(X);
+  auto* dX = Output(DXVALUE, X.sizes(), at::dtype<T>());
   math::Set<T, CPUContext>(
-      dX->size(), 0.f, dX->template mutable_data<T>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<T>(), &context_);
 
   if (N == 0) {
     return true;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const int32_t* lengths_vec;
   int len_size = 1;
   if (InputSize() > LENGTHS) {
     auto& lengths = Input(LENGTHS);
-    CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-    len_size = lengths.size();
+    CAFFE_ENFORCE_EQ(lengths.dim(), 1);
+    len_size = lengths.numel();
     lengths_vec = lengths.template data<int32_t>();
     int len_sum = 0;
     if (len_size > 0) {
@@ -119,7 +120,7 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
     lengths_vec = &N;
   }
 
-  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), len_size);
 
   const T* Xdata = X.template data<T>();

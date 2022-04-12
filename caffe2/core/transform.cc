@@ -4,13 +4,13 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
 using transform::Graph;
 
-CAFFE_DEFINE_REGISTRY(TransformRegistry, Transform);
+C10_DEFINE_REGISTRY(TransformRegistry, Transform);
 
 std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {
   // checks if the node at index i is matched already or not
@@ -205,6 +205,7 @@ double average_net_run_duration(
     CAFFE_ENFORCE(init_net->Run(), "Init run has failed!");
   } else {
     // If a proper init_net is not provided, then this is the best we can do.
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto inp : netdef.external_input()) {
       ws.CreateBlob(inp);
     }

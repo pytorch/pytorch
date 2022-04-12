@@ -1,15 +1,15 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import hypothesis.strategies as st
 
-from caffe2.python import core, workspace
+
+
+
 from caffe2.proto import caffe2_pb2
-from hypothesis import given
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
+from hypothesis import given, settings
+import hypothesis.strategies as st
 import numpy as np
 
 
@@ -19,9 +19,10 @@ def _fill_diagonal(shape, value):
     return (result,)
 
 
-class TestFillerOperator(hu.HypothesisTestCase):
+class TestFillerOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_shape_error(self, gc, dc):
         op = core.CreateOperator(
             'GaussianFill',
@@ -50,6 +51,7 @@ class TestFillerOperator(hu.HypothesisTestCase):
         self.assertEqual(workspace.FetchBlob('out'), [2.0])
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_int64_shape(self, gc, dc):
         large_dim = 2 ** 31 + 1
         net = core.Net("test_shape_net")
@@ -75,6 +77,7 @@ class TestFillerOperator(hu.HypothesisTestCase):
         b=st.integers(min_value=0, max_value=100),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_uniform_int_fill_op_blob_input(self, shape, a, b, gc, dc):
         net = core.Net('test_net')
 
@@ -127,7 +130,7 @@ class TestFillerOperator(hu.HypothesisTestCase):
 
         self.assertNotEqual(min_data, max_data)
 
-    @given(
+    @serial.given(
         shape=st.sampled_from(
             [
                 [3, 3],
@@ -168,9 +171,9 @@ class TestFillerOperator(hu.HypothesisTestCase):
         # Check against numpy reference
         self.assertReferenceChecks(gc, op, [shape, value], _fill_diagonal)
 
-    @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
-                            min_size=0,
-                            max_size=10),
+    @serial.given(lengths=st.lists(st.integers(min_value=0, max_value=10),
+                                   min_size=0,
+                                   max_size=10),
            **hu.gcs)
     def test_lengths_range_fill(self, lengths, gc, dc):
         op = core.CreateOperator(
@@ -227,6 +230,41 @@ class TestFillerOperator(hu.HypothesisTestCase):
             assert np.count_nonzero(blob_out) > 0, "All generated elements are "
             "zeros. Is the random generator functioning correctly?"
 
+    @given(
+        min=st.integers(min_value=0, max_value=5),
+        range=st.integers(min_value=1, max_value=10),
+        emb_size=st.sampled_from((10000, 20000, 30000)),
+        dim_size=st.sampled_from((16, 32, 64)),
+        **hu.gcs)
+    @settings(deadline=None)
+    def test_fp16_uniformfill_op(self, min, range, emb_size, dim_size, gc, dc):
+        op = core.CreateOperator(
+            'Float16UniformFill',
+            [],
+            'out',
+            shape=[emb_size, dim_size],
+            min=float(min),
+            max=float(min + range),
+        )
+        for device_option in dc:
+            op.device_option.CopyFrom(device_option)
+            assert workspace.RunOperatorOnce(op), "Float16UniformFill op did not run successfully"
+
+            self.assertEqual(workspace.blobs['out'].shape, (emb_size, dim_size))
+
+            blob_out = workspace.FetchBlob('out')
+
+            expected_type = "float16"
+            expected_mean = min + range / 2.0
+            expected_var = range * range / 12.0
+            expected_min = min
+            expected_max = min + range
+
+            self.assertEqual(blob_out.dtype.name, expected_type)
+            self.assertAlmostEqual(np.mean(blob_out, dtype=np.float32), expected_mean, delta=0.1)
+            self.assertAlmostEqual(np.var(blob_out, dtype=np.float32), expected_var, delta=0.1)
+            self.assertGreaterEqual(np.min(blob_out), expected_min)
+            self.assertLessEqual(np.max(blob_out), expected_max)
 
 if __name__ == "__main__":
     import unittest

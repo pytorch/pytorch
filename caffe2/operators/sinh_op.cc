@@ -15,6 +15,7 @@ bool SinhGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
@@ -88,12 +89,12 @@ Y: [1.15841695 0.5541099  0.03216984 1.09924557 0.49732079]
         "output",
         "The hyperbolic sine values of the input tensor, computed "
         "element-wise")
-    .InheritOnnxSchema("Sinh");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(SinhGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .IdenticalTypeAndShape();
+    .IdenticalTypeAndShapeOfInput(0);
 
 namespace {
 

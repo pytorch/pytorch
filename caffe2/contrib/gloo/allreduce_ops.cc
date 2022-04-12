@@ -10,7 +10,7 @@
 
 namespace {
 /**
- * This is a helper function which attemtps to get a base value depending on the
+ * This is a helper function which attempts to get a base value depending on the
  * # of nodes. Larger the base the better performance (up to 4) is what we have
  * observed in gloo benchmarks. At the moment bcube works only if # nodes = base
  * ^ x. Where x is some constant. So, if # node don't match our expectation
@@ -56,7 +56,7 @@ void AllreduceOp<Context>::initializeBcube() {
   if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::AllreduceBcube<float>(
         init_.context, init_.template getOutputs<float>(), init_.size));
-  } else if (init_.template IsType<::caffe2::float16>()) {
+  } else if (init_.template IsType<::at::Half>()) {
     algorithm_.reset(new ::gloo::AllreduceBcube<::gloo::float16>(
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
@@ -71,7 +71,7 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
   if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<float>(
         init_.context, init_.template getOutputs<float>(), init_.size));
-  } else if (init_.template IsType<::caffe2::float16>()) {
+  } else if (init_.template IsType<::at::Half>()) {
     algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<::gloo::float16>(
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
@@ -81,12 +81,15 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
   }
 }
 
+// Used outside of the translation unit
+template void AllreduceOp<CPUContext>::initializeHalvingDoubling();
+
 template <class Context>
 void AllreduceOp<Context>::initializeRingFull() {
   if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::AllreduceRing<float>(
         init_.context, init_.template getOutputs<float>(), init_.size));
-  } else if (init_.template IsType<::caffe2::float16>()) {
+  } else if (init_.template IsType<::at::Half>()) {
     algorithm_.reset(new ::gloo::AllreduceRing<::gloo::float16>(
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
@@ -101,7 +104,7 @@ void AllreduceOp<Context>::initializeRingChunked() {
   if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::AllreduceRingChunked<float>(
         init_.context, init_.template getOutputs<float>(), init_.size));
-  } else if (init_.template IsType<::caffe2::float16>()) {
+  } else if (init_.template IsType<::at::Half>()) {
     algorithm_.reset(new ::gloo::AllreduceRingChunked<::gloo::float16>(
         init_.context,
         init_.template getOutputs<::gloo::float16>(),

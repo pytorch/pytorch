@@ -77,6 +77,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`ContinuousBernoulli`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.continuous_bernoulli
+.. autoclass:: ContinuousBernoulli
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Dirichlet`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -158,6 +167,24 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`Kumaraswamy`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.kumaraswamy
+.. autoclass:: Kumaraswamy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`LKJCholesky`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lkj_cholesky
+.. autoclass:: LKJCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -181,6 +208,15 @@ Probability distributions - torch.distributions
 
 .. currentmodule:: torch.distributions.lowrank_multivariate_normal
 .. autoclass:: LowRankMultivariateNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`MixtureSameFamily`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.mixture_same_family
+.. autoclass:: MixtureSameFamily
     :members:
     :undoc-members:
     :show-inheritance:
@@ -257,6 +293,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`LogitRelaxedBernoulli`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.relaxed_bernoulli
+.. autoclass:: LogitRelaxedBernoulli
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`RelaxedOneHotCategorical`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -292,12 +337,30 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
-    
+
+:hidden:`VonMises`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.von_mises
+.. autoclass:: VonMises
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.weibull
 .. autoclass:: Weibull
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`Wishart`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.wishart
+.. autoclass:: Wishart
     :members:
     :undoc-members:
     :show-inheritance:

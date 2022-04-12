@@ -1,6 +1,8 @@
 #include "caffe2/operators/transpose_op.h"
 
 #include <algorithm>
+#include <limits>
+#include <type_traits>
 #include <vector>
 
 #include "caffe2/core/context_gpu.h"
@@ -10,143 +12,157 @@
 
 namespace caffe2 {
 
-#define MAX_DIMS 8
+namespace {
 
 class CuDNNTransposeOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  USE_DISPATCH_HELPER;
 
-  CuDNNTransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNTransposeOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {
-    // We will check the legality of axes_: it should be from 0 to axes_.size().
+    // Checks the legality of axes_: it should be from 0 to axes_.size().
     std::vector<int> axes_sorted(axes_);
     std::sort(axes_sorted.begin(), axes_sorted.end());
-    for (int i = 0; i < axes_sorted.size(); ++i) {
+    for (std::size_t i = 0; i < axes_sorted.size(); ++i) {
       if (axes_sorted[i] != i) {
         CAFFE_THROW("Axes should be a permutation of 0 to ndim.");
       }
     }
 
-    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&xDesc_));
-    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&yDesc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&X_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&Y_desc_));
   }
 
-  ~CuDNNTransposeOp() {
-    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(xDesc_));
-    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(yDesc_));
+  ~CuDNNTransposeOp() override {
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(X_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(Y_desc_));
   }
 
   bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float, int>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    const int ndim = X.ndim();
-    X_dims_.assign(X.dims().cbegin(), X.dims().cend());
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.rbegin(), axes_.rend(), 0);
     } else {
-      CAFFE_ENFORCE_EQ(X.ndim(), axes_.size());
+      CAFFE_ENFORCE_EQ(axes_.size(), ndim);
     }
-    std::vector<int> Y_dims(ndim);
+    std::vector<std::int64_t> X_dims = X.sizes().vec();
+    std::vector<std::int64_t> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
-      Y_dims[i] = X_dims_[axes_[i]];
+      Y_dims[i] = X_dims[axes_[i]];
     }
-    Y->Resize(Y_dims);
-    // Do the actual transpose, which is implemented in DoRunWithType().
-#if CUDNN_VERSION_MIN(6, 0, 0)
-    return DispatchHelper<TensorTypes<float, int>>::call(this, Input(0));
-#else
-    // CUDNN 5.1 does not have int support yet.
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
-#endif
-  }
-
- protected:
-  template <typename T>
-  bool DoRunWithType() {
-    const auto& input = Input(0);
-    auto* output = Output(0);
-    int ndim = input.ndim();
-
-    if (ndim == 0) {
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (X.numel() == 0) {
       return true;
     }
-    if (ndim == 1) {
-      output->CopyFrom(input);
+    if (!IsFloatType<T>() || !IsCuDNNValidTensor(X)) {
+      math::Transpose<std::int64_t, T, CUDAContext>(
+          ndim, X_dims.data(), axes_.data(), X_data, Y_data, &context_);
       return true;
     }
-
-    cudnnDataType_t typedesc = cudnnTypeWrapper<T>::type;
-#if CUDNN_VERSION_MIN(6, 0, 0)
-    if (typedesc == CUDNN_DATA_INT32) {
-      // CUDNN Transpose only support float for now
-      math::Transpose<int, CUDAContext>(
-          X_dims_.size(),
-          X_dims_.data(),
-          axes_.data(),
-          input.template data<int>(),
-          output->template mutable_data<int>(),
-          &context_);
-      return true;
+    if (cudnnTypeWrapper<T>::type != cached_dtype_ ||
+        X_dims != cached_X_dims_) {
+      SetTensorDescriptor(cudnnTypeWrapper<T>::type, X_dims, Y_dims);
+      cached_dtype_ = cudnnTypeWrapper<T>::type;
+      cached_X_dims_ = X_dims;
     }
-#endif
-
-    CAFFE_ENFORCE(ndim < MAX_DIMS, "Input ndim exceeds compile time max.");
-
-    stride_y[ndim - 1] = 1;
-    for (int i = ndim - 2; i >= 0; i--) {
-      stride_y[i] = stride_y[i + 1] * output->dim32(i + 1);
-    }
-
-    CHECK(axes_.size() >= ndim);
-
-    stride_x[ndim] = 1;
-    for (int i = 0; i < ndim; i++) {
-      stride_x[i] = 1;
-      for (int j = axes_[i] + 1; j < ndim; j++) {
-        stride_x[i] *= input.dim32(j);
-      }
-      dim_y_int[i] = output->dim32(i);
-    }
-
-    // CuDNN requires at least 3-dim tensors
-    for (int i = ndim; i < MAX_DIMS; i++) {
-      stride_x[i] = 1;
-      stride_y[i] = 1;
-      dim_y_int[i] = 1;
-    }
-
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        xDesc_, typedesc, ndim < 4 ? 4 : ndim, dim_y_int, stride_x));
-
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        yDesc_, typedesc, ndim < 4 ? 4 : ndim, dim_y_int, stride_y));
-
     CUDNN_ENFORCE(cudnnTransformTensor(
         cudnn_wrapper_.inline_cudnn_handle(),
         cudnnTypeWrapper<T>::kOne(),
-        xDesc_,
-        static_cast<const void*>(input.template data<T>()),
+        X_desc_,
+        X_data,
         cudnnTypeWrapper<T>::kZero(),
-        yDesc_,
-        static_cast<void*>(output->template mutable_data<T>())));
+        Y_desc_,
+        Y_data));
     return true;
   }
 
-  int stride_x[MAX_DIMS];
-  int stride_y[MAX_DIMS];
-  int dim_y_int[MAX_DIMS];
+ private:
+  template <typename T>
+  constexpr bool IsFloatType() const {
+    return std::is_same<T, float>::value || std::is_same<T, double>::value ||
+        std::is_same<T, at::Half>::value;
+  }
 
-  cudnnTensorDescriptor_t xDesc_;
-  cudnnTensorDescriptor_t yDesc_;
+  bool IsCuDNNValidTensor(const Tensor& X) const {
+    const int ndim = X.dim();
+    return ndim >= 3 && ndim <= CUDNN_DIM_MAX &&
+        X.numel() < std::numeric_limits<int32_t>::max();
+  }
+
+  void SetTensorDescriptor(
+      const cudnnDataType_t data_type,
+      const std::vector<std::int64_t>& X_dims,
+      const std::vector<std::int64_t>& Y_dims) {
+    const int ndim = X_dims.size();
+    std::vector<int> dims(Y_dims.cbegin(), Y_dims.cend());
+    std::vector<int> X_strides(ndim);
+    std::vector<int> X_buff(ndim);
+    std::vector<int> Y_strides(ndim);
+    X_buff.back() = 1;
+    Y_strides.back() = 1;
+    for (int i = ndim - 1; i > 0; --i) {
+      X_buff[i - 1] = X_buff[i] * X_dims[i];
+      Y_strides[i - 1] = Y_strides[i] * Y_dims[i];
+    }
+    for (int i = 0; i < ndim; ++i) {
+      X_strides[i] = X_buff[axes_[i]];
+    }
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+        X_desc_, data_type, ndim, dims.data(), X_strides.data()));
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+        Y_desc_, data_type, ndim, dims.data(), Y_strides.data()));
+  }
+
   CuDNNWrapper cudnn_wrapper_;
+  cudnnTensorDescriptor_t X_desc_;
+  cudnnTensorDescriptor_t Y_desc_;
 
-  std::vector<int> axes_;
-  std::vector<int> X_dims_;
+  cudnnDataType_t cached_dtype_ = cudnnTypeWrapper<float>::type;
+  std::vector<std::int64_t> cached_X_dims_;
+  std::vector<std::int32_t> axes_;
 };
+
+#if !CUDNN_VERSION_MIN(6, 0, 0)
+
+// CuDNN 5.1 does not have int support yet.
+template <>
+bool CuDNNTransposeOp::DoRunWithType<int>() {
+  const auto& X = Input(0);
+  const int ndim = X.dim();
+  if (axes_.empty()) {
+    axes_.resize(ndim);
+    std::iota(axes_.rbegin(), axes_.rend(), 0);
+  } else {
+    CAFFE_ENFORCE_EQ(axes_.size(), ndim);
+  }
+  std::vector<std::int64_t> X_dims = X.sizes().vec();
+  std::vector<std::int64_t> Y_dims(ndim);
+  for (int i = 0; i < ndim; ++i) {
+    Y_dims[i] = X_dims[axes_[i]];
+  }
+  auto* Y = Output(0, Y_dims, at::dtype<T>());
+  const T* X_data = X.template data<T>();
+  T* Y_data = Y->template mutable_data<T>();
+  math::Transpose<std::int64_t, T, CUDAContext>(
+      ndim, X_dims.data(), axes_.data(), X_data, Y_data, &context_);
+  return true;
+}
+
+#endif // !CUDNN_VERSION_MIN(6, 0, 0)
+
+} // namespace
 
 REGISTER_CUDNN_OPERATOR(Transpose, CuDNNTransposeOp);
 

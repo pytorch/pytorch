@@ -1,6 +1,9 @@
 import time
 from collections import defaultdict
 from functools import partial
+from typing import DefaultDict
+
+import torch
 
 
 # Unfortunately it doesn't seem as if there was any way to get TensorBoard to do
@@ -12,7 +15,7 @@ try:
     from tensorflow.python.summary.writer.writer import FileWriter
 except ImportError:
     raise ImportError("TensorBoard visualization of GraphExecutors requires having "
-                      "TensorFlow installed")
+                      "TensorFlow installed") from None
 
 
 def dump_tensorboard_summary(graph_executor, logdir):
@@ -27,7 +30,7 @@ def visualize(graph, name_prefix='', pb_graph=None, executors_it=None):
     value_map = {}
     pb_graph = pb_graph or graph_pb2.GraphDef()
 
-    if isinstance(graph, (torch._C.GraphExecutor, torch._C.GraphExecutorState)):
+    if isinstance(graph, torch._C.GraphExecutorState):
         visualize_graph_executor(graph, name_prefix, pb_graph,
                                  partial(visualize, pb_graph=pb_graph))
         return pb_graph
@@ -50,7 +53,7 @@ def visualize(graph, name_prefix='', pb_graph=None, executors_it=None):
 def visualize_graph_executor(state, name_prefix, pb_graph, inline_graph):
     """Appends the state of a given GraphExecutor to the graph protobuf.
 
-    Arguments:
+    Args:
         state (GraphExecutor or GraphExecutorState): GraphExecutor to display.
         name_prefix (str): Name prefix of the containing subgraph.
         pb_graph (GraphDef): graph to append to.
@@ -65,9 +68,6 @@ def visualize_graph_executor(state, name_prefix, pb_graph, inline_graph):
     The strategy is to embed all different configurations as independent subgraphs,
     while inlining the original graph as the one that actually produces the values.
     """
-    if isinstance(state, torch._C.GraphExecutor):
-        state = state.get_debug_state()
-
     if state.autograd_fallback_graph is not None:
         visualize(graph=state.autograd_fallback_graph,
                   name_prefix=name_prefix + 'autograd_fallback/',
@@ -105,7 +105,7 @@ def visualize_rec(graph, value_map, name_prefix, pb_graph, executors_it=None):
         for out, val in zip(subgraph.outputs(), node.outputs()):
             value_map[val.unique()] = rec_value_map[out.unique()]
 
-    op_id_counter = defaultdict(int)
+    op_id_counter: DefaultDict[str, int] = defaultdict(int)
 
     def name_for(node):
         kind = node.kind()[node.kind().index('::') + 2:]

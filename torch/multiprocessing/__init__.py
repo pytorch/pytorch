@@ -13,6 +13,7 @@ memory.
 Because of the similarity of APIs we do not document most of this package
 contents, and we recommend referring to very good docs of the original module.
 """
+import torch
 import sys
 from .reductions import init_reductions
 import multiprocessing
@@ -21,17 +22,21 @@ __all__ = ['set_sharing_strategy', 'get_sharing_strategy',
            'get_all_sharing_strategies']
 
 
-from multiprocessing import *
+from multiprocessing import *  # noqa: F403
 
 
-__all__ += multiprocessing.__all__
+__all__ += multiprocessing.__all__  # type: ignore[attr-defined]
 
 
-if sys.version_info < (3, 3):
-    """Override basic classes in Python 2.7 and Python 3.3 to use ForkingPickler
-    for serialization. Later versions of Python already use ForkingPickler."""
-    from .queue import Queue, SimpleQueue
-    from .pool import Pool
+# This call adds a Linux specific prctl(2) wrapper function to this module.
+# See https://github.com/pytorch/pytorch/pull/14391 for more information.
+torch._C._multiprocessing_init()
+
+
+"""Add helper function to spawn N processes and wait for completion of any of
+them. This depends `mp.get_context` which was added in Python 3.4."""
+from .spawn import spawn, SpawnContext, start_processes, ProcessContext, \
+    ProcessRaisedException, ProcessExitedException
 
 
 if sys.platform == 'darwin' or sys.platform == 'win32':
@@ -45,7 +50,7 @@ else:
 def set_sharing_strategy(new_strategy):
     """Sets the strategy for sharing CPU tensors.
 
-    Arguments:
+    Args:
         new_strategy (str): Name of the selected strategy. Should be one of
             the values returned by :func:`get_all_sharing_strategies()`.
     """

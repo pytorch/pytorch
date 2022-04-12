@@ -10,7 +10,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API StoreHandler {
+class TORCH_API StoreHandler {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(30);
@@ -27,10 +27,12 @@ class CAFFE2_API StoreHandler {
 
   /*
    * Get the data for the key.
-   * The call should wait until the key is stored with default timeout
+   * The call should wait until the key is stored with specified timeout
    * and return data if set else fail.
    */
-  virtual std::string get(const std::string& name) = 0;
+  virtual std::string get(
+      const std::string& name,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 
   /*
    * Does an atomic add operation on the key and returns the latest updated
@@ -38,6 +40,16 @@ class CAFFE2_API StoreHandler {
    * Note: To access the current value for this counter call with value = 0
    */
   virtual int64_t add(const std::string& name, int64_t value) = 0;
+
+  /*
+   * Returns the number of keys in this store.
+   */
+  virtual int64_t getNumKeys() = 0;
+
+  /*
+   * Removes the specified key from the store.
+   */
+  virtual bool deleteKey(const std::string& key) = 0;
 
   /*
    * Check if a keys exist in the store.
@@ -55,27 +67,24 @@ class CAFFE2_API StoreHandler {
 /*
  * The backing store is no longer available. It may have been deleted.
  */
-struct CAFFE2_API StoreHandlerNotAvailableException
-    : public std::runtime_error {
-  StoreHandlerNotAvailableException() = default;
+struct TORCH_API StoreHandlerNotAvailableException : public std::runtime_error {
   explicit StoreHandlerNotAvailableException(const std::string& msg)
       : std::runtime_error(msg) {}
 };
 
 #define STORE_HANDLER_NOT_AVAILABLE(...)             \
   throw ::caffe2::StoreHandlerNotAvailableException( \
-      ::caffe2::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
+      ::c10::str("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
 
 /*
  * Timeout accessing the store.
  */
-struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
-  StoreHandlerTimeoutException() = default;
+struct TORCH_API StoreHandlerTimeoutException : public std::runtime_error {
   explicit StoreHandlerTimeoutException(const std::string& msg)
       : std::runtime_error(msg) {}
 };
 
 #define STORE_HANDLER_TIMEOUT(...)              \
   throw ::caffe2::StoreHandlerTimeoutException( \
-      ::caffe2::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
+      ::c10::str("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
 } // namespace caffe2

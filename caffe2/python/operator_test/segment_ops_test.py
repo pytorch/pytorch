@@ -1,10 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from functools import partial
-from hypothesis import given
+from hypothesis import given, settings
 
 import numpy as np
 import unittest
@@ -12,6 +12,29 @@ import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
+def sparse_lengths_sum_ref(D, I, L, normalize_by_lengths=False):
+    R = np.zeros(shape=(L.size,) + D.shape[1:], dtype=np.float32)
+    line = 0
+    for g in range(L.size):
+        for _ in range(L[g]):
+            if len(D.shape) > 1:
+                R[g, :] += D[I[line], :]
+            else:
+                R[g] += D[I[line]]
+            line += 1
+
+        if normalize_by_lengths and L[g] > 1:
+            if len(D.shape) > 1:
+                R[g, :] = R[g, :] / L[g]
+            else:
+                R[g] = R[g] / L[g]
+
+    return [R]
+
+def sparse_lengths_mean_ref(D, I, L):
+    return sparse_lengths_sum_ref(D, I, L, normalize_by_lengths=True)
 
 
 class TesterBase:
@@ -418,7 +441,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         op = core.CreateOperator("UnsortedSegmentMean", ["X", "segments"], "out")
         self.assertDeviceChecks(dc, op, [X, segments], [0])
 
-    @given(
+    @serial.given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -447,7 +470,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
 
-    @given(
+    @serial.given(
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -476,7 +499,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
-    @given(
+    @serial.given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -511,7 +534,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
 
-    @given(
+    @serial.given(
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -547,7 +570,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
-    @given(
+    @serial.given(
         grad_on_weights=st.booleans(),
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
@@ -621,6 +644,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertTrue((out1 == out2).all())
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_sparse_lengths_sum_invalid_index(self, gc, dc):
         D = np.random.rand(50, 3, 4, 5).astype(np.float32)
         I = (np.random.randint(0, 10000, size=10) + 10000).astype(np.int64)
@@ -635,7 +659,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    @given(**hu.gcs_cpu_only)
+    @serial.given(**hu.gcs_cpu_only)
     def test_sparse_lengths_positional_weighted_sum(
             self, gc, dc):
         D = np.random.rand(50, 3, 4, 5).astype(np.float32)
@@ -670,6 +694,44 @@ class TestSegmentOps(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(
             gc, op, [D, W, indices, L], ref_sparse)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
+    @given(
+        input=hu.tensor(min_dim=2, max_dim=2, max_value=20, dtype=np.float16),
+        data_strategy=st.data(),
+        is_mean=st.booleans(),
+        **hu.gcs
+    )
+    @settings(deadline=None)
+    def test_sparse_lengths_fp16(self, input, data_strategy, is_mean, gc, dc):
+        m = input.shape[0]
+
+        lengths = data_strategy.draw(
+            hu.tensor(
+                max_dim=1,
+                max_value=input.shape[0],
+                dtype=np.int32,
+                elements=st.integers(min_value=0, max_value=27),
+            )
+        )
+        lengths_sum = int(np.sum(lengths).item())
+
+        indices = data_strategy.draw(
+            hu.arrays(
+                [lengths_sum], dtype=np.int64, elements=st.sampled_from(np.arange(m))
+            )
+        )
+        if is_mean:
+            op = core.CreateOperator(
+                "SparseLengthsMean", ["input", "indices", "lengths"], "out"
+            )
+            self.assertReferenceChecks(gc, op, [input, indices, lengths], sparse_lengths_mean_ref)
+
+        else:
+            op = core.CreateOperator(
+                "SparseLengthsSum", ["input", "indices", "lengths"], "out"
+            )
+            self.assertReferenceChecks(gc, op, [input, indices, lengths], sparse_lengths_sum_ref)
 
    # @given(
    #     inputs=hu.lengths_tensor(

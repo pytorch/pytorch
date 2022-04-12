@@ -14,8 +14,9 @@ template <typename T, class Context>
 class ClipOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ClipOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ClipOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
@@ -37,8 +38,9 @@ template <typename T, class Context>
 class ClipGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ClipGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ClipGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {

@@ -13,8 +13,7 @@ namespace {
 template <typename Dtype>
 __global__ void MaxPoolForward(
     const int nthreads,
-    const Dtype* const bottom_data,
-    const int num,
+    const Dtype *const bottom_data,
     const int channels,
     const int height,
     const int width,
@@ -26,8 +25,8 @@ __global__ void MaxPoolForward(
     const int stride_w,
     const int pad_h,
     const int pad_w,
-    Dtype* const top_data,
-    int* mask) {
+    Dtype *const top_data,
+    int *const mask) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
@@ -59,9 +58,8 @@ __global__ void MaxPoolForward(
 template <typename Dtype>
 __global__ void MaxPoolBackward(
     const int nthreads,
-    const Dtype* const top_diff,
-    const int* const mask,
-    const int num,
+    const Dtype *const top_diff,
+    const int *const mask,
     const int channels,
     const int height,
     const int width,
@@ -73,7 +71,7 @@ __global__ void MaxPoolBackward(
     const int stride_w,
     const int pad_h,
     const int pad_w,
-    Dtype* const bottom_diff) {
+    Dtype *const bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
@@ -108,12 +106,12 @@ __global__ void MaxPoolBackward(
 template <typename T>
 bool MaxPoolWithIndexOp::DoRunWithType() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  auto* mask = Output(1);
 
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
-  int output_size = Y->size();
-  mask->Resize(output_size);
+  auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(1));
+  auto* Y = Output(0, sizes, at::dtype<T>());
+
+  int output_size = Y->numel();
+  auto* mask = Output(1, {output_size}, at::dtype<int>());
 
   MaxPoolForward<T>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -122,7 +120,6 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
          context_.cuda_stream()>>>(
           output_size,
           X.data<T>(),
-          X.dim32(0),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
@@ -136,18 +133,20 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
           pad_l(),
           Y->template mutable_data<T>(),
           mask->template mutable_data<int>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
 bool MaxPoolWithIndexOp::RunOnDevice() {
   auto& X = Input(0);
 
-  CAFFE_ENFORCE(X.ndim() == 4, "Operator only supports 4D tensors");
+  CAFFE_ENFORCE(X.dim() == 4, "Operator only supports 4D tensors");
 
   if (X.IsType<float>()) {
     return DoRunWithType<float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half>();
   } else {
     CAFFE_THROW("Unsupported input type");
   }
@@ -158,22 +157,20 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
   auto& X = Input(0);
   auto& dY = Input(1);
   auto& mask = Input(2);
-  auto* dX = Output(0);
 
-  CAFFE_ENFORCE(X.ndim() == 4, "Operator only supports 4D tensors");
+  CAFFE_ENFORCE(X.dim() == 4, "Operator only supports 4D tensors");
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<T>());
   ConvPoolOpBase<CUDAContext>::ComputePads(vector<int>{X.dim32(2), X.dim32(3)});
 
   MaxPoolBackward<T><<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       dY.data<T>(),
       mask.data<int>(),
-      X.dim32(0),
       X.dim32(1),
       X.dim32(2),
       X.dim32(3),
@@ -186,6 +183,8 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
       pad_t(),
       pad_l(),
       dX->template mutable_data<T>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -194,8 +193,8 @@ bool MaxPoolWithIndexGradientOp::RunOnDevice() {
 
   if (X.IsType<float>()) {
     return DoRunWithType<float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half>();
   } else {
     CAFFE_THROW("Unsupported input type");
   }

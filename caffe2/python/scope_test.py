@@ -1,10 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import scope, core
-from caffe2.proto import caffe2_pb2
+
+
+
+
+from caffe2.python import scope, core, workspace
 
 import unittest
 import threading
@@ -18,7 +17,7 @@ def thread_runner(idx, testobj):
     testobj.assertEquals(scope.CurrentNameScope(), "")
     testobj.assertEquals(scope.CurrentDeviceScope(), None)
     namescope = "namescope_{}".format(idx)
-    dsc = core.DeviceOption(caffe2_pb2.CUDA, idx)
+    dsc = core.DeviceOption(workspace.GpuDeviceType, idx)
     with scope.DeviceScope(dsc):
         with scope.NameScope(namescope):
             testobj.assertEquals(scope.CurrentNameScope(), namescope + "/")
@@ -55,10 +54,18 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentNameScope(), "")
 
+    def testEmptyNamescopeBasic(self):
+        self.assertEquals(scope.CurrentNameScope(), "")
+
+        with scope.NameScope("test_scope"):
+            with scope.EmptyNameScope():
+                self.assertEquals(scope.CurrentNameScope(), "")
+            self.assertEquals(scope.CurrentNameScope(), "test_scope/")
+
     def testDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-        dsc = core.DeviceOption(caffe2_pb2.CUDA, 9)
+        dsc = core.DeviceOption(workspace.GpuDeviceType, 9)
         with scope.DeviceScope(dsc):
             self.assertEquals(scope.CurrentDeviceScope(), dsc)
 
@@ -67,7 +74,7 @@ class TestScope(unittest.TestCase):
     def testEmptyDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-        dsc = core.DeviceOption(caffe2_pb2.CUDA, 9)
+        dsc = core.DeviceOption(workspace.GpuDeviceType, 9)
         with scope.DeviceScope(dsc):
             self.assertEquals(scope.CurrentDeviceScope(), dsc)
             with scope.EmptyDeviceScope():
@@ -78,7 +85,7 @@ class TestScope(unittest.TestCase):
     def testDevicescopeAssertion(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-        dsc = core.DeviceOption(caffe2_pb2.CUDA, 9)
+        dsc = core.DeviceOption(workspace.GpuDeviceType, 9)
 
         try:
             with scope.DeviceScope(dsc):

@@ -1,19 +1,18 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
-from hypothesis import given
-import hypothesis.strategies as st
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+import hypothesis.strategies as st
 import numpy as np
-
 import unittest
 
 
-class TestMean(hu.HypothesisTestCase):
-    @given(
+class TestMean(serial.SerializedTestCase):
+    @serial.given(
         k=st.integers(1, 5),
         n=st.integers(1, 10),
         m=st.integers(1, 10),
@@ -61,4 +60,3 @@ class TestMean(hu.HypothesisTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -88,7 +88,8 @@ void ROIAlignBackwardFeature(
     const int sampling_ratio,
     T* bottom_diff,
     const T* bottom_rois,
-    int rois_cols) {
+    int rois_cols,
+    bool continuous_coordinate) {
   DCHECK(rois_cols == 4 || rois_cols == 5);
 
   for (int index = 0; index < nthreads; index++) {
@@ -106,18 +107,23 @@ void ROIAlignBackwardFeature(
     }
 
     // Do not using rounding; this implementation detail is critical
-    T roi_start_w = offset_bottom_rois[0] * spatial_scale;
-    T roi_start_h = offset_bottom_rois[1] * spatial_scale;
-    T roi_end_w = offset_bottom_rois[2] * spatial_scale;
-    T roi_end_h = offset_bottom_rois[3] * spatial_scale;
-    // T roi_start_w = round(offset_bottom_rois[0] * spatial_scale);
-    // T roi_start_h = round(offset_bottom_rois[1] * spatial_scale);
-    // T roi_end_w = round(offset_bottom_rois[2] * spatial_scale);
-    // T roi_end_h = round(offset_bottom_rois[3] * spatial_scale);
+    T roi_offset = continuous_coordinate ? T(0.5) : 0;
+    T roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
+    T roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    T roi_end_w = offset_bottom_rois[2] * spatial_scale - roi_offset;
+    T roi_end_h = offset_bottom_rois[3] * spatial_scale - roi_offset;
 
-    // Force malformed ROIs to be 1x1
-    T roi_width = std::max(roi_end_w - roi_start_w, (T)1.);
-    T roi_height = std::max(roi_end_h - roi_start_h, (T)1.);
+    T roi_width = roi_end_w - roi_start_w;
+    T roi_height = roi_end_h - roi_start_h;
+    if (continuous_coordinate) {
+      CAFFE_ENFORCE(
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = std::max(roi_width, (T)1.);
+      roi_height = std::max(roi_height, (T)1.);
+    }
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -140,14 +146,17 @@ void ROIAlignBackwardFeature(
 
     for (int iy = 0; iy < roi_bin_grid_h; iy++) {
       const T y = roi_start_h + ph * bin_size_h +
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           static_cast<T>(iy + .5f) * bin_size_h /
               static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
       for (int ix = 0; ix < roi_bin_grid_w; ix++) {
         const T x = roi_start_w + pw * bin_size_w +
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             static_cast<T>(ix + .5f) * bin_size_w /
                 static_cast<T>(roi_bin_grid_w);
 
         T w1, w2, w3, w4;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int x_low, x_high, y_low, y_high;
 
         bilinear_interpolate_gradient(
@@ -185,28 +194,30 @@ void ROIAlignBackwardFeature(
 } // namespace
 
 template <>
-bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // if R has 5 columns, the first column is the index, otherwise 0
   CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0,
+      X.sizes(),
+      at::dtype<float>()); // Gradient of net w.r.t. input to "forward" op (aka
+                           // "gradInput")
 
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CPUContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     ROIAlignBackwardFeature<float>(
-        dY.size(),
+        dY.numel(),
         dY.data<float>(),
         R.dim32(0),
         spatial_scale_,
@@ -218,7 +229,8 @@ bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         dX->template mutable_data<float>(),
         R.data<float>(),
-        R.dim32(1));
+        R.dim32(1),
+        aligned_);
   }
   return true;
 }
@@ -252,4 +264,22 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
+template <typename T>
+using RoIAlignGradientCPUOp = RoIAlignGradientOp<T, CPUContext>;
+
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlignGradient,
+    "_caffe2::RoIAlignGradient("
+    "    Tensor features,"
+    "    Tensor rois,"
+    "    Tensor grad,"
+    "    str order,"
+    "    float spatial_scale,"
+    "    int pooled_h,"
+    "    int pooled_w,"
+    "    int sampling_ratio,"
+    "    bool aligned"
+    ") -> Tensor",
+    caffe2::RoIAlignGradientCPUOp<float>);

@@ -2,13 +2,14 @@
 
 #include <memory>
 
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 namespace caffe2 {
 
 constexpr std::chrono::milliseconds StoreHandler::kDefaultTimeout;
 constexpr std::chrono::milliseconds StoreHandler::kNoTimeout;
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 StoreHandler::~StoreHandler() {
   // NOP; definition is here to make sure library contains
   // symbols for this abstract class.

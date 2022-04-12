@@ -2,8 +2,8 @@
 
 #include <limits>
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
@@ -28,7 +28,7 @@ __global__ void ComputeArgCUDAKernel(
     const Reducer reducer,
     const T init,
     const T* X,
-    TIndex* Y) {
+    int64_t* Y) {
   __shared__ typename BlockReduce<int, T>::TempStorage temp_storage;
   const int d = stride.d();
   for (int idx = blockIdx.x; idx < outer_size; idx += gridDim.x) {
@@ -41,7 +41,7 @@ __global__ void ComputeArgCUDAKernel(
     }
     kv = BlockReduce<int, T>(temp_storage).Reduce(kv, reducer);
     if (threadIdx.x == 0) {
-      Y[idx] = static_cast<TIndex>(kv.key);
+      Y[idx] = static_cast<int64_t>(kv.key);
     }
     __syncthreads();
   }
@@ -56,7 +56,7 @@ bool ArgMaxReducer<CUDAContext>::operator()(
     const int next_size,
     const int n,
     const T* X,
-    TIndex* Y,
+    int64_t* Y,
     CUDAContext* context) const {
   const int outer_size = prev_size * next_size;
   const FixedDivisor<int> stride(next_size);
@@ -72,6 +72,8 @@ bool ArgMaxReducer<CUDAContext>::operator()(
       std::numeric_limits<T>::lowest(),
       X,
       Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -82,7 +84,7 @@ bool ArgMinReducer<CUDAContext>::operator()(
     const int next_size,
     const int n,
     const T* X,
-    TIndex* Y,
+    int64_t* Y,
     CUDAContext* context) const {
   const int outer_size = prev_size * next_size;
   const FixedDivisor<int> stride(next_size);
@@ -98,6 +100,8 @@ bool ArgMinReducer<CUDAContext>::operator()(
       std::numeric_limits<T>::max(),
       X,
       Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -1,121 +1,38 @@
-from __future__ import print_function
+# Owner(s): ["module: unknown"]
+
 import sys
 import os
+import contextlib
+import io
 import re
-import math
 import shutil
 import random
+import subprocess
 import tempfile
+import textwrap
 import unittest
-import traceback
 import torch
 import torch.nn as nn
 import torch.utils.data
+from torch.utils.data import DataLoader
 import torch.cuda
-import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch.utils.trainer import Trainer
-from torch.utils.trainer.plugins import *
-from torch.utils.trainer.plugins.plugin import Plugin
-from torch.autograd._functions.utils import prepare_onnx_paddings
+import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC, skipIfRocm
+from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
+from torch.testing._internal.common_utils import has_breakpad, load_tests, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
+
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase, run_tests, download_file
 
-try:
-    import cffi
-    HAS_CFFI = True
-except ImportError:
-    HAS_CFFI = False
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-if HAS_CFFI:
-    from torch.utils.ffi import create_extension
-
-
-class SimplePlugin(Plugin):
-
-    def __init__(self, interval):
-        super(SimplePlugin, self).__init__(interval)
-        self.trainer = None
-        self.num_iteration = 0
-        self.num_epoch = 0
-        self.num_batch = 0
-        self.num_update = 0
-
-    def register(self, trainer):
-        self.trainer = trainer
-
-    def iteration(self, *args):
-        self.iteration_args = args
-        self.num_iteration += 1
-
-    def epoch(self, *args):
-        self.epoch_args = args
-        self.num_epoch += 1
-
-    def batch(self, *args):
-        self.batch_args = args
-        self.num_batch += 1
-
-    def update(self, *args):
-        self.update_args = args
-        self.num_update += 1
-
-
-class ModelMock(object):
-
-    def __init__(self):
-        self.num_calls = 0
-        self.output = torch.ones(1, 1, requires_grad=True)
-
-    def __call__(self, i):
-        self.num_calls += 1
-        return self.output * 2
-
-
-class CriterionMock(object):
-
-    def __init__(self):
-        self.num_calls = 0
-
-    def __call__(self, out, target):
-        self.num_calls += 1
-        return out
-
-
-class OptimizerMock(object):
-    max_evals = 5
-    min_evals = 1
-
-    def __init__(self):
-        self.num_steps = 0
-        self.num_evals = 0
-
-    def step(self, closure):
-        for i in range(random.randint(self.min_evals, self.max_evals)):
-            loss = closure()
-            self.num_evals += 1
-        self.num_steps += 1
-
-    def zero_grad(self):
-        pass
-
-
-class DatasetMock(object):
-
-    def __iter__(self):
-        for i in range(10):
-            yield torch.randn(2, 10), torch.randperm(10)[:2]
-
-    def __len__(self):
-        return 10
-
-
-class RandomDatasetMock(object):
+class RandomDatasetMock(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
@@ -125,6 +42,48 @@ class RandomDatasetMock(object):
 
 
 class TestCheckpoint(TestCase):
+
+    # This runs checkpoint_sequential on each of the nets in
+    # module_lists_to_compare, and compares them against the uncheckpointed model.
+    # To compare, it checks outputs as well as input gradients and parameter gradients
+    def _check_checkpoint_sequential(
+        self,
+        model,
+        module_lists_to_compare,
+        num_chunks,
+        input,
+    ):
+
+        # not checkpointed
+        out = model(input)
+        out_not_checkpointed = out.detach().clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_not_checkpointed = {
+            name: param.grad.detach().clone()
+            for name, param in model.named_parameters()
+        }
+        input_grad_not_checkpointed = input.grad.detach().clone()
+        for model_to_compare in module_lists_to_compare:
+            # checkpointed model by passing list of modules
+            detached = input.detach()
+            detached.requires_grad = True
+
+            # pass list of modules to checkpoint
+            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
+            out_checkpointed = out.detach().clone()
+            model.zero_grad()
+            out.sum().backward()
+            grad_checkpointed = {
+                name: param.grad.detach().clone()
+                for name, param in model.named_parameters()
+            }
+            input_grad_checkpointed = detached.grad.detach().clone()
+            # compare outputs as well as the gradients of input and parameters
+            self.assertEqual(out_checkpointed, out_not_checkpointed)
+            self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
+            for name in grad_checkpointed:
+                self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
@@ -185,58 +144,214 @@ class TestCheckpoint(TestCase):
             nn.ReLU()
         )
 
-        x = torch.randn(1, 100, requires_grad=True)
+        # Compare uncheckpointed model with its checkpointed counterparts
+        # In addition to running checkpoint_sequential on the nn.Sequential
+        # instance, we also run the function on the list of functions within
+        # the module.
+        self._check_checkpoint_sequential(
+            model,
+            [list(model.children()), model],
+            2,
+            torch.randn(1, 100, requires_grad=True)
+        )
 
-        # not checkpointed
-        out = model(x)
-        out_not_checkpointed = out.data.clone()
-        model.zero_grad()
+    def test_checkpoint_module_list(self):
+        class ModuleListNet(nn.Module):
+            def __init__(self):
+                super(ModuleListNet, self).__init__()
+                module_list = [
+                    nn.Linear(100, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU(),
+                ]
+                self.module_list = nn.ModuleList(module_list)
+
+            def forward(self, input):
+                for layer in self.module_list:
+                    input = layer(input)
+                return input
+
+        model = ModuleListNet()
+
+        # Compare uncheckpointed model with its checkpointed counterparts.
+        self._check_checkpoint_sequential(
+            model,
+            [list(model.module_list.children()), model.module_list],
+            2,
+            torch.randn(1, 100, requires_grad=True),
+        )
+
+    def test_checkpoint_sequential_deprecated_multiple_args(self):
+        class Two(nn.Module):
+            def forward(self, a, b):
+                return a, b
+
+        model = nn.Sequential(Two())
+        a = torch.randn(1, 100, requires_grad=True)
+        b = torch.randn(1, 100, requires_grad=True)
+
+        with self.assertRaises(TypeError):
+            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
+
+    def test_checkpoint_sequential_deprecated_no_args(self):
+        class Noop(nn.Module):
+            def forward(self):
+                pass
+
+        model = nn.Sequential(Noop())
+
+        with self.assertRaises(TypeError):
+            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
+
+    def test_checkpoint_rng_cpu(self):
+        for _ in range(5):
+            inp = torch.randn(20000, device='cpu').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    def test_checkpoint_rng_cuda(self):
+        for _ in range(5):
+            inp = torch.randn(20000, device='cuda').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.cuda.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.cuda.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    def test_checkpoint_non_tensor(self):
+
+        def run_fn(tensor1, tensor2):
+            if tensor2 is None:
+                return tensor1
+            return tensor1 + tensor2
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+        out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
-        grad_not_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_not_checkpointed[name] = param.grad.data.clone()
-        input_grad = x.grad.data.clone()
 
-        # checkpointed model by passing list of modules
-        chunks = 2
-        modules = list(model.children())
-        input_var = x.detach()
-        input_var.requires_grad = True
-        # pass list of modules to checkpoint
-        out = checkpoint_sequential(modules, chunks, input_var)
-        out_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = input_var.grad.data.clone()
-        # compare the output, input and parameters gradients
-        self.assertEqual(out_checkpointed, out_not_checkpointed)
-        self.assertEqual(input_grad, checkpoint_input_grad)
-        for name in grad_checkpointed:
-            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+    def test_checkpoint_non_tensor_inputs_outputs(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
 
-        # checkpointed by passing sequential directly
-        input_var1 = x.detach()
-        input_var1.requires_grad = True
-        # pass the sequential itself
-        out = checkpoint_sequential(model, 2, input_var1)
-        out_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = input_var1.grad.data.clone()
-        # compare the output, input and parameters gradients
-        self.assertEqual(out_checkpointed, out_not_checkpointed)
-        self.assertEqual(input_grad, checkpoint_input_grad)
-        for name in grad_checkpointed:
-            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+        t1 = torch.rand(10, requires_grad=True)
+        t2 = torch.rand(10, requires_grad=True)
+        t3 = torch.rand(10)
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
 
+        # Validate running backward.
+        res[1].sum().backward(retain_graph=True)
+        res[4].sum().backward(retain_graph=True)
+        res[6].sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
+            res[6].sum().backward()
+        t1_grad = t1.grad
+        t2_grad = t2.grad
 
-class TestDataLoader(TestCase):
+        # Reset grads, run without checkpoint and validate we receive same grads.
+        t1.grad = None
+        t2.grad = None
+        res = foo(t1, t2, scale, t3)
+        torch.autograd.backward([res[1].sum(), res[4].sum(), res[6].sum()])
+        self.assertEqual(t1.grad, t1_grad)
+        self.assertEqual(t2.grad, t2_grad)
+
+    def test_checkpoint_no_tensors(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = random.random()
+        t2 = random.random()
+        t3 = random.random()
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
+    def test_checkpoint_partial_grad(self):
+        def run_fn(tensor1, tensor2):
+            # tensor 2 is used for other application logic
+            return tensor1, tensor2
+        input_var = torch.randn(1, 4, requires_grad=True)
+        input_var2 = torch.randn(1, 4, requires_grad=False)
+        out = checkpoint(run_fn, input_var, input_var2)
+        out[0].sum().backward()
+
+        def run_fn2(tensor1, tensor2):
+            return tensor1
+        input_var = torch.randn(1, 4, requires_grad=False)
+        input_var2 = torch.randn(1, 4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+        ):
+            out = checkpoint(run_fn2, input_var, input_var2)
+            out.sum().backward()
+
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
@@ -256,298 +371,62 @@ class TestDataLoader(TestCase):
         self.assertEqual(x1, x2)
 
     def test_single_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=False)
+        # self.dataset is a Tensor here; technically not a valid input because
+        # not a Dataset subclass, but needs to stay working so add ignore's
+        # for type checking with mypy
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_single_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=False)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_multi_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
-
-
-class TestTrainer(TestCase):
-
-    intervals = [
-        [(1, 'iteration')],
-        [(1, 'epoch')],
-        [(1, 'batch')],
-        [(1, 'update')],
-        [(5, 'iteration')],
-        [(5, 'epoch')],
-        [(5, 'batch')],
-        [(5, 'update')],
-        [(1, 'iteration'), (1, 'epoch')],
-        [(5, 'update'), (1, 'iteration')],
-        [(2, 'epoch'), (1, 'batch')],
-    ]
-
-    def setUp(self):
-        self.optimizer = OptimizerMock()
-        self.trainer = Trainer(ModelMock(), CriterionMock(),
-                               self.optimizer, DatasetMock())
-        self.num_epochs = 3
-        self.dataset_size = len(self.trainer.dataset)
-        self.num_iters = self.num_epochs * self.dataset_size
-
-    def test_register_plugin(self):
-        for interval in self.intervals:
-            simple_plugin = SimplePlugin(interval)
-            self.trainer.register_plugin(simple_plugin)
-            self.assertEqual(simple_plugin.trainer, self.trainer)
-
-    def test_optimizer_step(self):
-        self.trainer.run(epochs=1)
-        self.assertEqual(self.trainer.optimizer.num_steps, 10)
-
-    def test_plugin_interval(self):
-        for interval in self.intervals:
-            self.setUp()
-            simple_plugin = SimplePlugin(interval)
-            self.trainer.register_plugin(simple_plugin)
-            self.trainer.run(epochs=self.num_epochs)
-            units = {
-                ('iteration', self.num_iters),
-                ('epoch', self.num_epochs),
-                ('batch', self.num_iters),
-                ('update', self.num_iters)
-            }
-            for unit, num_triggers in units:
-                call_every = None
-                for i, i_unit in interval:
-                    if i_unit == unit:
-                        call_every = i
-                        break
-                if call_every:
-                    expected_num_calls = math.floor(num_triggers / call_every)
-                else:
-                    expected_num_calls = 0
-                num_calls = getattr(simple_plugin, 'num_' + unit)
-                self.assertEqual(num_calls, expected_num_calls, 0)
-
-    def test_model_called(self):
-        self.trainer.run(epochs=self.num_epochs)
-        num_model_calls = self.trainer.model.num_calls
-        num_crit_calls = self.trainer.criterion.num_calls
-        self.assertEqual(num_model_calls, num_crit_calls)
-        for num_calls in [num_model_calls, num_crit_calls]:
-            lower_bound = OptimizerMock.min_evals * self.num_iters
-            upper_bound = OptimizerMock.max_evals * self.num_iters
-            self.assertEqual(num_calls, self.trainer.optimizer.num_evals)
-            self.assertLessEqual(lower_bound, num_calls)
-            self.assertLessEqual(num_calls, upper_bound)
-
-    def test_model_gradient(self):
-        self.trainer.run(epochs=self.num_epochs)
-        output_var = self.trainer.model.output
-        expected_grad = torch.ones(1, 1) * 2 * self.optimizer.num_evals
-        self.assertEqual(output_var.grad.data, expected_grad)
 
 
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-class TestFFI(TestCase):
-
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        os.chdir(self.tmpdir)
-        sys.path.append(self.tmpdir)
-
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir)
-
-    @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
-    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
-    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
-    def test_cpu(self):
-        create_extension(
-            name='test_extensions.cpulib',
-            headers=[test_dir + '/ffi/src/cpu/lib.h'],
-            sources=[
-                test_dir + '/ffi/src/cpu/lib1.c',
-                test_dir + '/ffi/src/cpu/lib2.c',
-            ],
-            verbose=False,
-        ).build()
-        from test_extensions import cpulib
-        tensor = torch.ones(2, 2).float()
-
-        cpulib.good_func(tensor, 2, 1.5)
-        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
-
-        new_tensor = cpulib.new_tensor(4)
-        self.assertEqual(new_tensor, torch.ones(4, 4) * 4)
-
-        f = cpulib.int_to_float(5)
-        self.assertIs(type(f), float)
-
-        self.assertRaises(TypeError,
-                          lambda: cpulib.good_func(tensor.double(), 2, 1.5))
-        self.assertRaises(torch.FatalError,
-                          lambda: cpulib.bad_func(tensor, 2, 1.5))
-
-    @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
-    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
-    @skipIfRocm
-    def test_gpu(self):
-        from torch.utils.cpp_extension import CUDA_HOME
-        create_extension(
-            name='gpulib',
-            headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
-            sources=[
-                test_dir + '/ffi/src/cuda/cudalib.c',
-            ],
-            with_cuda=True,
-            verbose=False,
-            include_dirs=[os.path.join(CUDA_HOME, 'include')],
-        ).build()
-        import gpulib
-        tensor = torch.ones(2, 2).float()
-
-        gpulib.good_func(tensor, 2, 1.5)
-        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
-
-        ctensor = tensor.cuda().fill_(1)
-        gpulib.cuda_func(ctensor, 2, 1.5)
-        self.assertEqual(ctensor, torch.ones(2, 2) * 2 + 1.5)
-
-        self.assertRaises(TypeError,
-                          lambda: gpulib.cuda_func(tensor, 2, 1.5))
-        self.assertRaises(TypeError,
-                          lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
-
-
-class TestLuaReader(TestCase):
-
-    @staticmethod
-    def _module_test(name, test):
-        def do_test(self):
-            module = test['module']
-            input = test['input']
-            grad_output = test['grad_output']
-            if hasattr(self, '_transform_' + name):
-                input = getattr(self, '_transform_' + name)(input)
-            output = module.forward(input)
-            module.zeroGradParameters()
-            grad_input = module.backward(input, grad_output)
-            self.assertEqual(output, test['output'])
-            self.assertEqual(grad_input, test['grad_input'])
-            if module.parameters() is not None:
-                params, d_params = module.parameters()
-                self.assertEqual(params, test['params'])
-                self.assertEqual(d_params, test['d_params'])
-            else:
-                self.assertFalse('params' in test and test['params'])
-                self.assertFalse('params' in test and test['d_params'])
-        return do_test
-
-    @staticmethod
-    def _criterion_test(name, test):
-        def do_test(self):
-            module = test['module']
-            input = test['input']
-            if name == 'L1Cost':
-                target = None
-            else:
-                target = test['target']
-            if hasattr(self, '_transform_' + name):
-                input, target = getattr(self, '_transform_' + name)(input, target)
-
-            output = module.forward(input, target)
-            grad_input = module.backward(input, target)
-            self.assertEqual(output, test['loss'])
-            self.assertEqual(grad_input, test['grad_input'])
-        return do_test
-
-    @classmethod
-    def init(cls):
-        try:
-            path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
-        except unittest.SkipTest:
-            return
-        long_size = 8 if sys.platform == 'win32' else None
-        tests = load_lua(path, long_size=long_size)
-        for name, test in tests['modules'].items():
-            if name == "HardShrink":
-                continue
-            test_name = 'test_' + name.replace('nn.', '')
-            setattr(cls, test_name, cls._module_test(name, test))
-        for name, test in tests['criterions'].items():
-            if name == "HardShrink":
-                continue
-            test_name = 'test_' + name.replace('nn.', '')
-            setattr(cls, test_name, cls._criterion_test(name, test))
-
-    def _transform_Index(self, input):
-        return [input[0], input[1].sub(1)]
-
-    def _transform_LookupTable(self, input):
-        return input.sub(1)
-
-    def _transform_MultiLabelMarginCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ClassNLLCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_SpatialClassNLLCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ClassSimplexCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_CrossEntropyCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ParallelCriterion(self, input, target):
-        return input, [target[0].sub(1), target[1]]
-
-    def _transform_MultiCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_MultiMarginCriterion(self, input, target):
-        return input, target.sub(1)
-
-
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
-    def _run(self, command):
+    def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
-        from common import PY3
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa: P204
                              stderr=subprocess.PIPE, shell=True)
-        output, err = p.communicate()
+        try:
+            output, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            output, err = p.communicate()
         rc = p.returncode
-        if PY3:
-            output = output.decode("ascii")
-            err = err.decode("ascii")
-        return (rc, output, err)
+        output_str = output.decode("ascii")
+        err_str = err.decode("ascii")
+        return (rc, output_str, err_str)
 
     def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
@@ -560,19 +439,19 @@ class TestBottleneck(TestCase):
 
     def _check_run_args(self):
         # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck('bottleneck/test_args.py')
-        self.assertEqual(rc, 2, None, self._fail_msg('Missing args should error', out + err))
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
+        self.assertEqual(rc, 2, atol=0, rtol=0, msg=self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
-        rc, out, err = self._run_bottleneck('bottleneck/test_args.py', '--foo foo --bar bar')
-        self.assertEqual(rc, 0, None, self._fail_msg('Should pass args to script', out + err))
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
+        self.assertEqual(rc, 0, atol=0, rtol=0, msg=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
         return '{}, output was:\n{}'.format(msg, output)
 
     def _check_environment_summary(self, output):
         results = re.search('Environment Summary', output)
-        self.assertIsNotNone(results, self._fail_msg('Should have Enviroment Summary', output))
+        self.assertIsNotNone(results, self._fail_msg('Should have Environment Summary', output))
 
         # Up to five lines away from the heading, there should be the version number
         results = re.search(r'Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+', output)
@@ -608,8 +487,8 @@ class TestBottleneck(TestCase):
 
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck('bottleneck/test.py')
-        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+        rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -618,10 +497,9 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
-        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -643,7 +521,7 @@ class TestONNXUtils(TestCase):
     def test_prepare_onnx_paddings(self):
         sizes = [2, 3, 4]
         pad = [1, 2, 3, 4]
-        paddings = prepare_onnx_paddings(len(sizes), pad)
+        paddings = _prepare_onnx_paddings(len(sizes), pad)
         self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
 
     def test_check_onnx_broadcast(self):
@@ -699,7 +577,153 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+class TestHipify(TestCase):
+    def test_import_hipify(self):
+        from torch.utils.hipify import hipify_python  # noqa: F401
+
+
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        # bool argument
+        torch._assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch._assert(False, "bar")
+        # tensor argument
+        torch._assert(torch.tensor([True], dtype=torch.bool), "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
+
+    def test_assert_scriptable(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.sum() > 0, "foo")
+                return x
+
+        m = M()
+        # scriptable
+        ms = torch.jit.script(m)
+        # data can be passed without errors
+        x = torch.randn(4, 4).fill_(1.0)
+        ms(x)
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
+            ms(torch.tensor([False], dtype=torch.bool))
+
+
+class TestCrashHandler(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
+    def test_python_exception_writing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            torch.utils._crash_handler.enable_minidumps(temp_dir)
+            torch.utils._crash_handler.enable_minidumps_on_exceptions()
+
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 0)
+
+            f = io.StringIO()
+            with contextlib.redirect_stderr(f):
+                try:
+                    @torch.jit.script
+                    def x(i: int):
+                        return i + "2"  # type: ignore[operator]
+                except RuntimeError as e:
+                    pass
+
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].endswith(".dmp"))
+            torch.utils._crash_handler.disable_minidumps()
+
+
+@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
+class TestStandaloneCPPJIT(TestCase):
+    def test_load_standalone(self):
+        build_dir = tempfile.mkdtemp()
+        try:
+            src_path = os.path.join(build_dir, "main.cpp")
+            src = textwrap.dedent("""\
+                #include <iostream>
+                #include <torch/torch.h>
+                int main() {
+                    auto x = torch::eye(3);
+                    std::cout << x << std::endl;
+                }
+            """)
+            with open(src_path, "wt") as f:
+                f.write(src)
+
+            exec_path = torch.utils.cpp_extension.load(
+                "standalone_load_test",
+                src_path,
+                build_directory=build_dir,
+                is_python_module=False,
+                is_standalone=True,
+            )
+
+            ext = ".exe" if IS_WINDOWS else ""
+            self.assertEqual(
+                exec_path,
+                os.path.join(build_dir, f"standalone_load_test{ext}")
+            )
+
+            for shell in [True, False]:
+                r = subprocess.run(
+                    [exec_path],
+                    shell=shell,
+                    stdout=subprocess.PIPE,
+                )
+                self.assertEqual(r.returncode, 0)
+                self.assertEqual(
+                    # Windows prints "\r\n" for newlines.
+                    textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
+                    textwrap.dedent("""\
+                     1  0  0
+                     0  1  0
+                     0  0  1
+                    [ CPUFloatType{3,3} ]
+                    """)
+                )
+
+        finally:
+            shutil.rmtree(build_dir)
+
+
+class DummyXPUModule(object):
+    @staticmethod
+    def is_available():
+        return True
+
+
+class TestExtensionUtils(TestCase):
+    def test_external_module_register(self):
+        # Built-in module
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('cuda', torch.cuda)
+
+        # Wrong device type
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('dummmy', DummyXPUModule)
+
+        with self.assertRaises(AttributeError):
+            torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        torch._register_device_module('xpu', DummyXPUModule)
+
+        torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        # No supporting for override
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('xpu', DummyXPUModule)
+
+
+class TestCppExtensionUtils(TestCase):
+    def test_cpp_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
+
+    def test_cc_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
+
+
 if __name__ == '__main__':
-    from torch.utils.serialization import load_lua
-    TestLuaReader.init()
     run_tests()

@@ -12,6 +12,7 @@ inline float logit(float p) {
   // it computes log(p / (1-p))
   // to avoid numeric issue, hard code p log(p) when p approaches 0
   float x = std::min(std::max(p, kLOG_THRESHOLD()), 1 - kLOG_THRESHOLD());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return -log(1. / x - 1.);
 }
 
@@ -29,10 +30,9 @@ template <>
 bool BernoulliJSDOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // predicted probabilities
   auto& T = Input(1); // target probabilities
-  auto* L = Output(0); // JSD loss output
-  int N = X.size();
-  CAFFE_ENFORCE_EQ(T.size(), N);
-  L->ResizeLike(X);
+  int N = X.numel();
+  CAFFE_ENFORCE_EQ(T.numel(), N);
+  auto* L = Output(0, X.sizes(), at::dtype<float>()); // JSD loss output
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
   auto* l_data = L->template mutable_data<float>();
@@ -51,9 +51,9 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   auto& go = Input(0);
   auto& X = Input(1);
   auto& T = Input(2);
-  auto* gi = Output(0);
-  int N = X.size();
-  gi->ResizeLike(X);
+
+  int N = X.numel();
+  auto* gi = Output(0, X.sizes(), at::dtype<float>());
   auto* go_data = go.data<float>();
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();

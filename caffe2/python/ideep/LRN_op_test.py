@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import hypothesis.strategies as st
@@ -12,14 +12,14 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class LRNTest(hu.HypothesisTestCase):
     @given(input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            im_size=st.integers(1, 10),
            order=st.sampled_from(["NCHW"]),
            **mu.gcs)
-
+    @settings(deadline=10000)
     def test_LRN(self, input_channels,
                             batch_size, im_size, order,
                              gc, dc):

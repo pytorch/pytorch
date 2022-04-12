@@ -1,65 +1,61 @@
+#include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <utility>
 #include <vector>
 
+namespace F = torch::nn::functional;
+
 namespace torch {
 namespace nn {
-BatchNormOptions::BatchNormOptions(int64_t features) : features_(features) {}
 
-BatchNormImpl::BatchNormImpl(BatchNormOptions options)
-    : options(std::move(options)) {
-  reset();
-}
+template <size_t D, typename Derived>
+void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::BatchNorm" << D << "d("
+         << this->options.num_features() << ", "
+         << "eps=" << this->options.eps() << ", "
+         << "momentum=";
 
-void BatchNormImpl::reset() {
-  if (options.affine_) {
-    weight = register_parameter(
-        "weight", torch::empty({options.features_}).uniform_());
-    bias = register_parameter("bias", torch::zeros({options.features_}));
+  if (this->options.momentum().has_value()) {
+      stream << this->options.momentum().value();
+  } else {
+      stream << "None";
   }
 
-  if (options.stateful_) {
-    running_mean =
-        register_buffer("running_mean", torch::zeros({options.features_}));
-    running_variance =
-        register_buffer("running_variance", torch::ones({options.features_}));
-  }
+   stream << ", "
+         << "affine=" << this->options.affine() << ", "
+         << "track_running_stats=" << this->options.track_running_stats() << ")";
 }
 
-Tensor BatchNormImpl::forward(Tensor input) {
-  return pure_forward(input, Tensor(), Tensor());
+void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() == 2 || input.dim() == 3,
+      "expected 2D or 3D input (got ", input.dim(), "D input)");
 }
 
-Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
-  auto& running_mean = options.stateful_ ? this->running_mean : mean;
-  auto& running_variance =
-      options.stateful_ ? this->running_variance : variance;
-
-  if (is_training()) {
-    const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
-    AT_CHECK(
-        input.numel() / num_channels > 1,
-        "BatchNorm expected more than 1 value per channel when training!");
-  }
-
-  return torch::batch_norm(
-      input,
-      weight,
-      bias,
-      running_mean,
-      running_variance,
-      is_training(),
-      options.momentum_,
-      options.eps_,
-      torch::cuda::cudnn_is_available());
+void BatchNorm2dImpl::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() == 4,
+      "expected 4D input (got ", input.dim(), "D input)");
 }
+
+void BatchNorm3dImpl::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() == 5,
+      "expected 5D input (got ", input.dim(), "D input)");
+}
+
+template class BatchNormImplBase<1, BatchNorm1dImpl>;
+template class BatchNormImplBase<2, BatchNorm2dImpl>;
+template class BatchNormImplBase<3, BatchNorm3dImpl>;
 
 } // namespace nn
 } // namespace torch

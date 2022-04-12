@@ -1,19 +1,19 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import core
-from hypothesis import assume, given
+
+
+
+
+from caffe2.python import core, workspace
+from hypothesis import assume, given, settings
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.proto import caffe2_pb2
 
 
-class TestReductionOps(hu.HypothesisTestCase):
+class TestReductionOps(serial.SerializedTestCase):
 
-    @given(n=st.integers(5, 8), **hu.gcs)
+    @serial.given(n=st.integers(5, 8), **hu.gcs)
     def test_elementwise_sum(self, n, gc, dc):
         X = np.random.rand(n).astype(np.float32)
 
@@ -42,6 +42,7 @@ class TestReductionOps(hu.HypothesisTestCase):
         )
 
     @given(n=st.integers(5, 8), **hu.gcs)
+    @settings(deadline=10000)
     def test_elementwise_int_sum(self, n, gc, dc):
         X = np.random.rand(n).astype(np.int32)
 
@@ -64,11 +65,12 @@ class TestReductionOps(hu.HypothesisTestCase):
     @given(n=st.integers(1, 65536),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_elementwise_sqrsum(self, n, dtype, gc, dc):
         if dtype == np.float16:
-            # fp16 is only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 is only supported with CUDA/HIP
+            assume(gc.device_type == workspace.GpuDeviceType)
+            dc = [d for d in dc if d.device_type == workspace.GpuDeviceType]
 
         X = np.random.rand(n).astype(dtype)
 
@@ -120,7 +122,7 @@ class TestReductionOps(hu.HypothesisTestCase):
             outputs_with_grads=[0],
         )
 
-    @given(batch_size=st.integers(1, 3),
+    @serial.given(batch_size=st.integers(1, 3),
            m=st.integers(1, 3),
            n=st.integers(1, 4),
            **hu.gcs)
@@ -143,7 +145,7 @@ class TestReductionOps(hu.HypothesisTestCase):
             reference=rowwise_max,
         )
 
-    @given(batch_size=st.integers(1, 3),
+    @serial.given(batch_size=st.integers(1, 3),
            m=st.integers(1, 3),
            n=st.integers(1, 4),
            **hu.gcs)
@@ -165,3 +167,14 @@ class TestReductionOps(hu.HypothesisTestCase):
             inputs=[X],
             reference=columnwise_max,
         )
+
+        # Test shape inference logic
+        net = core.Net("test_shape_inference")
+        workspace.FeedBlob("x", X)
+        output = net.ColwiseMax(["x"], ["y"])
+        (shapes, types) = workspace.InferShapesAndTypes([net])
+        workspace.RunNetOnce(net)
+
+        self.assertEqual(shapes[output], list(workspace.blobs[output].shape))
+        self.assertEqual(shapes[output], [X.shape[0]] + [X.shape[2]])
+        self.assertEqual(types[output], core.DataType.FLOAT)

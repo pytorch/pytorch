@@ -95,13 +95,12 @@ __global__ void ChannelBackpropStatsBlockKernel(
 
 template <unsigned int blockSize>
 __global__ void ChannelBackpropStatsFinalSumsKernel(
-    int N,
-    int C,
-    int numSumsPerChannel,
-    const float* dBiasScratch,
-    const float* dScaleScratch,
-    float* dBias,
-    float* dScale) {
+    const int N,
+    const int numSumsPerChannel,
+    const float *const dBiasScratch,
+    const float *const dScaleScratch,
+    float *const dBias,
+    float *const dScale) {
   __shared__ float dBiasData[blockSize];
   __shared__ float dScaleData[blockSize];
 
@@ -154,31 +153,30 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
   const auto& dY = Input(OUTPUT_GRAD);
   const auto& mean = Input(SAVED_MEAN);
   const auto& invStddev = Input(SAVED_INV_STDDEV);
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
+  CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
-  const int W = X.ndim() > 3 ? X.dim32(3) : 1;
-  const int D = X.ndim() > 4 ? X.dim32(4) : 1;
-
-  auto dScale = Output(SCALE_GRAD);
-  auto dBias = Output(BIAS_GRAD);
+  const int W = X.dim() > 3 ? X.dim32(3) : 1;
+  const int D = X.dim() > 4 ? X.dim32(4) : 1;
 
   const auto Xarr = X.data<float>();
   const auto dYarr = dY.data<float>();
   const auto meanArr = mean.data<float>();
   const auto invStddevArr = invStddev.data<float>();
 
-  dBias->Resize(C);
-  dScale->Resize(C);
+  auto dBias = Output(BIAS_GRAD, {C}, at::dtype<float>());
+  auto dScale = Output(SCALE_GRAD, {C}, at::dtype<float>());
 
   const auto valsPerChannel = H * W * D;
 
   const auto numBlocksPerChannel = CAFFE_GET_BLOCKS(valsPerChannel);
   const auto numBlocksTotal = numBlocksPerChannel * N * C;
 
-  dBiasScratch_.Resize(numBlocksTotal);
-  dScaleScratch_.Resize(numBlocksTotal);
+  ReinitializeTensor(
+      &dBiasScratch_, {numBlocksTotal}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(
+      &dScaleScratch_, {numBlocksTotal}, at::dtype<float>().device(CUDA));
 
   ChannelBackpropStatsBlockKernel<CAFFE_CUDA_NUM_THREADS>
       <<<numBlocksTotal, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
@@ -191,16 +189,17 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
           invStddevArr,
           dBiasScratch_.mutable_data<float>(),
           dScaleScratch_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ChannelBackpropStatsFinalSumsKernel<CAFFE_CUDA_NUM_THREADS>
       <<<C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N,
-          C,
           numBlocksPerChannel,
           dBiasScratch_.data<float>(),
           dScaleScratch_.data<float>(),
           dBias->template mutable_data<float>(),
           dScale->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

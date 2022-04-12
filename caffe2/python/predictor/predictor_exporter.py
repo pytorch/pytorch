@@ -1,9 +1,9 @@
 ## @package predictor_exporter
 # Module caffe2.python.predictor.predictor_exporter
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.proto import metanet_pb2
@@ -33,10 +33,11 @@ def get_predictor_exporter_helper(submodelNetName):
     return pred_meta
 
 
+# pyre-fixme[13]: Pyre can't detect the attribute initialization via cls.super() here
 class PredictorExportMeta(collections.namedtuple(
     'PredictorExportMeta',
-        'predict_net, parameters, inputs, outputs, shapes, name, \
-        extra_init_net, net_type, num_workers, trainer_prefix')):
+        'predict_net, parameters, inputs, outputs, shapes, name, '
+        'extra_init_net, global_init_net, net_type, num_workers, trainer_prefix')):
     """
     Metadata to be used for serializaing a net.
 
@@ -52,6 +53,13 @@ class PredictorExportMeta(collections.namedtuple(
     num_workers specifies for net type 'dag' how many threads should run ops
 
     trainer_prefix specifies the type of trainer.
+
+    extra_init_net gets appended to pred_init_net, useful for thread local init
+
+    global_init_net gets appended to global_init_net, useful for global init
+    on a shared across threads parameter workspace
+    (in a case of multi-threaded inference)
+
     """
     def __new__(
         cls,
@@ -62,6 +70,7 @@ class PredictorExportMeta(collections.namedtuple(
         shapes=None,
         name="",
         extra_init_net=None,
+        global_init_net=None,
         net_type=None,
         num_workers=None,
         trainer_prefix=None,
@@ -79,13 +88,14 @@ class PredictorExportMeta(collections.namedtuple(
             "Intersection: {}".format(set(parameters).intersection(outputs)))
         shapes = shapes or {}
 
-        if isinstance(predict_net, (core.Net, core.Plan)):
-            predict_net = predict_net.Proto()
+        if predict_net is not None:
+            if isinstance(predict_net, (core.Net, core.Plan)):
+                predict_net = predict_net.Proto()
 
-        assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
+            assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
         return super(PredictorExportMeta, cls).__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
-            extra_init_net, net_type, num_workers, trainer_prefix)
+            extra_init_net, global_init_net, net_type, num_workers, trainer_prefix)
 
     def inputs_name(self):
         return utils.get_comp_name(predictor_constants.INPUTS_BLOB_TYPE,
@@ -146,20 +156,25 @@ def prepare_prediction_net(filename, db_type, device_option=None):
     return predict_net
 
 
-def _global_init_net(predictor_export_meta):
+def _global_init_net(predictor_export_meta, db_type):
     net = core.Net("global-init")
-    net.Load(
-        [predictor_constants.PREDICTOR_DBREADER],
-        predictor_export_meta.parameters)
-    net.Proto().external_input.extend([predictor_constants.PREDICTOR_DBREADER])
-    net.Proto().external_output.extend(predictor_export_meta.parameters)
+    # manifold_db does not need DBReader
+    if db_type != "manifold_db":
+        net.Load(
+            [predictor_constants.PREDICTOR_DBREADER],
+            predictor_export_meta.parameters)
+        net.Proto().external_input.extend([predictor_constants.PREDICTOR_DBREADER])
+        net.Proto().external_output.extend(predictor_export_meta.parameters)
+
+    if predictor_export_meta.global_init_net:
+        net.AppendNet(predictor_export_meta.global_init_net)
 
     # Add the model_id in the predict_net to the global_init_net
     utils.AddModelIdArg(predictor_export_meta, net.Proto())
     return net.Proto()
 
 
-def get_meta_net_def(predictor_export_meta, ws=None):
+def get_meta_net_def(predictor_export_meta, ws=None, db_type=None):
     """
     """
 
@@ -170,7 +185,7 @@ def get_meta_net_def(predictor_export_meta, ws=None):
     utils.AddNet(meta_net_def, predictor_export_meta.predict_init_name(),
                  utils.create_predict_init_net(ws, predictor_export_meta))
     utils.AddNet(meta_net_def, predictor_export_meta.global_init_name(),
-                 _global_init_net(predictor_export_meta))
+                 _global_init_net(predictor_export_meta, db_type))
     utils.AddNet(meta_net_def, predictor_export_meta.predict_net_name(),
                  utils.create_predict_net(predictor_export_meta))
     utils.AddBlobs(meta_net_def, predictor_export_meta.parameters_name(),
@@ -189,8 +204,10 @@ def set_model_info(meta_net_def, project_str, model_class_str, version):
     meta_net_def.modelInfo.version = version
 
 
-def save_to_db(db_type, db_destination, predictor_export_meta):
-    meta_net_def = get_meta_net_def(predictor_export_meta)
+def save_to_db(db_type, db_destination, predictor_export_meta, use_ideep=False,
+               *args, **kwargs):
+    meta_net_def = get_meta_net_def(predictor_export_meta, db_type=db_type)
+    device_type = caffe2_pb2.IDEEP if use_ideep else caffe2_pb2.CPU
     with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
         workspace.FeedBlob(
             predictor_constants.META_NET_DEF,
@@ -199,16 +216,20 @@ def save_to_db(db_type, db_destination, predictor_export_meta):
 
     blobs_to_save = [predictor_constants.META_NET_DEF] + \
         predictor_export_meta.parameters
+
     op = core.CreateOperator(
         "Save",
         blobs_to_save, [],
+        device_option = core.DeviceOption(device_type),
         absolute_path=True,
-        db=db_destination, db_type=db_type)
+        db=db_destination, db_type=db_type,
+        **kwargs
+    )
 
     workspace.RunOperatorOnce(op)
 
 
-def load_from_db(filename, db_type, device_option=None):
+def load_from_db(filename, db_type, device_option=None, *args, **kwargs):
     # global_init_net in meta_net_def will load parameters from
     # predictor_constants.PREDICTOR_DBREADER
     create_db = core.CreateOperator(

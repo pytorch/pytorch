@@ -1,13 +1,14 @@
 #ifndef CAFFE2_UTILS_FIXED_DIVISOR_H_
 #define CAFFE2_UTILS_FIXED_DIVISOR_H_
 
-#include <stdint.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
+// See Note [hip-clang differences to hcc]
+
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__) || \
+    (defined(__clang__) && defined(__CUDA__))
 #define FIXED_DIVISOR_DECL inline __host__ __device__
 #else
 #define FIXED_DIVISOR_DECL inline
@@ -29,13 +30,16 @@ class FixedDivisor<std::int32_t> {
   FixedDivisor() = default;
 
   explicit FixedDivisor(const std::int32_t d) : d_(d) {
+#if !defined(USE_ROCM)
     CalcSignedMagic();
+#endif // USE_ROCM
   }
 
   FIXED_DIVISOR_DECL std::int32_t d() const {
     return d_;
   }
 
+#if !defined(USE_ROCM)
   FIXED_DIVISOR_DECL std::uint64_t magic() const {
     return magic_;
   }
@@ -43,12 +47,17 @@ class FixedDivisor<std::int32_t> {
   FIXED_DIVISOR_DECL int shift() const {
     return shift_;
   }
+#endif // USE_ROCM
 
   /// Calculates `q = n / d`.
   FIXED_DIVISOR_DECL std::int32_t Div(const std::int32_t n) const {
+#if defined(USE_ROCM)
+    return n / d_;
+#else // USE_ROCM
     // In lieu of a mulhi instruction being available, perform the
     // work in uint64
     return (int32_t)((magic_ * (uint64_t)n) >> shift_);
+#endif // USE_ROCM
   }
 
   /// Calculates `r = n % d`.
@@ -64,6 +73,7 @@ class FixedDivisor<std::int32_t> {
   }
 
  private:
+#if !defined(USE_ROCM)
   // Calculates magic multiplicative value and shift amount for calculating `q =
   // n / d` for signed 32-bit integers.
   // Implementation taken from Hacker's Delight section 10.
@@ -107,10 +117,14 @@ class FixedDivisor<std::int32_t> {
     shift_ = p;
     magic_ = (std::uint64_t)(std::uint32_t)magic;
   }
+#endif // USE_ROCM
 
   std::int32_t d_ = 1;
+
+#if !defined(USE_ROCM)
   std::uint64_t magic_;
   int shift_;
+#endif // USE_ROCM
 };
 
 } // namespace caffe2

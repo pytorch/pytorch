@@ -1,12 +1,13 @@
 #ifndef CAFFE2_OPERATORS_MOMENTS_OP_H_
 #define CAFFE2_OPERATORS_MOMENTS_OP_H_
 
-#include <algorithm>
-#include <vector>
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include <c10/util/irange.h>
+
+#include <algorithm>
+#include <vector>
 
 namespace caffe2 {
 
@@ -15,16 +16,17 @@ class MomentsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MomentsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit MomentsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")),
-        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
+        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true),
+        OP_SINGLE_ARG(bool, "allow_broadcast_fastpath", allow_broadcast_fastpath_, true) {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
-    auto* mean = Output(0);
-    auto* variance = Output(1);
-    const int ndim = X.ndim();
+
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
@@ -36,37 +38,42 @@ class MomentsOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
-    std::vector<int> Y_dims;
-    Y_dims.reserve(ndim);
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
+    std::vector<int> Y_dims = X_dims;
+    for (const int axis : axes_) {
+      Y_dims[axis] = 1;
+    }
+    std::vector<std::int64_t> output_dims;
+    output_dims.reserve(ndim);
     std::size_t cur_axis = 0;
-    for (int i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       if (cur_axis < axes_.size() && i == axes_[cur_axis]) {
         if (keep_dims_) {
-          Y_dims.push_back(1);
+          output_dims.push_back(1);
         }
         ++cur_axis;
       } else {
-        Y_dims.push_back(X_dims[i]);
+        output_dims.push_back(X_dims[i]);
       }
     }
-    mean->Resize(Y_dims);
-    variance->Resize(Y_dims);
+    auto* mean = Output(0, output_dims, at::dtype<T>());
+    auto* var = Output(1, output_dims, at::dtype<T>());
     math::Moments<float, Context>(
         X_dims.size(),
         X_dims.data(),
-        axes_.size(),
-        axes_.data(),
+        Y_dims.data(),
         X.template data<T>(),
         mean->template mutable_data<T>(),
-        variance->template mutable_data<T>(),
-        &context_);
+        var->template mutable_data<T>(),
+        &context_,
+        allow_broadcast_fastpath_);
     return true;
   }
 
  private:
   std::vector<int> axes_;
   const int keep_dims_;
+  const bool allow_broadcast_fastpath_;
 };
 
 template <typename T, class Context>
@@ -74,17 +81,19 @@ class MomentsGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MomentsGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        axes_(this->template GetRepeatedArgument<int>("axes")) {}
+  template <class... Args>
+  explicit MomentsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        axes_(this->template GetRepeatedArgument<int>("axes")),
+        OP_SINGLE_ARG(bool, "allow_broadcast_fastpath", allow_broadcast_fastpath_, true) {}
 
   bool RunOnDevice() override {
     const auto& dmean = Input(0);
     const auto& dvariance = Input(1);
     const auto& X = Input(2);
     const auto& mean = Input(3);
-    auto* dX = Output(0);
-    const int ndim = X.ndim();
+
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
@@ -96,12 +105,12 @@ class MomentsGradientOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> dY_dims = dX_dims;
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     return Compute(
         dY_dims,
         dX_dims,
@@ -123,6 +132,7 @@ class MomentsGradientOp final : public Operator<Context> {
       T* dX_data);
 
   std::vector<int> axes_;
+  const bool allow_broadcast_fastpath_;
 };
 
 } // namespace caffe2

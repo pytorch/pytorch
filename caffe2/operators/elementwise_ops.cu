@@ -1,5 +1,6 @@
 #include "caffe2/operators/elementwise_ops.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
@@ -9,8 +10,10 @@
 #include "caffe2/utils/conversions.h"
 
 #ifdef __HIPCC__
+#if TORCH_HIP_VERSION < 210
 // rocblas doesn't fully support fp16 yet
 #define ROCBLAS_FP16 0
+#endif
 #endif
 
 namespace caffe2 {
@@ -110,24 +113,48 @@ void device_reduce(
 }
 
 template <>
-void device_reduce<float16>(
-    const float16* in,
-    float16* out,
+void device_reduce<at::Half>(
+    const at::Half* in,
+    at::Half* out,
     int N,
     Tensor* buffer,
     CUDAContext* context) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
+  (void)N; // Suppress unused variable warning
+  (void)buffer; // Suppress unused variable warning
+  (void)context; // Suppress unused variable warning
+#if TORCH_HIP_VERSION >= 210
+  auto buffer_size = 1;
+
+  if (buffer->numel() != buffer_size) {
+    buffer->Resize(buffer_size);
+
+    math::Set<at::Half, CUDAContext>(
+        N,
+        convert::To<float, at::Half>(1.),
+        buffer->template mutable_data<at::Half>(),
+        context);
+  }
+
+  CUBLAS_ENFORCE(rocblas_hdot(
+      context->cublas_handle(),
+      N,
+      reinterpret_cast<const rocblas_half*>(in),
+      1,
+      reinterpret_cast<const rocblas_half*>(buffer->data<at::Half>()),
+      0,
+      reinterpret_cast<rocblas_half*>(out)));
+#elif TORCH_HIP_VERSION < 210
+   CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
 #else
   auto buffer_size = 1;
 
-  if (buffer->size() != buffer_size) {
+  if (buffer->numel() != buffer_size) {
     buffer->Resize(buffer_size);
 
-    math::Set<float16, CUDAContext>(
+    math::Set<at::Half, CUDAContext>(
         N,
-        convert::To<float, float16>(1.),
-        buffer->template mutable_data<float16>(),
+        convert::To<float, at::Half>(1.),
+        buffer->template mutable_data<at::Half>(),
         context);
   }
 
@@ -137,7 +164,7 @@ void device_reduce<float16>(
       in,
       CUDA_R_16F,
       1,
-      buffer->data<float16>(),
+      buffer->data<at::Half>(),
       CUDA_R_16F,
       0,
       out,
@@ -201,19 +228,24 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
              CAFFE_CUDA_NUM_THREADS,
              0,
              context_.cuda_stream()>>>(Adata, Cdata, pre, n);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       if (post >= 128) {
         reduce_sum_like<T, 512>
             <<<n, 512, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (post >= 64) {
         reduce_sum_like<T, 128>
             <<<n, 128, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (post >= 32) {
         reduce_sum_like<T, 64>
             <<<n, 64, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         reduce_sum_like<T, 32>
             <<<n, 32, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
   }
@@ -222,7 +254,7 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
 
 template <>
 bool SumReduceLikeOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(SumReduceLike, SumReduceLikeOp<CUDAContext>);

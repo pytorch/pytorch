@@ -1,17 +1,16 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
-import numpy as np
+
+
 
 from caffe2.python import core
-from hypothesis import given
-
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from hypothesis import given, settings
 import hypothesis.strategies as st
+import numpy as np
 
 
-class TestAffineChannelOp(hu.HypothesisTestCase):
+class TestAffineChannelOp(serial.SerializedTestCase):
     def affine_channel_nchw_ref(self, X, scale, bias):
         dims = X.shape
         N = dims[0]
@@ -30,9 +29,10 @@ class TestAffineChannelOp(hu.HypothesisTestCase):
         Y = X * scale + bias
         return [Y.reshape(dims)]
 
-    @given(N=st.integers(1, 5), C=st.integers(1, 5), H=st.integers(1, 5),
-           W=st.integers(1, 5), order=st.sampled_from(["NCHW", "NHWC"]),
-           is_learnable=st.booleans(), in_place=st.booleans(), **hu.gcs)
+    @serial.given(N=st.integers(1, 5), C=st.integers(1, 5),
+            H=st.integers(1, 5), W=st.integers(1, 5),
+            order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
+            in_place=st.booleans(), **hu.gcs)
     def test_affine_channel_2d(
             self, N, C, H, W, order, is_learnable, in_place, gc, dc):
         op = core.CreateOperator(
@@ -72,6 +72,7 @@ class TestAffineChannelOp(hu.HypothesisTestCase):
            H=st.integers(1, 3), W=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
            in_place=st.booleans(), **hu.gcs)
+    @settings(deadline=10000)
     def test_affine_channel_3d(
             self, N, C, T, H, W, order, is_learnable, in_place, gc, dc):
         op = core.CreateOperator(

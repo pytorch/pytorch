@@ -30,13 +30,13 @@ struct ProxyPrinter {
         int16_t,
         int64_t,
         double,
-        char>>::call(this, tensor->meta());
+        char>>::call(this, tensor->dtype());
   }
 
   const Tensor* tensor;
   TensorPrinter* tensorPrinter;
 };
-}
+} // namespace
 
 SmartTensorPrinter::SmartTensorPrinter(const std::string& tensor_name)
     : tensorPrinter_(tensor_name) {}
@@ -53,6 +53,7 @@ SmartTensorPrinter::SmartTensorPrinter(
     : tensorPrinter_(tensor_name, file_name, limit) {}
 
 void SmartTensorPrinter::Print(const Tensor& tensor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProxyPrinter printer;
 
   printer.tensor = &tensor;
@@ -62,7 +63,7 @@ void SmartTensorPrinter::Print(const Tensor& tensor) {
 
 SmartTensorPrinter& SmartTensorPrinter::DefaultTensorPrinter() {
 // TODO(janusz): thread_local does not work under mac.
-#if __APPLE__
+#if defined(__APPLE__)
   CAFFE_THROW(
       "SmartTensorPrinter does not work on mac yet due to thread_local.");
 #else
@@ -74,4 +75,4 @@ SmartTensorPrinter& SmartTensorPrinter::DefaultTensorPrinter() {
 void SmartTensorPrinter::PrintTensor(const Tensor& tensor) {
   DefaultTensorPrinter().Print(tensor);
 }
-}
+} // namespace caffe2

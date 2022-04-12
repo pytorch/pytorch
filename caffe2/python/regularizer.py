@@ -1,6 +1,6 @@
 # @package optimizer
 # Module caffe2.python.regularizer
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 from caffe2.python import core, utils
 import numpy as np
@@ -41,6 +41,22 @@ class Regularizer(object):
 
     def _run_after_optimizer(self, net, param_init_net, param, grad):
         return None
+
+    def _feature_grouping(self, param, net):
+        # Possible alternative grouping method via summing over absolute values
+        # Compute l2norm over feature weights
+        # pow( sum_i { pow(theda_i, 2) } ,  0.5)
+        param_mul = net.Mul([param, param], [net.NextScopedBlob("param_mul")])
+        param_reduced = net.ReduceFrontSum(
+            [param_mul], [net.NextScopedBlob("param_reduced")]
+        )
+        grouped_feature_weight_vec = net.Pow(
+            [param_reduced],
+            [net.NextScopedBlob("grouped_feature_weight_vec")],
+            exponent=0.5,
+        )
+
+        return grouped_feature_weight_vec
 
     def _ensure_clipped(
         self,
@@ -84,6 +100,128 @@ class L1Norm(Regularizer):
         net.Scale([output_blob], [output_blob], scale=self.reg_lambda)
         return output_blob
 
+class LpNorm(Regularizer):
+    def __init__(self, reg_lambda, p_value=0.5):
+        """
+        reg_lambda: parameter to scale regularization by
+
+        p_value:    determines what type of Lp norm to calculate. If p > 0,
+                    we will calculate Lp norm with the formula:
+                    pow( sum_i { pow(theda_i, p) } ,  1/p)
+        """
+        super(LpNorm, self).__init__()
+        assert reg_lambda > 0, "factor ahead of regularization should be greater than 0"
+        assert p_value > 0, "p_value factor should be greater than 0"
+        self.p_value = p_value
+        self.reg_lambda = reg_lambda
+
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        # TODO: the second dim (num of input nodes) of param is after feature preproc,
+        # and does not correspond to the original num of dense features.
+        # In the future, will want to create a util to reduce the input dim of param to
+        # match the num of dense features.
+
+        output_blob = net.NextScopedBlob(param + "_dense_feature_regularization")
+        grouped_feature_weight_vec = self._feature_grouping(param, net)
+
+        # Compute Lpnorm:
+        # pow( sum_i { pow(theda_i, p) } ,  1/p)
+        lp_vec_raised = net.Pow(
+            [grouped_feature_weight_vec],
+            [net.NextScopedBlob("lp_vec_raised")],
+            exponent=self.p_value,
+        )
+        lp_vec_summed = net.ReduceFrontSum(
+            [lp_vec_raised], [net.NextScopedBlob("lp_vec_summed")]
+        )
+        lp_norm = net.Pow(
+            [lp_vec_summed],
+            [net.NextScopedBlob("lp_vec")],
+            exponent=(1 / self.p_value),
+        )
+        net.Scale([lp_norm], [output_blob], scale=self.reg_lambda)
+        return output_blob
+
+
+class L0ApproxNorm(Regularizer):
+    def __init__(self, reg_lambda, alpha=0.01, budget=0):
+        """
+        reg_lambda: parameter to scale regularization by
+
+        alpha:      hyper parameter to tune that is only used in the calculation
+                    of approximate L0 norm
+
+        budget:     desired number of features. If the number of features is greater
+                    than the budget amount, then the least important features will
+                    be penalized. If there are fewer features than the desired
+                    budget, no penalization will be applied. Optional parameter, if
+                    0, then no budget is used
+        """
+        super(L0ApproxNorm, self).__init__()
+        assert reg_lambda > 0, "factor ahead of regularization should be greater than 0"
+        assert alpha > 0, "alpha factor must be a positive value greater than 0"
+        assert budget >= 0, "budget factor must be greater than or equal to 0"
+        self.reg_lambda = reg_lambda
+        self.alpha = alpha
+        self.budget = float(budget)  # budget must be float for future calculations
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        # TODO: the second dim (num of input nodes) of param is after feature preproc,
+        # and does not correspond to the original num of dense features.
+        # In the future, will want to create a util to reduce the input dim of param to
+        # match the num of dense features.
+
+        output_blob = net.NextScopedBlob(param + "_dense_feature_regularization")
+        grouped_feature_weight_vec = self._feature_grouping(param, net)
+
+        # compute approximate L0 norm
+        # sum_i ( min ( abs (theta_i), alpha))) / alpha
+        l0_abs = net.Abs([grouped_feature_weight_vec], [net.NextScopedBlob("l0_abs")])
+        l0_min = net.Clip([l0_abs], [net.NextScopedBlob("l0_min")], max=self.alpha)
+        l0_summed = net.ReduceFrontSum([l0_min], [net.NextScopedBlob("l0_summed")])
+        l0_norm = net.Scale(
+            [l0_summed], [net.NextScopedBlob("l0_norm")], scale=(1 / self.alpha)
+        )
+
+        # incorporate budget factor
+        # regularization = reg_lambda * max(0, l0_norm - budget)
+        if self.budget:
+            budget_blob = net.ConstantFill([], "budget", shape=[1], value=self.budget)
+            l0_sub_budget = net.Sub(
+                [l0_norm, budget_blob], [net.NextScopedBlob("l0_budget")]
+            )
+            relu_l0_sub_budget = net.Relu(
+                [l0_sub_budget], [net.NextScopedBlob("relu_l0_sub_budget")]
+            )
+            net.Scale([relu_l0_sub_budget], [output_blob], scale=self.reg_lambda)
+        else:
+            net.Scale([l0_norm], [output_blob], scale=self.reg_lambda)
+        return output_blob
+
+class L1NormTrimmed(Regularizer):
+    """
+    The Trimmed Lasso: Sparsity and Robustness. https://arxiv.org/abs/1708.04527
+    """
+    def __init__(self, reg_lambda, k):
+        super(L1NormTrimmed, self).__init__()
+        assert reg_lambda >= 0, "factor ahead of regularization should be 0 or positive"
+        assert isinstance(k, int), "k should be an interger as expected #. after selection"
+        assert k >= 1, "k should be larger than 1"
+
+        self.reg_lambda = reg_lambda
+        self.k = k
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        output_blob = net.NextScopedBlob(param + "_l1_trimmed_regularization")
+        abs = net.Abs([param], [net.NextScopedBlob("abs")])
+        sum_abs = net.SumElements([abs], [net.NextScopedBlob("sum_abs")], average=False)
+        topk, _, _ = net.TopK([abs], [net.NextScopedBlob("topk"), net.NextScopedBlob("id"), net.NextScopedBlob("flat_id")], k=self.k)
+        topk_sum = net.SumElements([topk], [net.NextScopedBlob("topk_sum")], average=False)
+        net.Sub([sum_abs, topk_sum], [output_blob])
+        net.Scale([output_blob], [output_blob], scale=self.reg_lambda)
+        return output_blob
+
 
 class L2Norm(Regularizer):
     def __init__(self, reg_lambda):
@@ -99,20 +237,72 @@ class L2Norm(Regularizer):
         return output_blob
 
 
+class ElasticNet(Regularizer):
+    def __init__(self, l1, l2):
+        super(ElasticNet, self).__init__()
+        self.l1 = l1
+        self.l2 = l2
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        output_blob = net.NextScopedBlob(param + "_elastic_net_regularization")
+        l2_blob = net.NextScopedBlob(param + "_l2_blob")
+        l1_blob = net.NextScopedBlob(param + "_l1_blob")
+        net.LpNorm([param], [l2_blob], p=2)
+        net.LpNorm([param], [l1_blob], p=1)
+        net.Scale([l2_blob], [l2_blob], scale=self.l2)
+        net.Scale([l1_blob], [l1_blob], scale=self.l1)
+        net.Add([l1_blob, l2_blob], [output_blob])
+        return output_blob
+
+
+class ElasticNetL1NormTrimmed(Regularizer):
+    def __init__(self, l1, l2, k):
+        super(ElasticNetL1NormTrimmed, self).__init__()
+        self.l1 = l1
+        self.l2 = l2
+        self.k = k
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        output_blob = net.NextScopedBlob(param + "_elastic_net_l1_trimmed_regularization")
+        l2_blob = net.NextScopedBlob(param + "_l2_blob")
+        net.LpNorm([param], [l2_blob], p=2)
+        net.Scale([l2_blob], [l2_blob], scale=self.l2)
+
+        l1_blob = net.NextScopedBlob(param + "_l1_blob")
+        abs = net.Abs([param], [net.NextScopedBlob("abs")])
+        sum_abs = net.SumElements([abs], [net.NextScopedBlob("sum_abs")], average=False)
+        topk, _, _ = net.TopK([abs], [net.NextScopedBlob("topk"), net.NextScopedBlob("id"), net.NextScopedBlob("flat_id")], k=self.k)
+        topk_sum = net.SumElements([topk], [net.NextScopedBlob("topk_sum")], average=False)
+        net.Sub([sum_abs, topk_sum], [l1_blob])
+        net.Scale([l1_blob], [l1_blob], scale=self.l1)
+
+        net.Add([l1_blob, l2_blob], [output_blob])
+        return output_blob
+
+
 class MaxNorm(Regularizer):
-    def __init__(self, norm=1.0):
+    def __init__(self, norm=1.0, dtype=None):
         super(MaxNorm, self).__init__()
         self.norm = norm
+        self.dtype = dtype
 
     def _run_after_optimizer(self, net, param_init_net, param, grad):
         assert self.norm > 0, "norm should be bigger than 0."
         if isinstance(grad, core.GradientSlice):
-            net.SparseNormalize(
-                [param, grad.indices, grad.values],
-                [param],
-                use_max_norm=True,
-                norm=self.norm,
-            )
+            if self.dtype and self.dtype == 'fp16':
+                net.Float16SparseNormalize(
+                    [param, grad.indices],
+                    [param],
+                    use_max_norm=True,
+                    norm=self.norm,
+                )
+            else:
+                net.SparseNormalize(
+                    [param, grad.indices],
+                    [param],
+                    use_max_norm=True,
+                    norm=self.norm,
+                )
         else:
             raise NotImplementedError("MaxNorm is not supported for dense parameters")
 
@@ -126,7 +316,7 @@ class ConstantNorm(Regularizer):
         assert self.norm > 0, "norm should be bigger than 0."
         if isinstance(grad, core.GradientSlice):
             net.SparseNormalize(
-                [param, grad.indices, grad.values],
+                [param, grad.indices],
                 [param],
                 use_max_norm=False,
                 norm=self.norm,
@@ -135,6 +325,36 @@ class ConstantNorm(Regularizer):
             raise NotImplementedError(
                 "ConstantNorm is not supported for dense parameters"
             )
+
+
+class SparseLpNorm(Regularizer):
+    def __init__(self, p, reg_lambda):
+        super(SparseLpNorm, self).__init__()
+        assert p in (1.0, 2.0), "Sparse Lp regularization only implemented for p = 1.0 and p = 2.0."
+        assert reg_lambda > 0, "factor ahead of regularization should be greater than 0."
+        self.p = p
+        self.reg_lambda = reg_lambda
+
+    def _run_after_optimizer(self, net, param_init_net, param, grad):
+        if isinstance(grad, core.GradientSlice):
+            net.SparseLpRegularizer(
+                [param, grad.indices],
+                [param],
+                p=self.p,
+                reg_lambda=self.reg_lambda,
+            )
+        else:
+            raise NotImplementedError("SparseLpNorm is not supported for dense parameters")
+
+
+class SparseL1Norm(SparseLpNorm):
+    def __init__(self, reg_lambda):
+        super(SparseL1Norm, self).__init__(p=1.0, reg_lambda=reg_lambda)
+
+
+class SparseL2Norm(SparseLpNorm):
+    def __init__(self, reg_lambda):
+        super(SparseL2Norm, self).__init__(p=2.0, reg_lambda=reg_lambda)
 
 
 class LogBarrier(Regularizer):
@@ -167,7 +387,7 @@ class LogBarrier(Regularizer):
             **self.discount_options
         )
         # TODO(xlwang): param might still be negative at the initialization time or
-        # slighly negative due to the distributed training. Enforce it's non-negativity
+        # slightly negative due to the distributed training. Enforce it's non-negativity
         # for now (at least above machine epsilon)
         param_non_neg = net.NextScopedBlob(param + "_non_neg")
         net.Clip([param], [param_non_neg], min=self.kEpsilon)

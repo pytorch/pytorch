@@ -1,9 +1,9 @@
 # @package parallel_workers
 # Module caffe2.python.parallel_workers
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 
 '''
@@ -38,7 +38,6 @@ import threading
 import atexit
 import time
 import collections
-import six
 import traceback
 
 from abc import ABCMeta, abstractmethod
@@ -110,7 +109,7 @@ class Metrics(object):
 
 
 class State():
-    six.add_metaclass(ABCMeta)
+    __metaclass__ = ABCMeta
 
     @abstractmethod
     def start(self):
@@ -177,7 +176,7 @@ class WorkerCoordinator(object):
                 w.join(5.0)  # don't wait forever, thread may be blocked in i/o
         success = True
         for w in self._workers:
-            if w.isAlive():
+            if w.is_alive():
                 print("Worker {} failed to close while waiting".format(w))
                 success = False
 

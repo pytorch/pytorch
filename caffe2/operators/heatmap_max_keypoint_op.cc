@@ -25,9 +25,8 @@ template <>
 bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   const auto& heatmaps_in = Input(0);
   const auto& bboxes_in = Input(1);
-  auto* keypoints_out = Output(0);
 
-  CAFFE_ENFORCE_EQ(heatmaps_in.ndim(), 4);
+  CAFFE_ENFORCE_EQ(heatmaps_in.dim(), 4);
   const int N = heatmaps_in.dim32(0);
   CAFFE_ENFORCE_EQ(heatmaps_in.dim32(0), N);
   const int keypoint_count = heatmaps_in.dim32(1);
@@ -35,7 +34,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_GE(heatmap_size, 2); // at least 2x2 for approx
   CAFFE_ENFORCE_EQ(heatmaps_in.dim32(2), heatmaps_in.dim32(3));
 
-  CAFFE_ENFORCE_EQ(bboxes_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(bboxes_in.dim(), 2);
   CAFFE_ENFORCE_EQ(bboxes_in.dim32(0), N);
   CAFFE_ENFORCE_GE(bboxes_in.dim32(1), 4);
 
@@ -61,7 +60,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   } /* otherwise not initialized */
 
   // Resize and wrap outputs in Eigen
-  keypoints_out->Resize(N, 4, keypoint_count);
+  auto* keypoints_out = Output(0, {N, 4, keypoint_count}, at::dtype<float>());
   Eigen::Map<ERArrXXf> keypoints(
       keypoints_out->mutable_data<float>(), N, 4 * keypoint_count);
 
@@ -123,6 +122,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       // Solve Ax=b
       const float div = A.determinant();
       EVecXf delta(2);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float deltaScore;
       const float MAX_DELTA = 1.5;
       if (std::abs(div) < 1e-4f) {
@@ -141,7 +141,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       }
       assert(std::abs(delta(0)) <= MAX_DELTA);
       assert(std::abs(delta(1)) <= MAX_DELTA);
-      // find maximum of detla scores
+      // find maximum of delta scores
       keypoints(k, 0 * keypoint_count + j) =
           x0 + (0.5 + maxX + delta(0)) * xLen / heatmap_size;
       keypoints(k, 1 * keypoint_count + j) =
@@ -159,3 +159,18 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using HeatmapMaxKeypointOpFloatCPU =
+    caffe2::HeatmapMaxKeypointOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    HeatmapMaxKeypoint,
+    "_caffe2::HeatmapMaxKeypoint("
+      "Tensor heatmaps, "
+      "Tensor bboxes_in, "
+      "bool should_output_softmax = True"
+    ") -> Tensor keypoints",
+    HeatmapMaxKeypointOpFloatCPU);
+
+// clang-format on

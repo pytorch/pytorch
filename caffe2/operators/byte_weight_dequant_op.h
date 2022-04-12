@@ -14,19 +14,19 @@ class ByteWeightDequantOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         min_(this->template GetSingleArgument<float>("min", -3)),
         max_(this->template GetSingleArgument<float>("max", 3)),
-        shape_(this->template GetRepeatedArgument<int>("shape")) {}
+        shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
 
   USE_OPERATOR_FUNCTIONS(Context);
   using Operator<Context>::Operator;
 
   bool RunOnDevice() override {
     const auto& WI = Input(0);
-    auto* Y = Output(0);
-    Y->Resize(shape_);
+
+    auto* Y = Output(0, shape_, at::dtype<float>());
     float bin_interval = (max_ - min_) / 255.0;
     int total = 1;
-    for (int i = 0; i < shape_.size(); i++) {
-      total *= Y->dim(i);
+    for (const auto i : c10::irange(0U, shape_.size())) {
+      total *= Y->size(i);
     }
     const uint8_t* Xdata;
     if (WI.template IsType<uint8_t>()) {
@@ -47,7 +47,7 @@ class ByteWeightDequantOp : public Operator<Context> {
  private:
   float min_;
   float max_;
-  std::vector<int> shape_;
+  std::vector<int64_t> shape_;
 };
 
 } // namespace caffe2

@@ -19,7 +19,6 @@
 #include <unordered_map>
 
 #include "caffe2/core/common.h"
-#include "caffe2/core/context_gpu.h"
 #include "caffe2/core/event.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
@@ -45,12 +44,11 @@ class ProfileCounter {
   Timer timer_;
   float start_time_ = 0.0f;
   float run_time_ = 0.0f;
-  cudaEvent_t start_;
-  cudaEvent_t stop_;
 };
 
-class ProfileOperatorObserver : public ProfileCounter,
-                                public ObserverBase<OperatorBase> {
+class TORCH_API ProfileOperatorObserver final
+    : public ProfileCounter,
+      public ObserverBase<OperatorBase> {
  public:
   explicit ProfileOperatorObserver(OperatorBase* subject) = delete;
   explicit ProfileOperatorObserver(
@@ -96,9 +94,9 @@ class ProfileOperatorObserver : public ProfileCounter,
   void Stop() override;
 };
 
-class ProfileObserver final : public OperatorAttachingNetObserver<
-                                  ProfileOperatorObserver,
-                                  ProfileObserver> {
+class TORCH_API ProfileObserver final : public OperatorAttachingNetObserver<
+                                            ProfileOperatorObserver,
+                                            ProfileObserver> {
  public:
   explicit ProfileObserver(NetBase* subject)
       : OperatorAttachingNetObserver<ProfileOperatorObserver, ProfileObserver>(

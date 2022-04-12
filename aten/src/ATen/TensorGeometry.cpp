@@ -1,26 +1,35 @@
 #include <ATen/TensorGeometry.h>
 
-#include <ATen/ATen.h>
+#include <limits>
+#include <cstddef>
 
 namespace at {
+
+// See TensorGeometry.h on why this is useful now that we cache is_contiguous.
+bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
+  assert(!overflows<std::int64_t>(sizes.size()));
+  auto dim = static_cast<std::int64_t>(sizes.size());
+  int64_t expected_stride = 1;
+  bool contig_if_nonempty = true;
+  for (int64_t i = dim - 1; i >= 0; i--) {
+    if (sizes[i] == 0) {
+      return true;
+    }
+    if (contig_if_nonempty) {
+      if (sizes[i] != 1 && strides[i] != expected_stride) {
+        contig_if_nonempty = false;
+      }
+      expected_stride *= sizes[i];
+    }
+  }
+  return contig_if_nonempty;
+}
 
 bool TensorGeometry::is_contiguous() const {
   if (numel_ == 0) {
     return true;
   }
-  int64_t dim = sizes_.size();
-  int64_t expected_stride = 1;
-  for (int64_t i = dim - 1; i >= 0; i--) {
-    if (sizes_[i] != 1 && strides_[i] != expected_stride) {
-      return false;
-    }
-    expected_stride *= sizes_[i];
-  }
-  return true;
-}
-
-Tensor TensorGeometry::zeros_with_stride(const Type& type) const {
-  return type.tensor(sizes_, strides_).zero_();
+  return at::geometry_is_contiguous(sizes_, strides_);
 }
 
 } // namespace at

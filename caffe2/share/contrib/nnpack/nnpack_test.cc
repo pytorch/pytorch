@@ -13,13 +13,13 @@ namespace caffe2 {
 namespace {
 
 void AddNoiseInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const string& name,
     Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
@@ -91,10 +91,10 @@ void compare(
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("pad_r", padR));
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("group", group));
 
-  AddNoiseInput(vector<TIndex>{N, inputC, H, W}, "X", &ws);
+  AddNoiseInput(vector<int64_t>{N, inputC, H, W}, "X", &ws);
   AddNoiseInput(
-      vector<TIndex>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
-  AddNoiseInput(vector<TIndex>{outputC}, "B", &ws);
+      vector<int64_t>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
+  AddNoiseInput(vector<int64_t>{outputC}, "B", &ws);
 
   unique_ptr<OperatorBase> nnpackOp(CreateOperator(nnpackOpDef, &ws));
   EXPECT_NE(nullptr, nnpackOp.get());
@@ -236,10 +236,7 @@ void runConv(
 
 } // unnamed namespace
 
-constexpr size_t kIters = 20;
-
-// TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
-#if !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+constexpr int kIters = 20;
 
 TEST(NNPACK, Conv_3x3s1) {
   for (int i = 0; i < kIters; ++i) {
@@ -383,7 +380,5 @@ TEST(NNPACK, Conv_HxWsHxW) {
     runConv(kernelH, kernelW, strideH, strideW);
   }
 }
-
-#endif
 
 } // namespace caffe2

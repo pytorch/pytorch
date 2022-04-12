@@ -3,9 +3,10 @@
 #include "caffe2/core/scope_guard.h"
 
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_version,
     false,
     "Print Caffe2 version and build options on startup");
@@ -42,6 +43,7 @@ bool GlobalInitAlreadyRun() {
 }
 
 bool GlobalInit(int* pargc, char*** pargv) {
+  C10_LOG_API_USAGE_ONCE("caffe2.global_init");
   static std::recursive_mutex init_mutex;
   std::lock_guard<std::recursive_mutex> guard(init_mutex);
   internal::State& init_state = internal::GlobalInitState();
@@ -53,7 +55,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
   if (init_state == internal::State::Initialized) {
     VLOG(1) << "GlobalInit has already been called: re-parsing gflags only.";
     // Reparse command line flags
-    success &= ParseCaffeCommandLineFlags(pargc, pargv);
+    success &= c10::ParseCommandLineFlags(pargc, pargv);
     UpdateLoggingLevelsFromFlags();
   } else if (init_state == internal::State::Uninitialized) {
     init_state = internal::State::Initializing;
@@ -68,7 +70,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
                    ->RunRegisteredEarlyInitFunctions(pargc, pargv);
     CAFFE_ENFORCE(
         success, "Failed to run some early init functions for caffe2.");
-    success &= ParseCaffeCommandLineFlags(pargc, pargv);
+    success &= c10::ParseCommandLineFlags(pargc, pargv);
     success &= InitCaffeLogging(pargc, *pargv);
     // Print out the current build version. Using cerr as LOG(INFO) might be off
     if (FLAGS_caffe2_version) {
@@ -95,9 +97,15 @@ bool GlobalInit() {
   // On mobile devices, use this global init, since we cannot pass the
   // command line options to caffe2, no arguments are passed.
   int mobile_argc = 1;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char caffe2_name[] = "caffe2";
   char* mobile_name = &caffe2_name[0];
   char** mobile_argv = &mobile_name;
   return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
+}
+
+bool unsafeRunCaffe2InitFunction(const char* name, int* pargc, char*** pargv) {
+  return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
+      name, pargc, pargv);
 }
 }  // namespace caffe2

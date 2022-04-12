@@ -6,26 +6,22 @@
 To run this, you will need to have Caffe2 installed as well.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import itertools
+
+
+
 import collections
+import itertools
 import logging
 import re
 
 from caffe2.python import core as caffe2_core
-from caffe2.proto import caffe2_legacy_pb2
-from enum import Enum
-from onnx import (defs, checker, helper, numpy_helper, mapping,
-                  ModelProto, GraphProto, NodeProto, AttributeProto, TensorProto, OperatorSetIdProto)
-from onnx.helper import make_tensor, make_tensor_value_info, make_attribute, make_model
+from onnx import (checker, helper, numpy_helper, mapping,
+                  GraphProto, NodeProto, TensorProto, OperatorSetIdProto)
+from onnx.helper import make_tensor_value_info, make_model
 import numpy as np
 
 from caffe2.python.onnx.helper import c2_native_run_net
-from caffe2.python.onnx.error import Unsupported
 
 import caffe2.python._import_c_extension as C
 
@@ -38,7 +34,7 @@ class Caffe2Frontend(object):
     # ONNX makes a BC breaking change to semantics of operators, having this set
     # to an accurate number will prevent our models form exporting.  However,
     # we should strive to keep this up-to-date as much as possible.
-    target_opset_version = 8
+    target_opset_version = 9
 
     _renamed_operators = {
         'SpatialBN': 'BatchNormalization',
@@ -57,9 +53,10 @@ class Caffe2Frontend(object):
     }
 
     # caffe2 arguments that are completely removed in onnx
-    _blacklist_caffe2_args = {
+    _blocklist_caffe2_args = {
         'order': {b'NCHW'},
         'cudnn_exhaustive_search': {0, 1},
+        'exhaustive_search': {0, 1},
         'use_cudnn': {0, 1},
     }
 
@@ -85,11 +82,10 @@ class Caffe2Frontend(object):
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
         # name
         op_type = op_def.type
+        name = cls._global_renamed_args.get(arg.name, arg.name)
         if op_type in cls._per_op_renamed_args:
-            name = cls._per_op_renamed_args[op_type].get(
-                arg.name, arg.name)
-        else:
-            name = cls._global_renamed_args.get(arg.name, arg.name)
+            # Per-op attribute renames override the global attribute renames
+            name = cls._per_op_renamed_args[op_type].get(arg.name, name)
 
         # value
         if arg.HasField('f'):
@@ -107,8 +103,8 @@ class Caffe2Frontend(object):
         else:
             raise ValueError('Could not find data field in arg: {}'.format(arg))
 
-        if name in cls._blacklist_caffe2_args:
-            assert value in cls._blacklist_caffe2_args[arg.name]
+        if name in cls._blocklist_caffe2_args:
+            assert value in cls._blocklist_caffe2_args[arg.name]
             return None
 
         return helper.make_attribute(name, value)
@@ -156,7 +152,7 @@ class Caffe2Frontend(object):
         const_tensors = []
         if isinstance(nodes, tuple):
             nodes, const_tensors = nodes
-        if not isinstance(nodes, collections.Iterable):
+        if not isinstance(nodes, collections.abc.Iterable):
             nodes = [nodes]
         return nodes, const_tensors
 
@@ -201,6 +197,15 @@ class Caffe2Frontend(object):
         else:
             initializer = []
 
+        # Check if value_info contains the types/shapes of all the blobs, in
+        # which case we don't need to infer them by running the net.
+        run_native_net = False
+        for op in predict_net.op:
+            for name in itertools.chain(op.input, op.output):
+                if name not in value_info:
+                    run_native_net = True
+                    break
+
         # Check whether we have got type shape info of all input
         missing = (set(list(predict_net.external_input)) -
                    set(value_info.keys()))
@@ -208,22 +213,25 @@ class Caffe2Frontend(object):
             raise RuntimeError('Could not find value info of inputs: {}'.format(
                 ', '.join(missing)))
 
-        inputs = {}
-        for name in predict_net.external_input:
-            elem_type, shape = value_info[name]
-            inputs[name] = np.random.randn(*shape).astype(
-                mapping.TENSOR_TYPE_TO_NP_TYPE[elem_type])
+        ws = None
+        outputs = None
+        if run_native_net:
+            inputs = {}
+            for name in predict_net.external_input:
+                elem_type, shape = value_info[name]
+                inputs[name] = np.random.randn(*shape).astype(
+                    mapping.TENSOR_TYPE_TO_NP_TYPE[elem_type])
 
-        ws, outputs = c2_native_run_net(
-            init_net,
-            predict_net,
-            inputs)
+            ws, outputs = c2_native_run_net(
+                init_net,
+                predict_net,
+                inputs)
 
-        for name in predict_net.external_output:
-            output = outputs[name]
-            elem_type = mapping.NP_TYPE_TO_TENSOR_TYPE[output.dtype]
-            shape = output.shape
-            value_info[name] = (elem_type, shape)
+            for name in predict_net.external_output:
+                output = outputs[name]
+                elem_type = mapping.NP_TYPE_TO_TENSOR_TYPE[output.dtype]
+                shape = output.shape
+                value_info[name] = (elem_type, shape)
 
         graph_def = GraphProto()
         graph_def.name = predict_net.name
@@ -241,9 +249,12 @@ class Caffe2Frontend(object):
         for op in predict_net.op:
             shapes = {}
             for name in itertools.chain(op.input, op.output):
-                blob = ws.FetchBlob(name)
-                if hasattr(blob, 'shape'):
-                    shapes[name] = blob.shape
+                if ws:
+                    blob = ws.FetchBlob(name)
+                    if hasattr(blob, 'shape'):
+                        shapes[name] = blob.shape
+                else:
+                    shapes[name] = value_info[name][1]
             nodes, const_tensors = cls.caffe2_op_to_onnx_node(op, shapes=shapes)
             graph_def.node.extend(nodes)
             graph_def.initializer.extend(const_tensors)
@@ -293,33 +304,38 @@ class Caffe2Frontend(object):
 
     @classmethod
     def _ssa_rewrite(cls, net, init_net, value_info):
-        def ssa_name(name, version):
+        def ssa_name(name, version, version_cnt=None):
+            if version == 0:
+                return name
+            if version_cnt and len(version_cnt.get(name, {})) <= 1:
+                return name
             return '{}_{}'.format(name, version)
 
         if init_net:
             for op in init_net.op:
                 assert re.match('GivenTensor.*Fill', op.type), "type is {}, \n{}".format(op.type, op)
                 assert len(op.output) == 1
-                op.output[0] = ssa_name(op.output[0], 0)
-            init_net.external_input[:] = [ssa_name(name, 0)
-                                          for name in init_net.external_input]
-            init_net.external_output[:] = [ssa_name(name, 0)
-                                           for name in init_net.external_output]
-        if value_info:
-            ssa_value_info = {ssa_name(name, 0): value
-                              for name, value in value_info.items()}
-            value_info.clear()
-            value_info.update(ssa_value_info)
-        net.external_input[:] = [ssa_name(name, 0)
-                                 for name in net.external_input]
+
         ssa, blob_versions = caffe2_core.get_ssa(net)
+        version_cnt = {}
+        versioned_blobs = []
+        for versioned_input, versioned_output in ssa:
+            versioned_blobs += versioned_input
+            versioned_blobs += versioned_output
+
+        for (name, version) in versioned_blobs:
+            if name not in version_cnt:
+                version_cnt[name] = {version}
+            else:
+                version_cnt[name].add(version)
+
         assert len(net.op) == len(ssa)
         for op, (versioned_inputs, versioned_outputs) in zip(net.op, ssa):
-            op.input[:] = [ssa_name(name, version)
+            op.input[:] = [ssa_name(name, version, version_cnt)
                            for name, version in versioned_inputs]
-            op.output[:] = [ssa_name(name, version)
+            op.output[:] = [ssa_name(name, version, version_cnt)
                             for name, version in versioned_outputs]
-        net.external_output[:] = [ssa_name(name, blob_versions[name])
+        net.external_output[:] = [ssa_name(name, blob_versions[name], version_cnt)
                                   for name in net.external_output]
 
     @classmethod

@@ -1,21 +1,23 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from hypothesis import given
-import hypothesis.strategies as st
-import numpy as np
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
+from hypothesis import given, settings
+import hypothesis.strategies as st
+import numpy as np
 
 
-class TestMarginRankingCriterion(hu.HypothesisTestCase):
+class TestMarginRankingCriterion(serial.SerializedTestCase):
     @given(N=st.integers(min_value=10, max_value=20),
            seed=st.integers(min_value=0, max_value=65535),
            margin=st.floats(min_value=-0.5, max_value=0.5),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_margin_ranking_criterion(self, N, seed, margin, gc, dc):
         np.random.seed(seed)
         X1 = np.random.randn(N).astype(np.float32)

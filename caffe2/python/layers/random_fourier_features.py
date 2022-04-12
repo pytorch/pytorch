@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
@@ -23,8 +23,8 @@ class RandomFourierFeatures(ModelLayer):
     Inputs:
         output_dims -- output feature dimensions
         sigma -- bandwidth for the Gaussian kernel estimator
-        w_init -- initalization options for weight parameter
-        b_init -- initalization options for bias parameter
+        w_init -- initialization options for weight parameter
+        b_init -- initialization options for bias parameter
 
     """
     def __init__(

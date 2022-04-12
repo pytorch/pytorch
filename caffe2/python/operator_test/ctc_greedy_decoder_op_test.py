@@ -1,17 +1,18 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
+
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
-
 import unittest
 
 
-class TestCTCGreedyDecoderOp(hu.HypothesisTestCase):
+class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
 
     @given(
         batch=st.sampled_from([2, 4, 128, 256]),
@@ -20,6 +21,7 @@ class TestCTCGreedyDecoderOp(hu.HypothesisTestCase):
         merge_repeated=st.sampled_from([True, False]),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_ctc_greedy_decoder(
         self, batch, max_time,
         num_classes, merge_repeated, gc, dc
@@ -89,6 +91,7 @@ class TestCTCGreedyDecoderOp(hu.HypothesisTestCase):
         num_classes=st.sampled_from([2, 10, 26, 40]),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_ctc_greedy_decoder_no_merge_arg(
         self, batch, max_time,
         num_classes, gc, dc

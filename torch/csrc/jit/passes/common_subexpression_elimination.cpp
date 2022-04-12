@@ -1,139 +1,53 @@
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
-#include <algorithm>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
+#include <torch/csrc/jit/jit_log.h>
+
 #include <unordered_map>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/hash.h"
-
-namespace torch { namespace jit {
-
+namespace torch {
+namespace jit {
 namespace {
 
-bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
-  return &lhs.type() == &rhs.type() && lhs.equal(rhs);
-}
+struct CommonSubexpressionEliminator {
+  CommonSubexpressionEliminator(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
 
-bool tensorListEqual(const std::vector<at::Tensor>& lhs, const std::vector<at::Tensor>& rhs) {
-  if (lhs.size() != rhs.size()) return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
-}
+  bool run(std::function<Node*(Node*)> parent_lookup_fn) {
+    return run(graph_->block(), std::move(parent_lookup_fn));
+  }
 
+  // The function implements common subexpression elimination.
+  // Since the nodes are visited in topological order, one pass is enough.
+  // returns true if CSE made changes to a graph
+  bool run(Block* block, std::function<Node*(Node*)> parent_lookup_fn) {
+    std::unordered_set<Node*, HashNode, EqualNode> subexprs;
+    bool changed = false;
+    for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+      auto node = *it;
 
-// Check whether two nodes have the same attributes in CSE.
-// This function may be too conservative for general use.
-// Do NOT support t/ts/g/gs attributes.
-// If t/ts are supported, CONSTANT node comparison may need to consider device.
-bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
-  JIT_ASSERT(lhs != nullptr);
-  JIT_ASSERT(rhs != nullptr);
-  // One has attributes, the other does not.
-  if (lhs->hasAttributes() != rhs->hasAttributes()) return false;
-  // Neither has attributes.
-  if (!lhs->hasAttributes() && !rhs->hasAttributes()) return true;
-
-  auto lnames = lhs->attributeNames();
-  auto rnames = rhs->attributeNames();
-  std::sort(lnames.begin(), lnames.end());
-  std::sort(rnames.begin(), rnames.end());
-  if (lnames != rnames) return false;
-
-  for (auto name : lnames) {
-    if (lhs->kindOf(name) != rhs->kindOf(name)) return false;
-
-    #define COMPARE_ATTRIBUTEVALUE(type) \
-      case AttributeKind::type: \
-        { if (lhs->type(name) != rhs->type(name)) return false; } break;
-
-    switch(lhs->kindOf(name)) {
-      COMPARE_ATTRIBUTEVALUE(f)
-      COMPARE_ATTRIBUTEVALUE(fs)
-      COMPARE_ATTRIBUTEVALUE(i)
-      COMPARE_ATTRIBUTEVALUE(is)
-      COMPARE_ATTRIBUTEVALUE(s)
-      COMPARE_ATTRIBUTEVALUE(ss)
-      case AttributeKind::t: {
-        if (!tensorEqual(lhs->t(name), rhs->t(name))) return false;
-        break;
+      if (node->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "Profiled nodes shouldn't be CSE'ed there's a separate pass that does dedup and merging:\n",
+            *node);
+        continue;
       }
-      case AttributeKind::ts: {
-        if (!tensorListEqual(lhs->ts(name), rhs->ts(name))) return false;
-        break;
+
+      if (node->hasSideEffects()) {
+        GRAPH_DEBUG("Node was skipped due to side effects:\n", *node);
+        continue;
       }
-      case AttributeKind::g:
-      case AttributeKind::gs:
-        return false;
-    }
+      if (node->isNondeterministic()) {
+        GRAPH_DEBUG("Node was skipped due to its non determinism:\n", *node);
+        continue;
+      }
 
-    #undef COMPARE_ATTRIBUTEVALUE
-  }
-
-  return true;
-}
-
-struct HashNodeCSE {
-  size_t operator()(const Node* k) const {
-    JIT_ASSERT(k != nullptr);
-    return get_hash(k->kind(),
-                    k->stage(),
-                    fmap(k->outputs(), [](const Value *v) { return v->type()->kind(); }),
-                    fmap(k->inputs(), [](const Value *v) { return v->unique(); }));
-  }
-};
-
-struct EqualNodeCSE {
-  bool operator()(const Node* lhs, const Node* rhs) const {
-    if (lhs == nullptr && rhs == nullptr) return true;
-    if (lhs == nullptr || rhs == nullptr) return false;
-
-    if (lhs->kind() != rhs->kind()) return false;
-    if (lhs->stage() != rhs->stage()) return false;
-
-    // Check whether the output types are the same.
-    auto lhs_outputs = lhs->outputs();
-    auto rhs_outputs = rhs->outputs();
-    if (lhs_outputs.size() != rhs_outputs.size()) return false;
-    for (size_t i = 0; i < lhs_outputs.size(); ++i) {
-      if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
-        return false;
-    }
-
-    // Check whether the inputs are the same.
-    auto lhs_inputs = lhs->inputs();
-    auto rhs_inputs = rhs->inputs();
-    if (lhs_inputs.size() != rhs_inputs.size()) return false;
-    if (!std::equal(lhs_inputs.begin(), lhs_inputs.end(), rhs_inputs.begin())) return false;
-
-    if (!attributesEqualCSE(lhs, rhs)) return false;
-
-    return true;
-  }
-};
-
-} // anonymous namespace
-
-// The function implements common subexpression elimination.
-// Since the nodes are visited in topological order, one pass is enough.
-void EliminateCommonSubexpression(Block * block,
-                                  std::function<Node*(Node*)> parent_lookup_fn) {
-  std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
-  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
-    auto node = *it;
-    if (node->kind() == prim::PythonOp
-        || node->kind() == prim::Print
-       ) {
-      // Do NOT have enough information to do CSE on these nodes.
-      continue;
-    }
-
-    if (!node->blocks().empty()) {
-      // Traverse sub-blocks.
-      for (auto block : node->blocks()) {
-        EliminateCommonSubexpression(block,
-          [&](Node *n) {
+      if (!node->blocks().empty()) {
+        // Traverse sub-blocks.
+        for (auto block : node->blocks()) {
+          changed |= run(block, [&](Node* n) {
             auto existing = subexprs.find(n);
             if (existing != subexprs.end()) {
               return *existing;
@@ -141,33 +55,76 @@ void EliminateCommonSubexpression(Block * block,
 
             return parent_lookup_fn(n);
           });
+        }
+
+        continue;
       }
 
-      continue;
+      if (getOrCreateAliasDb().hasWriters(node)) {
+        GRAPH_DEBUG("Node was skipped due to alias analysis result:\n", *node);
+        // Do NOT have enough information to do CSE on these nodes.
+        continue;
+      }
+
+      // Check for CSE opportunities in the parent block.
+      auto parent_lookup = parent_lookup_fn(node);
+      auto g_out = node->owningGraph()->outputs();
+      if (parent_lookup != nullptr) {
+        if (!getOrCreateAliasDb().safeToChangeAliasingRelationship(
+                node->outputs(), parent_lookup->outputs())) {
+          continue;
+        }
+
+        GRAPH_UPDATE("Replacing\n", *node, "with\n", *parent_lookup);
+        changed = true;
+        node->replaceAllUsesWith(parent_lookup);
+        it.destroyCurrent();
+        continue;
+      }
+
+      // Check whether the same subexpression already exists.
+      auto subit = subexprs.insert(node);
+      if (!subit.second) {
+        // Subexpression exists, replace the uses of node, and destroy it.
+        auto existing = *subit.first;
+
+        // don't introduce new aliasing among graph outputs
+        if (getOrCreateAliasDb().mayContainAlias(
+                node->outputs(), node->owningGraph()->outputs()) &&
+            getOrCreateAliasDb().mayContainAlias(existing->outputs(), g_out)) {
+          continue;
+        }
+
+        GRAPH_UPDATE("Replacing\n", *node, "with\n", *existing);
+        changed = true;
+        node->replaceAllUsesWith(existing);
+        // Destroy the node.
+        it.destroyCurrent();
+      }
     }
 
-    // Check for CSE opportunities in the parent block.
-    auto parent_lookup = parent_lookup_fn(node);
-    if (parent_lookup) {
-      node->replaceAllUsesWith(parent_lookup);
-      it.destroyCurrent();
-      continue;
-    }
-
-    // Check whether the same subexpression already exists.
-    auto subit = subexprs.insert(node);
-    if (!subit.second) {
-      // Subexpression exists, replace the uses of node, and destroy it.
-      auto existing = *subit.first;
-      node->replaceAllUsesWith(existing);
-      // Destroy the node.
-      it.destroyCurrent();
-    }
+    return changed;
   }
-}
 
-void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  EliminateCommonSubexpression(graph->block());
-}
+  AliasDb& getOrCreateAliasDb() {
+    if (!alias_db_) {
+      alias_db_ = std::make_unique<AliasDb>(graph_);
+    }
 
-}}
+    return *alias_db_;
+  }
+
+ private:
+  std::unique_ptr<AliasDb> alias_db_;
+  std::shared_ptr<Graph> graph_;
+};
+
+} // namespace
+
+bool EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("Before CSE", graph);
+  CommonSubexpressionEliminator cse(graph);
+  return cse.run([](Node*) { return nullptr; });
+}
+} // namespace jit
+} // namespace torch

@@ -1,11 +1,20 @@
 #pragma once
 
-namespace torch { namespace onnx {
+namespace torch {
+namespace onnx {
 
 enum class OperatorExportTypes {
   ONNX, // Strict ONNX export
   ONNX_ATEN, // ONNX With ATen op everywhere
   ONNX_ATEN_FALLBACK, // ONNX export with ATen fallback
-  RAW, // Raw export (no ONNX)
+  ONNX_FALLTHROUGH, // Export supported ONNX ops. Pass through unsupported ops.
 };
-}} // namespace torch::onnx
+
+enum class TrainingMode {
+  EVAL, // Inference mode
+  PRESERVE, // Preserve model state (eval/training)
+  TRAINING, // Training mode
+};
+
+} // namespace onnx
+} // namespace torch

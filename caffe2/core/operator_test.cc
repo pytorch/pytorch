@@ -70,7 +70,7 @@ REGISTER_CUDA_OPERATOR(JustTest, JustTest);
 REGISTER_CPU_OPERATOR(JustTestWithSomeOutput, JustTestWithSomeOutput);
 
 TEST(OperatorTest, DeviceTypeRegistryWorks) {
-  EXPECT_EQ(gDeviceTypeRegistry()->count(DeviceType::CPU), 1);
+  EXPECT_EQ(gDeviceTypeRegistry()->count(CPU), 1);
 }
 
 TEST(OperatorTest, RegistryWorks) {
@@ -83,7 +83,7 @@ TEST(OperatorTest, RegistryWorks) {
   // as it needs to instantiate an Event object with CUDAContext. Thus we will
   // guard this test below.
   if (HasCudaRuntime()) {
-    op_def.mutable_device_option()->set_device_type(CUDA);
+    op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
     op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
   }
@@ -93,7 +93,7 @@ TEST(OperatorTest, RegistryWrongDevice) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("JustTypeCPUOnly");
-  op_def.mutable_device_option()->set_device_type(CUDA);
+  op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   try {
     CreateOperator(op_def, &ws);
     LOG(FATAL) << "No exception was thrown";
@@ -114,14 +114,14 @@ TEST(OperatorTest, ExceptionWorks) {
     // This should not happen - exception should throw above.
     LOG(FATAL) << "This should not happen.";
   } catch (const EnforceNotMet& err) {
-    LOG(INFO) << err.msg();
+    LOG(INFO) << err.what();
   }
   try {
     op->RunAsync();
     // This should not happen - exception should throw above.
     LOG(FATAL) << "This should not happen.";
   } catch (const EnforceNotMet& err) {
-    LOG(INFO) << err.msg();
+    LOG(INFO) << err.what();
   }
 }
 
@@ -152,6 +152,7 @@ TEST(OperatorTest, CannotUseUninitializedBlob) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(CreateOperator(op_def, &ws), EnforceNotMet);
 }
 
@@ -192,6 +193,7 @@ TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(op.GetSingleArgument<int>("arg0", 0), EnforceNotMet);
 }
 
@@ -209,6 +211,7 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   auto args = op.GetRepeatedArgument<float>("arg0");
   EXPECT_EQ(args.size(), 1);
   EXPECT_FLOAT_EQ(args[0], 0.1f);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_DEATH(op.GetRepeatedArgument<int>("arg0"),
                "Argument does not have the right field: expected ints");
 }
@@ -246,6 +249,7 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only accept one single input.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 #endif
 
@@ -254,6 +258,7 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output2");
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only produce one single output.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 #endif
 }
@@ -317,6 +322,22 @@ TEST(NetTest, TestScaffoldingDAGNet) {
   EXPECT_TRUE(net->Run());
 }
 
+class FooGradientOp : public JustTest {
+ public:
+  using JustTest::JustTest;
+  string type() override {
+    return "FooGradient";
+  }
+};
+
+class FooGradientDummyEngineOp : public JustTest {
+ public:
+  using JustTest::JustTest;
+  string type() override {
+    return "FooGradientDummyEngine";
+  }
+};
+
 class GetFooGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -328,12 +349,18 @@ class GetFooGradient : public GradientMakerBase {
   }
 };
 
+GRADIENT_OPERATOR_SCHEMA(FooGradient).NumInputs(1).NumOutputs(1);
+REGISTER_CPU_GRADIENT_OPERATOR(FooGradient, FooGradientOp)
+REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(
+    FooGradient,
+    DUMMY_ENGINE,
+    FooGradientDummyEngineOp)
 REGISTER_GRADIENT(Foo, GetFooGradient);
 
 TEST(OperatorGradientRegistryTest, GradientSimple) {
   Argument arg = MakeArgument<int>("arg", 1);
   DeviceOption option;
-  option.set_device_type(CPU);
+  option.set_device_type(PROTO_CPU);
   OperatorDef def = CreateOperatorDef(
       "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
       std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
@@ -342,23 +369,31 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   GradientOpsMeta meta = GetGradientForOp(def, g_output);
   // Check the names, input and output.
   EXPECT_EQ(meta.ops_.size(), 1);
-  const OperatorDef& grad_op = meta.ops_[0];
-  EXPECT_EQ(grad_op.type(), "FooGradient");
-  EXPECT_EQ(grad_op.name(), "");
-  EXPECT_EQ(grad_op.input_size(), 1);
-  EXPECT_EQ(grad_op.output_size(), 1);
-  EXPECT_EQ(grad_op.input(0), "out_grad");
-  EXPECT_EQ(grad_op.output(0), "in_grad");
+  const OperatorDef& grad_op_def = meta.ops_[0];
+  EXPECT_EQ(grad_op_def.type(), "FooGradient");
+  EXPECT_EQ(grad_op_def.name(), "");
+  EXPECT_EQ(grad_op_def.input_size(), 1);
+  EXPECT_EQ(grad_op_def.output_size(), 1);
+  EXPECT_EQ(grad_op_def.input(0), "out_grad");
+  EXPECT_EQ(grad_op_def.output(0), "in_grad");
   // Checks the engine, device option and arguments.
-  EXPECT_EQ(grad_op.engine(), "DUMMY_ENGINE");
-  EXPECT_EQ(grad_op.device_option().device_type(), CPU);
-  EXPECT_EQ(grad_op.arg_size(), 1);
-  EXPECT_EQ(grad_op.arg(0).SerializeAsString(),
-            MakeArgument<int>("arg", 1).SerializeAsString());
+  EXPECT_EQ(grad_op_def.engine(), "DUMMY_ENGINE");
+  EXPECT_EQ(grad_op_def.device_option().device_type(), PROTO_CPU);
+  EXPECT_EQ(grad_op_def.arg_size(), 1);
+  EXPECT_EQ(
+      grad_op_def.arg(0).SerializeAsString(),
+      MakeArgument<int>("arg", 1).SerializeAsString());
   // Checks the gradient name for input.
   EXPECT_EQ(meta.g_input_.size(), 1);
   EXPECT_TRUE(meta.g_input_[0].IsDense());
   EXPECT_EQ(meta.g_input_[0].dense_, "in_grad");
+
+  Workspace ws;
+  EXPECT_NE(ws.CreateBlob("out_grad"), nullptr);
+  unique_ptr<OperatorBase> grad_op = CreateOperator(grad_op_def, &ws);
+  EXPECT_NE(nullptr, grad_op.get());
+  EXPECT_EQ(
+      static_cast<JustTest*>(grad_op.get())->type(), "FooGradientDummyEngine");
 }
 
 TEST(EnginePrefTest, PerOpEnginePref) {
@@ -366,7 +401,7 @@ TEST(EnginePrefTest, PerOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAR"}}}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAR"}}}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -376,9 +411,9 @@ TEST(EnginePrefTest, PerOpEnginePref) {
   SetPerOpEnginePref({});
 
   // Invalid operator type
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
-      SetPerOpEnginePref({{DeviceType::CPU, {{"NO_EXIST", {"BAR"}}}}}),
-      EnforceNotMet);
+      SetPerOpEnginePref({{CPU, {{"NO_EXIST", {"BAR"}}}}}), EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePref) {
@@ -386,7 +421,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetGlobalEnginePref({{DeviceType::CPU, {"FOO", "BAR"}}});
+  SetGlobalEnginePref({{CPU, {"FOO", "BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -395,7 +430,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   // clear
   SetGlobalEnginePref({});
 
-  SetGlobalEnginePref({{DeviceType::CPU, {"FOO"}}});
+  SetGlobalEnginePref({{CPU, {"FOO"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -405,7 +440,8 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   SetGlobalEnginePref({});
 
   // Invalid device type
-  ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
+  // This check is no longer necessary with the enum class
+  // ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
@@ -413,8 +449,8 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAR"}}}}});
-  SetGlobalEnginePref({{DeviceType::CPU, {"BAZ"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAR"}}}}});
+  SetGlobalEnginePref({{CPU, {"BAZ"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -432,8 +468,8 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePrefAndOpDef) {
   op_def.set_type("JustTest");
   op_def.set_engine("BAR");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAZ"}}}}});
-  SetGlobalEnginePref({{DeviceType::CPU, {"BAZ"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAZ"}}}}});
+  SetGlobalEnginePref({{CPU, {"BAZ"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -450,8 +486,8 @@ TEST(EnginePrefTest, SetOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAZ"}}}}});
-  SetOpEnginePref("JustTest", {{DeviceType::CPU, {"BAR"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAZ"}}}}});
+  SetOpEnginePref("JustTest", {{CPU, {"BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -468,8 +504,8 @@ TEST(EnginePrefTest, SetDefaultEngine) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"DEFAULT"}}}}});
-  SetGlobalEnginePref({{DeviceType::CPU, {"BAR"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"DEFAULT"}}}}});
+  SetGlobalEnginePref({{CPU, {"BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());

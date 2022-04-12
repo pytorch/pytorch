@@ -1,7 +1,31 @@
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/logging.h"
 
+#include <iostream>
+
+#include <c10/util/irange.h>
+
 namespace caffe2 {
+
+// NOLINTNEXTLINE(modernize-pass-by-value)
+OpSchema::OpSchema(const string& type, const string& file, const int line)
+   : type_(type), file_(file), line_(line), tensor_inference_function_(
+      [](const OperatorDef& def, const vector<TensorShape>&) {
+        vector<TensorShape> out;
+        for (int i = 0; i < def.output_size(); i++) {
+          TensorShape ts;
+          ts.set_unknown_shape(true);
+          out.push_back(ts);
+        }
+        return out;
+      }), device_inference_function_(
+      [](const OperatorDef& def) {
+        auto op_device =
+            def.has_device_option() ? def.device_option() : DeviceOption();
+        vector<DeviceOption> in_dev(def.input_size(), op_device);
+        vector<DeviceOption> out_dev(def.output_size(), op_device);
+        return std::make_pair(in_dev, out_dev);
+      }) {}
 
 bool OpSchema::Verify(const OperatorDef& def) const {
   // Check the number of inputs.
@@ -237,7 +261,7 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfMultipleInputs(
   return TensorInferenceFunction(
       [indices](const OperatorDef&, const vector<TensorShape>& input_types) {
         vector<TensorShape> out(indices.size());
-        for (int i = 0; i < indices.size(); i++) {
+        for (const auto i : c10::irange(indices.size())) {
           out[i] = input_types[indices.at(i)];
         }
         return out;
@@ -266,7 +290,7 @@ OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
 
 OpSchema& OpSchema::CostInferenceFunction(CostInferenceFunctionType function) {
   cost_inference_function_ =
-      caffe2::make_unique<CostInferenceFunctionType>(function);
+      std::make_unique<CostInferenceFunctionType>(function);
   return *this;
 }
 
@@ -283,13 +307,14 @@ OpSchema& OpSchema::SetDoc(const string& doc) {
 
 OpSchema&
 OpSchema::Arg(const char* name, const char* description, bool required) {
+  // NOLINTNEXTLINE(modernize-use-emplace)
   args_.push_back(Argument(name, description, required));
   return *this;
 }
 
 #define DEFINE_STANDARG_ARG(name, str)                                \
-  CAFFE2_API const char* OpSchema::Arg_##name = #str;                 \
-  CAFFE2_API OpSchema& OpSchema::Arg##name(const char* description) { \
+  TORCH_API const char* OpSchema::Arg_##name = #str;                 \
+  TORCH_API OpSchema& OpSchema::Arg##name(const char* description) { \
     return Arg(#str, description, true);                              \
   }
 
@@ -330,47 +355,99 @@ int OpSchema::CalculateOutput(int num_input) const {
   }
 }
 
-static void SparseLengthsFillerHelper(
-    const std::vector<std::vector<TIndex>>& shapes,
+namespace {
+void SparseLengthsFillerHelper(
+    const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
     size_t length_index,
     std::vector<TensorFiller>* fillers) {
   CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
+  // filler.h: SparseLengths->FixedSum will select FD_FIXEDSUM distribution
   (*fillers)[length_index].SparseLengths(shapes[value_index].front());
 }
 
-static void SparseSegmentsFillerHelper(
-    const std::vector<std::vector<TIndex>>& shapes,
+void SparseWeightsFillerHelper(
+    const std::vector<std::vector<int64_t>>& shapes,
+    size_t weight_index,
+    std::vector<TensorFiller>* fillers) {
+  (*fillers)[weight_index]
+      .Min(0)
+      .Max(shapes[weight_index].front())
+      .Dist(FD_UNIFORM);
+}
+
+void SparseSegmentsFillerHelper(
+    const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
     size_t segment_index,
     std::vector<TensorFiller>* fillers) {
   CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
-  // TODO (mnaumov): distribution of value
-  (*fillers)[value_index].Min(0).Max(shapes[value_index].front() * 2);
+  // filler.h SparseSegments will select FD_UNIFORM or FD_SYNTHETIC distribution
+  (*fillers)[value_index]
+      .Min(0)
+      .Max(shapes[value_index].front() * 2)
+      .Dist(FD_UNIFORM);
   (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
 }
+} // namespace
 
+// The helper is build sparse input with values, keys, and lengths; e.g.:
+// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+// keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+//            \_____/  \________/  \__/
+// lengths =    [3,        4,       2]
 OpSchema& OpSchema::ValueKeyLengthInputFillers(
     size_t value_index,
     size_t key_index,
     size_t length_index) {
-  // TODO (mnaumov): distribution of value
   filler_supplier_ = [this, value_index, key_index, length_index](
-                         const std::vector<std::vector<TIndex>>& shapes) {
+                         const std::vector<std::vector<int64_t>>& shapes) {
     auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
+    // fill in the keys (value_index is used to get the correct shape)
     SparseSegmentsFillerHelper(shapes, value_index, key_index, &fillers);
     return fillers;
   };
   return *this;
 }
 
+// The helper is build sparse input with values, keys, and lengths; e.g.:
+// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+// keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+// weights = [1, 1, 1, 0, 2, 2, 2, 1, 2]
+//            \_____/  \________/  \__/
+// lengths =    [3,        4,       2]
+OpSchema& OpSchema::WeightedValueKeyLengthInputFillers(
+    size_t value_index,
+    size_t key_index,
+    size_t length_index,
+    size_t weight_index) {
+  filler_supplier_ = [this, value_index, key_index, length_index, weight_index](
+                         const std::vector<std::vector<int64_t>>& shapes) {
+    auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
+    SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
+    // fill in the keys (value_index is used to get the correct shape)
+    SparseSegmentsFillerHelper(shapes, value_index, key_index, &fillers);
+    // fill in the weights
+    SparseWeightsFillerHelper(shapes, weight_index, &fillers);
+    return fillers;
+  };
+  return *this;
+}
+
+// The helper is build sparse input with values and lengths; e.g.:
+// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+//            \_____/  \________/  \__/
+// lengths =    [3,        4,       2]
 OpSchema& OpSchema::ValueLengthInputFillers(
     size_t value_index,
     size_t length_index) {
   filler_supplier_ = [this, value_index, length_index](
-                         const std::vector<std::vector<TIndex>>& shapes) {
+                         const std::vector<std::vector<int64_t>>& shapes) {
     auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, value_index, length_index, &fillers);
     return fillers;
   };
@@ -379,7 +456,7 @@ OpSchema& OpSchema::ValueLengthInputFillers(
 
 OpSchema& OpSchema::DisallowInputFillers() {
   filler_supplier_ =
-      [this](const std::vector<std::vector<TIndex>>& /* unused */) {
+      [this](const std::vector<std::vector<int64_t>>& /* unused */) {
         throw std::invalid_argument(type_ + " does not have input fillers");
         return std::vector<TensorFiller>();
       };
@@ -387,20 +464,21 @@ OpSchema& OpSchema::DisallowInputFillers() {
 }
 
 std::vector<TensorFiller> OpSchema::InputFillers(
-    const std::vector<std::vector<TIndex>>& shapes) const {
+    const std::vector<std::vector<int64_t>>& shapes) const {
   return filler_supplier_(shapes);
 }
 
 std::vector<TensorFiller> OpSchema::SupplyDenseFillers(
-    const std::vector<std::vector<TIndex>>& shapes) {
+    const std::vector<std::vector<int64_t>>& shapes) {
   std::vector<TensorFiller> fillers;
   for (const auto& shape : shapes) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     fillers.emplace_back(shape);
   }
   return fillers;
 }
 
-CAFFE2_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
+C10_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
   if (!schema.args().empty()) {
     out << "Arguments:" << std::endl;
     for (const auto& arg : schema.args()) {
@@ -442,6 +520,22 @@ CAFFE2_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema
     out << "Defined at " << schema.file_ << ":" << schema.line_ << std::endl;
   }
   return out;
+}
+
+OpSchema& OpSchemaRegistry::NewSchema(const string& key, const string& file, const int line) {
+  auto& m = map();
+  auto it = m.find(key);
+  if (it != m.end()) {
+    const auto& schema = it->second;
+    std::ios_base::Init init;
+    std::cerr << "Trying to register schema with name " << key
+              << " from file " << file << " line " << line
+              << ", but it is already registered from file " << schema.file()
+              << " line " << schema.line();
+    abort();
+  }
+  m.emplace(key, OpSchema(key, file, line));
+  return m[key];
 }
 
 CaffeMap<string, OpSchema>& OpSchemaRegistry::map() {

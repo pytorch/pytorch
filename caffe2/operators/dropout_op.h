@@ -12,13 +12,13 @@ template <typename T, class Context>
 class DropoutOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  DropoutOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit DropoutOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         ratio_(this->template GetSingleArgument<float>("ratio", 0.5)),
         is_test_(
             this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
     CAFFE_ENFORCE_GE(ratio_, 0);
-    CAFFE_ENFORCE_LT(ratio_, 1);
   }
 
   bool RunOnDevice() override;
@@ -33,13 +33,13 @@ template <typename T, class Context>
 class DropoutGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  DropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit DropoutGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         ratio_(this->template GetSingleArgument<float>("ratio", 0.5)),
         is_test_(
             this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
     CAFFE_ENFORCE_GE(ratio_, 0);
-    CAFFE_ENFORCE_LT(ratio_, 1);
   }
 
   bool RunOnDevice() override;

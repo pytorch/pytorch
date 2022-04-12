@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import given, assume
 import hypothesis.strategies as st
 
-from caffe2.python import core, model_helper
+from caffe2.python import core, model_helper, utils
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -22,7 +22,7 @@ class TestLeakyRelu(hu.HypothesisTestCase):
             input_data <= 0, input_data >= -0.051)] = -0.051
 
         if order == 'NHWC':
-            input_data = np.transpose(input_data, axes=(0, 2, 3, 1))
+            input_data = utils.NCHW2NHWC(input_data)
 
         return input_data,
 
@@ -84,7 +84,7 @@ class TestLeakyRelu(hu.HypothesisTestCase):
             outputs[order] = self.ws.blobs['output'].fetch()
         np.testing.assert_allclose(
             outputs['NCHW'],
-            outputs['NHWC'].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -158,7 +158,7 @@ class TestLeakyRelu(hu.HypothesisTestCase):
 
         input_blob = np.random.rand(N, C, H, W).astype(np.float32)
         if order == 'NHWC':
-            input_blob = np.transpose(input_blob, axes=(0, 2, 3, 1))
+            input_blob = utils.NCHW2NHWC(input_blob)
 
         self.ws.create_blob('input').feed(input_blob)
 
@@ -167,7 +167,7 @@ class TestLeakyRelu(hu.HypothesisTestCase):
 
         output_blob = self.ws.blobs['output'].fetch()
         if order == 'NHWC':
-            output_blob = np.transpose(output_blob, axes=(0, 3, 1, 2))
+            output_blob = utils.NHWC2NCHW(output_blob)
 
         assert output_blob.shape == (N, C, H, W)
 

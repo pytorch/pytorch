@@ -1,18 +1,19 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 
 
-class TestBatchBucketize(hu.HypothesisTestCase):
-    @given(**hu.gcs_cpu_only)
+class TestBatchBucketize(serial.SerializedTestCase):
+    @serial.given(**hu.gcs_cpu_only)
     def test_batch_bucketize_example(self, gc, dc):
         op = core.CreateOperator('BatchBucketize',
                                  ["FEATURE", "INDICES", "BOUNDARIES", "LENGTHS"],
@@ -41,7 +42,7 @@ class TestBatchBucketize(hu.HypothesisTestCase):
     @given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.float32,
-            elements=st.floats(min_value=0, max_value=5),
+            elements=hu.floats(min_value=0, max_value=5),
             min_value=5),
         seed=st.integers(min_value=2, max_value=1000),
         **hu.gcs_cpu_only)
@@ -56,7 +57,7 @@ class TestBatchBucketize(hu.HypothesisTestCase):
         indices.sort()
         boundaries = []
         for i in range(d - 3):
-            # add [0, 0] as duplicated bounary for duplicated bucketization
+            # add [0, 0] as duplicated boundary for duplicated bucketization
             if lens[i] > 2:
                 cur_boundary = np.append(
                     np.random.randn(lens[i] - 2) * 5, [0, 0])

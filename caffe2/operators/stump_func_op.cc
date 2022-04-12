@@ -22,10 +22,10 @@ template <>
 bool StumpFuncOp<float, float, CPUContext>::RunOnDevice() {
   auto& in = Input(0);
   const float* in_data = in.template data<float>();
-  auto* out = Output(0);
-  out->ResizeLike(in);
+
+  auto* out = Output(0, in.sizes(), at::dtype<float>());
   float* out_data = out->template mutable_data<float>();
-  for (int i = 0; i < in.size(); i++) {
+  for (int i = 0; i < in.numel(); i++) {
     out_data[i] = (in_data[i] <= threshold_) ? low_value_ : high_value_;
   }
   return true;
@@ -35,19 +35,18 @@ template <>
 bool StumpFuncIndexOp<float, int64_t, CPUContext>::RunOnDevice() {
   auto& in = Input(0);
   const float* in_data = in.template data<float>();
-  auto* out_lo = Output(0);
-  auto* out_hi = Output(1);
+
   int lo_cnt = 0;
-  for (int i = 0; i < in.size(); i++) {
+  for (int i = 0; i < in.numel(); i++) {
     lo_cnt += (in_data[i] <= threshold_);
   }
-  out_lo->Resize(lo_cnt);
-  out_hi->Resize(in.size() - lo_cnt);
+  auto* out_lo = Output(0, {lo_cnt}, at::dtype<int64_t>());
+  auto* out_hi = Output(1, {in.numel() - lo_cnt}, at::dtype<int64_t>());
   int64_t* lo_data = out_lo->template mutable_data<int64_t>();
   int64_t* hi_data = out_hi->template mutable_data<int64_t>();
   int lidx = 0;
   int hidx = 0;
-  for (int i = 0; i < in.size(); i++) {
+  for (int i = 0; i < in.numel(); i++) {
     if (in_data[i] <= threshold_) {
       lo_data[lidx++] = i;
     } else {
@@ -64,6 +63,13 @@ OPERATOR_SCHEMA(StumpFunc)
     .NumOutputs(1)
     .Input(0, "X", "tensor of float")
     .Output(0, "Y", "tensor of float")
+    .TensorInferenceFunction([](const OperatorDef&,
+                                const vector<TensorShape>& input_types) {
+      vector<TensorShape> out(1);
+      out.at(0) = input_types.at(0);
+      out.at(0).set_data_type(TensorProto_DataType::TensorProto_DataType_FLOAT);
+      return out;
+    })
     .SetDoc(R"DOC(
 Converts each input element into either high_ or low_value
 based on the given threshold.
@@ -88,9 +94,9 @@ OPERATOR_SCHEMA(StumpFuncIndex)
         "Index_High",
         "tensor of int64 indices for elements above threshold")
     .SetDoc(R"DOC(
-Split the elemnts and return the indices based on the given threshold.
+Split the elements and return the indices based on the given threshold.
 )DOC");
 
 NO_GRADIENT(StumpFuncIndex);
 
-} // caffe2
+} // namespace caffe2

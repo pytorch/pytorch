@@ -36,7 +36,7 @@ inline void LogCuDNNPerfStats(
     const ArrayOfcudnnConvolutionAlgoPerf_t& perf_stat,
     int returned_algo_count) {
   VLOG(1) << "Perf result: (algo: stat, time, memory)";
-  for (int i = 0; i < returned_algo_count; ++i) {
+  for (const auto i : c10::irange(returned_algo_count)) {
     const auto& stat = perf_stat[i];
     VLOG(1) << stat.algo << ": " << stat.status << " " << stat.time << " "
             << stat.memory;
@@ -46,7 +46,7 @@ inline void LogCuDNNPerfStats(
 
 // Easier indexing into force_algo_ vector,
 // shared by CudnnConvTransposeOpBase and CudnnConvOpBase to force
-// usage of a particular algortihm instead of searching
+// usage of a particular algorithm instead of searching
 enum { ALGO_FWD = 0, ALGO_WGRAD = 1, ALGO_DGRAD = 2 };
 
 } // namespace caffe2

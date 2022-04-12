@@ -1,16 +1,17 @@
 import math
+from numbers import Real
 from numbers import Number
 
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _standard_normal, broadcast_all
 
 
 class Normal(ExponentialFamily):
     r"""
     Creates a normal (also called Gaussian) distribution parameterized by
-    `loc` and `scale`.
+    :attr:`loc` and :attr:`scale`.
 
     Example::
 
@@ -48,6 +49,15 @@ class Normal(ExponentialFamily):
             batch_shape = self.loc.size()
         super(Normal, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Normal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.loc = self.loc.expand(batch_shape)
+        new.scale = self.scale.expand(batch_shape)
+        super(Normal, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
@@ -55,7 +65,7 @@ class Normal(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(shape).normal_()
+        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + eps * self.scale
 
     def log_prob(self, value):
@@ -63,7 +73,7 @@ class Normal(ExponentialFamily):
             self._validate_sample(value)
         # compute the variance
         var = (self.scale ** 2)
-        log_scale = math.log(self.scale) if isinstance(self.scale, Number) else self.scale.log()
+        log_scale = math.log(self.scale) if isinstance(self.scale, Real) else self.scale.log()
         return -((value - self.loc) ** 2) / (2 * var) - log_scale - math.log(math.sqrt(2 * math.pi))
 
     def cdf(self, value):
@@ -72,8 +82,6 @@ class Normal(ExponentialFamily):
         return 0.5 * (1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2)))
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
 
     def entropy(self):

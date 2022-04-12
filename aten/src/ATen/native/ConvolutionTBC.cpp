@@ -1,16 +1,17 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 namespace at {
 namespace native {
 
 Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, int64_t pad) {
-  AT_CHECK(self.dim() == 3, "Input must have 3 dims: time, batch, "
+  TORCH_CHECK(self.dim() == 3, "Input must have 3 dims: time, batch, "
       "in_channel");
-  AT_CHECK(weight.dim() == 3, "Weight tensor must have 3 dims: kernel_width,"
+  TORCH_CHECK(weight.dim() == 3, "Weight tensor must have 3 dims: kernel_width,"
       " in_channels, out_channels.");
-  AT_CHECK(bias.dim() == 1, "Bias must be 1-D");
+  TORCH_CHECK(bias.dim() == 1, "Bias must be 1-D");
 
   auto input_size = self.sizes();
   auto weight_size = weight.sizes();
@@ -27,21 +28,22 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
   // Input = (time, batch, in_channels)
   // Weight = (kernel_width, in_channels, out_channels)
   // Bias = (out_channels)
-  AT_CHECK(inputPlanes == weight_size[1], "Input dim 2 (input channels) "
+  TORCH_CHECK(inputPlanes == weight_size[1], "Input dim 2 (input channels) "
       "is not == dim 1 in the weight tensor");
-  AT_CHECK(weight_size[2] == bias.sizes()[0], "Bias size must equal dim 2 in "
+  TORCH_CHECK(weight_size[2] == bias.sizes()[0], "Bias size must equal dim 2 in "
       "the weight tensor (output channels).");
 
   // input * weights + bias -> output_features
-  Tensor output = self.type().tensor({
+  Tensor output = at::empty({
     olen,
     input_size[1],
     weight_size[2],
-  });
+  }, self.options());
   output.copy_(bias.expand(output.sizes()));
-  for (int k = 0; k < kw; k++) {
+  for (const auto k : c10::irange(kw)) {
     int iShift = std::max(0, static_cast<int>(k - real_pad));
     int oShift = std::max(0, static_cast<int>(real_pad - k));
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int t = std::min(ilen + real_pad - k, olen) - oShift;
     // Note: gemm assumes column-major matrices
     // input    is l*m (row-major)
@@ -67,12 +69,14 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   auto outputPlanes = weight_size[2];
   auto kw = weight.sizes()[0];
   auto olen = input_size[0] - kw + 1 + pad * 2;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int real_pad = (olen - ilen + kw - 1) / 2;
 
-  Tensor dInput = at::zeros_like(input);
+  Tensor dInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   for (int k = 0; k < kw; k++) {
     int iShift = std::max(0, k - real_pad);
     int oShift = std::max(0, real_pad - k);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int t = std::min(ilen + real_pad - k, olen) - oShift;
     // dOutput * T(weight) -> dInput
     if (t > 0) {
@@ -82,10 +86,11 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
     }
   }
 
-  Tensor dWeight = at::zeros_like(weight);
+  Tensor dWeight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   for (int k = 0; k < kw; k++) {
     int iShift = std::max(0, k - real_pad);
     int oShift = std::max(0, real_pad - k);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int t = std::min(ilen + real_pad - k, olen) - oShift;
     // T(input) * dOutput -> dWeight
     if (t > 0) {
@@ -96,7 +101,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
     }
   }
 
-  Tensor dBias = at::zeros_like(bias);
+  Tensor dBias = at::zeros_like(bias, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto tmp = dOutput.sum(0, false);
   dBias.copy_(tmp.sum(0));
 

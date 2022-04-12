@@ -59,27 +59,26 @@ class AllreduceOp final : public Operator<Context> {
  protected:
   void initialize() {
     Mode mode = HALVING_DOUBLING;
-    auto bytes = Input(1).nbytes();
 
     // Store which inputs/outputs this instance initialized with
     update(init_);
 
-    // Verify inputs == ouputs
+    // Verify inputs == outputs
     CAFFE_ENFORCE_EQ(init_.inputs.size(), init_.outputs.size());
-    for (auto i = 0; i < init_.inputs.size(); i++) {
+    for (const auto i : c10::irange(0U, init_.inputs.size())) {
       CAFFE_ENFORCE_EQ(init_.inputs[i], init_.outputs[i]);
     }
 
     // Verify tensors all have same size
-    size_t size = Input(1).size();
-    for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE_EQ(Input(i).size(), size);
+    auto size = Input(1).numel();
+    for (const auto i : c10::irange(2, InputSize())) {
+      CAFFE_ENFORCE_EQ(Input(i).numel(), size);
     }
 
     // Verify tensors all have same type
-    TypeMeta meta = Input(1).meta();
-    for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE(Input(i).meta() == meta);
+    TypeMeta meta = Input(1).dtype();
+    for (const auto i : c10::irange(2, InputSize())) {
+      CAFFE_ENFORCE(Input(i).dtype() == meta);
     }
 
     switch (mode) {
@@ -116,12 +115,12 @@ class AllreduceOp final : public Operator<Context> {
     params.context = OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
     params.inputs.resize(InputSize() - 1);
     params.outputs.resize(OutputSize());
-    for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).template raw_data();
-      params.outputs[i] = Output(i)->template raw_mutable_data();
+    for (const auto i : c10::irange(0U, params.inputs.size())) {
+      params.inputs[i] = Input(i + 1).raw_data();
+      params.outputs[i] = Output(i)->raw_mutable_data();
     }
-    params.size = Output(0)->size();
-    params.meta = Output(0)->meta();
+    params.size = Output(0)->numel();
+    params.meta = Output(0)->dtype();
   }
 
   GlooParameters init_;

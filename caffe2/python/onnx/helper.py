@@ -1,17 +1,14 @@
 ## @package onnx
 # Module caffe2.python.onnx.helper
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from onnx.backend.base import namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
-import caffe2.python._import_c_extension as C
-
-import io
 import logging
 import time
 
@@ -36,7 +33,7 @@ def c2_native_run_op(op_def, inputs):
     return ws, namedtupledict('Outputs', output_names)(*output_values)
 
 
-def c2_native_run_net(init_net, predict_net, inputs):
+def c2_native_run_net(init_net, predict_net, inputs, debug_arg=None):
     ws = Workspace()
     if init_net:
         ws.RunNetOnce(init_net)
@@ -54,6 +51,14 @@ def c2_native_run_net(init_net, predict_net, inputs):
         else:
             # If everything is initialized,
             # we just initialized the first len(inputs) external_input.
+            # Added some extra logging to help debug sporadic sandcastle fails
+            if len(inputs) > len(predict_net.external_input):
+                print("c2_native_run_net assert. len(inputs)=", len(inputs),
+                      "len(predict_net.external_input)=",
+                      len(predict_net.external_input))
+                print("debug_arg: ", debug_arg)
+                print("predict_net ", type(predict_net), ":", predict_net)
+                print("inputs ", type(inputs), ":", inputs)
             assert(len(inputs) <= len(predict_net.external_input))
             for i in range(len(inputs)):
                 ws.FeedBlob(predict_net.external_input[i], inputs[i],

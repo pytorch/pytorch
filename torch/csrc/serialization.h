@@ -1,16 +1,13 @@
 #ifndef THP_SERIALIZATION_INC
 #define THP_SERIALIZATION_INC
 
-#include "generic/serialization.h"
-#include <TH/THGenerateAllTypes.h>
-
-#include "generic/serialization.h"
-#include <TH/THGenerateHalfType.h>
+#include <torch/csrc/generic/serialization.h>
+#include <torch/csrc/THGenerateByteType.h>
 
 template <class io>
-ssize_t doRead(io fildes, void* buf, size_t nbytes);
+void doRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-ssize_t doWrite(io fildes, void* buf, size_t nbytes);
+void doWrite(io fildes, void* buf, size_t nbytes);
 
 #endif

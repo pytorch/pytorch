@@ -1,5 +1,7 @@
 #include "store_ops.h"
 
+#include "caffe2/core/blob_serialization.h"
+
 namespace caffe2 {
 
 constexpr auto kBlobName = "blob_name";
@@ -15,7 +17,7 @@ bool StoreSetOp::RunOnDevice() {
   // Serialize and pass to store
   auto* handler =
       OperatorBase::Input<std::unique_ptr<StoreHandler>>(HANDLER).get();
-  handler->set(blobName_, InputBlob(DATA).Serialize(blobName_));
+  handler->set(blobName_, SerializeBlob(InputBlob(DATA), blobName_));
   return true;
 }
 
@@ -42,7 +44,7 @@ bool StoreGetOp::RunOnDevice() {
   // Get from store and deserialize
   auto* handler =
       OperatorBase::Input<std::unique_ptr<StoreHandler>>(HANDLER).get();
-  OperatorBase::Outputs()[DATA]->Deserialize(handler->get(blobName_));
+  DeserializeBlob(handler->get(blobName_), OperatorBase::Outputs()[DATA]);
   return true;
 }
 
@@ -101,6 +103,7 @@ bool StoreWaitOp::RunOnDevice() {
     std::vector<std::string> blobNames;
     auto* namesPtr = Input(1).data<std::string>();
     for (int i = 0; i < Input(1).size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       blobNames.push_back(namesPtr[i]);
     }
     handler->wait(blobNames);
@@ -121,4 +124,4 @@ either as an input blob with blob names or as an argument.
     .Arg("blob_names", "names of the blobs to wait for (optional)")
     .Input(0, "handler", "unique_ptr<StoreHandler>")
     .Input(1, "names", "names of the blobs to wait for (optional)");
-}
+} // namespace caffe2

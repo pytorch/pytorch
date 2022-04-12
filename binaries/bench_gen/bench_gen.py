@@ -1,11 +1,7 @@
-#!/usr/bin/env python
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+#!/usr/bin/env python3
 
 import argparse
+import ast
 
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.predictor import mobile_exporter
@@ -15,18 +11,15 @@ from caffe2.python import workspace, brew
 def parse_kwarg(kwarg_str):
     key, value = kwarg_str.split('=')
     try:
-        value = int(value)
+        value = ast.literal_eval(value)
     except ValueError:
-        try:
-            value = float(value)
-        except ValueError:
-            pass
+        pass
     return key, value
 
 
 def main(args):
     # User defined keyword arguments
-    kwargs = {"order": "NCHW"}
+    kwargs = {"order": "NCHW", "use_cudnn": False}
     kwargs.update(dict(args.kwargs))
 
     model = ModelHelper(name=args.benchmark_name)

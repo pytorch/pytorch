@@ -1,22 +1,24 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
-from hypothesis import given
-import hypothesis.strategies as st
 import caffe2.python.hypothesis_test_util as hu
-import numpy as np
+import caffe2.python.serialized_test.serialized_test_util as serial
 
+from hypothesis import given, settings
+import hypothesis.strategies as st
+import numpy as np
 import unittest
 
 
-class TestFloor(hu.HypothesisTestCase):
+class TestFloor(serial.SerializedTestCase):
 
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_floor(self, X, gc, dc, engine):
         op = core.CreateOperator("Floor", ["X"], ["Y"], engine=engine)
 

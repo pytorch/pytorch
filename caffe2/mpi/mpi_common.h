@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <mutex>
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
@@ -14,12 +15,16 @@ inline void CheckInitializedMPI() {
   CAFFE_ENFORCE(flag, "MPI does not seem to have been initialized.");
 }
 
-template <typename T> class MPIDataTypeWrapper;
+template <typename T>
+class MPIDataTypeWrapper;
 
-#define MPI_DATATYPE_WRAPPER(c_type, mpi_type)                                 \
-  template<> class MPIDataTypeWrapper<c_type> {                                \
-   public:                                                                     \
-    inline static MPI_Datatype type() { return mpi_type; }                     \
+#define MPI_DATATYPE_WRAPPER(c_type, mpi_type) \
+  template <>                                  \
+  class MPIDataTypeWrapper<c_type> {           \
+   public:                                     \
+    inline static MPI_Datatype type() {        \
+      return mpi_type;                         \
+    }                                          \
   };
 
 MPI_DATATYPE_WRAPPER(char, MPI_CHAR)
@@ -29,7 +34,7 @@ MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 #undef MPI_DATATYPE_WRAPPER
 
 // For all Caffe MPI calls, we will wrap it inside an MPI mutex lock guard.
-std::mutex& MPIMutex();
+TORCH_API std::mutex& MPIMutex();
 
 #define MPI_CHECK(condition)                                 \
   do {                                                       \
@@ -49,23 +54,23 @@ std::mutex& MPIMutex();
  * @brief Gets the global MPI communicator used by Caffe2. In default, this
  * is MPI_COMM_WORLD unless you call SetGlobalMPIComm().
  */
-MPI_Comm GlobalMPIComm();
+TORCH_API MPI_Comm GlobalMPIComm();
 
 /**
  * @brief Sets the global MPI communicator. Caffe2 takes over the ownership
  * of the passed in communicator.
  */
-void SetGlobalMPIComm(MPI_Comm new_comm);
+TORCH_API void SetGlobalMPIComm(MPI_Comm new_comm);
 
 /**
  * @brief A helper function to return the size of the given communicator.
  */
-int MPICommSize(MPI_Comm comm);
+TORCH_API int MPICommSize(MPI_Comm comm);
 
 /**
  * @brief A helper function to return the rank of the given communicator.
  */
-int MPICommRank(MPI_Comm comm);
+TORCH_API int MPICommRank(MPI_Comm comm);
 
 /**
  * @brief A simple wrapper over an MPI common world.
@@ -149,6 +154,6 @@ void MPISetupPeers(
     const int replicas,
     const string& role,
     const string& job_path);
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_MPI_MPI_COMMON_H_
+#endif // CAFFE2_MPI_MPI_COMMON_H_

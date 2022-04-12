@@ -1,9 +1,9 @@
 ## @package batch_lr_loss
 # Module caffe2.python.layers.batch_lr_loss
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
@@ -16,7 +16,6 @@ import numpy as np
 
 
 class BatchLRLoss(ModelLayer):
-
     def __init__(
         self,
         model,
@@ -29,6 +28,11 @@ class BatchLRLoss(ModelLayer):
         homotopy_weighting=False,
         log_D_trick=False,
         unjoined_lr_loss=False,
+        uncertainty_penalty=1.0,
+        focal_gamma=0.0,
+        stop_grad_in_focal_factor=False,
+        task_gamma=1.0,
+        task_gamma_lb=0.1,
         **kwargs
     ):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
@@ -60,6 +64,8 @@ class BatchLRLoss(ModelLayer):
         assert not (log_D_trick and unjoined_lr_loss)
         self.log_D_trick = log_D_trick
         self.unjoined_lr_loss = unjoined_lr_loss
+        assert uncertainty_penalty >= 0
+        self.uncertainty_penalty = uncertainty_penalty
 
         self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
@@ -67,6 +73,48 @@ class BatchLRLoss(ModelLayer):
             np.float32,
             self.get_next_blob_reference('output')
         )
+
+        self.focal_gamma = focal_gamma
+        self.stop_grad_in_focal_factor = stop_grad_in_focal_factor
+
+        self.apply_exp_decay = False
+        if task_gamma < 1.0:
+            self.apply_exp_decay = True
+            self.task_gamma_cur = self.create_param(
+                param_name=('%s_task_gamma_cur' % self.name),
+                shape=[1],
+                initializer=(
+                    'ConstantFill', {
+                        'value': 1.0,
+                        'dtype': core.DataType.FLOAT
+                    }
+                ),
+                optimizer=self.model.NoOptim,
+            )
+
+            self.task_gamma = self.create_param(
+                param_name=('%s_task_gamma' % self.name),
+                shape=[1],
+                initializer=(
+                    'ConstantFill', {
+                        'value': task_gamma,
+                        'dtype': core.DataType.FLOAT
+                    }
+                ),
+                optimizer=self.model.NoOptim,
+            )
+
+            self.task_gamma_lb = self.create_param(
+                param_name=('%s_task_gamma_lb' % self.name),
+                shape=[1],
+                initializer=(
+                    'ConstantFill', {
+                        'value': task_gamma_lb,
+                        'dtype': core.DataType.FLOAT
+                    }
+                ),
+                optimizer=self.model.NoOptim,
+            )
 
     def init_weight(self, jsd_weight, homotopy_weighting):
         if homotopy_weighting:
@@ -156,6 +204,54 @@ class BatchLRLoss(ModelLayer):
             log_D_trick=self.log_D_trick,
             unjoined_lr_loss=self.unjoined_lr_loss
         )
+
+        if self.focal_gamma != 0:
+            label = net.StopGradient(
+                [label],
+                [net.NextScopedBlob('label_stop_gradient')],
+            )
+
+            prediction = self.input_record.prediction()
+            # focal loss = (y(1-p) + p(1-y))^gamma * original LR loss
+            # y(1-p) + p(1-y) = y + p - 2 * yp
+            y_plus_p = net.Add(
+                [prediction, label],
+                net.NextScopedBlob("y_plus_p"),
+            )
+            yp = net.Mul([prediction, label], net.NextScopedBlob("yp"))
+            two_yp = net.Scale(yp, net.NextScopedBlob("two_yp"), scale=2.0)
+            y_plus_p_sub_two_yp = net.Sub(
+                [y_plus_p, two_yp], net.NextScopedBlob("y_plus_p_sub_two_yp")
+            )
+            focal_factor = net.Pow(
+                y_plus_p_sub_two_yp,
+                net.NextScopedBlob("y_plus_p_sub_two_yp_power"),
+                exponent=float(self.focal_gamma),
+            )
+            if self.stop_grad_in_focal_factor is True:
+                focal_factor = net.StopGradient(
+                    [focal_factor],
+                    [net.NextScopedBlob("focal_factor_stop_gradient")],
+                )
+            xent = net.Mul(
+                [xent, focal_factor], net.NextScopedBlob("focallossxent")
+            )
+
+        if self.apply_exp_decay:
+            net.Mul(
+                [self.task_gamma_cur, self.task_gamma],
+                self.task_gamma_cur
+            )
+
+            task_gamma_multiplier = net.Max(
+                [self.task_gamma_cur, self.task_gamma_lb],
+                net.NextScopedBlob("task_gamma_cur_multiplier")
+            )
+
+            xent = net.Mul(
+                [xent, task_gamma_multiplier], net.NextScopedBlob("expdecayxent")
+            )
+
         # fuse with JSD
         if self.jsd_fuse:
             jsd = net.BernoulliJSD(
@@ -170,6 +266,49 @@ class BatchLRLoss(ModelLayer):
             )
         else:
             loss = xent
+
+        if 'log_variance' in self.input_record.fields:
+            # mean (0.5 * exp(-s) * loss + 0.5 * penalty * s)
+            log_variance_blob = self.input_record.log_variance()
+
+            log_variance_blob = net.ExpandDims(
+                log_variance_blob, net.NextScopedBlob('expanded_log_variance'),
+                dims=[1]
+            )
+
+            neg_log_variance_blob = net.Negative(
+                [log_variance_blob],
+                net.NextScopedBlob('neg_log_variance')
+            )
+
+            # enforce less than 88 to avoid OverflowError
+            neg_log_variance_blob = net.Clip(
+                [neg_log_variance_blob],
+                net.NextScopedBlob('clipped_neg_log_variance'),
+                max=88.0
+            )
+
+            exp_neg_log_variance_blob = net.Exp(
+                [neg_log_variance_blob],
+                net.NextScopedBlob('exp_neg_log_variance')
+            )
+
+            exp_neg_log_variance_loss_blob = net.Mul(
+                [exp_neg_log_variance_blob, loss],
+                net.NextScopedBlob('exp_neg_log_variance_loss')
+            )
+
+            penalized_uncertainty = net.Scale(
+                log_variance_blob, net.NextScopedBlob("penalized_unceratinty"),
+                scale=float(self.uncertainty_penalty)
+            )
+
+            loss_2x = net.Add(
+                [exp_neg_log_variance_loss_blob, penalized_uncertainty],
+                net.NextScopedBlob('loss')
+            )
+            loss = net.Scale(loss_2x, net.NextScopedBlob("loss"), scale=0.5)
+
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()
             if self.input_record.weight.field_type().base != np.float32:

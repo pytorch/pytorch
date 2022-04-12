@@ -2,7 +2,7 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -69,23 +69,21 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
   static constexpr int kNeonNoiseReadSize = kOutputChannels * 16;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
+  explicit PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& mean = Input(1);
-    auto* Y = Output(0);
+
     auto* noiseBlob = ws_->CreateBlob("__CAFFE2_STYLIZER_NOISE__");
     auto defaultNoiseSize = OperatorBase::GetSingleArgument<int>(
         "noise_size", 491 /* prime to avoid artifacts */);
 
-    if (!noiseBlob->IsType<Tensor>(CPU)) {
+    if (!BlobIsTensorType(*noiseBlob, CPU)) {
       // Initialize random noise on first use.
       // Cache it to maintain temporal consistency.
-      auto* t = noiseBlob->GetMutableTensor(CPU);
+      auto* t = BlobGetMutableTensor(noiseBlob, CPU);
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
       // Noise space is larger for vectorized code due to the
@@ -96,15 +94,15 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
 #endif
     }
     const auto& noise = noiseBlob->template Get<TensorCPU>();
-    CAFFE_ENFORCE(noise.size() >= defaultNoiseSize);
+    CAFFE_ENFORCE(noise.numel() >= defaultNoiseSize);
 
-    CAFFE_ENFORCE(X.ndim() == 4);
+    CAFFE_ENFORCE(X.dim() == 4);
     const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
     // Assume BGR or BGRA
-    CAFFE_ENFORCE(mean.size() == kOutputChannels);
+    CAFFE_ENFORCE(mean.numel() == kOutputChannels);
 
     CAFFE_ENFORCE(C == kInputChannels);
-    Y->Resize(N, kOutputChannels, H, W);
+    auto* Y = Output(0, {N, kOutputChannels, H, W}, at::dtype<float>());
 
     runBatch(
         N,
@@ -138,7 +136,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     // For ARM NEON, we read in multiples of kNeonNoiseReadSize since
     // the inner loop is vectorized. Round up to the next highest
     // multiple of kNeonNoiseReadSize
-    size = math::roundUp(size, kNeonNoiseReadSize) + size;
+    size = math::RoundUp(size, kNeonNoiseReadSize) + size;
     noise->Resize(size);
 
     math::RandGaussian<float, CPUContext>(
@@ -410,17 +408,17 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
   // Expect this many channels as output
   static constexpr int kOutputChannels = 4;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& mean = Input(1);
-    auto* Y = Output(0);
-    CAFFE_ENFORCE(X.ndim() == 4);
+
+    CAFFE_ENFORCE(X.dim() == 4);
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     // Assume BGR or BGRA
-    CAFFE_ENFORCE(mean.size() == kInputChannels);
+    CAFFE_ENFORCE(mean.numel() == kInputChannels);
     CAFFE_ENFORCE(C == kInputChannels);
     // RGB
-    Y->Resize(N, H, W, kOutputChannels);
+    auto* Y = Output(0, {N, H, W, kOutputChannels}, at::dtype<uint8_t>());
 
     runBatch(
         N,
@@ -586,7 +584,7 @@ OPERATOR_SCHEMA(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
     .NumInputs(2)
     .NumOutputs(1);
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
     IDEEPFallbackOp<BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp, SkipIndices<0>>);

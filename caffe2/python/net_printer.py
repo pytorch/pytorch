@@ -1,9 +1,9 @@
 ## @package net_printer
 # Module caffe2.python.net_printer
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto.caffe2_pb2 import OperatorDef, NetDef
 from caffe2.python.checkpoint import Job
@@ -150,7 +150,7 @@ def analyze_job(analyzer, job):
 def analyze(obj):
     """
     Given a Job, visits all the execution steps making sure that:
-      - no undefined blobs will be found during excution
+      - no undefined blobs will be found during execution
       - no blob with same name is defined in concurrent steps
     """
     Analyzer()(obj)
@@ -268,11 +268,11 @@ def call(op, inputs=None, outputs=None, factor_prefixes=False):
 
 def format_device_option(dev_opt):
     if not dev_opt or not (
-            dev_opt.device_type or dev_opt.cuda_gpu_id or dev_opt.node_name):
+            dev_opt.device_type or dev_opt.device_id or dev_opt.node_name):
         return None
     return call(
         'DeviceOption',
-        [dev_opt.device_type, dev_opt.cuda_gpu_id, "'%s'" % dev_opt.node_name])
+        [dev_opt.device_type, dev_opt.device_id, "'%s'" % dev_opt.node_name])
 
 
 @Printer.register(OperatorDef)

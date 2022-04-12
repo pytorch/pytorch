@@ -5,10 +5,10 @@ namespace caffe2 {
 namespace {
 
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
-  const auto& dims = tensor.dims();
+  const auto dims = tensor.sizes();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
-  int offset = (t * dims[1] + n) * dims[2];
-  CAFFE_ENFORCE_LT(offset, tensor.size());
+  int64_t offset = (t * dims[1] + n) * dims[2];
+  CAFFE_ENFORCE_LT(offset, tensor.numel());
   return tensor.template data<float>() + offset;
 }
 
@@ -19,11 +19,10 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   // [max_time_step, batch_size, num_classes]
   auto& inputs = Input(INPUTS);
   // [batch_size]
-  auto* output_len = Output(OUTPUT_LEN);
-  // [total_decoded_output]
-  auto* values = Output(VALUES);
 
-  const auto& inputs_dims = inputs.dims();
+  // [total_decoded_output]
+
+  const auto inputs_dims = inputs.sizes();
   int32_t max_time_step = inputs_dims[0];
   int32_t batch_size = inputs_dims[1];
   int32_t num_classes = inputs_dims[2];
@@ -32,7 +31,8 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int> values_cach;
-  output_len->Resize(vector<TIndex>{batch_size});
+  auto* output_len =
+      Output(OUTPUT_LEN, vector<int64_t>{batch_size}, at::dtype<int>());
   int* output_len_data = output_len->template mutable_data<int>();
 
   for (int32_t i = 0; i < batch_size; ++i) {
@@ -42,6 +42,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
     for (int32_t t = 0; t < seq_len_i; ++t) {
       auto* prob_data = getTensorDataPtr(inputs, t, i);
       int curr_label =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           std::max_element(prob_data, prob_data + num_classes) - prob_data;
       if (curr_label != 0 &&
           (!merge_repeated_ || (previous_label != curr_label))) {
@@ -54,9 +55,10 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   }
 
   int32_t values_cach_size = values_cach.size();
-  values->Resize(vector<TIndex>{values_cach_size});
+  auto* values =
+      Output(VALUES, vector<int64_t>{values_cach_size}, at::dtype<int>());
   int* values_data = values->mutable_data<int>();
-  for (int i = 0; i < values_cach.size(); ++i) {
+  for (size_t i = 0; i < values_cach.size(); ++i) {
     values_data[i] = values_cach.at(i);
   }
   values_cach.clear();
@@ -92,7 +94,7 @@ OPERATOR_SCHEMA(CTCGreedyDecoder)
         "VALUES",
         "Values vector, size (total_decoded_outputs). "
         "The vector stores the decoded classes")
-    .InheritOnnxSchema("CTCGreedyDecoder");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(CTCGreedyDecoder);
 
 } // namespace caffe2

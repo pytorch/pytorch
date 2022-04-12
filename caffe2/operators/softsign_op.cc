@@ -26,6 +26,7 @@ bool SoftsignGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
@@ -40,7 +41,7 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         SoftsignFunctor<CPUContext>>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     SoftsignGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
@@ -106,9 +107,9 @@ Y:
 )DOC")
     .Input(0, "input", "Input data blob to be operated on.")
     .Output(0, "output", "Output data blob with same shape as input")
-    .InheritOnnxSchema("Softsign");
+    .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(SoftsignGradient)
+GRADIENT_OPERATOR_SCHEMA(SoftsignGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})

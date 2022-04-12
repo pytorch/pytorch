@@ -2,9 +2,13 @@
 
 // ${generated_comment}
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/intrusive_ptr.h>
+
+#include <torch/csrc/Export.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 
 #include <cstdint> // for size_t
 #include <functional> // for function
@@ -12,66 +16,42 @@
 #include <string>
 #include <vector>
 
+namespace at {
+  struct Quantizer;
+};
+
 namespace torch { namespace autograd {
 
-struct Variable;
+using Variable = at::Tensor;
 using at::Context;
+using at::Device;
+using at::Dimname;
+using at::DimnameList;
 using at::Generator;
-using at::IntList;
+using at::IntArrayRef;
+using at::MemoryFormat;
+using at::QScheme;
 using at::Scalar;
-using at::SparseTensorRef;
 using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
-using at::Type;
-using at::ScalarType;
-using at::optional;
+using at::TensorOptions;
+using at::Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+using c10::optional;
 
-void register_variable_type_for(at::Type* baseType);
+namespace VariableType {
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
-struct TORCH_API VariableType final : public at::Type {
-  VariableType(Context* context, at::Type* baseType);
-  virtual at::ScalarType scalarType() const override;
-  virtual at::Backend backend() const override;
-  virtual bool is_cuda() const override;
-  virtual bool is_sparse() const override;
-  virtual bool is_distributed() const override;
-  virtual Storage storage(bool resizable = false) const override;
-  virtual Storage storage(size_t size, bool resizable = false) const override;
-  virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  virtual Storage storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
-  virtual std::unique_ptr<at::Generator> generator() const override;
-  virtual const char * toString() const override;
-  virtual at::TypeID ID() const override;
-  virtual size_t elementSizeInBytes() const override;
-  virtual at::Type & toBackend(at::Backend b) const override;
-  virtual at::Type & toScalarType(at::ScalarType s) const override;
-  static const char * typeString();
-  virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
-  virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
-
-  static at::Type* getType(const at::Type& baseType);
-  static at::Type* getType(const at::Tensor& tensor);
-  static bool isVariableType(const at::Type& type);
-  static std::vector<at::Type*> allCUDATypes();
-  static std::vector<at::Type*> allCPUTypes();
-
-  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
-  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
-  ${type_derived_method_declarations}
-
-private:
-  // checks that t is actually a Variable
-  static Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
-  static at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
-  static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
-  static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
-
-  at::Type* baseType;
-  std::string str;
-  size_t id_;
+  at::Tensor & unpack(Tensor & t, const char * name, int pos);
+  const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
+  at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
+  std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 };
 
 }} // namespace torch::autograd

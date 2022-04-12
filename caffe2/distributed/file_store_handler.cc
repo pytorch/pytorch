@@ -1,9 +1,13 @@
 #include "file_store_handler_op.h"
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <errno.h>
 #include <fcntl.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <limits.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 #include <sys/stat.h>
 
@@ -16,15 +20,19 @@
 #include <direct.h> // for _mkdir
 #endif
 
+#include "c10/util/StringUtil.h"
+
 #include "caffe2/utils/murmur_hash3.h"
 
 namespace caffe2 {
 
 static std::string encodeName(const std::string& name) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<uint64_t, 2> out;
   MurmurHash3_x64_128(name.data(), name.size(), 0xcafef00d, out.data());
 
   // Size is 33 to have space for final NUL
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 33> buf;
   for (int i = 0; i < 16; i++) {
     snprintf(&buf[i * 2], buf.size() - (i * 2), "%02x", ((char*)out.data())[i]);
@@ -51,6 +59,7 @@ FileStoreHandler::FileStoreHandler(
   }
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 FileStoreHandler::~FileStoreHandler() {}
 
 std::string FileStoreHandler::realPath(const std::string& path) {
@@ -58,6 +67,7 @@ std::string FileStoreHandler::realPath(const std::string& path) {
   std::array<char, _MAX_PATH> buf;
   auto ret = _fullpath(buf.data(), path.c_str(), buf.size());
 #else
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<char, PATH_MAX> buf;
   auto ret = realpath(path.c_str(), buf.data());
 #endif
@@ -91,12 +101,14 @@ void FileStoreHandler::set(const std::string& name, const std::string& data) {
   CAFFE_ENFORCE_EQ(rv, 0, "rename: ", strerror(errno));
 }
 
-std::string FileStoreHandler::get(const std::string& name) {
+std::string FileStoreHandler::get(
+    const std::string& name,
+    const std::chrono::milliseconds& timeout) {
   auto path = objectPath(name);
   std::string result;
 
   // Block until key is set
-  wait({name});
+  wait({name}, timeout);
 
   std::ifstream ifs(path.c_str(), std::ios::in);
   if (!ifs) {
@@ -118,9 +130,20 @@ int64_t FileStoreHandler::add(
   return 0;
 }
 
+int64_t FileStoreHandler::getNumKeys() {
+  CHECK(false) << "getNumKeys not implemented for FileStoreHandler";
+  return 0;
+}
+
+bool FileStoreHandler::deleteKey(const std::string& /* unused */) {
+  CHECK(false) << "deleteKey not implemented for FileStoreHandler";
+  return false;
+}
+
 bool FileStoreHandler::check(const std::vector<std::string>& names) {
   std::vector<std::string> paths;
   for (const auto& name : names) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     paths.push_back(objectPath(name));
   }
 
@@ -151,10 +174,11 @@ void FileStoreHandler::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      STORE_HANDLER_TIMEOUT("Wait timeout for name(s): ", Join(" ", names));
+      STORE_HANDLER_TIMEOUT(
+          "Wait timeout for name(s): ", c10::Join(" ", names));
     }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
-}
+} // namespace caffe2

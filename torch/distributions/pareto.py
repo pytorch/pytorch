@@ -1,8 +1,3 @@
-from numbers import Number
-
-import math
-
-import torch
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -28,23 +23,29 @@ class Pareto(TransformedDistribution):
 
     def __init__(self, scale, alpha, validate_args=None):
         self.scale, self.alpha = broadcast_all(scale, alpha)
-        base_dist = Exponential(self.alpha)
+        base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
         super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Pareto, _instance)
+        new.scale = self.scale.expand(batch_shape)
+        new.alpha = self.alpha.expand(batch_shape)
+        return super(Pareto, self).expand(batch_shape, _instance=new)
 
     @property
     def mean(self):
         # mean is inf for alpha <= 1
-        a = self.alpha.clone().clamp(min=1)
+        a = self.alpha.clamp(min=1)
         return a * self.scale / (a - 1)
 
     @property
     def variance(self):
         # var is inf for alpha <= 2
-        a = self.alpha.clone().clamp(min=2)
+        a = self.alpha.clamp(min=2)
         return self.scale.pow(2) * a / ((a - 1).pow(2) * (a - 2))
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
         return constraints.greater_than(self.scale)
 

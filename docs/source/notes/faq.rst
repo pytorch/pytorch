@@ -62,9 +62,9 @@ Here, ``intermediate`` remains live even while ``h`` is executing,
 because its scope extrudes past the end of the loop.  To free it
 earlier, you should ``del intermediate`` when you are done with it.
 
-**Don't run RNNs on sequences that are too large.**
+**Avoid running RNNs on sequences that are too large.**
 The amount of memory required to backpropagate through an RNN scales
-linearly with the length of the RNN; thus, you will run out of memory
+linearly with the length of the RNN input; thus, you will run out of memory
 if you try to feed an RNN a sequence that is too long.
 
 The technical term for this phenomenon is `backpropagation through time
@@ -82,8 +82,11 @@ to `blow through your memory <https://github.com/pytorch/pytorch/issues/958>`_
 this way (and remember that you will need at least twice the size of the
 weights, since you also need to store the gradients.)
 
+**Consider checkpointing.**
+You can trade-off memory for compute by using `checkpoint <https://pytorch.org/docs/stable/checkpoint.html>`_.
+
 My GPU memory isn't freed properly
--------------------------------------------------------
+----------------------------------
 PyTorch uses a caching memory allocator to speed up memory allocations. As a
 result, the values shown in ``nvidia-smi`` usually don't reflect the true
 memory usage. See :ref:`cuda-memory-management` for more details about GPU
@@ -93,13 +96,44 @@ If your GPU memory isn't freed even after Python quits, it is very likely that
 some Python subprocesses are still alive. You may find them via
 ``ps -elf | grep python`` and manually kill them with ``kill -9 [pid]``.
 
+My out of memory exception handler can't allocate memory
+--------------------------------------------------------
+You may have some code that tries to recover from out of memory errors.
+
+.. code-block:: python
+
+    try:
+        run_model(batch_size)
+    except RuntimeError: # Out of memory
+        for _ in range(batch_size):
+            run_model(1)
+
+But find that when you do run out of memory, your recovery code can't allocate
+either. That's because the python exception object holds a reference to the
+stack frame where the error was raised. Which prevents the original tensor
+objects from being freed. The solution is to move you OOM recovery code outside
+of the ``except`` clause.
+
+.. code-block:: python
+
+    oom = False
+    try:
+        run_model(batch_size)
+    except RuntimeError: # Out of memory
+        oom = True
+
+    if oom:
+        for _ in range(batch_size):
+            run_model(1)
+
+
 .. _dataloader-workers-random-seed:
 
 My data loader workers return identical random numbers
 -------------------------------------------------------
-You are likely using other libraries to generate random numbers in the dataset.
-For example, NumPy's RNG is duplicated when worker subprocesses are started via
-``fork``. See :class:`torch.utils.data.DataLoader`'s document for how to
+You are likely using other libraries to generate random numbers in the dataset
+and worker subprocesses are started via ``fork``. See
+:class:`torch.utils.data.DataLoader`'s documentation for how to
 properly set up random seeds in workers with its :attr:`worker_init_fn` option.
 
 .. _pack-rnn-unpack-with-data-parallelism:
@@ -124,10 +158,10 @@ write::
     class MyModule(nn.Module):
         # ... __init__, other methods, etc.
 
-        # padding_input is of shape [B x T x *] (batch_first mode) and contains
+        # padded_input is of shape [B x T x *] (batch_first mode) and contains
         # the sequences sorted by lengths
-        # B is the batch size
-        # T is max sequence length
+        #   B is the batch size
+        #   T is max sequence length
         def forward(self, padded_input, input_lengths):
             total_length = padded_input.size(1)  # get the max sequence length
             packed_input = pack_padded_sequence(padded_input, input_lengths,

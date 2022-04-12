@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import functools
 
@@ -14,6 +14,7 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ def wngrad_sparse_test_helper(parent_test, inputs, seq_b, lr, epsilon,
     )
 
 
-class TestWngrad(hu.HypothesisTestCase):
+class TestWngrad(serial.SerializedTestCase):
     @given(inputs=hu.tensors(n=2),
            seq_b=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
@@ -85,6 +86,7 @@ class TestWngrad(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_wngrad_dense_base(self, inputs, seq_b, lr, epsilon, gc, dc):
         param, grad = inputs
         seq_b = np.array([seq_b, ], dtype=np.float32)
@@ -111,6 +113,7 @@ class TestWngrad(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_wngrad_dense_output_effective_lr(self, inputs, seq_b,
                                               lr, epsilon, gc, dc):
         param, grad = inputs
@@ -139,6 +142,7 @@ class TestWngrad(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_wngrad_dense_output_effective_lr_and_update(
             self, inputs, seq_b, lr, epsilon, gc, dc):
         param, grad = inputs
@@ -161,7 +165,7 @@ class TestWngrad(hu.HypothesisTestCase):
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
-    @settings(suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
     @given(inputs=hu.tensors(n=2),
            seq_b=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
@@ -181,10 +185,9 @@ class TestWngrad(hu.HypothesisTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           data_strategy=st.data(),
            **hu.gcs_cpu_only)
-    def test_sparse_wngrad_empty(self, inputs, seq_b, lr, epsilon,
-                                  data_strategy, gc, dc):
+    @settings(deadline=10000)
+    def test_sparse_wngrad_empty(self, inputs, seq_b, lr, epsilon, gc, dc):
         param = inputs[0]
         seq_b = np.array([seq_b, ], dtype=np.float32)
         lr = np.array([lr], dtype=np.float32)

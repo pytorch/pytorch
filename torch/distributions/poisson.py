@@ -8,7 +8,7 @@ from torch.distributions.utils import broadcast_all
 
 class Poisson(ExponentialFamily):
     r"""
-    Creates a Poisson distribution parameterized by `rate`, the rate parameter.
+    Creates a Poisson distribution parameterized by :attr:`rate`, the rate parameter.
 
     Samples are nonnegative integers, with a pmf given by
 
@@ -24,7 +24,7 @@ class Poisson(ExponentialFamily):
     Args:
         rate (Number, Tensor): the rate parameter
     """
-    arg_constraints = {'rate': constraints.positive}
+    arg_constraints = {'rate': constraints.nonnegative}
     support = constraints.nonnegative_integer
 
     @property
@@ -43,6 +43,14 @@ class Poisson(ExponentialFamily):
             batch_shape = self.rate.size()
         super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Poisson, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.rate = self.rate.expand(batch_shape)
+        super(Poisson, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
@@ -52,7 +60,7 @@ class Poisson(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
-        return (rate.log() * value) - rate - (value + 1).lgamma()
+        return value.xlogy(rate) - rate - (value + 1).lgamma()
 
     @property
     def _natural_params(self):

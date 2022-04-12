@@ -1,17 +1,15 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from future.utils import bytes_to_native_str
-from hypothesis import given
+
+
+
+
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util
-from caffe2.python.core import CreateOperator, GradientRegistry
-from caffe2.python import workspace
+from caffe2.python import core, test_util, workspace
+from caffe2.python.core import CreateOperator, GradientRegistry, IR
 
 import numpy as np
 
@@ -88,13 +86,18 @@ class TestGradientCalculation(test_util.TestCase):
     def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
         for op in operatorDefList1:
             op.debug_info = ""
+            if op.device_option:
+                del op.device_option.extra_info[:]
         for op in operatorDefList2:
             op.debug_info = ""
+            if op.device_option:
+                del op.device_option.extra_info[:]
         self.assertEqual(operatorDefList1, operatorDefList2)
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
+    @settings(deadline=10000)
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -266,7 +269,7 @@ class TestGradientCalculation(test_util.TestCase):
         in -> out, with UseInput
         in -> in
 
-        Since we overwrite in in op#1, but in will be needed by the gradient
+        Since we overwrite in op#1, but in will be needed by the gradient
         calculation of op#0, the gradient registry should raise an error.
         """
         operators = [
@@ -279,7 +282,8 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
+    @settings(deadline=10000)
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 
@@ -384,6 +388,57 @@ class TestGradientCalculation(test_util.TestCase):
         gradients, _ = GradientRegistry.GetBackwardPass(
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
+
+    def testMultiUseInputAutoGenSumDevice(self):
+        parallel_tag = "parallelize:shard_by_1"
+        split_op_device_option_clear_auto_gen_sum = core.DeviceOption(
+            caffe2_pb2.CPU,
+            extra_info=[
+                parallel_tag,
+                "{}:1".format(IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG),
+            ]
+        )
+        split_op_device_option_no_clear_auto_gen_sum = core.DeviceOption(
+            caffe2_pb2.CPU,
+            extra_info=[parallel_tag]
+        )
+        operators_clear_auto_gen_sum = [
+            CreateOperator(
+                'Direct', 'in', 'hidden1',
+                device_option=split_op_device_option_clear_auto_gen_sum
+            ),
+            CreateOperator(
+                'Direct', 'in', 'hidden2',
+                device_option=split_op_device_option_clear_auto_gen_sum
+            ),
+            CreateOperator('Direct', ['hidden1', 'hidden2'], 'out'),
+        ]
+        gradients_clear_auto_gen_sum, _ = GradientRegistry.GetBackwardPass(
+            operators_clear_auto_gen_sum, {'out': 'out_grad'})
+        self.assertEqual(gradients_clear_auto_gen_sum[-1].type, "Sum")
+        self.assertNotIn(
+            parallel_tag,
+            gradients_clear_auto_gen_sum[-1].device_option.extra_info
+        )
+
+        operators_no_clear_auto_gen_sum = [
+            CreateOperator(
+                'Direct', 'in', 'hidden1',
+                device_option=split_op_device_option_no_clear_auto_gen_sum
+            ),
+            CreateOperator(
+                'Direct', 'in', 'hidden2',
+                device_option=split_op_device_option_no_clear_auto_gen_sum
+            ),
+            CreateOperator('Direct', ['hidden1', 'hidden2'], 'out'),
+        ]
+        gradients_no_clear_auto_gen_sum, _ = GradientRegistry.GetBackwardPass(
+            operators_no_clear_auto_gen_sum, {'out': 'out_grad'})
+        self.assertEqual(gradients_clear_auto_gen_sum[-1].type, "Sum")
+        self.assertIn(
+            parallel_tag,
+            gradients_no_clear_auto_gen_sum[-1].device_option.extra_info
+        )
 
     def testMultiUseInputAndMultipleVersionsBig(self):
         """Test gradient for the following case:
@@ -911,6 +966,44 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
             self.assertFalse(True, "Did not throw exception")
         except Exception as e:
             self.assertTrue("schema" in str(e))
+
+    def testDeviceOptionsPropagation(self):
+        '''
+        Test verifies that aggregation operators in a backward path will be in
+        the same device as the parameter.
+        '''
+        device_0 = 'node:0'
+
+        # init_net.
+        init_net = core.Net("init_net")
+        with core.DeviceScope(0, node_name=device_0):
+            w = init_net.UniformFill([], 'w', shape=[10000, 64])
+            ids = init_net.GivenTensorFill(
+                [],
+                'ids',
+                values=np.random.random_integers(low=0, high=10000, size=10),
+            )
+            ids_2 = init_net.GivenTensorFill(
+                [],
+                'ids_2',
+                values=np.random.random_integers(low=0, high=10000, size=10),
+            )
+
+        # train_net.
+        train_net = core.Net("train_net")
+        with core.DeviceScope(0, node_name=device_0):
+            vals = train_net.Gather([w, ids], "gathered")
+            r_vals = train_net.ReduceSum([vals], 1, axes=0)
+
+            vals_2 = train_net.Gather([w, ids_2], "gathered_2")
+            r_vals_2 = train_net.ReduceSum([vals_2], 1, axes=0)
+
+        loss = train_net.Sum([r_vals, r_vals_2], 1)
+        train_net.AddGradientOperators([loss])
+        # All concat operators should be on device_0
+        for op in train_net.Proto().op:
+            if op.type == 'Concat':
+                self.assertEqual(op.device_option.node_name, device_0)
 
 
 if __name__ == '__main__':

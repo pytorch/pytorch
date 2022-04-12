@@ -1,9 +1,9 @@
 ## @package checkpoint
 # Module caffe2.python.checkpoint
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import os
 import logging
@@ -19,12 +19,10 @@ from caffe2.python.task import (
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 
-@context.define_context()
-class Job(object):
+class Job(context.Managed):
     """
     A Job defines three TaskGroups: the `init_group`, the `epoch_group` and the
     `exit_group` which will be run by a JobRunner.
@@ -98,11 +96,13 @@ class Job(object):
         self.exit_group = session_class.compile(self.exit_group)
 
     def __enter__(self):
+        super(Job, self).__enter__()
         self.epoch_group.__enter__()
         return self
 
     def __exit__(self, *args):
         self.epoch_group.__exit__()
+        super(Job, self).__exit__(*args)
 
     def add_stop_condition(self, output):
         if isinstance(output, core.BlobReference):
@@ -133,7 +133,7 @@ def db_name(epoch, node_name, db_prefix, path_prefix=None):
         node_name: A string. The name of the node.
         db_prefix: A string. The prefix used to construct full db name.
         path_prefix: A string. Optional param used to construct db name or path
-            where checkpoint files are are stored.
+            where checkpoint files are stored.
     Returns:
         db_name: A string. The absolute path of full_db_name where checkpoint
             files are saved
@@ -383,7 +383,7 @@ class CheckpointManager(object):
         Args:
             user_epoch: An integer. Optional parameter for user to explicitly
                 identify the epoch-id to load checkpoint from
-        Retruns:
+        Returns:
             epoch: the epoch-id to load checkpoints from
                 or None if no checkpoints were written
         """
@@ -587,7 +587,7 @@ class MultiNodeCheckpointManager(object):
         Args:
             user_epoch: An integer. Optional parameter for user to explicitly
                 identify the epoch-id to load checkpoint from
-        Retruns:
+        Returns:
             epoch: the epoch-id to load checkpoints from
                 or None if no checkpoints were written
         """

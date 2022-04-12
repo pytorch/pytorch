@@ -13,13 +13,13 @@ namespace caffe2 {
 namespace {
 
 void AddNoiseInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const string& name,
     Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
@@ -78,10 +78,10 @@ void compare(
   depthwiseOpDef.add_arg()->CopyFrom(MakeArgument("pad_r", padR));
   depthwiseOpDef.add_arg()->CopyFrom(MakeArgument("group", group));
 
-  AddNoiseInput(vector<TIndex>{N, inputC, H, W}, "X", &ws);
+  AddNoiseInput(vector<int64_t>{N, inputC, H, W}, "X", &ws);
   AddNoiseInput(
-      vector<TIndex>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
-  AddNoiseInput(vector<TIndex>{outputC}, "B", &ws);
+      vector<int64_t>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
+  AddNoiseInput(vector<int64_t>{outputC}, "B", &ws);
 
   unique_ptr<OperatorBase> depthwiseOp(CreateOperator(depthwiseOpDef, &ws));
   EXPECT_NE(nullptr, depthwiseOp.get());
@@ -140,9 +140,7 @@ void compare(
 
           // For small values / small difference, the relative error
           // can be huge but the absolute error will be small
-          EXPECT_TRUE(
-              relErr <= maxRelErr ||
-              (relErr > maxRelErr && absErr <= absErrForRelErrFailure))
+          EXPECT_TRUE(relErr <= maxRelErr || absErr <= absErrForRelErrFailure)
               << v1 << " " << v2 << " (rel err " << relErr << ") "
               << "(" << n << " " << c << " " << h << " " << w << ") "
               << "running N " << N << " inputC " << inputC << " H " << H
@@ -201,10 +199,7 @@ void runConv(
 
 } // unnamed namespace
 
-constexpr size_t kIters = 20;
-
-// TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
-#if !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+constexpr int kIters = 20;
 
 TEST(DEPTHWISE3x3, Conv) {
   for (int i = 0; i < kIters; ++i) {
@@ -212,7 +207,5 @@ TEST(DEPTHWISE3x3, Conv) {
     runConv(3, 3, 1, 1, channel, channel, channel, randInt(1, 2));
   }
 }
-
-#endif
 
 } // namespace caffe2

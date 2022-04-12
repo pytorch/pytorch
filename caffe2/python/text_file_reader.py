@@ -1,9 +1,9 @@
 ## @package text_file_reader
 # Module caffe2.python.text_file_reader
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core
 from caffe2.python.dataio import Reader
 from caffe2.python.schema import Scalar, Struct, data_type_for_dtype
@@ -21,7 +21,7 @@ class TextFileReader(Reader):
             init_net   : Net that will be run only once at startup.
             filename   : Path to file to read from.
             schema     : schema.Struct representing the schema of the data.
-                         Currently, only support Struct of strings.
+                         Currently, only support Struct of strings and float32.
             num_passes : Number of passes over the data.
             batch_size : Number of rows to read at a time.
         """

@@ -9,6 +9,7 @@ namespace caffe2 {
 
 namespace {
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 constexpr char kLCDoc[] = R"DOC(
 Note that other parameters, such as the stride and
 kernel size, or the pads' sizes in each direction are not necessary for input
@@ -26,8 +27,8 @@ std::function<void(OpSchema&)> LCDocGenerator(const char* dim) {
     string doc = R"DOC(
 The locally connected operator consumes an input vector, a {dim}filter blob
 and a bias blob and computes the output. {lc_doc})DOC";
-    ReplaceAll(doc, "{dim}", dim);
-    ReplaceAll(doc, "{lc_doc}", kLCDoc);
+    c10::ReplaceAll(doc, "{dim}", dim);
+    c10::ReplaceAll(doc, "{lc_doc}", kLCDoc);
     schema.SetDoc(doc);
     schema.Input(
         1,
@@ -119,6 +120,7 @@ class GetLocallyConnectedGradient : public GradientMakerBase {
     CAFFE_ENFORCE(def_.input_size() == 3 || def_.input_size() == 2);
     ArgumentHelper argsHelper(def_);
     const bool compute_dX =
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         !argsHelper.GetSingleArgument<bool>("no_gradient_to_input", 0);
 
     if (def_.input_size() == 3) {

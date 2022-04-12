@@ -1,91 +1,104 @@
-#include <cub/block/block_reduce.cuh>
-
-#include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/tile_op.h"
 
+#include <array>
+
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/math.h"
+
 namespace caffe2 {
+
 namespace {
-__global__ void TileCopyKernel(
-    int item_size,
-    int outer_dim,
-    int inner_dim,
-    int tiles,
-    const char* input_data,
-    char* output_data) {
-  CUDA_1D_KERNEL_LOOP(index, outer_dim * tiles) {
-    int i = index / tiles;
-    int t = index % tiles;
-    const char* input_ptr = input_data + inner_dim * item_size * i;
-    char* output_ptr = output_data + (i * tiles + t) * inner_dim * item_size;
-    memcpy(output_ptr, input_ptr, inner_dim * item_size);
-  }
-}
 
 template <typename T>
-__global__ void TileGradientAxpyKernel(
-    int outer_dim,
-    int inner_dim,
-    int tiles,
-    const T* input_data,
-    T* output_data) {
-  typedef cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS> BlockReduce;
-
-  for (int idx = blockIdx.x; idx < outer_dim * inner_dim; idx += gridDim.x) {
-    int i = idx / inner_dim;
-    int j = idx % inner_dim;
-    T* output_ptr = output_data + inner_dim * i;
-
-    T x = 0.0;
-    for (int t = threadIdx.x; t < tiles; t += blockDim.x) {
-      const T* input_ptr = input_data + (i * tiles + t) * inner_dim;
-      x += input_ptr[j];
-    }
-    __shared__ typename BlockReduce::TempStorage temp_storage;
-    T totx = BlockReduce(temp_storage).Sum(x);
-    if (threadIdx.x == 0) {
-      output_ptr[j] = totx;
-    }
-    __syncthreads();
+__global__ void TileCopyCUDAKernel(
+    const int total_size,
+    const int inner_size,
+    const int tiles,
+    const T* X,
+    T* Y) {
+  const int x = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (x < total_size) {
+    const int r = x / inner_size / tiles;
+    const int c = x % inner_size;
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
+    Y[x] = __ldg(X + r * inner_size + c);
+#else
+    Y[x] = X[r * inner_size + c];
+#endif
   }
 }
+
 } // namespace
 
 template <>
-void TileOp<CUDAContext>::DoTile(
-    const TypeMeta& meta,
-    int item_size,
-    int outer_dim,
-    int inner_dim,
-    const char* input_data,
-    char* output_data) {
-  TileCopyKernel<<<
-      std::min(outer_dim * tiles_, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      item_size, outer_dim, inner_dim, tiles_, input_data, output_data);
+template <typename T>
+bool TileOp<CUDAContext>::DoTile(
+    const int outer_size,
+    const int inner_size,
+    const T* X,
+    T* Y) {
+  const std::int64_t total_size = static_cast<std::int64_t>(outer_size) *
+      static_cast<std::int64_t>(tiles_) * static_cast<std::int64_t>(inner_size);
+  const int M = math::DivUp<std::int64_t>(total_size, CAFFE_CUDA_NUM_THREADS);
+  TileCopyCUDAKernel<T>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          total_size, inner_size, tiles_, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  return true;
 }
 
 template <>
-void TileGradientOp<float, CUDAContext>::DoTileGradient(
-    const TypeMeta& meta,
-    int item_size,
-    int outer_dim,
-    int inner_dim,
-    const char* input_data,
-    char* output_data) {
-  TileGradientAxpyKernel<float><<<
-      std::min(outer_dim * inner_dim, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      outer_dim,
-      inner_dim,
-      tiles_,
-      reinterpret_cast<const float*>(input_data),
-      reinterpret_cast<float*>(output_data));
+template <typename T>
+bool TileGradientOp<CUDAContext>::DoTileGradient(
+    const int outer_size,
+    const int inner_size,
+    const T* dY,
+    T* dX) {
+  const std::array<int, 3> dY_dims = {outer_size, tiles_, inner_size};
+  const std::array<int, 3> dX_dims = {outer_size, 1, inner_size};
+  math::ReduceSum<T, CUDAContext>(
+      3, dY_dims.data(), dX_dims.data(), T(1), dY, dX, &context_);
+  return true;
+}
+
+template <>
+template <>
+bool TileGradientOp<CUDAContext>::DoTileGradient<float>(
+    const int outer_size,
+    const int inner_size,
+    const float* dY,
+    float* dX) {
+  if (inner_size == 1) {
+    const std::array<int, 2> dY_dims = {outer_size, tiles_};
+    const std::array<int, 2> dX_dims = {outer_size, 1};
+    math::ReduceSum<float, CUDAContext>(
+        2, dY_dims.data(), dX_dims.data(), 1.0f, dY, dX, &context_);
+  } else {
+    ReinitializeTensor(&ones_, tiles_, at::dtype<float>().device(CUDA));
+    math::Set<float, CUDAContext>(
+        tiles_, 1.0f, ones_.template mutable_data<float>(), &context_);
+    math::GemmStridedBatched<float, CUDAContext>(
+        CblasTrans,
+        CblasNoTrans,
+        outer_size,
+        inner_size,
+        1,
+        tiles_,
+        1.0f,
+        dY,
+        tiles_ * inner_size,
+        ones_.template data<float>(),
+        0,
+        0.0f,
+        dX,
+        inner_size,
+        &context_);
+  }
+  return true;
 }
 
 REGISTER_CUDA_OPERATOR(Tile, TileOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(TileGradient, TileGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(TileGradient, TileGradientOp<CUDAContext>);
+
 } // namespace caffe2

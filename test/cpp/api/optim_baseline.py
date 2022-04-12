@@ -9,7 +9,7 @@ import torch.optim
 
 
 HEADER = """
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <vector>
 
@@ -18,12 +18,17 @@ namespace expected_parameters {
 
 FOOTER = "} // namespace expected_parameters"
 
-PARAMETERS = "static std::vector<std::vector<torch::Tensor>> {} = {{"
+PARAMETERS = "inline std::vector<std::vector<torch::Tensor>> {}() {{"
 
 OPTIMIZERS = {
+    "LBFGS" : lambda p: torch.optim.LBFGS(p, 1.0),
+    "LBFGS_with_line_search" : lambda p: torch.optim.LBFGS(p, 1.0, line_search_fn="strong_wolfe"),
     "Adam": lambda p: torch.optim.Adam(p, 1.0),
     "Adam_with_weight_decay": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-2),
     "Adam_with_weight_decay_and_amsgrad": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-6, amsgrad=True),
+    "AdamW": lambda p: torch.optim.AdamW(p, 1.0),
+    "AdamW_without_weight_decay": lambda p: torch.optim.AdamW(p, 1.0, weight_decay=0),
+    "AdamW_with_amsgrad": lambda p: torch.optim.AdamW(p, 1.0, amsgrad=True),
     "Adagrad": lambda p: torch.optim.Adagrad(p, 1.0),
     "Adagrad_with_weight_decay": lambda p: torch.optim.Adagrad(p, 1.0, weight_decay=1e-2),
     "Adagrad_with_weight_decay_and_lr_decay": lambda p: torch.optim.Adagrad(p, 1.0, weight_decay=1e-6, lr_decay=1e-3),
@@ -69,7 +74,9 @@ def run(optimizer_name, iterations, sample_every):
         loss = output.sum()
         loss.backward()
 
-        optimizer.step()
+        def closure():
+            return torch.tensor([10.])
+        optimizer.step(closure)
 
         if i % sample_every == 0:
 
@@ -86,13 +93,15 @@ def emit(optimizer_parameter_map):
     print(HEADER)
     for optimizer_name, parameters in optimizer_parameter_map.items():
         print(PARAMETERS.format(optimizer_name))
+        print("  return {")
         for sample in parameters:
-            print("  {")
+            print("    {")
             for parameter in sample:
                 parameter_values = "{{{}}}".format(", ".join(map(str, parameter)))
                 print("      torch::tensor({}),".format(parameter_values))
-            print("  },")
-        print("};\n")
+            print("    },")
+        print("  };")
+        print("}\n")
     print(FOOTER)
 
 

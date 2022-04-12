@@ -1,10 +1,13 @@
 import torch
+import torch.utils.hooks
+from torch._namedtensor_internals import check_serializing_named_tensor
 import os
-import weakref
 import threading
 import multiprocessing
+from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
-import sys
+from typing import Union
+
 try:
     # Early load resource_sharer to prevent a partially initialized instance
     # from being inherited in a forked child process. The reduce_storage method
@@ -26,10 +29,10 @@ class StorageWeakRef(object):
         self.cdata = storage._weak_ref()
         # Save a direct reference to _free_weak_ref because the `torch` module
         # might be cleared during Python shutdown before this module is cleared.
-        self._free_weak_ref = torch.Storage._free_weak_ref
+        self._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
 
     def expired(self):
-        return torch.Storage._expired(self.cdata)
+        return torch.Storage._expired(self.cdata)  # type: ignore[attr-defined]
 
     def __del__(self):
         self._free_weak_ref(self.cdata)
@@ -39,65 +42,99 @@ class SharedCache(dict):
     """dictionary from multiprocessing handles to StorageWeakRef"""
 
     def __init__(self):
-        # free_dead_references() is called if the len exceeds the currrent
+        # free_dead_references() is called if the len exceeds the current
         # limit. The limit scales with the number of remaining live objects.
         self.limit = 128
+        # `fork` inherits lock state, so in case we fork when the lock is held,
+        # we register a function to reset the lock to a new object to avoid
+        # possible deadlocks, following python multiprocessing library design.
+        self._after_fork()
+        register_after_fork(self, SharedCache._after_fork)
+
+    def _after_fork(self):
         self.lock = threading.Lock()
 
+    def get(self, key):
+        with self.lock:
+            return dict.get(self, key)
+
     def __setitem__(self, key, storage_ref):
-        dict.__setitem__(self, key, storage_ref)
-        if len(self) > self.limit:
-            self.free_dead_references()
+        with self.lock:
+            dict.__setitem__(self, key, storage_ref)
+            if len(self) > self.limit:
+                self.free_dead_references()
 
     def free_dead_references(self):
-        # Multiple Python threads may call free_dead_references() concurrently.
-        # Without a lock, they may try deleting the same entry multiple times.
-        with self.lock:
-            live = 0
-            for key, storage_ref in list(self.items()):
-                if storage_ref.expired():
-                    del self[key]
-                else:
-                    live += 1
-            self.limit = max(128, live * 2)
+        live = 0
+        for key, storage_ref in list(self.items()):
+            if storage_ref.expired():
+                del self[key]
+            else:
+                live += 1
+        self.limit = max(128, live * 2)
 
 
 # mapping from handles to StorageWeakRef objects
 shared_cache = SharedCache()
 
 
-def rebuild_event(handle):
-    return torch.cuda.Event(_handle=handle)
+def rebuild_event(device, handle):
+    return torch.cuda.Event.from_ipc_handle(device, handle)
 
 
 def reduce_event(event):
-    return (rebuild_event, (event.ipc_handle(),))
+    handle = event.ipc_handle()
+    return (rebuild_event, (event.device, handle))
 
 
 def rebuild_tensor(cls, storage, metadata):
-    storage_offset, size, stride, requires_grad, backward_hooks = metadata
+    storage_offset, size, stride, requires_grad = metadata
     t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
     if cls == torch.nn.parameter.Parameter:
-        t = torch.nn.parameter.Parameter(t)
-    t.requires_grad = requires_grad
-    t._backward_hooks = backward_hooks
+        # we have to pass requires_grad into constructor, rather than set it as an
+        # attribute later, because it's an important check for Integer Tensors to
+        # have requires_grad=False (or else they raise an error)
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
     return t
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size, requires_grad, backward_hooks):
+                        storage_cls, dtype, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
+                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
+    # If storage_handle is None, storage points to nullptr.
+    if storage_handle is None or storage_size_bytes == 0:
+        storage = storage_cls(0, dtype=dtype, device=storage_device)
+    else:
+        storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes))
+        if storage is None:
+            torch.cuda._lazy_init()
+            storage = storage_cls._new_shared_cuda(
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required)
+            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
+        else:
+            # We already ref counting this Storage, but producer needs new ref-counters to be released.
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset, device=storage_device)
 
-    storage = storage_from_cache(storage_cls, storage_handle)
-    if storage is None:
-        torch.cuda._lazy_init()
-        storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size)
-        shared_cache[storage_handle] = StorageWeakRef(storage)
+    t = torch._utils._rebuild_tensor(
+        torch.storage._TypedStorage(wrap_storage=storage._untyped(), dtype=dtype),
+        tensor_offset, tensor_size, tensor_stride)
 
-    t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
     if tensor_cls == torch.nn.parameter.Parameter:
-        t = torch.nn.parameter.Parameter(t)
-    t.requires_grad = requires_grad
-    t._backward_hooks = backward_hooks
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
     return t
 
 
@@ -109,6 +146,9 @@ def reduce_tensor(tensor):
                            "since autograd does not support crossing process boundaries.  "
                            "If you just want to transfer the data, call detach() on the tensor "
                            "before serializing (e.g., putting it on the queue).")
+
+    check_serializing_named_tensor(tensor)
+    torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -124,24 +164,67 @@ def reduce_tensor(tensor):
     # *entire* cudaMalloc allocation, i.e., the 0xA000 region, not just
     # the storage 0xA100 (because that is what CUDA supports).  So, on the
     # other end, there simply isn't any way to say, "Wait, you gave me
-    # a bigger region (0xA000) than the one I wanted (0xA100)"; we have
-    # to just make a storage for the entire caching allocator block.
+    # a bigger region (0xA000) than the one I wanted (0xA100)".
     #
-    # This is fine, because all we need to do is just adjust the offset
-    # on the tensor itself: instead of:
+    # OK, so if you sent the cudaMalloc allocation, can you just wrap that up as
+    # one storage itself? No, because this cudaMalloc allocation might contain
+    # storages of mixed types: float, bytes, double... If you make the entire
+    # allocation a single storage of a type A, we'll hit an error when constructing
+    # a tensor of type B on the storage.
     #
-    #   Tensor(size=0x100, offset=0x020, storage=Storage(data=0xA100, size=0x0100))
+    # cudaIpcMemHandle is an identifier to access the sender cudaMalloc allocation on the
+    # receiver side. However, cudaIpcMemHandles from each device in a given process may
+    # only be opened by one context per device per other process.
+    # If we open and close a memory handle multiples times in a process, CUDA is allowed
+    # to give it a different address; similarly, once we close the memory, we're not
+    # allowed to access it(and the storage/tensor built on top of it), even if it is
+    # still live in the original process. As we cannot make a cudaMalloc allocation
+    # to a single storage in one go, this requires us to cache the device pointer for
+    # each cudaIpcMemHandle on C++ side to reconstruct types of storages, while keep
+    # the old ones alives.
+    # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
-    # we have
+    # This is fine, because all we need to do is to save our position in the allocation,
+    # and reconstruct storage and tensor from it.
+    # 0xA000 ->  -------CUDA Allocation------
+    #           |                            |
+    #           |                            |
+    #           |                            |
+    #           |                            |
+    # 0xA100 ->  --------storage1 begin------
+    #           |                            |
+    # 0xA120 ->  --------tensor1 begin ------
+    #           |                            |
+    #           |                            |
+    #           |                            |
+    #           |                            |
+    #           |                            |
+    # 0xA160 ->  --------tensor1 end---------
+    #           |                            |
+    #           |                            |
+    #           |                            |
+    # 0xA200 ->  --------storage1 end--------
+    #           |                            |
+    # 0xE000 ->  --------CUDA allocation-----
     #
-    #   Tensor(size=0x100, offset=0x120, storage=Storage(data=0xA000, size=0x4000))
+    # To send tensor1, the following info are required from sender to receiver for
+    # storage recontruction.
+    #   1. cudaIpcMemHandle of 0xA000(which can be mapped to a basePtr in receiver process).
+    #      basePtr may not be exactly 0xA000 since it's a different process.
+    #   2. offset(0xA100) of storage1 in the CUDA allocation.
+    #   3. size of storage1(0x100).
+    #
+    # On receiver side:
+    #   1. Get the devPtr of the MemHandle to access the memory, reconstruct a storage
+    #      of the same type using (basePtr, offset, size).
+    #   2. we can reconstruct the tensor on top of the reconstructed storage
+    #   Tensor(size=0x040, offset=0x020, storage=Storage(data=basePtr+0xA100, size=0x0100))
     #
     # This strategy has a few implications:
     #
-    # 1. When we serialize a CUDA tensor for IPC, we have to do it all in one
-    #    go (non-compositionally), instead of first serializing storage, and
-    #    then serializing tensor.  This is because the base address of the
-    #    storage allocation affects what offset we write into the tensor.
+    # 1. When we serialize a CUDA tensor for IPC, we cannot do it all in one
+    #    go (non-compositionally), and this requires to have a global map
+    #    memHandle -> devPtr for each process.
     #
     # 2. We MUST NOT let the new IPC tensor be resizable.  Originally, a resize
     #    of the storage beyond 0x100 would merely have caused us to do a
@@ -158,25 +241,41 @@ def reduce_tensor(tensor):
     # thing.
     #
     if storage.is_cuda:
-        (device, handle, storage_size, storage_offset) = storage._share_cuda_()
+        (device,
+         handle,
+         storage_size_bytes,
+         storage_offset_bytes,
+         ref_counter_handle,
+         ref_counter_offset,
+         event_handle,
+         event_sync_required) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
-
         shared_cache[handle] = StorageWeakRef(storage)
-
+        # _backward_hooks purposely omitted here, see
+        # Note [Don't serialize hooks]
         return (rebuild_cuda_tensor,
                 (type(tensor),
                  tensor.size(),
                  tensor.stride(),
-                 tensor_offset + storage_offset,
+                 tensor_offset,  # tensor offset in its storage
                  type(storage),
+                 tensor.dtype,
                  device,
-                 handle,
-                 storage_size,
+                 handle,  # identifier which CUDA allocation is the storage in.
+                 storage_size_bytes,  # size(in bytes) of the storage
+                 storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
                  tensor.requires_grad,
-                 tensor._backward_hooks))
+                 ref_counter_handle,
+                 ref_counter_offset,
+                 event_handle,
+                 event_sync_required))
 
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad, tensor._backward_hooks)
-    return (rebuild_tensor, (type(tensor), storage, metadata))
+    # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
+    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
+    return (rebuild_tensor, (
+        type(tensor),
+        storage,
+        metadata))
 
 
 def fd_id(fd):
@@ -191,14 +290,11 @@ def storage_from_cache(cls, key):
     storage_ref = shared_cache.get(key)
     if storage_ref is None:
         return None
-    return cls._new_with_weak_ptr(storage_ref.cdata)
+    return torch._UntypedStorage._new_with_weak_ptr(storage_ref.cdata)
 
 
 def rebuild_storage_fd(cls, df, size):
-    if sys.version_info[0] == 2:
-        fd = multiprocessing.reduction.rebuild_handle(df)
-    else:
-        fd = df.detach()
+    fd = df.detach()
     try:
         storage = storage_from_cache(cls, fd_id(fd))
         if storage is not None:
@@ -210,11 +306,18 @@ def rebuild_storage_fd(cls, df, size):
         os.close(fd)
 
 
-def rebuild_storage_filename(cls, manager, handle, size):
-    storage = storage_from_cache(cls, handle)
+def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
+    storage: Union[torch._TypedStorage, torch._UntypedStorage] = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
-    storage = cls._new_shared_filename(manager, handle, size)
+    if dtype is None:
+        storage = torch._UntypedStorage._new_shared_filename(manager, handle, size)
+    else:
+        byte_size = size * torch._utils._element_size(dtype)
+        untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename(manager, handle, byte_size)
+        storage = torch._TypedStorage(
+            wrap_storage=untyped_storage,
+            dtype=dtype)
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 
@@ -222,6 +325,19 @@ def rebuild_storage_filename(cls, manager, handle, size):
 def rebuild_storage_empty(cls):
     return cls()
 
+def rebuild_typed_storage(storage, dtype):
+    return torch.storage._TypedStorage(wrap_storage=storage, dtype=dtype)
+
+# Use for torch.storage._TypedStorage
+def reduce_typed_storage(storage):
+    return (rebuild_typed_storage, (storage._storage, storage.dtype))
+
+def rebuild_typed_storage_child(storage, storage_type):
+    return storage_type(wrap_storage=storage)
+
+# Use for child classes of torch.storage._TypedStorage, like torch.FloatStorage
+def reduce_typed_storage_child(storage):
+    return (rebuild_typed_storage_child, (storage._storage, type(storage)))
 
 def reduce_storage(storage):
     from . import get_sharing_strategy
@@ -231,6 +347,8 @@ def reduce_storage(storage):
         metadata = storage._share_filename_()
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
+        if isinstance(storage, torch._TypedStorage):
+            metadata += (storage.dtype,)
         storage._shared_incref()
     elif storage.size() == 0:
         # This is special cased because Empty tensors
@@ -238,13 +356,10 @@ def reduce_storage(storage):
         return (rebuild_storage_empty, (type(storage),))
     else:
         fd, size = storage._share_fd_()
-        if sys.version_info[0] == 2:
-            df = multiprocessing.reduction.reduce_handle(fd)
-        else:
-            df = multiprocessing.reduction.DupFd(fd)
+        df = multiprocessing.reduction.DupFd(fd)
         cache_key = fd_id(fd)
         metadata = (df, size)
-        rebuild = rebuild_storage_fd
+        rebuild = rebuild_storage_fd  # type: ignore[assignment]
 
     shared_cache[cache_key] = StorageWeakRef(storage)
     return (rebuild, (type(storage),) + metadata)
@@ -254,7 +369,12 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        ForkingPickler.register(t, reduce_storage)
+        if t.__name__ == '_UntypedStorage':
+            ForkingPickler.register(t, reduce_storage)
+        else:
+            ForkingPickler.register(t, reduce_typed_storage_child)
+
+    ForkingPickler.register(torch.storage._TypedStorage, reduce_typed_storage)
 
     for t in torch._tensor_classes:
         ForkingPickler.register(t, reduce_tensor)

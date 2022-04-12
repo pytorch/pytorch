@@ -8,8 +8,6 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetIDEEPStaticContext();
-
 class IDEEPContext final : public BaseContext {
  public:
   typedef std::mt19937 rand_gen_type;
@@ -18,20 +16,14 @@ class IDEEPContext final : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), IDEEP);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
 
-  BaseStaticContext* GetStaticContext() const override {
-    return GetIDEEPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetIDEEPStaticContext();
-  }
-
-  inline void SwitchToDevice(int /*stream_id*/) {}
+  inline void SwitchToDevice(int64_t /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) {
@@ -53,8 +45,8 @@ class IDEEPContext final : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -85,13 +77,13 @@ class IDEEPContext final : public BaseContext {
 
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(size_t n, const T* src, T* dst) {
-    if (std::is_fundamental<T>::value) {
+    if (c10::guts::is_fundamental<T>::value) {
       CopyBytes<SrcContext, DstContext>(
           n * sizeof(T),
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (int i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         dst[i] = src[i];
       }
     }
@@ -99,7 +91,7 @@ class IDEEPContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     if (meta.copy()) {
       meta.copy()(src, dst, n);
     } else {
@@ -119,7 +111,11 @@ class IDEEPContext final : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  at::Device device() const override {
+    return at::Device(IDEEP);
+  }
+
+  DeviceType device_type() const override {
     return IDEEP;
   }
 
@@ -171,25 +167,5 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
-
-class IDEEPStaticContext : public BaseStaticContext {
- public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<IDEEPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<IDEEPContext>(option);
-  }
-
-  DeviceType GetDeviceType() override {
-    return IDEEP;
-  }
-};
 
 } // namespace caffe2

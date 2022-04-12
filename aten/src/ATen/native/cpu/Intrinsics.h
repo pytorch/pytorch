@@ -1,6 +1,9 @@
 #pragma once
 
-#if defined(_MSC_VER)
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__))
+/* Clang-compatible compiler, targeting x86/x86-64 */
+#include <x86intrin.h>
+#elif defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
 #if _MSC_VER <= 1900
@@ -19,6 +22,11 @@
     (defined(__VEC__) || defined(__ALTIVEC__))
 /* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */
 #include <altivec.h>
+/* We need to undef those tokens defined by <altivec.h> to avoid conflicts
+   with the C++ types. => Can still use __bool/__vector */
+#undef bool
+#undef vector
+#undef pixel
 #elif defined(__GNUC__) && defined(__SPE__)
 /* GCC-compatible compiler, targeting PowerPC with SPE */
 #include <spe.h>

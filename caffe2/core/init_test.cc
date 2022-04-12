@@ -8,11 +8,18 @@
 namespace caffe2 {
 namespace {
 bool gTestInitFunctionHasBeenRun = false;
+bool gTestFailInitFunctionHasBeenRun = false;
 
 bool TestInitFunction(int*, char***) {
   gTestInitFunctionHasBeenRun = true;
   return true;
 }
+
+bool TestFailInitFunction(int*, char***) {
+  gTestFailInitFunctionHasBeenRun = true;
+  return false;
+}
+
 REGISTER_CAFFE2_INIT_FUNCTION(
     TestInitFunction,
     &TestInitFunction,
@@ -21,12 +28,14 @@ REGISTER_CAFFE2_INIT_FUNCTION(
 
 int dummy_argc = 1;
 const char* dummy_name = "foo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-pro-type-const-cast)
 char** dummy_argv = const_cast<char**>(&dummy_name);
 } // namespace
 
 TEST(InitTest, TestInitFunctionHasRun) {
   caffe2::GlobalInit(&dummy_argc, &dummy_argv);
   EXPECT_TRUE(gTestInitFunctionHasBeenRun);
+  EXPECT_FALSE(gTestFailInitFunctionHasBeenRun);
 }
 
 TEST(InitTest, CanRerunGlobalInit) {
@@ -36,12 +45,28 @@ TEST(InitTest, CanRerunGlobalInit) {
 
 void LateRegisterInitFunction() {
   ::caffe2::InitRegisterer testInitFunc(
-      TestInitFunction, false, "This should fail");
+      TestInitFunction, false, "This should succeed but warn");
+}
+
+void LateRegisterEarlyInitFunction() {
+  ::caffe2::InitRegisterer testSecondInitFunc(
+      TestInitFunction, true, "This should fail for early init");
+}
+
+void LateRegisterFailInitFunction() {
+  ::caffe2::InitRegisterer testSecondInitFunc(
+      TestFailInitFunction, false, "This should fail for failed init");
 }
 
 TEST(InitTest, FailLateRegisterInitFunction) {
   caffe2::GlobalInit(&dummy_argc, &dummy_argv);
-  EXPECT_THROW(LateRegisterInitFunction(), caffe2::EnforceNotMet);
+  LateRegisterInitFunction();
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW(LateRegisterEarlyInitFunction(), ::c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW(LateRegisterFailInitFunction(), ::c10::Error);
+  EXPECT_TRUE(gTestInitFunctionHasBeenRun);
+  EXPECT_TRUE(gTestFailInitFunctionHasBeenRun);
 }
 
 } // namespace caffe2

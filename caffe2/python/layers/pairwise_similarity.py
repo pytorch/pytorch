@@ -1,9 +1,9 @@
 ## @package dot_product
 # Module caffe2.python.layers.dot_product
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
@@ -17,7 +17,7 @@ class PairwiseSimilarity(ModelLayer):
                  name='pairwise_similarity', **kwargs):
         super(PairwiseSimilarity, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Struct), (
-            "Incorrect input type. Excpected Struct, but received: {0}".
+            "Incorrect input type. Expected Struct, but received: {0}".
             format(input_record))
         assert (
             ('all_embeddings' in input_record) ^

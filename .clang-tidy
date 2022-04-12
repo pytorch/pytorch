@@ -1,46 +1,45 @@
 ---
-# NOTE: there must be no spaces before the '-', so put the comma first.
+# NOTE there must be no spaces before the '-', so put the comma last.
+InheritParentConfig: true
 Checks: '
-  *
-  ,clang-analyzer-*
-  ,modernize-*
-  ,-cert-err58-cpp
-  ,-cert-err60-cpp
-  ,-clang-diagnostic-*
-  ,-cppcoreguidelines-owning-memory
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-type-member-init
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-cppcoreguidelines-special-member-functions
-  ,-fuchsia-*
-  ,-google-build-using-namespace
-  ,-google-explicit-constructor
-  ,-google-readability-braces-around-statements
-  ,-google-readability-namespace-comments
-  ,-google-readability-todo
-  ,-google-runtime-references
-  ,-google-runtime-references
-  ,-hicpp-braces-around-statements
-  ,-hicpp-explicit-conversions
-  ,-hicpp-no-array-decay
-  ,-hicpp-signed-bitwise
-  ,-hicpp-special-member-functions
-  ,-hicpp-vararg
-  ,-llvm-header-guard
-  ,-llvm-include-order
-  ,-llvm-namespace-comment
-  ,-misc-unused-parameters
-  ,-modernize-make-unique
-  ,-modernize-use-default-member-init
-  ,-performance-unnecessary-value-param
-  ,-readability-braces-around-statements
-  ,-readability-else-after-return
-  ,-readability-named-parameter
-  '
-WarningsAsErrors: ''
-HeaderFilterRegex: 'torch/csrc/'
+bugprone-*,
+-bugprone-forward-declaration-namespace,
+-bugprone-macro-parentheses,
+-bugprone-lambda-function-name,
+-bugprone-reserved-identifier,
+cppcoreguidelines-*,
+-cppcoreguidelines-avoid-magic-numbers,
+-cppcoreguidelines-avoid-non-const-global-variables,
+-cppcoreguidelines-interfaces-global-init,
+-cppcoreguidelines-macro-usage,
+-cppcoreguidelines-owning-memory,
+-cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+-cppcoreguidelines-pro-bounds-constant-array-index,
+-cppcoreguidelines-pro-bounds-pointer-arithmetic,
+-cppcoreguidelines-pro-type-cstyle-cast,
+-cppcoreguidelines-pro-type-reinterpret-cast,
+-cppcoreguidelines-pro-type-static-cast-downcast,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-cppcoreguidelines-special-member-functions,
+-cppcoreguidelines-non-private-member-variables-in-classes,
+-facebook-hte-RelativeInclude,
+hicpp-exception-baseclass,
+hicpp-avoid-goto,
+modernize-*,
+-modernize-concat-nested-namespaces,
+-modernize-return-braced-init-list,
+-modernize-use-auto,
+-modernize-use-default-member-init,
+-modernize-use-using,
+-modernize-use-trailing-return-type,
+-modernize-use-nodiscard,
+performance-*,
+-performance-noexcept-move-constructor,
+-performance-unnecessary-value-param,
+'
+HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
 AnalyzeTemporaryDtors: false
+WarningsAsErrors: '*'
 CheckOptions:
 ...

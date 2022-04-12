@@ -24,18 +24,22 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_string(image_file, "", "The input image file name.");
-CAFFE2_DEFINE_string(label_file, "", "The label file name.");
-CAFFE2_DEFINE_string(output_file, "", "The output db name.");
-CAFFE2_DEFINE_string(db, "leveldb", "The db type.");
-CAFFE2_DEFINE_int(data_limit, -1,
-             "If set, only output this number of data points.");
-CAFFE2_DEFINE_bool(channel_first, false,
-            "If set, write the data as channel-first (CHW order) as the old "
-            "Caffe does.");
+C10_DEFINE_string(image_file, "", "The input image file name.");
+C10_DEFINE_string(label_file, "", "The label file name.");
+C10_DEFINE_string(output_file, "", "The output db name.");
+C10_DEFINE_string(db, "leveldb", "The db type.");
+C10_DEFINE_int(
+    data_limit,
+    -1,
+    "If set, only output this number of data points.");
+C10_DEFINE_bool(
+    channel_first,
+    false,
+    "If set, write the data as channel-first (CHW order) as the old "
+    "Caffe does.");
 
 namespace caffe2 {
 uint32_t swap_endian(uint32_t val) {
@@ -60,7 +64,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   image_file.read(reinterpret_cast<char*>(&magic), 4);
   magic = swap_endian(magic);
   if (magic == 529205256) {
-    LOG(FATAL) << 
+    LOG(FATAL) <<
         "It seems that you forgot to unzip the mnist dataset. You should "
         "first unzip them using e.g. gunzip on Linux.";
   }
@@ -79,21 +83,20 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   cols = swap_endian(cols);
 
   // leveldb
-  std::unique_ptr<db::DB> mnist_db(db::CreateDB(caffe2::FLAGS_db, db_path, db::NEW));
+  std::unique_ptr<db::DB> mnist_db(db::CreateDB(FLAGS_db, db_path, db::NEW));
   std::unique_ptr<db::Transaction> transaction(mnist_db->NewTransaction());
   // Storing to db
   char label_value;
   std::vector<char> pixels(rows * cols);
   int count = 0;
-  const int kMaxKeyLength = 10;
+  const int kMaxKeyLength = 11;
   char key_cstr[kMaxKeyLength];
-  string value;
 
   TensorProtos protos;
   TensorProto* data = protos.add_protos();
   TensorProto* label = protos.add_protos();
   data->set_data_type(TensorProto::BYTE);
-  if (caffe2::FLAGS_channel_first) {
+  if (FLAGS_channel_first) {
     data->add_dims(1);
     data->add_dims(rows);
     data->add_dims(cols);
@@ -115,11 +118,10 @@ void convert_dataset(const char* image_filename, const char* label_filename,
     }
     label->set_int32_data(0, static_cast<int>(label_value));
     snprintf(key_cstr, kMaxKeyLength, "%08d", item_id);
-    protos.SerializeToString(&value);
     string keystr(key_cstr);
 
     // Put in db
-    transaction->Put(keystr, value);
+    transaction->Put(keystr, protos.SerializeAsString());
     if (++count % 1000 == 0) {
       transaction->Commit();
     }
@@ -133,7 +135,10 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  caffe2::convert_dataset(caffe2::FLAGS_image_file.c_str(), caffe2::FLAGS_label_file.c_str(),
-                          caffe2::FLAGS_output_file.c_str(), caffe2::FLAGS_data_limit);
+  caffe2::convert_dataset(
+      FLAGS_image_file.c_str(),
+      FLAGS_label_file.c_str(),
+      FLAGS_output_file.c_str(),
+      FLAGS_data_limit);
   return 0;
 }

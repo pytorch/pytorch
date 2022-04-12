@@ -1,9 +1,9 @@
 ## @package parser
 # Module caffe2.python.docs.parser
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import re
 
 
@@ -19,10 +19,10 @@ class Parser(object):
         ('```(.+?)```',
          lambda m, f: f.addCode(m.group(1))
          ),
-        ('((( {2})+)(\S.*)(\n\s*\n|\n))+',
+        (r'((( {2})+)(\S.*)(\n\s*\n|\n))+',
          lambda m, f: f.addCode(m.group(0))
          ),
-        ('([^\.])\n',
+        (r'([^\.])\n',
          lambda m, f: f.addRaw('{c} '.format(c=m.group(1))) or True
          ),
         ('`(.+?)`',
@@ -30,13 +30,13 @@ class Parser(object):
          ),
         # Make links clickable
         ('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]'
-         '|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
+         r'|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
          lambda m, f: f.addLink(m.group(0), m.group(0))
          ),
-        ('\*\*(.+?)\*\*',
+        (r'\*\*(.+?)\*\*',
          lambda m, f: f.addEmphasis(m.group(1), 2)
          ),
-        ('\*(.+?)\*',
+        (r'\*(.+?)\*',
          lambda m, f: f.addEmphasis(m.group(1), 1)
          ),
     ]

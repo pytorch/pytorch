@@ -13,10 +13,10 @@
 # limitations under the License.
 ##############################################################################
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import caffe2.python._import_c_extension as C
 
@@ -46,15 +46,9 @@ def fuseNNPACKConvRelu(net):
     )
 
 
-def sinkMaxPool(net):
+def optimizeForMKLDNN(net, training_mode = False):
     net.Proto().ParseFromString(
-        C.transform_sinkMaxPool(net.Proto().SerializeToString())
-    )
-
-
-def optimizeForIDEEP(net, training_mode = False):
-    net.Proto().ParseFromString(
-        C.transform_optimizeForIDEEP(net.Proto().SerializeToString(), training_mode)
+        C.transform_optimizeForMKLDNN(net.Proto().SerializeToString(), training_mode)
     )
 
 

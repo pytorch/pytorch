@@ -7,12 +7,6 @@
 
 namespace caffe2 {
 
-// We put this here because context.h rather than context_base.h is included in
-// user code
-// TODO: rename context.h -> context_cpu.h & context_base.h -> context.h
-CAFFE2_API BaseStaticContext*
-    BaseContext::static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
-
 uint32_t RandomNumberSeed() {
   // Originally copied from folly::randomNumberSeed (at 418ad4)
   // modified to use chrono instead of sys/time.h
@@ -30,11 +24,41 @@ uint32_t RandomNumberSeed() {
       kPrime2 * tv_sec + kPrime3 * tv_usec;
 }
 
-BaseStaticContext* GetCPUStaticContext() {
-  static CPUStaticContext context;
-  return &context;
+namespace {
+inline void CopyBytesImpl(size_t nbytes, const void* src, void* dst) {
+  if (nbytes == 0) {
+    return;
+  }
+  CAFFE_ENFORCE(src);
+  CAFFE_ENFORCE(dst);
+  memcpy(dst, src, nbytes);
 }
 
-REGISTER_STATIC_CONTEXT(CPU, GetCPUStaticContext());
+void CopyBytesWrapper(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device) {
+  CopyBytesImpl(nbytes, src, dst);
+}
+} // namespace
+
+void CPUContext::CopyBytesSameDevice(
+    size_t nbytes,
+    const void* src,
+    void* dst) {
+  CopyBytesImpl(nbytes, src, dst);
+}
 
 } // namespace caffe2
+
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::CPU, caffe2::CPUContext);
+
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::CPU,
+    DeviceType::CPU,
+    caffe2::CopyBytesWrapper);
+} // namespace at

@@ -1,13 +1,11 @@
 #pragma once
 
 #include <torch/nn/module.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
-#include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
-#include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
 
 #include <memory>
 #include <utility>
@@ -22,6 +20,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class Cloneable : public virtual Module {
  public:
   using Module::Module;
@@ -34,11 +33,7 @@ class Cloneable : public virtual Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      at::optional<Device> device = at::nullopt) const override {
-    auto options = DefaultTensorOptions::get();
-    OptionsGuard options_guard(
-        options.device(device.value_or(options.device())));
-
+      const optional<Device>& device = nullopt) const override {
     NoGradGuard no_grad;
 
     const auto& self = static_cast<const Derived&>(*this);
@@ -47,56 +42,49 @@ class Cloneable : public virtual Module {
     copy->buffers_.clear();
     copy->children_.clear();
     copy->reset();
-    AT_CHECK(
+    TORCH_CHECK(
         copy->parameters_.size() == parameters_.size(),
         "The cloned module does not have the same number of "
         "parameters as the original module after calling reset(). "
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
-    for (const auto& parameter : parameters_) {
-      if (device) {
-        copy->parameters_[parameter.key].copy_(
-            *parameter, /*non_blocking=*/true);
-      } else {
-        at::detail::set_data(
-            copy->parameters_[parameter.key],
-            autograd::Variable(*parameter).data().clone());
-      }
+    for (const auto& parameter : named_parameters(/*recurse=*/false)) {
+      auto& tensor = *parameter;
+      auto data = device && tensor.device() != *device ?
+          tensor.to(*device) : autograd::Variable(tensor).clone();
+      copy->parameters_[parameter.key()].set_data(data);
     }
-    AT_CHECK(
+    TORCH_CHECK(
         copy->buffers_.size() == buffers_.size(),
         "The cloned module does not have the same number of "
         "buffers as the original module after calling reset(). "
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
-    for (const auto& buffer : buffers_) {
-      if (device) {
-        copy->buffers_[buffer.key].copy_(*buffer, /*non_blocking=*/true);
-      } else {
-        at::detail::set_data(
-            copy->buffers_[buffer.key],
-            autograd::Variable(*buffer).data().clone());
-      }
+    for (const auto& buffer : named_buffers(/*recurse=*/false)) {
+      auto& tensor = *buffer;
+      auto data = device && tensor.device() != *device ?
+          tensor.to(*device) : autograd::Variable(tensor).clone();
+      copy->buffers_[buffer.key()].set_data(data);
     }
-    AT_CHECK(
+    TORCH_CHECK(
         copy->children_.size() == children_.size(),
         "The cloned module does not have the same number of "
         "child modules as the original module after calling reset(). "
         "Are you sure you called register_module() inside reset() "
         "and not the constructor?");
     for (const auto& child : children_) {
-      copy->children_[child.key]->clone_(*child.value, device);
+      copy->children_[child.key()]->clone_(*child.value(), device);
     }
     return copy;
   }
 
  private:
-  void clone_(Module& other, at::optional<Device> device) final override {
+  void clone_(Module& other, const optional<Device>& device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.
     auto clone = std::dynamic_pointer_cast<Derived>(other.clone(device));
-    AT_CHECK(
+    TORCH_CHECK(
         clone != nullptr,
         "Attempted to clone submodule, but it is of a "
         "different type than the submodule it was to be cloned into");

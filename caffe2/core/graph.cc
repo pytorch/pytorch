@@ -3,7 +3,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -87,6 +87,7 @@ const std::vector<std::pair<string, int>> Graph::GetSubgraphPerimeterHelper(
         const auto& blobs = edge.second;
         if (match_set.count(parent)) { // but has a parent that is in subgraph
           for (const string& blob : blobs) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             edge_list.push_back({blob, x});
           }
         }
@@ -118,6 +119,7 @@ NetDef Graph::GetNetDef() {
   // This guarantees the lowest lexicographical topological ordering.
 
   // This also means the original nodes will be kept in their execution order.
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   std::priority_queue<int, std::vector<int>, std::greater<int>> q;
 
   // In our graph, G, the nodes don't have a strict ordering. But in the netdef,

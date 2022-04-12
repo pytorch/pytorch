@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import numpy as np
 
 from caffe2.python import workspace, memonger, core, model_helper, brew
@@ -38,7 +33,7 @@ class MemongerTest(hu.HypothesisTestCase):
            batch_size=st.integers(min_value=1, max_value=10),
            do=st.sampled_from(hu.device_options),
            algo=st.sampled_from(memonger.AssignmentAlgorithm))
-    @settings(max_examples=5, timeout=120)
+    @settings(max_examples=5, deadline=None)
     def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -91,7 +86,7 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=1, max_value=10),
            batch_size=st.integers(min_value=1, max_value=10),
            do=st.sampled_from(hu.device_options))
-    @settings(max_examples=5, timeout=120)
+    @settings(max_examples=5, deadline=None)
     def test_fast_memonger(self, input_dim, output_dim, batch_size, do):
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -229,7 +224,7 @@ class MemongerTest(hu.HypothesisTestCase):
         Check that memonger does not make blobs cross CPU/GPU boundary
         '''
         m = model_helper.ModelHelper()
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
             fc1 = brew.fc(m, "data", "fc1", dim_in=2, dim_out=2)
             fc2 = brew.fc(m, fc1, "fc2", dim_in=2, dim_out=2)
             fc3 = brew.fc(m, fc2, "fc3", dim_in=2, dim_out=2)
@@ -259,7 +254,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Create set of blobs on CPU side and GPU side and check they don't
         # overlap
-        device_blobs = {caffe2_pb2.CPU: set(), caffe2_pb2.CUDA: set()}
+        device_blobs = {caffe2_pb2.CPU: set(), workspace.GpuDeviceType: set()}
         for op in optim_proto.op:
             if op.type not in ['CopyCPUToGPU', "CopyGPUToCPU"]:
                 dev = op.device_option.device_type
@@ -267,13 +262,14 @@ class MemongerTest(hu.HypothesisTestCase):
                     device_blobs[dev].add(b)
 
         device_crossers = device_blobs[caffe2_pb2.CPU].intersection(
-            device_blobs[caffe2_pb2.CUDA]
+            device_blobs[workspace.GpuDeviceType]
         )
         self.assertEquals(device_crossers, set())
 
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
+    @settings(deadline=1000)
     def test_gradient_optim_tree(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
@@ -331,6 +327,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
+    @settings(deadline=1000)
     def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -387,6 +384,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
+    @settings(deadline=10000)
     def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.net.Proto().type = "dag"
@@ -452,6 +450,89 @@ class MemongerTest(hu.HypothesisTestCase):
         optimized_loss2 = workspace.FetchBlob("name_x/loss2")
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
+
+    # This test reproduces scenario where dag traversal for finding
+    # shared blobs was not always starting from ops with in degree of 0
+    @settings(deadline=10000)
+    def test_forward_optim_tree_dag_traversal(self):
+        input_dim = 4
+        output_dim = 4
+        batch_size = 4
+
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+
+            # Branch
+            fc3b = brew.fc(m, fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = brew.fc(m, fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+
+            fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
+
+            fc5.Relu([], fc5sum) \
+               .Softmax([], "pred1") \
+               .LabelCrossEntropy(["label"], ["xent1"]) \
+               .AveragedLoss([], "loss1")
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6.Relu([], fc6) \
+               .Softmax([], "pred2") \
+               .LabelCrossEntropy(["label"], ["xent2"]) \
+               .AveragedLoss([], "loss2")
+
+        blobs_before = count_blobs(m.net.Proto())
+        # adding name_x/fc5_w as heads (which belongs to non-root op)
+        # to make sure that dag traversal always starts from root ops
+        optim_proto = memonger.optimize_inference_for_dag(
+            m.net, ["name_x/fc5_w", "name_x/data"], "name_x"
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+    # This is specifically to verify the op schema check being done in memonger
+    def test_forward_optim_tree_enforce_inplace_op_invalid(self):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        net = m.net
+        net.IndexFreeze("A", "B")  # enforce inplace op
+        net.Sum(["B", "B"], "C")
+        net.Relu("C", "D")
+        net.Sum(["D", "D"], "E")
+
+        with self.assertRaises(RuntimeError):
+            memonger.optimize_inference_for_dag(net, ["A"], "")
+
+    # Here inplace op is specifically a root op to repro the scenario where dag
+    # memonger could treat all the output blobs as shareable blobs and fails
+    # assertion of input blob with the same name not allowed to share
+    def test_forward_optim_tree_enforce_inplace_op_valid_and_as_head(self):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        net = m.net
+        net.IndexFreeze("A", "A")  # enforce inplace op
+        net.Sum(["A", "A"], "B")
+        net.Relu("B", "C")
+        net.Relu("C", "D")
+        net.Sum(["D", "D"], "E")
+
+        blobs_before = count_blobs(m.net.Proto())
+        optim_proto = memonger.optimize_inference_for_dag(
+            net, ["A"], ""
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
 
     def test_rnn(self):
         from caffe2.python import rnn_cell

@@ -17,8 +17,9 @@ class WhereOp final : public Operator<Context> {
   USE_OPERATOR_FUNCTIONS(Context);
   USE_DISPATCH_HELPER;
 
-  WhereOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit WhereOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast_on_rows", enable_broadcast_, 0) {}
 
   bool RunOnDevice() override {
@@ -32,16 +33,16 @@ class WhereOp final : public Operator<Context> {
     auto& select = Input(0);
     auto& left = Input(1);
     auto& right = Input(2);
-    auto* output = Output(0);
+
     if (enable_broadcast_) {
-      CAFFE_ENFORCE_EQ(select.ndim(), 1);
-      CAFFE_ENFORCE_EQ(select.dim(0), right.dim(0));
-      CAFFE_ENFORCE_EQ(left.dims(), right.dims());
+      CAFFE_ENFORCE_EQ(select.dim(), 1);
+      CAFFE_ENFORCE_EQ(select.size(0), right.size(0));
+      CAFFE_ENFORCE_EQ(left.sizes(), right.sizes());
     } else {
-      CAFFE_ENFORCE_EQ(select.dims(), left.dims());
-      CAFFE_ENFORCE_EQ(select.dims(), right.dims());
+      CAFFE_ENFORCE_EQ(select.sizes(), left.sizes());
+      CAFFE_ENFORCE_EQ(select.sizes(), right.sizes());
     }
-    output->ResizeLike(left);
+    auto* output = Output(0, left.sizes(), at::dtype<T>());
 
     const bool* select_data = select.template data<bool>();
     const T* left_data = left.template data<T>();
@@ -50,24 +51,24 @@ class WhereOp final : public Operator<Context> {
 
     if (enable_broadcast_) {
       size_t block_size = left.size_from_dim(1);
-      for (int i = 0; i < select.size(); i++) {
+      for (const auto i : c10::irange(select.numel())) {
         size_t offset = i * block_size;
         if (select_data[i]) {
           context_.CopyItemsSameDevice(
-              output->meta(),
+              output->dtype(),
               block_size,
               left_data + offset,
               output_data + offset);
         } else {
           context_.CopyItemsSameDevice(
-              output->meta(),
+              output->dtype(),
               block_size,
               right_data + offset,
               output_data + offset);
         }
       }
     } else {
-      for (int i = 0; i < select.size(); ++i) {
+      for (const auto i : c10::irange(select.numel())) {
         output_data[i] = select_data[i] ? left_data[i] : right_data[i];
       }
     }
@@ -111,8 +112,9 @@ class IsMemberOfOp final : public Operator<Context> {
  public:
   using TestableTypes = TensorTypes<int32_t, int64_t, bool, std::string>;
 
-  IsMemberOfOp(const OperatorDef& op, Workspace* ws)
-      : Operator<Context>(op, ws) {
+  template <class... Args>
+  explicit IsMemberOfOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     auto dtype =
         static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_UNDEFINED));
@@ -147,8 +149,8 @@ class IsMemberOfOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& input = Input(0);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+
+    auto* output = Output(0, input.sizes(), at::dtype<bool>());
 
     if (!values_.has_values()) {
       values_.set(this->template GetRepeatedArgument<T>(VALUE_TAG));
@@ -157,7 +159,7 @@ class IsMemberOfOp final : public Operator<Context> {
 
     const T* input_data = input.template data<T>();
     bool* output_data = output->template mutable_data<bool>();
-    for (int i = 0; i < input.size(); ++i) {
+    for (const auto i : c10::irange(input.numel())) {
       output_data[i] = values.find(input_data[i]) != values.end();
     }
     return true;

@@ -48,7 +48,7 @@ TEST(EnginePrefTest, GPUDeviceDefaultPreferredEngines) {
     return;
   OperatorDef op_def;
   Workspace ws;
-  op_def.mutable_device_option()->set_device_type(CUDA);
+  op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   op_def.set_type("JustTest");
 
   {

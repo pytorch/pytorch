@@ -10,14 +10,15 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/create_scope_op.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
 template <class Context>
 class DoOp final : public Operator<Context> {
  public:
-  DoOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DoOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws), parent_ws_(ws) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("net"),
@@ -46,18 +47,19 @@ class DoOp final : public Operator<Context> {
 
     const auto& outer_blob_names = checkAndGetOuterNames(operator_def);
     std::unordered_set<std::string> used_outer_names;
-    for (size_t blob_idx = 0; blob_idx < inner_blobs.size(); ++blob_idx) {
+    for (const auto blob_idx : c10::irange(inner_blobs.size())) {
       CAFFE_ENFORCE(
           !blob_bindings_.count(inner_blobs[blob_idx]),
           "Invalid blob bindings: redefinition of inner blob " +
               inner_blobs[blob_idx]);
       CAFFE_ENFORCE(
           outer_blobs_idx[blob_idx] >= 0 &&
+              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
               outer_blobs_idx[blob_idx] < outer_blob_names.size(),
           "Invalid blob bindings: outer blob index (" +
-              caffe2::to_string(outer_blobs_idx[blob_idx]) + ", inner name: " +
+              c10::to_string(outer_blobs_idx[blob_idx]) + ", inner name: " +
               inner_blobs[blob_idx] + ") is out of bounds [0, " +
-              caffe2::to_string(outer_blob_names.size() - 1) + "]");
+              c10::to_string(outer_blob_names.size() - 1) + "]");
       const auto& outer_name = outer_blob_names[outer_blobs_idx[blob_idx]];
       CAFFE_ENFORCE(
           !used_outer_names.count(outer_name),
@@ -153,7 +155,7 @@ class DoOp final : public Operator<Context> {
       const OperatorDef& operator_def) const {
     std::vector<std::string> names;
     names.reserve(operator_def.input_size());
-    for (auto idx = 0; idx < operator_def.input_size(); ++idx) {
+    for (const auto idx : c10::irange(operator_def.input_size())) {
       names.push_back(operator_def.input(idx));
     }
     return names;
@@ -163,7 +165,7 @@ class DoOp final : public Operator<Context> {
       const OperatorDef& operator_def) const {
     std::vector<std::string> names;
     names.reserve(operator_def.output_size());
-    for (auto idx = 0; idx < operator_def.output_size(); ++idx) {
+    for (const auto idx : c10::irange(operator_def.output_size())) {
       names.push_back(operator_def.output(idx));
     }
     return names;

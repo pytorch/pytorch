@@ -15,12 +15,24 @@ VALGRIND=${VALGRIND:=ON}
 ./dlconvertor_test
 ./native_test
 ./scalar_tensor_test
+if [[ -x ./tensor_interop_test ]]; then
+  ./tensor_interop_test
+fi
 ./undefined_tensor_test
+./extension_backend_test
+./lazy_tensor_test
+./tensor_iterator_test
+./Dimname_test
+./Dict_test
+./NamedTensor_test
+./cpu_generator_test
+./vmap_test
+./operators_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
-if [[ -x ./cuda_rng_test ]]; then
-  ./cuda_rng_test
+if [[ -x ./cuda_generator_test ]]; then
+  ./cuda_generator_test
 fi
 if [[ -x ./apply_test ]]; then
   ./apply_test
@@ -31,9 +43,35 @@ fi
 if [[ -x ./cuda_half_test ]]; then
   ./cuda_half_test
 fi
-if [ "$VALGRIND" == "ON" ]
-then
-  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic "[cpu]"
+if [[ -x ./cuda_vectorized_test ]]; then
+  ./cuda_vectorized_test
+fi
+if [[ -x ./cuda_distributions_test ]]; then
+  ./cuda_distributions_test
+fi
+if [[ -x ./cuda_optional_test ]]; then
+  ./cuda_optional_test
+fi
+if [[ -x ./cuda_tensor_interop_test ]]; then
+  ./cuda_tensor_interop_test
+fi
+if [[ -x ./cuda_complex_test ]]; then
+  ./cuda_complex_test
+fi
+if [[ -x ./cuda_complex_math_test ]]; then
+  ./cuda_complex_math_test
+fi
+if [[ -x ./cuda_cub_test ]]; then
+  ./cuda_cub_test
+fi
+if [[ -x ./cuda_atomic_ops_test ]]; then
+  ./cuda_atomic_ops_test
+fi
+if [ "$VALGRIND" == "ON" ]; then
+  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'
+  if [[ -x ./tensor_interop_test ]]; then
+    valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
+  fi
 fi
 
 popd

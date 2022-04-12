@@ -15,7 +15,7 @@ class IOS_CAFFE_EXPORT Caffe2IOSPredictor final {
  public:
   /**
    @allowMetalOperators Allow converting eligible operators to Metal GPU framework accelerated
-   operators. Setting this flag to true doesn't gaurantee predictor will be using Metal operators;
+   operators. Setting this flag to true doesn't guarantee predictor will be using Metal operators;
    Client code must check usingMetalOperators flag to determine predictor is using them.
    */
   static Caffe2IOSPredictor* NewCaffe2IOSPredictor(const caffe2::NetDef& init_net,
