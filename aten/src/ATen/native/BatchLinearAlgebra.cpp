@@ -258,7 +258,8 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
-                             bool compute_uv) {
+                             bool compute_uv,
+                             c10::optional<c10::string_view> driver) {
   TORCH_CHECK(A.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
   auto sizes_and_strides = ::at::native::_get_svd_outputs_sizes_and_strides(A, full_matrices, compute_uv);
@@ -2945,6 +2946,7 @@ DEFINE_DISPATCH(svd_stub);
 TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const bool full_matrices,
                                  const bool compute_uv,
+                                 c10::optional<c10::string_view> driver,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
@@ -3011,6 +3013,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
 std::tuple<Tensor&, Tensor&, Tensor&>
 linalg_svd_out(const Tensor& A,
                bool full_matrices,
+               c10::optional<c10::string_view> driver,
                Tensor & U,
                Tensor & S,
                Tensor & Vh) {
@@ -3025,11 +3028,12 @@ linalg_svd_out(const Tensor& A,
   //   2. We would like to make use of the `compute_uv=False` optimisation within svdvals
   // The only way to achieve these two things and still abide by the compositionality rules
   // is by dispatching to another function.
-  return at::_linalg_svd_out(U, S, Vh, A, full_matrices, /*compute_uv=*/true);
+  return at::_linalg_svd_out(U, S, Vh, A, full_matrices, /*compute_uv=*/true, driver);
 }
 
-std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices) {
-  return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true);
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices,
+    c10::optional<c10::string_view> driver) {
+  return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true, driver);
 }
 
 // See note in linalg_svd for why this function does not have an _ex variant
