@@ -114,13 +114,13 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 The change you have to make is to replace
 
 ```bash
-python setup.py install
+python3 setup.py install
 ```
 
 with
 
 ```bash
-python setup.py develop
+python3 setup.py develop
 ```
 
 This mode will symlink the Python files from the current local source
@@ -138,7 +138,7 @@ if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, 
 
 In case you want to reinstall, make sure that you uninstall PyTorch
 first by running `pip uninstall torch` until you see `WARNING: Skipping
-torch as it is not installed`; next run `python setup.py clean`. After
+torch as it is not installed`; next run `python3 setup.py clean`. After
 that, you can install in `develop` mode again.
 
 ### Tips and Debugging
@@ -161,14 +161,14 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   ```bash
   git submodule deinit -f .
   git clean -xdf
-  python setup.py clean
+  python3 setup.py clean
   git submodule update --init --recursive --jobs 0 # very important to sync the submodules
-  python setup.py develop                          # then try running the command again
+  python3 setup.py develop                          # then try running the command again
   ```
-  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  4. The main step within `python3 setup.py develop` is running `make` from the `build` directory. If you want to
   experiment with some environment variables, you can pass them into the command:
   ```bash
-  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python3 setup.py develop
   ```
 * If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
   - If you encountered error such as
@@ -311,7 +311,7 @@ All PyTorch test suites are located in the `test` folder and start with
 suite with
 
 ```bash
-python test/run_test.py
+python3 test/run_test.py
 ```
 
 or run individual test suites using the command `python test/FILENAME.py`,
@@ -322,7 +322,7 @@ For example, to run all the TorchScript JIT tests (located at
 `test/test_jit.py`), you would run:
 
 ```bash
-python test/test_jit.py
+python3 test/test_jit.py
 ```
 
 You can narrow down what you're testing even further by specifying the
@@ -335,7 +335,7 @@ Going off the above example, let's say you want to run
 in `test/test_jit.py`. Your command would be:
 
 ```bash
-python test/test_jit.py TestJit.test_Sequential
+python3 test/test_jit.py TestJit.test_Sequential
 ```
 
 The `expecttest` and `hypothesis` libraries must be installed to run the tests. `mypy` is
@@ -443,7 +443,7 @@ You can generate a commit that limits the CI to only run a specific job by using
 # --job: specify one or more times to filter to a specific job + its dependencies
 # --filter-gha: specify github actions workflows to keep
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
+python3 tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
 
 # Make your changes
 
@@ -562,7 +562,7 @@ Then navigate to `localhost:8000` in your web browser.
 You can start a lightweight HTTP server on the remote machine with:
 
 ```bash
-python -m http.server 8000 <path_to_html_output>
+python3 -m http.server 8000 <path_to_html_output>
 ```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
@@ -661,7 +661,7 @@ specific build of PyTorch. To set one up:
 conda create -n pytorch-myfeature
 source activate pytorch-myfeature
 # if you run python now, torch will NOT be installed
-python setup.py develop
+python3 setup.py develop
 ```
 
 ## C++ development tips
@@ -674,7 +674,7 @@ will want to keep in mind:
 
 ### Build only what you need
 
-`python setup.py build` will build everything by default, but sometimes you are
+`python3 setup.py build` will build everything by default, but sometimes you are
 only interested in a specific component.
 
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
@@ -699,7 +699,7 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 For example:
 
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python3 setup.py develop
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -709,7 +709,7 @@ options.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate
+When using `python3 setup.py develop`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -723,7 +723,7 @@ information for the code in `torch/csrc`. More information at:
 By default, cmake will use its Makefile generator to generate your build
 system.  You can get faster builds if you install the ninja build system
 with `pip install ninja`.  If PyTorch was already built, you will need
-to run `python setup.py clean` once after installing ninja for builds to
+to run `python3 setup.py clean` once after installing ninja for builds to
 succeed.
 
 #### Use CCache
@@ -769,7 +769,7 @@ If not, you can define these variables on the command line before invoking `setu
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
-python setup.py develop
+python3 setup.py develop
 ```
 
 #### Use a faster linker
@@ -796,7 +796,7 @@ setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
 `CMakeCache.txt` file.
 
 ```sh
-USE_PRECOMPILED_HEADERS=1 python setup.py develop
+USE_PRECOMPILED_HEADERS=1 python3 setup.py develop
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
@@ -819,7 +819,7 @@ A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can 
 this as a compiler launcher, similar to `ccache`
 ```bash
 export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
-python setup.py develop
+python3 setup.py develop
 ```
 
 ### C++ frontend development tips
@@ -1147,7 +1147,7 @@ build_with_asan()
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python setup.py develop
+  python3 setup.py develop
 }
 
 run_with_asan()
@@ -1165,7 +1165,7 @@ Then you can use the scripts like:
 
 ```
 suo-devfair ~/pytorch ❯ build_with_asan
-suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
+suo-devfair ~/pytorch ❯ run_with_asan python3 test/test_jit.py
 ```
 
 ### Getting `ccache` to work
