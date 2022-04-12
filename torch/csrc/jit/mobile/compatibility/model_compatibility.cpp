@@ -74,6 +74,7 @@ uint64_t _get_model_bytecode_version(
 
 uint64_t _get_model_bytecode_version(std::istream& in) {
   auto orig_pos = in.tellg();
+  in.seekg(0, in.beg);
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
