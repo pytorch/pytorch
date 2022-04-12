@@ -39,7 +39,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_device,
     verify_ddp_error_logged,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
