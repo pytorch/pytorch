@@ -7,7 +7,6 @@ import functools
 import pprint
 import pickle
 import collections
-import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
