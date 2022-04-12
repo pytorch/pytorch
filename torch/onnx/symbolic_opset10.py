@@ -10,7 +10,7 @@ import torch.onnx.utils
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
-from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu
+from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu, op_with_optional_float_cast
 
 from sys import maxsize
 
@@ -129,10 +129,8 @@ def _avg_pool(name, tuple_fn):
             stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
-            input = g.op("Pad", input,
-                         pads_i=((0,) * 2 + padding) * 2,
-                         mode_s="constant",
-                         value_f=0.)
+            input = op_with_optional_float_cast(g, "Pad", input, pads_i=((0,) * 2 + padding) * 2,
+                                                mode_s="constant", value_f=0., opset_before=11)
             padding = (0,) * len(padding)
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),
@@ -168,9 +166,10 @@ upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
 upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor, antialias):
+
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
-                                                             mode , align_corners)
+                                                             mode, align_corners)
     return g.op("Resize", input, scales, mode_s=mode)
 
 
