@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 
 
 if not dist.is_available():
@@ -126,15 +127,16 @@ class TestFSDPStateDict(FSDPTest):
             # zero the model to ensure parameters are different.
             _zero_model(model_new)
 
-            with model.summon_full_params(), model_new.summon_full_params():
-                params = list(model.parameters())
-                params_new = list(model_new.parameters())
-                self.assertNotEqual(params, params_new)
+            with FullyShardedDataParallel.summon_full_params(model):
+                with FullyShardedDataParallel.summon_full_params(model_new):
+                    params = list(model.parameters())
+                    params_new = list(model_new.parameters())
+                    self.assertNotEqual(params, params_new)
 
             # Verify parameters are the same in the new model.
             model_new.load_state_dict(fsdp_state_dict)
-            with model_new.summon_full_params():
-                with model.summon_full_params():
+            with FullyShardedDataParallel.summon_full_params(model_new):
+                with FullyShardedDataParallel.summon_full_params(model):
                     params = list(model.parameters())
                     params_new = list(model_new.parameters())
                     self.assertEqual(params, params_new)
@@ -268,7 +270,7 @@ class TestFSDPStateDict(FSDPTest):
             optim.step()
             optim.zero_grad()
 
-        with model.summon_full_params():
+        with FullyShardedDataParallel.summon_full_params(model):
             fsdp_params = deepcopy(list(model.parameters()))
 
         # get FSDP state_dict. Note that by default we return state_dict.
@@ -341,12 +343,12 @@ class TestFSDPStateDict(FSDPTest):
             with torch.no_grad():
                 param.zero_()
 
-        with fsdp.summon_full_params():
+        with fsdp.summon_full_params(fsdp):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertNotEqual(p1, p2)
 
         local.load_state_dict(deepcopy(state_dict))
-        with fsdp.summon_full_params():
+        with fsdp.summon_full_params(fsdp):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertEqual(p1, p2)
 
