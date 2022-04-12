@@ -38,7 +38,7 @@ void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sigmoid_backward_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         using comp_t = at::opmath_type<scalar_t>;
-        const auto one = comp_t{1.}
+        const auto one = comp_t{1.};
         const auto comp_b = comp_t{b};
         return comp_t{a} * std::conj((one - comp_b) * comp_b);
       });
