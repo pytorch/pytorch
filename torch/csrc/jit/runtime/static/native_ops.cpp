@@ -1099,7 +1099,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           throw std::runtime_error(
               "Cannot convert a tensor of dimension > 0 to scalar");
         }
-        if (!isIntegralType(tensor.scalar_type())) {
+        if (!isIntegralType(tensor.scalar_type(), /*includeBool=*/false)) {
           std::stringstream ss;
           ss << "Cannot input a tensor of type " << tensor.scalar_type()
              << " as an integral argument";

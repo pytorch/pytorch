@@ -37,8 +37,8 @@ void max_pool1d_impl(
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
       set_quantizer_(output, make_per_tensor_affine_quantizer(input.q_scale(), input.q_zero_point(), output.scalar_type()));
       const Tensor in = input.contiguous();
-      const auto OP = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
-      const auto IP = reinterpret_cast<scalar_t::underlying*>(in.data_ptr());
+      const auto OP = output.data_ptr<scalar_t::underlying>();
+      const auto IP = in.data_ptr<scalar_t::underlying>();
 
       // Value used for padding
       constexpr auto FILL = std::numeric_limits<scalar_t::underlying>::lowest();
