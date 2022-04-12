@@ -4,6 +4,7 @@ import operator
 import torch
 from .observation_type import ObservationType
 import torch.nn.functional as F
+import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
@@ -13,15 +14,29 @@ from ...observer import (
     default_symmetric_fixed_qparams_observer,
 )
 from ...fake_quantize import FixedQParamsFakeQuantize
-from ...fuser_method_mappings import reverse_sequential_wrapper2
+from ...fuser_method_mappings import (
+    reverse_sequential_wrapper2,
+    reverse2,
+    reverse3,
+    fuse_conv_bn,
+    fuse_conv_bn_relu,
+    fuse_linear_bn,
+    fuse_convtranspose_bn,
+)
 
-_ConvMetadata = namedtuple("_ConvMetadata", ["root", "reference", "qat", "relu", "relu_qat", "bn_qat", "bn_relu_qat", "func"])
-_Conv1dMetadata = _ConvMetadata(torch.nn.Conv1d, nnqr.Conv1d, nnqat.Conv1d, nni.ConvReLU1d,
-                                nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d, F.conv1d)
-_Conv2dMetadata = _ConvMetadata(torch.nn.Conv2d, nnqr.Conv2d, nnqat.Conv2d, nni.ConvReLU2d,
-                                nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d, F.conv2d)
-_Conv3dMetadata = _ConvMetadata(torch.nn.Conv3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
-                                nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
+_ConvMetadata = namedtuple(
+    "_ConvMetadata",
+    ["root", "transpose", "bn", "reference", "qat", "relu", "relu_qat", "bn_qat",
+     "bn_relu_qat", "func"])
+_Conv1dMetadata = _ConvMetadata(
+    nn.Conv1d, nn.ConvTranspose1d, nn.BatchNorm1d, nnqr.Conv1d, nnqat.Conv1d, nni.ConvReLU1d,
+    nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d, F.conv1d)
+_Conv2dMetadata = _ConvMetadata(
+    nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d, nnqr.Conv2d, nnqat.Conv2d, nni.ConvReLU2d,
+    nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d, F.conv2d)
+_Conv3dMetadata = _ConvMetadata(
+    nn.Conv3d, nn.ConvTranspose3d, nn.BatchNorm3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
+    nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
 
 # ===================
 # |  DTYPE CONFIGS  |
@@ -54,6 +69,28 @@ default_op_fp16_dtype_config = {
     "weight_dtype": torch.float16,
     # optional, output activation dtype
     "output_dtype": torch.float16,
+}
+
+default_dynamic_int8_dtype_config = {
+    "input_dtype": torch.quint8,
+    "weight_dtype": torch.qint8,
+    "output_dtype": torch.quint8,
+    # currently the dtype check is not yet enabled, so we provided the dtype_configs but
+    # it is not really used yet,
+    # we will enable it a bit later after we moved everything to backend_config_dict
+    "is_dynamic": True,
+}
+
+weight_only_quint8_dtype_config = {
+    "input_dtype": torch.float,
+    "weight_dtype": torch.quint8,
+    "output_dtype": torch.float,
+}
+
+weight_only_quint4x2_dtype_config = {
+    "input_dtype": torch.float,
+    "weight_dtype": torch.quint4x2,
+    "output_dtype": torch.float,
 }
 
 # ======================
@@ -127,11 +164,26 @@ def _get_linear_configs():
 
     # (2) Linear + relu
     # -------------------
+    # 2.1 linear module + relu fusion config
+    # linear relu, linear module + relu module
+    linear_configs.append({
+        "pattern": (torch.nn.ReLU, torch.nn.Linear),
+        "dtype_configs": dtype_configs,
+        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
+    })
+    # linear relu, linear module + functional relu
+    linear_configs.append({
+        "pattern": (torch.nn.functional.relu, torch.nn.Linear),
+        "dtype_configs": dtype_configs,
+        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
+    })
+
+    # 2.2 linear module + relu, fused module configs
     # linear relu, fused module
     linear_configs.append({
         "pattern": nni.LinearReLU,
         "observation_type": observation_type,
-        "dtype_configs": dtype_configs ,
+        "dtype_configs": dtype_configs,
         "root_module": torch.nn.Linear,
         "reference_quantized_module_for_root": nnqr.Linear,
         "qat_module": nniqat.LinearReLU,
@@ -144,20 +196,7 @@ def _get_linear_configs():
         "root_module": torch.nn.Linear,
         "reference_quantized_module_for_root": nnqr.Linear,
     })
-    # linear relu, linear module + relu module
-    linear_configs.append({
-        "pattern": (torch.nn.ReLU, torch.nn.Linear),
-        "observation_type": observation_type,
-        "dtype_configs": dtype_configs,
-        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
-    })
-    # linear relu, linear module + functional relu
-    linear_configs.append({
-        "pattern": (F.relu, torch.nn.Linear),
-        "observation_type": observation_type,
-        "dtype_configs": dtype_configs,
-        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
-    })
+    # 2.3 functional linear + relu configs
     # linear relu, functional linear + relu module
     linear_configs.append({
         "pattern": (torch.nn.ReLU, F.linear),
@@ -173,6 +212,14 @@ def _get_linear_configs():
 
     # (3) Linear + batchnorm
     # ------------------------
+    # 3.1 linear bn fusion
+    linear_configs.append({
+        "pattern": (nn.BatchNorm1d, nn.Linear),
+        "dtype_configs": dtype_configs,
+        "fuser_method": reverse2(fuse_linear_bn)
+    })
+
+    # 3.2 linear bn quantization
     # linear bn, fused module
     linear_configs.append({
         "pattern": nni.LinearBn1d,
@@ -229,6 +276,20 @@ def _get_conv_configs():
 
         # (2) Conv + relu
         # -----------------
+        # 2.1 conv module + relu fusion configs
+        # conv relu fusion, conv module + relu module
+        conv_configs.append({
+            "pattern": (torch.nn.ReLU, convs.root),
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse_sequential_wrapper2(convs.relu),
+        })
+        # conv relu fusion, conv module + functional relu
+        conv_configs.append({
+            "pattern": (F.relu, convs.root),
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse_sequential_wrapper2(convs.relu),
+        })
+        # 2.2 conv module + relu fused module configs
         # conv relu, fused module
         conv_configs.append({
             "pattern": convs.relu,
@@ -246,20 +307,7 @@ def _get_conv_configs():
             "root_module": convs.root,
             "reference_quantized_module_for_root": convs.reference,
         })
-        # conv relu, conv module + relu module
-        conv_configs.append({
-            "pattern": (torch.nn.ReLU, convs.root),
-            "observation_type": observation_type,
-            "dtype_configs": dtype_configs,
-            "fuser_method": reverse_sequential_wrapper2(convs.relu),
-        })
-        # conv relu, conv module + functional relu
-        conv_configs.append({
-            "pattern": (F.relu, convs.root),
-            "observation_type": observation_type,
-            "dtype_configs": dtype_configs,
-            "fuser_method": reverse_sequential_wrapper2(convs.relu),
-        })
+        # 2.3 functional conv + relu configs
         # conv relu, functional conv + relu module
         conv_configs.append({
             "pattern": (torch.nn.ReLU, convs.func),
@@ -275,6 +323,29 @@ def _get_conv_configs():
 
         # (3) Conv + batchnorm (+ relu)
         # -------------------------------
+        # 3.1 conv bn fusion configs
+        # conv + bn fusion
+        conv_configs.append({
+            "pattern": (convs.bn, convs.root),
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse2(fuse_conv_bn),
+        })
+        # conv + bn + relu module fusion
+        conv_configs.append({
+            "pattern": (nn.ReLU, (convs.bn, convs.root)),
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse3(fuse_conv_bn_relu),
+        })
+        # conv + bn + relu functional fusion
+        conv_configs.append({
+            "pattern": (F.relu, (convs.bn, convs.root)),
+            "dtype_configs": dtype_configs,
+            "root_module": convs.root,
+            "fuser_method": reverse3(fuse_conv_bn_relu),
+        })
+        # TODO: we can add fusion for torch.relu as well
+
+        # 3.2 conv + bn (+ relu) fused module configs
         # conv bn, qat fused module
         conv_configs.append({
             "pattern": convs.bn_qat,
@@ -291,6 +362,14 @@ def _get_conv_configs():
             "root_module": convs.root,
             "reference_quantized_module_for_root": convs.reference,
         })
+
+        # (4) conv transpose fusion
+        conv_configs.append({
+            "pattern": (convs.bn, convs.transpose),
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse2(fuse_convtranspose_bn),
+        })
+
     return conv_configs
 
 def _get_binary_op_configs():
@@ -380,33 +459,144 @@ def _get_bn_configs():
         torch.nn.BatchNorm2d: nni.BNReLU2d,
         torch.nn.BatchNorm3d: nni.BNReLU3d,
     }
-    for bn in [torch.nn.BatchNorm2d, torch.nn.BatchNorm3d]:
-        # TODO: enable these and remove entries in fusion_patterns.py
-        # bn_configs.append({
-        #     "pattern": (torch.nn.ReLU, bn),
-        #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-        #     "dtype_configs": default_op_quint8_dtype_config,
-        #     "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
-        # })
-        # bn_configs.append({
-        #     "pattern": (torch.nn.functional.relu, bn),
-        #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-        #     "dtype_configs": default_op_quint8_dtype_config,
-        #     "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
-        # })
+    for bn in bn_to_fused_bn.keys():
+        # bn module + relu module fusion config
+        bn_configs.append({
+            "pattern": (torch.nn.ReLU, bn),
+            "dtype_configs": default_op_quint8_dtype_config,
+            "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+        })
+        # bn module + F.relu fusion config
+        bn_configs.append({
+            "pattern": (torch.nn.functional.relu, bn),
+            "dtype_configs": default_op_quint8_dtype_config,
+            "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+        })
         bn_configs.append({
             "pattern": bn,
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
             "dtype_configs": default_op_quint8_dtype_config,
         })
 
-    for fused_bn in [nni.BNReLU2d, nni.BNReLU3d]:
+    # fused bn configs
+    for fused_bn in bn_to_fused_bn.values():
         bn_configs.append({
             "pattern": fused_bn,
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
             "dtype_configs": default_op_quint8_dtype_config,
         })
     return bn_configs
+
+def _get_share_qparams_op_configs():
+    """ Get the operator config for the operators that works for both float and quantized input
+    if input is quantized, the output Tensor shares the same quantization parameter
+    with input.
+    Example operator: avgpool2d, reshape, transpose, maxpool2d
+    Example observed operator:
+    observer_0 - avgpool2d - observer_0 (same observer instance as input)
+    """
+
+    def _get_share_qprams_op_backend_config(op):
+        return {
+            "pattern": op,
+            "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+            "dtype_configs": [default_op_quint8_dtype_config],
+        }
+
+    share_qparams_ops = [
+        torch.nn.AdaptiveAvgPool1d,
+        torch.nn.AdaptiveAvgPool2d,
+        torch.nn.AdaptiveAvgPool3d,
+        torch.nn.AvgPool1d,
+        torch.nn.AvgPool2d,
+        torch.nn.AvgPool3d,
+        torch.nn.Hardtanh,
+        torch.nn.Identity,
+        torch.nn.MaxPool1d,
+        torch.nn.MaxPool2d,
+        torch.nn.MaxPool3d,
+        torch.nn.ReLU,
+        torch.nn.ReLU6,
+        torch.adaptive_avg_pool1d,
+        torch.nn.functional.adaptive_avg_pool2d,
+        torch.nn.functional.adaptive_avg_pool3d,
+        torch.nn.functional.hardtanh,
+        torch.nn.functional.hardtanh_,
+        torch.nn.functional.interpolate,
+        torch.nn.functional.max_pool1d,
+        torch.nn.functional.max_pool2d,
+        torch.nn.functional.max_pool3d,
+        torch.nn.functional.relu,
+        torch.nn.functional.relu6,
+        torch.avg_pool1d,
+        torch._C._nn.avg_pool2d,
+        torch._C._nn.avg_pool3d,
+        torch.clamp,
+        torch.flatten,
+        torch.mean,
+        torch.repeat_interleave,
+        torch.transpose,
+        torch.squeeze,
+        torch.stack,
+        torch.unsqueeze,
+        operator.floordiv,
+        "contiguous",
+        "clamp",
+        "detach",
+        "detach_",
+        "mean",
+        "permute",
+        "repeat",
+        "repeat_interleave",
+        "reshape",
+        "resize_",
+        "relu",
+        "relu_",
+        "shape",
+        "size",
+        "squeeze",
+        "squeeze_",
+        "transpose",
+        "unsqueeze",
+        "unsqueeze_",
+        "view"
+    ]
+    return [_get_share_qprams_op_backend_config(op) for op in share_qparams_ops]
+
+def _get_rnn_op_configs():
+    rnn_op_configs = []
+    for rnn_op in [
+            torch.nn.GRUCell,
+            torch.nn.LSTMCell,
+            torch.nn.RNNCell,
+            torch.nn.LSTM,
+    ]:
+        rnn_op_configs.append({
+            "pattern": rnn_op,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [default_dynamic_int8_dtype_config],
+        })
+    return rnn_op_configs
+
+def _get_embedding_op_configs():
+    embedding_op_configs = []
+    for embedding_op in [
+            torch.nn.Embedding,
+            torch.nn.EmbeddingBag,
+            nnqat.Embedding,
+            nnqat.EmbeddingBag,
+    ]:
+        embedding_op_configs.append({
+            "pattern": embedding_op,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [
+                weight_only_quint8_dtype_config,
+                weight_only_quint4x2_dtype_config
+            ],
+            # This is temporary, and will be removed soon
+            "_input_output_observed": False
+        })
+    return embedding_op_configs
 
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
@@ -421,5 +611,8 @@ def get_native_backend_config_dict():
             *_get_fixed_qparams_op_configs(),
             _CAT_CONFIG,
             *_get_bn_configs(),
+            *_get_share_qparams_op_configs(),
+            *_get_rnn_op_configs(),
+            *_get_embedding_op_configs(),
         ],
     }
