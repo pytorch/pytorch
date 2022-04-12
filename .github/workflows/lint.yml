@@ -18,7 +18,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install lintrunner
-        run: cargo install lintrunner --version=~0.5
+        run: pip install lintrunner=0.5
       - name: Initialize lint dependencies
         run: lintrunner init
       - name: Do build steps necessary for linters
@@ -41,7 +41,7 @@ jobs:
 
           git grep -Il . >> lint_paths.txt
       - name: Run lintrunner
-        run: lintrunner -vv
+        run: lintrunner -vv --paths-from lint_paths.txt
       - name: Store annotations
         if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository}}
         run: |
