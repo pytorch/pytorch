@@ -258,7 +258,7 @@ void host_softmax_backward(
 
           acc_type<scalar_t, false> sum = 0;
           for (const auto d : c10::irange(dim_size)) {
-            if (!MaskedSoftMax || mask_data[d * dim_stride]) {
+            if (!MaskedSoftMax || !mask_data[d * dim_stride]) {
               if (LogSoftMax) {
                 sum += gradOutput_data[d * dim_stride];
               } else {
@@ -269,7 +269,7 @@ void host_softmax_backward(
           }
 
           for (const auto d : c10::irange(dim_size)) {
-            if (MaskedSoftMax && !mask_data[d * dim_stride]) {
+            if (MaskedSoftMax && mask_data[d * dim_stride]) {
               gradInput_data[d * dim_stride] = 0;
             }
             else if (LogSoftMax) {

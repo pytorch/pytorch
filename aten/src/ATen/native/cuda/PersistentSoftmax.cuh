@@ -263,7 +263,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
-            if (!is_masked || mask[i*element_count+it*WARP_SIZE]) {
+            if (!is_masked || !mask[i*element_count+it*WARP_SIZE]) {
                 sum[i] += grad_reg[i][it];
             }
         }
@@ -279,7 +279,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
-                if (is_masked && !mask[i*element_count+it*WARP_SIZE]) {
+                if (is_masked && mask[i*element_count+it*WARP_SIZE]) {
                     gradInput[i*element_count+it*WARP_SIZE] = 0;
                 }
                 // compute gradients
