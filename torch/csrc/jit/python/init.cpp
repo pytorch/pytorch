@@ -89,7 +89,6 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -874,7 +873,10 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_fuse_tensorexprs",
-          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
+          [](std::shared_ptr<Graph>& g) {
+            FuseTensorExprs(g);
+            RemoveTensorTypeSpecializations(g);
+          })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, const std::vector<at::Tensor>& inps) {
