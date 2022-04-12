@@ -1058,7 +1058,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front()->as<TensorView>();
             list_val.pop_front();
@@ -1080,7 +1080,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
@@ -1161,7 +1161,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()],
                 value_map[node->inputs()[2]->unique()]);
@@ -1192,7 +1192,7 @@ class IrParser {
               MemoryFormat format;
               std::list<Val*> list_val;
               std::tie(format, list_val) = getConsistentValues(
-                  MemoryFormat::Contiguous(),
+                  c10::nullopt,
                   value_map[node->inputs()[0]->unique()],
                   value_map[node->inputs()[1]->unique()],
                   value_map[node->inputs()[2]->unique()]);
