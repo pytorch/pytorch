@@ -1179,7 +1179,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy()) {
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
       return self._reshape_alias(shape, stride.value());
     } else {
       return self.view(shape);
@@ -1482,6 +1482,10 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
     splits[i] = self.narrow(dim, i * split_size, length);
   }
   return splits;
+}
+
+std::vector<Tensor> split(const Tensor& self, IntArrayRef sizes, int64_t dim) {
+  return at::split_with_sizes(self, sizes, dim);
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
