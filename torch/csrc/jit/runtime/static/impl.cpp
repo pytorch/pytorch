@@ -218,6 +218,11 @@ bool mayContainAlias(
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
 
+bool escapesScope(const AliasDb& db, const Value* a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.escapesScope({const_cast<Value*>(a)});
+}
+
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts,
@@ -299,7 +304,7 @@ void ValueGroup::init(const Block& block, const AliasDb& db) {
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, v, external_aliases_)) {
+      if (escapesScope(db, v) || mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -314,13 +319,6 @@ void ValueGroup::init(const Block& block, const AliasDb& db) {
       continue;
     }
     for (const auto* v : node->outputs()) {
-      // Add values that can aliase input/constant values. Note some output
-      // aliases may end up in this category via collection objects (e.g.,
-      // Tuple).
-      if (mayContainAlias(db, v, external_aliases_)) {
-        external_aliases_.insert(v);
-        continue;
-      }
       if (mayContainAlias(db, v, output_aliases_)) {
         output_aliases_.insert(v);
       }
@@ -939,7 +937,7 @@ void BlockRunner::set_inputs(
 
 void BlockRunner::create_memory_planner() {
   if (!planner_) {
-    planner_ = std::make_unique<MemoryPlanner>(
+    planner_ = std::make_unique<StandardMemoryPlanner>(
         this,
         block_info_,
         static_module_.opts().enable_out_variant,
@@ -1716,7 +1714,9 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (!isManagedOutputTensorValue(val)) {
+      if (!isManagedOutputTensorValue(val) || !ival->isTensor()) {
+        // ival can not be a tensor if it's being managed by ops like
+        // to_maybe_copy_out; see ReplaceWithMaybeCopy for details.
         continue;
       }
       const auto& t = ival->toTensor();
