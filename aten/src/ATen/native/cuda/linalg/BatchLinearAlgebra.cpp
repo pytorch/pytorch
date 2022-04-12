@@ -2838,7 +2838,7 @@ void svd_kernel(const Tensor& A,
   } else {
     // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
     // and then conjugate Vh in-place
-    svd_cusolver(A, full_matrices, compute_uv, U, S, compute_uv ? Vh.mT() : Vh, info);
+    svd_cusolver(A, full_matrices, compute_uv, driver, U, S, compute_uv ? Vh.mT() : Vh, info);
     if (compute_uv && Vh.is_complex()) {
       Vh._set_conj(!Vh.is_conj());
     }
