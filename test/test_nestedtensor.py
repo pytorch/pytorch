@@ -280,9 +280,10 @@ class TestNestedTensorDeviceType(TestCase):
             torch.randn(4, 5, 6, device=device),
         ]
         nt = torch.nested_tensor(ts, device=device)
+        pad = 42
         correct_output = torch.cat(
-            [torch.nn.ConstantPad3d((0, 6 - x.shape[2], 0, 5 - x.shape[1], 0, 4 - x.shape[0]), 0)(x.unsqueeze(0)) for x in ts])
-        padded = nt.to_padded_tensor(0)
+            [torch.nn.ConstantPad3d((0, 6 - x.shape[2], 0, 5 - x.shape[1], 0, 4 - x.shape[0]), pad)(x.unsqueeze(0)) for x in ts])
+        padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
 
