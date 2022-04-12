@@ -606,16 +606,8 @@ Tensor instance_norm(
   Tensor running_var_ = repeat_if_defined(running_var, b);
 
   auto input_reshaped = input.contiguous().view(shape);
-  auto out = at::native::batch_norm(
-      input_reshaped,
-      weight_,
-      bias_,
-      running_mean_,
-      running_var_,
-      use_input_stats,
-      momentum,
-      eps,
-      cudnn_enabled);
+  auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
+                            use_input_stats, momentum, eps, cudnn_enabled);
 
   // we alias running_mean and running_var because they are const but we want to modify their data
   if (running_mean.defined()) {

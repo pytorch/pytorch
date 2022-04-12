@@ -1,12 +1,12 @@
 import torch
 from .expanded_weights_impl import ExpandedWeight
 
-def standard_kwargs(kwarg_names, expanded_args_and_kwargs):
+def standard_kwargs(kwarg_names, expanded_args):
     r'''Most `__torch_function__`s standardize the kwargs that they give, so this will separate
     the args and kwargs they pass. Functions that don't are linear and convND
     '''
-    kwarg_values = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
-    expanded_args_without_kwargs = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
+    kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
+    expanded_args_without_kwargs = expanded_args[:len(expanded_args) - len(kwarg_names)]
     expanded_kwargs = {name: value for (name, value) in zip(kwarg_names, kwarg_values)}
     return expanded_args_without_kwargs, expanded_kwargs
 
