@@ -1,5 +1,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//:tools/build_variables.bzl", "aten_ufunc_headers")
 
 CPU_CAPABILITY_NAMES = ["DEFAULT", "AVX2"]
 CAPABILITY_COMPILER_FLAGS = {
@@ -8,8 +9,9 @@ CAPABILITY_COMPILER_FLAGS = {
 }
 
 PREFIX = "aten/src/ATen/native/"
+EXTRA_PREFIX = "aten/src/ATen/"
 
-def intern_build_aten_ops(copts, deps):
+def intern_build_aten_ops(copts, deps, extra_impls):
     for cpu_capability in CPU_CAPABILITY_NAMES:
         srcs = []
         for impl in native.glob(
@@ -20,6 +22,17 @@ def intern_build_aten_ops(copts, deps):
         ):
             name = impl.replace(PREFIX, "")
             out = PREFIX + name + "." + cpu_capability + ".cpp"
+            native.genrule(
+                name = name + "_" + cpu_capability + "_cp",
+                srcs = [impl],
+                outs = [out],
+                cmd = "cp $< $@",
+            )
+            srcs.append(out)
+
+        for impl in extra_impls:
+            name = impl.replace(EXTRA_PREFIX, "")
+            out = EXTRA_PREFIX + name + "." + cpu_capability + ".cpp"
             native.genrule(
                 name = name + "_" + cpu_capability + "_cp",
                 srcs = [impl],
@@ -81,3 +94,32 @@ generate_aten = rule(
         "srcs": attr.label_list(allow_files = True),
     },
 )
+
+# copy pasted from ufunc_defs.bzl, as ufuncs_defs.bzl cannot be included
+# from BUILD.bazel because it has a directory relative load, and Bazel
+# always load from workspace root.  The "correct" fix would be to move
+# build_variables.bzl to the top level but I don't have time to do this at
+# the moment.
+
+aten_ufunc_names = [
+    paths.split_extension(paths.basename(h))[0]
+    for h in aten_ufunc_headers
+]
+
+def aten_ufunc_generated_cpu_sources(gencode_pattern = "{}"):
+    return [gencode_pattern.format(name) for name in [
+        "UfuncCPU_{}.cpp".format(n)
+        for n in aten_ufunc_names
+    ]]
+
+def aten_ufunc_generated_cpu_kernel_sources(gencode_pattern = "{}"):
+    return [gencode_pattern.format(name) for name in [
+        "UfuncCPUKernel_{}.cpp".format(n)
+        for n in aten_ufunc_names
+    ]]
+
+def aten_ufunc_generated_cuda_sources(gencode_pattern = "{}"):
+    return [gencode_pattern.format(name) for name in [
+        "UfuncCUDA_{}.cu".format(n)
+        for n in aten_ufunc_names
+    ]]

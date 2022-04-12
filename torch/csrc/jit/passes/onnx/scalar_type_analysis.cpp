@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 namespace torch {
@@ -11,13 +12,6 @@ using namespace ::c10::onnx;
 }
 
 namespace {
-class ScalarTypeHashFunction {
- public:
-  size_t operator()(const c10::ScalarType& type) const {
-    return static_cast<size_t>(type);
-  }
-};
-
 const int ONNX_OPSET_14 = 14;
 
 static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>

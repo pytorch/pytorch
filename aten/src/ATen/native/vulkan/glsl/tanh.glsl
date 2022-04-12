@@ -18,6 +18,10 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    imageStore(uOutput, pos, tanh(texelFetch(uInput, pos, 0)));
+    const vec4 intex = texelFetch(uInput, pos, 0);
+    imageStore(
+        uOutput,
+        pos,
+        tanh(clamp(intex, -15.0, 15.0)));
   }
 }

@@ -145,16 +145,16 @@ class TORCH_API TensorExprKernel {
             pre_alloc,
             symbolic_strides) {}
 
-  void run(Stack& stack);
+  void run(Stack& stack) const;
   void runFast(
       const std::vector<void*>& inputs,
-      const std::vector<void*>& outputs);
+      const std::vector<void*>& outputs) const;
   // Expected format of stack:
   //  ... <outputs> <inputs>
   // i.e., output IValues must be below the input IValues in the stack.
-  void runWithAllocatedOutputs(Stack& stack);
+  void runWithAllocatedOutputs(Stack& stack) const;
 
-  void fallback(Stack& stack) {
+  void fallback(Stack& stack) const {
     InterpreterState(code_).run(stack);
   }
   void recompile();
@@ -196,7 +196,7 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-  void runKernel(Stack& stack);
+  void runKernel(Stack& stack) const;
 
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
 
@@ -218,10 +218,14 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
-  void updateOutputSizesAndStrides(const at::ArrayRef<IValue>& inputs);
+  void getStaticOutputSizesAndStrides(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<std::vector<int64_t>>* static_sizes,
+      std::vector<std::vector<int64_t>>* static_strides) const;
+
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
-      std::vector<at::Tensor>& outputs);
+      std::vector<at::Tensor>& outputs) const;
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   Tensor bindInput(const torch::jit::Value* input);
