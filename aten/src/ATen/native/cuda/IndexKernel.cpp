@@ -3,7 +3,6 @@
 #include <ATen/native/TensorAdvancedIndexing.h>  // For at::native::index_out
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
-#include <ATen/CUDAFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -12,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/index_cuda_dispatch.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_native.h>
