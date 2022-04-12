@@ -14418,10 +14418,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-           )),
+           ),
     BinaryUfuncInfo('hypot',
                     dtypes=floating_types_and(torch.bfloat16),
                     dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -14508,8 +14505,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
            skips=(
-               # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
@@ -14523,8 +14518,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # RuntimeError: _fn() Expected a value of type
                #   'Tensor (inferred)' for argument 't0' but instead found type 'tuple'.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),)),
@@ -14533,10 +14526,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-           )),
+           ),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),

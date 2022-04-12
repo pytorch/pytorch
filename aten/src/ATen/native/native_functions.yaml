@@ -1081,12 +1081,19 @@
     SparseCPU, SparseCUDA: sparse_broadcast_to
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  structured_delegate: cat.out
   dispatch:
-    CompositeExplicitAutograd: cat
+    SparseCPU, SparseCUDA: cat_sparse
+    QuantizedCPU: cat_quantized_cpu
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  precomputed:
+  - dim -> int dim, int valid, bool all_contiguous, bool all_same_dtype, bool all_same_sizes_and_stride, MemoryFormat memory_format
   dispatch:
-    CompositeExplicitAutograd: cat_out
+    CPU: cat_out_cpu
+    CUDA: cat_out_cuda
+    QuantizedCPU: cat_out_quantized_cpu
 
 - func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
 
@@ -7971,18 +7978,6 @@
   variants: function
   dispatch:
     CUDA: _amp_update_scale_cuda_
-
-- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
-  dispatch:
-    CPU: _cat_cpu
-    CUDA: cat_cuda
-    QuantizedCPU: cat_quantized_cpu
-
-- func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _cat_out_cpu
-    CUDA: cat_out_cuda
-    QuantizedCPU: cat_out_quantized_cpu
 
 - func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
