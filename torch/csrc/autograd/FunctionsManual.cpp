@@ -780,7 +780,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
@@ -4733,7 +4733,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -4756,7 +4756,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
