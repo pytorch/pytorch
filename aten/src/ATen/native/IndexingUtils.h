@@ -21,7 +21,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
     if (!index_opt.has_value()) {
       result.emplace_back();
     } else {
-      Tensor index = *index_opt;
+      const auto& index = *index_opt;
       if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
         if (index.scalar_type() == kByte) {
           TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
