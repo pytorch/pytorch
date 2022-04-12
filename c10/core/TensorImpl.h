@@ -1572,7 +1572,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   PyObject* _unchecked_untagged_pyobj() const {
-    return static_cast<PyObject*>(static_cast<uintptr_t>(pyobj_) & ~0x1ULL);
+    return reinterpret_cast<PyObject*>(reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
@@ -2287,11 +2287,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool owns_pyobj() {
-    return static_cast<uintptr_t>(pyobj_) & 1;
+    return reinterpret_cast<uintptr_t>(pyobj_) & 1;
   }
 
   void set_owns_pyobj(bool b) {
-    pyobj_ = static_cast<PyObject*>(static_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
+    pyobj_ = reinterpret_cast<PyObject*>(reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
  protected:
