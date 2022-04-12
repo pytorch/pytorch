@@ -30,8 +30,9 @@ using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
 using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
 
+using NodeNameMap = std::unordered_map<const Node*, std::string>;
+
 // Used for modularized export settling function and node attributes.
-using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
 using NodeAttrNameMap = std::
     unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
 
@@ -39,7 +40,8 @@ TORCH_API std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
     SymbolDimMap,
-    bool>
+    bool,
+    NodeNameMap>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -61,7 +63,9 @@ export_onnx(
 TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);
 
-TORCH_API void check_onnx_proto(const std::string& proto_string);
+TORCH_API void check_onnx_proto(
+    const std::string& proto_string,
+    bool full_check = false);
 
 // Serializer for both oldsyle and unified format TorchScript serialization
 class TORCH_API ScriptModuleSerializer {
@@ -85,9 +89,6 @@ class TORCH_API ScriptModuleSerializer {
   void convertNamedType(const c10::NamedTypePtr& class_type);
   void convertTypes(const at::NamedTypePtr& root_type);
   void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files);
-  void writeMobileMetadata(
-      const Module& module,
-      const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
   void writeArchive(
       const IValue& value,
@@ -157,21 +158,24 @@ TORCH_API void ExportModule(
     std::ostream& out,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
@@ -201,6 +205,9 @@ struct TORCH_API BytecodeEmitMode {
 
   static bool is_default_args_before_out_args_enabled();
   static void set_default_args_before_out_args_enabled(bool enabled);
+
+  static bool is_emit_promoted_ops_enabled();
+  static void set_default_emit_promoted_ops_enabled(bool enabled);
 };
 
 // RAII guard to switch the way JIT emits the bytecode for inputs.
@@ -216,24 +223,32 @@ struct TORCH_API BytecodeEmitMode {
 struct TORCH_API BytecodeEmitModeGuard {
   BytecodeEmitModeGuard(
       bool enable_default_value_for_unspecified_arg,
-      bool enable_default_args_before_out_args)
+      bool enable_default_args_before_out_args,
+      bool enable_emit_promoted_ops)
       : prev_default_value_for_unspecified_arg_mode(
             BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()),
         prev_default_args_before_out_args(
-            BytecodeEmitMode::is_default_args_before_out_args_enabled()) {
+            BytecodeEmitMode::is_default_args_before_out_args_enabled()),
+        prev_default_emit_promoted_ops(
+            BytecodeEmitMode::is_emit_promoted_ops_enabled()) {
     BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
         enable_default_value_for_unspecified_arg);
     BytecodeEmitMode::set_default_args_before_out_args_enabled(
         enable_default_args_before_out_args);
+    BytecodeEmitMode::set_default_emit_promoted_ops_enabled(
+        enable_emit_promoted_ops);
   }
   ~BytecodeEmitModeGuard() {
     BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
         prev_default_value_for_unspecified_arg_mode);
     BytecodeEmitMode::set_default_args_before_out_args_enabled(
         prev_default_args_before_out_args);
+    BytecodeEmitMode::set_default_emit_promoted_ops_enabled(
+        prev_default_emit_promoted_ops);
   }
   bool prev_default_value_for_unspecified_arg_mode;
   bool prev_default_args_before_out_args;
+  bool prev_default_emit_promoted_ops;
 };
 
 TORCH_API IValue to_tuple(std::vector<IValue> ivalues);

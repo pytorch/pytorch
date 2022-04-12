@@ -30,7 +30,6 @@ from .utils import (
     iterate_and_apply,
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
-    get_producer_of_seen_q_op_info,
     clone_detach_tensor_without_dispatch,
     get_input_args_quant_dequant_info,
     get_cur_qconfig,
@@ -43,11 +42,15 @@ from .function_fusion import (
     get_seen_q_op_info_of_end_of_fusion,
 )
 
+from torch.ao.quantization.utils import (
+    activation_is_int32_quantized,
+)
+
 OpConvertInfo = Tuple[
     # quantized equivalent of original op (None means keep original)
     Optional[Callable],
-    # arg_quant_infos, each element is (scale, zp) for quantized and None otherwise
-    List[Optional[Tuple[float, int]]],
+    # arg_quant_infos, each element is (scale, zp, dtype) for quantized and None otherwise
+    List[Optional[Tuple[float, int, torch.dtype]]],
     # arg_dequant_infos, each element is True if this arg needs a dequant
     List[bool],
     # packed param name, if the op has a packed param
@@ -455,9 +458,11 @@ class AutoQuantizationState(torch.nn.Module):
                     quant_info = arg_quant_infos[tensor_arg_idx]
                     dequant_info = arg_dequant_infos[tensor_arg_idx]
                     if quant_info is not None:
-                        scale, zp = quant_info
-                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-                    elif dequant_info is True:
+                        scale, zp, dtype = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, dtype)
+                    if dequant_info is True:
+                        # Note: both quant and dequant paths are taken for
+                        # reference ops.
                         arg = arg.dequantize()
                     new_first_arg.append(arg)
                     tensor_arg_idx += 1
@@ -471,9 +476,11 @@ class AutoQuantizationState(torch.nn.Module):
                     quant_info = arg_quant_infos[tensor_arg_idx]
                     dequant_info = arg_dequant_infos[tensor_arg_idx]
                     if quant_info is not None:
-                        scale, zp = quant_info
-                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-                    elif dequant_info is True:
+                        scale, zp, dtype = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, dtype)
+                    if dequant_info is True:
+                        # Note: both quant and dequant paths are taken for
+                        # reference ops.
                         arg = arg.dequantize()
                     new_args.append(arg)
                     tensor_arg_idx += 1
@@ -519,10 +526,22 @@ class AutoQuantizationState(torch.nn.Module):
         global_op_idx: List[int],
     ) -> Any:
         """
-        This function is called aftern an op call in a converted model.
-
-        TODO: add dequant, if needed
+        This function is called after an op call in a converted model.
         """
+        # TODO(future PR): improve performance by moving this out of the
+        # path of non-reference ops
+        seen_q_op_info = self._get_cur_seen_q_op_info()
+
+        if seen_q_op_info.is_reference_op_at_inference:
+            # given the current reference module design,
+            # we need to quantize to the target dtype
+            output_tensor_info = seen_q_op_info.output_tensor_infos[0]
+            tensor_id, inf_dtype = \
+                output_tensor_info.id, output_tensor_info.inf_dtype
+            scale, zp = self.tensor_id_to_scale_zp[tensor_id]
+            output = torch.quantize_per_tensor(
+                output, scale, zp, inf_dtype)
+
         if self.log_op_outputs:
             output_clone = clone_detach_tensor_without_dispatch(output)
             seen_q_op_info = self._get_cur_seen_q_op_info()
@@ -796,11 +815,15 @@ class AutoQuantizationState(torch.nn.Module):
             op_type_is_module = isinstance(op, torch.nn.Module)
             op_type = type(op) if op_type_is_module else op  # type: ignore[assignment]
             qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op_type)
+            # TODO(future PR): use API flag instead of qconfig for is_reference
+            is_reference_op_at_inference = \
+                qconfig is not None and activation_is_int32_quantized(qconfig)
             self.idx_to_seen_q_op_infos[self.idx] = SeenQOpInfo(
                 self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
-                op_packing_only_uses_module_attributes, qconfig, None)
+                op_packing_only_uses_module_attributes, qconfig, None,
+                is_reference_op_at_inference)
 
         return args, kwargs
 
@@ -826,19 +849,13 @@ class AutoQuantizationState(torch.nn.Module):
             seen_q_op_info = self._get_cur_seen_q_op_info()
             func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
             if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
-                if isinstance(op, torch.nn.Module):
-                    # For now, assume that eager mode convert has attached qconfig
-                    # objects to any leaf module which needs quantization
-                    if hasattr(op, 'activation_post_process'):
-                        dtype_to_use = op.activation_post_process.dtype
-                    else:
-                        dtype_to_use = torch.float
+                qconfig = get_cur_qconfig(
+                    self.qconfig_dict, seen_q_op_info.fqn,
+                    seen_q_op_info.type)
+                if qconfig is None:
+                    dtype_to_use = torch.float
                 else:
-                    qconfig = get_cur_qconfig(self.qconfig_dict, seen_q_op_info.fqn, op)
-                    if qconfig is None:
-                        dtype_to_use = torch.float
-                    else:
-                        dtype_to_use = qconfig.activation().dtype
+                    dtype_to_use = qconfig.activation().dtype
 
             elif func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX:
                 dtype_to_use = torch.float
@@ -939,48 +956,23 @@ class AutoQuantizationState(torch.nn.Module):
             assert seen_q_op_info.input_tensor_infos[0] is not None
             first_input_tensor_id = seen_q_op_info.input_tensor_infos[0].id
 
-            first_input_obs = None
-            if str(first_input_tensor_id) in self.tensor_id_to_observer:
-                first_input_obs = \
-                    self.tensor_id_to_observer[str(first_input_tensor_id)]
-            else:
-                # This observer may be in a module (handled by eager
-                # convert), in which case it's not in our map. For now,
-                # copy it from the module. In the future, we could look
-                # into having a soft link.
-                # TODO: make this handle more cases
-                # TODO: handle module -> add_scalar -> add_scalar
-                prev_op = get_producer_of_seen_q_op_info(
-                    self.idx_to_seen_q_op_infos, seen_q_op_info)
-                assert prev_op is not None
-                # TODO: the following line needs to only check fqn
-                # for modules, not for functions
-                fqn_last_part = prev_op.fqn.split('.')[-1]
-                if hasattr(root_module, fqn_last_part):
-                    first_input_mod = getattr(root_module, fqn_last_part)
-                else:
-                    first_input_mod = None
-                # Currently, both tracing for module fusion and tracing for
-                # quantization go through this code path. When tracing
-                # for module fusion, quantizeable modules do not have
-                # observers yet. For this path to not crash, we create one.
-                # When tracing for quantization, this will be ignored.
-                # TODO(future PR): refactor to avoid this.
-                if first_input_mod and hasattr(first_input_mod, 'activation_post_process'):
-                    first_input_obs = first_input_mod.activation_post_process
-                else:
-                    # TODO(future PR): check qconfig is None
-                    qconfig = get_cur_qconfig(
-                        self.qconfig_dict, seen_q_op_info.fqn, seen_q_op_info.type)
-                    assert qconfig is not None
-                    first_input_obs = qconfig.activation()
-
+            first_input_obs = \
+                self.tensor_id_to_observer[str(first_input_tensor_id)]
             self.tensor_id_to_observer[str(output_tensor_id)] = first_input_obs
 
     def insert_observers(self, root_module: torch.nn.Module):
         for idx, seen_q_op_info in self.idx_to_seen_q_op_infos.items():
             self._maybe_insert_input_observers(seen_q_op_info)
             self._maybe_insert_output_observers(seen_q_op_info, root_module)
+
+    def get_output_observer_from_fqn(self, fqn: str) -> Optional[torch.nn.Module]:
+        for idx, seen_q_op_info in self.idx_to_seen_q_op_infos.items():
+            if seen_q_op_info.fqn != fqn:
+                continue
+            output_tensor_id = seen_q_op_info.output_tensor_infos[0].id
+            if str(output_tensor_id) in self.tensor_id_to_observer:
+                return self.tensor_id_to_observer[str(output_tensor_id)]
+        return None
 
     # This is a hack to enable nn.Sequential to properly work with
     # this class.

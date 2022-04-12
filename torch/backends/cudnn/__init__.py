@@ -133,3 +133,4 @@ sys.modules[__name__] = CudnnModule(sys.modules[__name__], __name__)
 enabled: bool
 deterministic: bool
 benchmark: bool
+allow_tf32: bool

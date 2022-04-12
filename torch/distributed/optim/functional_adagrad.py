@@ -26,6 +26,7 @@ class _FunctionalAdagrad(object):
         warmup_num_iters: float = 0.0,
         eps: float = 1e-10,
         coalesce_grad: bool = True,
+        foreach: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -38,6 +39,7 @@ class _FunctionalAdagrad(object):
             "warmup_num_iters": warmup_num_iters,
         }
         self.coalesce_grad = coalesce_grad
+        self.foreach = foreach
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -69,8 +71,11 @@ class _FunctionalAdagrad(object):
                 + f"Gradients length: {len(gradients)}"
             )
 
+        has_sparse_grad = False
         for param, gradient in zip(self.param_group['params'], gradients):
             if gradient is not None:
+                if gradient.is_sparse:
+                    has_sparse_grad = True
                 params_with_grad.append(param)
                 grads.append(gradient)
                 state = self.state[param]
@@ -85,4 +90,6 @@ class _FunctionalAdagrad(object):
                       lr=self.defaults['lr'],
                       weight_decay=self.defaults['weight_decay'],
                       lr_decay=self.defaults['lr_decay'],
-                      eps=self.defaults['eps'])
+                      eps=self.defaults['eps'],
+                      has_sparse_grad=has_sparse_grad,
+                      foreach=self.foreach)

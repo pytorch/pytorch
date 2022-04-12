@@ -44,6 +44,9 @@ set(TORCH_PYTHON_SRCS
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
+list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp)
+
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
@@ -190,6 +193,7 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
 add_custom_command(
     OUTPUT
@@ -207,6 +211,18 @@ add_custom_command(
     "${TOOLS_PATH}/pyi/gen_pyi.py"
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+    WORKING_DIRECTORY
+    "${TORCH_ROOT}"
+)
+file(GLOB_RECURSE datapipe_files "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
+add_custom_command(
+    OUTPUT
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
+    COMMAND
+    "${PYTHON_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
+    DEPENDS
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
+    ${datapipe_files}
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -346,6 +362,7 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
+list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_CAFFE2)
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -375,6 +392,9 @@ set_source_files_properties(
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp
+    PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 

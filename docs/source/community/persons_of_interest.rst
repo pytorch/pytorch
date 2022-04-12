@@ -149,13 +149,13 @@ C10 utils and operator dispatch
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 -  (emeritus) Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
 
-ONNX <-> PyTorch
-~~~~~~~~~~~~~~~~
--  Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
--  Gary Miguel (`garymm <https://github.com/garymm>`__)
+PyTorch -> ONNX
+~~~~~~~~~~~~~~~
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
--  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  Gary Miguel (`garymm <https://github.com/garymm>`__)
 -  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  (emeritus) Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
 -  (emeritus) Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
 
 Mobile / Edge

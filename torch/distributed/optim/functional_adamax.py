@@ -22,6 +22,7 @@ class _FunctionalAdamax(object):
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0.0,
+        foreach: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
@@ -42,6 +43,7 @@ class _FunctionalAdamax(object):
             "beta2": betas[1],
             "weight_decay": weight_decay,
         }
+        self.foreach = foreach
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -96,4 +98,5 @@ class _FunctionalAdamax(object):
                      beta1=self.defaults['beta1'],
                      beta2=self.defaults['beta2'],
                      lr=self.defaults['lr'],
-                     weight_decay=self.defaults['weight_decay'])
+                     weight_decay=self.defaults['weight_decay'],
+                     foreach=self.foreach)

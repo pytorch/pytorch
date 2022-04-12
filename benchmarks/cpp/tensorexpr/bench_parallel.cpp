@@ -38,7 +38,7 @@ class ParallelAdd : public benchmark::Fixture {
 BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
   BufHandle a_buf("a", {M}, kFloat);
   BufHandle b_buf("b", {M}, kFloat);
-  Tensor c_tensor = Compute("c", {{M, "m"}}, [&](const VarHandle& m) {
+  Tensor c_tensor = Compute("c", {M}, [&](const VarHandle& m) {
     return a_buf.load(m) + b_buf.load(m);
   });
   LoopNest loop_nest({c_tensor});
