@@ -153,3 +153,11 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         for _ in range(5):
             out = ddp(replica_tensor)
             self.assertIsInstance(out, ReplicatedTensor)
+
+        # Test with context manager.
+        from torch.nn.parallel.replicated_tensor_ddp_interop import _ddp_replicated_tensor
+        with _ddp_replicated_tensor(False):
+            for _ in range(5):
+                with _ddp_replicated_tensor(True):
+                    out = ddp(replica_tensor)
+                self.assertIsInstance(out, ReplicatedTensor)

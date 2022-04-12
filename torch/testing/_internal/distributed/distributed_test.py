@@ -524,6 +524,10 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
+        # Enable DDP + ReplicatedTensor
+        from torch.nn.parallel.replicated_tensor_ddp_interop import _set_ddp_with_replicated_tensor
+        _set_ddp_with_replicated_tensor(True)
+
         if BACKEND == "nccl" and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         self = cls(test_name)
@@ -6606,7 +6610,11 @@ class DistributedTest:
 
                 inp = torch.ones(1, dtype=torch.float).to(device_id) * (self.rank + 1)
                 for i in range(6):
-                    ddp(inp).sum().backward()
+                    # Disable DDP + ReplicatedTensor
+                    from torch.nn.parallel.replicated_tensor_ddp_interop import _ddp_replicated_tensor
+                    with _ddp_replicated_tensor(False):
+                        ddp(inp).sum().backward()
+
                     local_model(inp).sum().backward()
                     # materialized param grad is not touched by DDP, so its grad should
                     # be the same as if running locally.
@@ -8616,7 +8624,11 @@ class DistributedTest:
                           'module.buffer': buffer}
             prev_weight = module.module.l1.weight.clone()
             prev_buffer = module.module.buffer.clone()
-            res = _stateless.functional_call(module, parameters, x)
+
+            # Disable DDP + ReplicatedTensor
+            from torch.nn.parallel.replicated_tensor_ddp_interop import _ddp_replicated_tensor
+            with _ddp_replicated_tensor(False):
+                res = _stateless.functional_call(module, parameters, x)
             self.assertEqual(x, res)
             # check that the weight remain unmodified
             cur_weight = module.module.l1.weight
