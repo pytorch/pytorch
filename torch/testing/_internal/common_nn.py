@@ -119,6 +119,16 @@ module_tests = [
         tf32_precision=0.005,
     ),
     dict(
+        module_name='Bias',
+        constructor_args=(5,),
+        cpp_constructor_args='torch::nn::BiasOptions(5)',
+        input_size=(4, 5),
+        reference_fn=lambda i, p, _: i + p[0],
+        desc="bias_basic",
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
         module_name='Threshold',
         constructor_args=(2., 1.),
         cpp_constructor_args='torch::nn::ThresholdOptions(2., 1.)',
@@ -4257,7 +4267,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Bias',
-        constructor_args=(5),
+        constructor_args=(5,),
         cpp_constructor_args='torch::nn::BiasOptions(5)',
         input_fn=lambda: torch.rand(5),
         reference_fn=lambda i, p, _: i + p[0],
