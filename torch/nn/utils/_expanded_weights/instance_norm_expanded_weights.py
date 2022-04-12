@@ -40,7 +40,8 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
             mean = torch.mean(input_reshaped.transpose(0, 1), tuple(range(1, input.dim())), False)
             rstd = torch.var(input_reshaped.transpose(0, 1), tuple(range(1, input.dim())), keepdim=False, unbiased=False)
 
-            # can't use cuda or miopen backward since 
+            # must use native batch norm since it supports all inputs. This may have used cuda or openmi during the forward but
+            # it didn't save the metadata, so we don't know during the backward
             res = torch.ops.aten.native_batch_norm_backward(
                 grad_output_reshaped, input_reshaped, weight_, running_mean_, running_var_,
                 mean, rstd, True, eps, (True, False, False))
