@@ -4396,6 +4396,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     def test_inf_quick_patch(self):
         x = torch.tensor([-float('inf'), -float('inf'), 4.0], device="cuda")
 
