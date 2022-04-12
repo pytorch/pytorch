@@ -1136,8 +1136,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [[torch.tensor([i + j]) for j in range(self.world_size)]]
             for i in range(len(inputs))
         ]
+        input_holder = {}
         for i in range(len(inputs)):
-            fut = pg.allgather(outputs[i], [fn(inputs[i])]).get_future()
+            # Note that this works around the data race discussed in
+            # https://github.com/pytorch/pytorch/issues/75529, but we should
+            # actually be able to pass the list directly into allgather when
+            # that race is fixed.
+            input_holder[i] = [fn(inputs[i])]
+            fut = pg.allgather(outputs[i], input_holder[i]).get_future()
             future_handles.append(fut)
 
         for i, future_handle in enumerate(future_handles):
@@ -1457,11 +1463,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
 
 class DistributedDataParallelTest(
-    test_c10d_common.AbstractDistributedDataParallelTest, MultiProcessTestCase
+    test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
         self._spawn_processes()
+
+    def _get_process_group(self):
+        store = self._get_store()
+        return c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
     def _test_gloo_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -1564,9 +1574,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            cpu_model._set_static_graph()
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
@@ -1577,9 +1586,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            gpu_model._set_static_graph()
         run_and_verify_grad(gpu_model)
 
     @requires_gloo()
@@ -1759,7 +1767,7 @@ class DistributedDataParallelTest(
         # Check that the gradients are sparse and identical
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
-        self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+        self.assertEqual(vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce())
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)

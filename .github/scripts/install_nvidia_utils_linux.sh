@@ -3,7 +3,7 @@
 set -eou pipefail
 
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID) \
-DRIVER_FN="NVIDIA-Linux-x86_64-460.39.run"
+DRIVER_FN="NVIDIA-Linux-x86_64-510.60.02.run"
 YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
 install_nvidia_docker2_amzn2() {

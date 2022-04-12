@@ -246,7 +246,8 @@ class File {
 off_t refresh(
     File& file,
     off_t pos,
-    std::unordered_map<std::string, std::vector<uint8_t>>& cache) {
+    std::unordered_map<std::string, std::vector<uint8_t>>& cache,
+    const std::string deletePrefix) {
   auto size = file.size();
   if (size != pos) {
     std::string tmpKey;
@@ -255,7 +256,11 @@ off_t refresh(
     while (size > pos) {
       file.read(tmpKey);
       file.read(tmpValue);
-      cache[tmpKey] = std::move(tmpValue);
+      if (tmpKey.compare(0, deletePrefix.size(), deletePrefix) == 0) {
+        cache.erase(tmpKey.substr(deletePrefix.size()));
+      } else {
+        cache[tmpKey] = std::move(tmpValue);
+      }
       pos = file.tell();
     }
   }
@@ -271,10 +276,24 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       pos_(0),
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
-      regularPrefix_("/") {
-}
+      regularPrefix_("/"),
+      deletePrefix_("-") {}
 
 FileStore::~FileStore() {
+  // If the file does not exist - exit.
+  // This can happen when FileStore is invoked from python language which has
+  // GC. If python code has directory cleanup procedure, the race condition may
+  // occur between that code and this deconstructor. As a result, we check for
+  // file existense before cleanup
+#ifdef _WIN32
+  int res = syscall(std::bind(::_access, path_.c_str(), 0));
+#else
+  int res =
+      syscall([filepath = path_.c_str()] { return ::access(filepath, F_OK); });
+#endif
+  if (res == -1) {
+    return;
+  }
   // cleanup key will be different from all rest keys since all rest keys will
   // have a regular prefix.
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
@@ -307,7 +326,7 @@ std::vector<uint8_t> FileStore::compareSet(
   auto lock = file.lockExclusive();
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
-  pos_ = refresh(file, pos_, cache_);
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
   if ((cache_.count(regKey) == 0 && expectedValue.empty()) ||
       (cache_.count(regKey) != 0 && cache_[regKey] == expectedValue)) {
     // if the key does not exist and currentValue arg is empty or
@@ -339,14 +358,15 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        TORCH_CHECK(false, "Timeout waiting for key: " + key);
+          auto err = c10::str("Timeout waiting for key: ", key, " after ", timeout_.count(), " ms");
+          TORCH_CHECK(false, err);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
-    pos_ = refresh(file, pos_, cache_);
+    pos_ = refresh(file, pos_, cache_, deletePrefix_);
     if (cache_.count(regKey) != 0) {
       return cache_[regKey];
     }
@@ -357,7 +377,7 @@ int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
-  pos_ = refresh(file, pos_, cache_);
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
 
   const auto& value = cache_[key];
   int64_t ti = i;
@@ -384,19 +404,26 @@ int64_t FileStore::getNumKeys() {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
-  pos_ = refresh(file, pos_, cache_);
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
   return cache_.size();
 }
 
-bool FileStore::deleteKey(const std::string& /* unused */) {
-  TORCH_CHECK(false, "deleteKey not implemented for FileStore");
+bool FileStore::deleteKey(const std::string& key) {
+  std::string deleteKey = deletePrefix_ + regularPrefix_ + key;
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDWR, timeout_);
+  auto lock = file.lockExclusive();
+  file.seek(0, SEEK_END);
+  file.write(deleteKey);
+  file.write(std::vector<uint8_t>{});
+  return true;
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
-  pos_ = refresh(file, pos_, cache_);
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
 
   for (const auto& key : keys) {
     std::string regKey = regularPrefix_ + key;

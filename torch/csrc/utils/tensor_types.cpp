@@ -6,6 +6,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <ATen/Context.h>
+#include <ATen/Formatting.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -20,10 +21,12 @@ static const char* backend_to_string(const at::Backend& backend) {
     case at::Backend::CPU: return "torch";
     case at::Backend::CUDA: return "torch.cuda";
     case at::Backend::XPU: return "torch.xpu";
+    case at::Backend::IPU: return "torch.ipu";
     case at::Backend::SparseCPU: return "torch.sparse";
     case at::Backend::SparseCUDA: return "torch.cuda.sparse";
     case at::Backend::SparseXPU: return "torch.xpu.sparse";
     case at::Backend::QuantizedCPU: return "torch.quantized";
+    case at::Backend::HPU: return "torch.hpu";
     default: AT_ERROR("Unimplemented backend ", backend);
   }
 }
@@ -81,11 +84,16 @@ at::TensorOptions options_from_string(const std::string& str) {
 
 std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   std::vector<std::pair<Backend, ScalarType>> ret;
-  // can't easily iterate over enum classes
+
+  // NOTE: Do not add more types here. This list controls the creation
+  // of legacy tensor types e.g. torch.cuda.FloatTensor which are
+  // maintained for backwards-compatibility only.
   std::vector<Backend> backends = { Backend::CPU, Backend::CUDA, Backend::SparseCPU, Backend::SparseCUDA };
-  std::vector<ScalarType> scalar_types = { ScalarType::Byte, ScalarType::Char, ScalarType::Double, ScalarType::Float,
-                                           ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half,
-                                           ScalarType::Bool, ScalarType::BFloat16};
+  std::vector<ScalarType> scalar_types = {
+    ScalarType::Byte, ScalarType::Char, ScalarType::Double, ScalarType::Float,
+    ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half,
+    ScalarType::Bool, ScalarType::BFloat16};
+
   for (auto& backend : backends) {
     for (auto& scalar_type : scalar_types) {
       // there is no sparse bool type.

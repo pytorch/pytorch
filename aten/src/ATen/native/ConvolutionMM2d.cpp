@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
 #include <c10/util/irange.h>
@@ -13,6 +14,69 @@ namespace at {
 namespace native {
 
 namespace {
+
+static Tensor compute_columns2d(
+    const Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef kernel_size) {
+  const int64_t kernel_height = kernel_size[0];
+  const int64_t kernel_width = kernel_size[1];
+  const int64_t pad_height = padding[0];
+  const int64_t pad_width = padding[1];
+  const int64_t stride_height = stride[0];
+  const int64_t stride_width = stride[1];
+  const int64_t dim_planes = 1;
+  const int64_t dim_height = 2;
+  const int64_t dim_width = 3;
+  const int64_t n_input_plane = input.size(dim_planes);
+  const int64_t input_height = input.size(dim_height);
+  const int64_t input_width = input.size(dim_width);
+  const int64_t output_height =
+      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width =
+      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
+  const int64_t batch_size = input.size(0);
+
+  Tensor columns;
+  if ((kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+    // Columns are just a view on the input for the 1x1 kernel special case.
+    columns = input.view({batch_size, n_input_plane, output_height * output_width}).detach();
+  } else {
+    columns = at::empty({batch_size, n_input_plane * kernel_height * kernel_width,
+        output_height * output_width}, input.options());
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
+      auto input_a = input.accessor<scalar_t, 4>();
+      auto columns_a = columns.accessor<scalar_t, 3>();
+
+      at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+        for (const auto t : c10::irange(start, end)) {
+          auto input_t = input_a[t];
+          auto columns_t = columns_a[t];
+          unfolded2d_copy_stub(
+              kCPU,
+              c10::CppTypeToScalarType<scalar_t>::value,
+              columns_t.data(),
+              input_t.data(),
+              kernel_height,
+              kernel_width,
+              stride_height,
+              stride_width,
+              pad_height,
+              pad_width,
+              n_input_plane,
+              input_height,
+              input_width,
+              output_height,
+              output_width);
+        }
+      });
+    });
+  }
+
+  return columns.contiguous();
+}
 
 static inline void slow_conv2d_shape_check(
     const Tensor& input,
@@ -58,7 +122,7 @@ static inline void slow_conv2d_shape_check(
 
   // Allow for empty batch size and channel size but not other dimensions
   TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got: ", input.sizes());
-  for (int64_t dim = 2; dim < ndim; ++dim) {
+  for (const auto dim : c10::irange(2, ndim)) {
     TORCH_CHECK(input.size(dim) != 0,
                 "Expected non-zero size for input dimension ", dim,
                 ", but got input shape: ", input.sizes(), ". Only the batch and channel dimensions support size 0.");
@@ -155,29 +219,6 @@ static void slow_conv2d_update_output_frame(
     int64_t n_output_plane,
     int64_t output_height,
     int64_t output_width) {
-  // Note: this is a no_group conv2d
-  if ((kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
-      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
-    // 1x1 kernel, no need to unfold input and finput is already set
-  } else {
-    unfolded2d_copy_stub(
-        kCPU,
-        c10::CppTypeToScalarType<scalar_t>::value,
-        finput.data(),
-        input.data(),
-        kernel_height,
-        kernel_width,
-        stride_height,
-        stride_width,
-        pad_height,
-        pad_width,
-        n_input_plane,
-        input_height,
-        input_width,
-        output_height,
-        output_width);
-  }
-
   const int beta = has_bias ? 1 : 0;
 
   // Compute out = weight * input
@@ -258,7 +299,6 @@ void slow_conv2d_backward_out_cpu_template(
     const Tensor& grad_output_,
     const Tensor& input_,
     const Tensor& weight_,
-    const Tensor& finput,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
@@ -284,6 +324,21 @@ void slow_conv2d_backward_out_cpu_template(
       false);
 
   const Tensor input = input_.contiguous();
+
+  // Compute shape of columnized data excluding batch dim.
+  const int64_t dim_planes = 1;
+  const int64_t dim_height = 2;
+  const int64_t dim_width = 3;
+  const int64_t n_input_plane = input.size(dim_planes);
+  const int64_t input_height = input.size(dim_height);
+  const int64_t input_width = input.size(dim_width);
+  const int64_t output_height =
+      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width =
+      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
+  const int64_t fgrad_input_size =
+      n_input_plane * kernel_height * kernel_width * output_height * output_width;
+
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
   grad_input.zero_();
@@ -297,8 +352,7 @@ void slow_conv2d_backward_out_cpu_template(
     auto weight_a = weight.accessor<scalar_t, 2>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      auto fgrad_input = std::make_unique<scalar_t[]>(
-          c10::multiply_integers(finput.sizes().slice(1)));
+      auto fgrad_input = std::make_unique<scalar_t[]>(fgrad_input_size);
       for (const auto t : c10::irange(start, end)) {
         auto grad_input_t = grad_input_a[t];
         auto grad_output_t = grad_output_a[t];
@@ -349,7 +403,6 @@ static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
     const Tensor& input,
     const Tensor& grad_output_,
-    const Tensor& finput,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
@@ -381,7 +434,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
       true);
 
   auto grad_output = grad_output_.contiguous();
-  TORCH_CHECK(finput.is_contiguous(), "slow_conv2d: finput must be contiguous");
+  Tensor finput = compute_columns2d(input, padding, stride, kernel_size);
 
   const int64_t batch_size = input.size(0);
 
@@ -391,7 +444,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto finput_a = finput.accessor<scalar_t, 3>();
 
-    for (int64_t t = 0; t < batch_size; t++) {
+    for (const auto t : c10::irange(batch_size)) {
       auto grad_output_t = grad_output_a[t];
       auto finput_t = finput_a[t];
 
@@ -403,14 +456,13 @@ static void slow_conv2d_backward_weight_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
+Tensor& slow_conv2d_forward_out_cpu(
     const Tensor& self,
     const Tensor& weight_,
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
-    Tensor& output,
-    Tensor& finput) {
+    Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -453,23 +505,12 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
 
   const int64_t batch_size = input.size(0);
 
-  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
-      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
-    finput =
-        input.view({batch_size, n_input_plane, output_height * output_width})
-            .detach();
-  } else {
-     finput.resize_({batch_size,
-                  n_input_plane * kernel_height * kernel_width,
-                  output_height * output_width});
-  }
-
+  Tensor finput = compute_columns2d(input, padding, stride, kernel_size);
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   if (bias.defined()) {
     output.copy_(bias.reshape({-1, 1, 1}));
   }
-  TORCH_CHECK(output.is_contiguous() && finput.is_contiguous(),
-              "slow_conv2d output tensors must be contiguous");
+  TORCH_CHECK(output.is_contiguous(), "slow_conv2d output tensor must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
     auto input_a = input.accessor<scalar_t, 4>();
@@ -504,10 +545,10 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
     });
   });
 
-  return std::tuple<Tensor&, Tensor&>(output, finput);
+  return output;
 }
 
-std::tuple<Tensor, Tensor> slow_conv2d_forward_cpu(
+Tensor slow_conv2d_forward_cpu(
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
@@ -518,7 +559,6 @@ std::tuple<Tensor, Tensor> slow_conv2d_forward_cpu(
   const Tensor& bias = *bias_maybe_owned;
 
   auto output = at::empty({0}, self.options());
-  auto finput = at::empty({0}, self.options());
   at::native::slow_conv2d_forward_out_cpu(
       self,
       weight,
@@ -526,10 +566,9 @@ std::tuple<Tensor, Tensor> slow_conv2d_forward_cpu(
       bias,
       stride,
       padding,
-      output,
-      finput);
+      output);
 
-  return std::make_tuple(output, finput);
+  return output;
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
@@ -539,7 +578,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    const Tensor& finput,
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias) {
@@ -549,7 +587,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
         grad_output,
         self,
         weight,
-        finput,
         kernel_size,
         stride,
         padding);
@@ -567,7 +604,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
         grad_weight,
         self,
         grad_output,
-        finput,
         kernel_size,
         stride,
         padding);
@@ -584,7 +620,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    const Tensor& finput,
     std::array<bool, 3> output_mask) {
   Tensor grad_input;
   Tensor grad_weight;
@@ -609,7 +644,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
       kernel_size,
       stride,
       padding,
-      finput,
       grad_input,
       grad_weight,
       grad_bias);
@@ -622,8 +656,7 @@ Tensor & thnn_conv2d_out(const Tensor & self, const Tensor & weight, IntArrayRef
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  Tensor finput = at::empty({0}, self.options());
-  return std::get<0>(at::_slow_conv2d_forward_out(output, finput, self, weight, kernel_size, bias, stride, padding));
+  return at::_slow_conv2d_forward_out(output, self, weight, kernel_size, bias, stride, padding);
 }
 
 Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding) {
@@ -631,7 +664,7 @@ Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return std::get<0>(at::_slow_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
+  return at::_slow_conv2d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
 } // namespace native

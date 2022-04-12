@@ -30,6 +30,8 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
       self.sizes().equals(src.sizes()) &&
+      self.is_neg() == src.is_neg() &&
+      self.is_conj() == src.is_conj() &&
       self.numel() >= MIN_SZ;
 }
 
@@ -50,7 +52,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   // The code below is implemented with the assumption that sizes are equal
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kHalf, kBool, kBFloat16, kComplexHalf, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
@@ -244,13 +246,19 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
+    if (self._is_zerotensor()) {
+     TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
+    }
+    if (src._is_zerotensor()) {
+      return self.zero_();
+    }
     copy_impl(self, src, non_blocking);
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
-void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
+void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
   // Called when we are copying into an overlapping index `dst`, but we don't
   // care which writer wins. Hacky but it works. This is only used by
   // CUDA_tensor_apply2 in case that there are write overlaps.

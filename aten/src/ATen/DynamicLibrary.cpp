@@ -20,22 +20,22 @@ namespace at {
 
 static void* checkDL(void* x) {
   if (!x) {
-    AT_ERROR("Error in dlopen or dlsym: ", dlerror());
+    TORCH_CHECK_WITH(DynamicLibraryError, false, "Error in dlopen or dlsym: ", dlerror());
   }
 
   return x;
 }
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak_handle_): leak_handle(leak_handle_) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   handle = dlopen(name, RTLD_LOCAL | RTLD_NOW);
   if (!handle) {
     if (alt_name) {
       handle = dlopen(alt_name, RTLD_LOCAL | RTLD_NOW);
       if (!handle) {
-        AT_ERROR("Error in dlopen for library ", name, "and ", alt_name);
+        TORCH_CHECK_WITH(DynamicLibraryError, false, "Error in dlopen for library ", name, "and ", alt_name);
       }
     } else {
-      AT_ERROR("Error in dlopen: ", dlerror());
+      TORCH_CHECK_WITH(DynamicLibraryError, false, "Error in dlopen: ", dlerror());
     }
   }
 }
@@ -46,8 +46,9 @@ void* DynamicLibrary::sym(const char* name) {
 }
 
 DynamicLibrary::~DynamicLibrary() {
-  if (!handle)
+  if (!handle || leak_handle) {
     return;
+  }
   dlclose(handle);
 }
 
@@ -55,7 +56,7 @@ DynamicLibrary::~DynamicLibrary() {
 
 // Windows
 
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak_handle_): leak_handle(leak_handle_) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule;
   bool reload = true;
@@ -83,7 +84,7 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
     FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                   NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   buf, (sizeof(buf) / sizeof(char)), NULL);
-    AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
+    TORCH_CHECK_WITH(DynamicLibraryError, false, "error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
 }
 
@@ -91,13 +92,13 @@ void* DynamicLibrary::sym(const char* name) {
   AT_ASSERT(handle);
   FARPROC procAddress = GetProcAddress((HMODULE)handle, name);
   if (!procAddress) {
-    AT_ERROR("error in GetProcAddress");
+    TORCH_CHECK_WITH(DynamicLibraryError, false, "error in GetProcAddress");
   }
   return (void*)procAddress;
 }
 
 DynamicLibrary::~DynamicLibrary() {
-  if (!handle) {
+  if (!handle || leak_handle) {
     return;
   }
   FreeLibrary((HMODULE)handle);

@@ -1,4 +1,5 @@
 #include <ATen/Dispatch.h>
+#include <ATen/Functions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>

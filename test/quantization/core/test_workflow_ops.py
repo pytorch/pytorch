@@ -181,11 +181,11 @@ def _get_per_row_min_max(
     y = x.permute(*new_axis_list)
 
     y = torch.flatten(y, start_dim=1)
-    # min_vals, max_vals = torch._aminmax(y, 1)
+    # min_vals, max_vals = torch.aminmax(y, dim=1)
     if math.isinf(min_vals[0]) or math.isinf(max_vals[0]):
-        min_vals, max_vals = torch._aminmax(y, 1)
+        min_vals, max_vals = torch.aminmax(y, dim=1)
     else:
-        min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
+        min_vals_cur, max_vals_cur = torch.aminmax(y, dim=1)
         min_vals = min_vals + averaging_const * (min_vals_cur - min_vals)
         max_vals = max_vals + averaging_const * (max_vals_cur - max_vals)
     return min_vals, max_vals
@@ -557,7 +557,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fq_serializable_per_tensor(self):
         observer = default_observer
         quant_min = 0
-        quant_max = 255
+        quant_max = 127
         for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
             fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
             X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
@@ -751,6 +751,32 @@ class TestFakeQuantizeOps(TestCase):
         Y3r = _fake_quantize_per_channel_affine_reference(X3, scale, zero, axis, mini, maxi)
         self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
 
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+           qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_fake_quant_per_channel_qparam_range(self, X):
+        X, (scale, zero_point, axis, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            X = to_tensor(X, device)
+            scale = to_tensor(scale, device)
+
+            # Ensure that zero_point < quant_min.
+            zero_point = torch.full(zero_point.shape, -1 - quant_min).to(dtype=torch.int32, device=device)
+
+            # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
+            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+
+            # For float zero_point, fakequant can be outside quant_min and quant_max.
+            for zero_point_dtype in [torch.float32, torch.float16]:
+                zero_point = zero_point.to(dtype=zero_point_dtype)
+                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+                Y_ref = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(),
+                                                                    axis, quant_min, quant_max)
+                np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
+
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
         """
@@ -813,7 +839,7 @@ class TestFakeQuantizeOps(TestCase):
         for zero_point_type in zero_point_types:
             X = to_tensor(X, device)
             scale = to_tensor(scale, device)
-            zero_point = torch.tensor(zero_point).to(dtype=zero_point_type, device=device)
+            zero_point = to_tensor(zero_point, device).to(dtype=zero_point_type)
             X.requires_grad_()
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)

@@ -5,7 +5,11 @@ if(NOT DEFINED ENV{ROCM_PATH})
 else()
   set(ROCM_PATH $ENV{ROCM_PATH})
 endif()
-
+if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
+  set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
+else()
+  set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
+endif()
 # HIP_PATH
 if(NOT DEFINED ENV{HIP_PATH})
   set(HIP_PATH ${ROCM_PATH}/hip)
@@ -130,11 +134,11 @@ else()
   set(MAGMA_HOME $ENV{MAGMA_HOME})
 endif()
 
-if(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
-  set(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
-else()
-  set(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
+torch_hip_get_arch_list(PYTORCH_ROCM_ARCH)
+if(PYTORCH_ROCM_ARCH STREQUAL "")
+  message(FATAL_ERROR "No GPU arch specified for ROCm build. Please use PYTORCH_ROCM_ARCH environment variable to specify GPU archs to build for.")
 endif()
+message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
@@ -151,8 +155,47 @@ if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
   # Find ROCM version for checks
-  file(READ "${ROCM_PATH}/.info/version-dev" ROCM_VERSION_DEV_RAW)
-  string(REGEX MATCH "^([0-9]+)\.([0-9]+)\.([0-9]+)-.*$" ROCM_VERSION_DEV_MATCH ${ROCM_VERSION_DEV_RAW})
+  # ROCM 5.0 and later will have header api for version management
+  if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm_version.h)
+
+    set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
+    set(file "${PROJECT_BINARY_DIR}/detect_rocm_version.cc")
+    file(WRITE ${file} ""
+      "#include <rocm_version.h>\n"
+      "#include <cstdio>\n"
+
+      "#ifndef ROCM_VERSION_PATCH\n"
+      "#define ROCM_VERSION_PATCH 0\n"
+      "#endif\n"
+      "#define STRINGIFYHELPER(x) #x\n"
+      "#define STRINGIFY(x) STRINGIFYHELPER(x)\n"
+      "int main() {\n"
+      "  printf(\"%d.%d.%s\", ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, STRINGIFY(ROCM_VERSION_PATCH));\n"
+      "  return 0;\n"
+      "}\n"
+      )
+
+    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+      RUN_OUTPUT_VARIABLE rocm_version_from_header
+      COMPILE_OUTPUT_VARIABLE output_var
+      )
+    # We expect the compile to be successful if the include directory exists.
+    if(NOT compile_result)
+      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
+    endif()
+    message(STATUS "Caffe2: Header version is: " ${rocm_version_from_header})
+    set(ROCM_VERSION_DEV_RAW ${rocm_version_from_header})
+    message("\n***** ROCm version from rocm_version.h ****\n")
+
+  # ROCM < 4.5, we don't have the header api file, use flat file
+  else()
+    file(READ "${ROCM_PATH}/.info/version-dev" ROCM_VERSION_DEV_RAW)
+    message("\n***** ROCm version from ${ROCM_PATH}/.info/version-dev ****\n")
+  endif()
+
+  string(REGEX MATCH "^([0-9]+)\.([0-9]+)\.([0-9]+).*$" ROCM_VERSION_DEV_MATCH ${ROCM_VERSION_DEV_RAW})
+
   if(ROCM_VERSION_DEV_MATCH)
     set(ROCM_VERSION_DEV_MAJOR ${CMAKE_MATCH_1})
     set(ROCM_VERSION_DEV_MINOR ${CMAKE_MATCH_2})
@@ -160,7 +203,7 @@ if(HIP_FOUND)
     set(ROCM_VERSION_DEV "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}.${ROCM_VERSION_DEV_PATCH}")
     math(EXPR ROCM_VERSION_DEV_INT "(${ROCM_VERSION_DEV_MAJOR}*10000) + (${ROCM_VERSION_DEV_MINOR}*100) + ${ROCM_VERSION_DEV_PATCH}")
   endif()
-  message("\n***** ROCm version from ${ROCM_PATH}/.info/version-dev ****\n")
+
   message("ROCM_VERSION_DEV: ${ROCM_VERSION_DEV}")
   message("ROCM_VERSION_DEV_MAJOR: ${ROCM_VERSION_DEV_MAJOR}")
   message("ROCM_VERSION_DEV_MINOR: ${ROCM_VERSION_DEV_MINOR}")
@@ -221,13 +264,8 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
 
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    message("ROCm version >= 4.1; enabling asserts")
-  else()
-    # Disable Asserts In Code (Can't use asserts on HIP stack.)
-    add_definitions(-DNDEBUG)
-    message("ROCm version < 4.1; disablng asserts")
-  endif()
+  # Disable Asserts In Code (Can't use asserts on HIP stack.)
+  add_definitions(-DNDEBUG)
 
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)

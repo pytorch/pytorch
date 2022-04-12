@@ -323,6 +323,14 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
   }
 }
 
+Node* TracingState::createNode(c10::Symbol op_name, size_t num_outputs) {
+  return graph->create(op_name, num_outputs);
+}
+
+void TracingState::insertNode(Node* node) {
+  graph->insertNode(node);
+}
+
 // XXX: this function mutates input
 static IValue addInput(
     const std::shared_ptr<TracingState>& state,
@@ -591,6 +599,16 @@ void addInputs(Node* n, const char* name, int64_t value) {
   }
 }
 
+void addInputs(Node* n, const char* name, c10::SymInt value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
+
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
@@ -787,6 +805,19 @@ void addInputs(
     const char* name,
     const c10::optional<at::IntArrayRef>& opt_value) {
   detail::genericAddOptionalInput(n, name, opt_value);
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalIntArrayRef& opt_value) {
+  if (opt_value.has_value()) {
+    jit::tracer::addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
 }
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {

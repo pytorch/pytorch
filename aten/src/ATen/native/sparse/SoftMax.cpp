@@ -1,12 +1,30 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
-#include <ATen/CPUFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorUtils.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CPUFunctions.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_log_softmax_backward_data_cpu_dispatch.h>
+#include <ATen/ops/_log_softmax_cpu_dispatch.h>
+#include <ATen/ops/_softmax_backward_data_cpu_dispatch.h>
+#include <ATen/ops/_softmax_cpu_dispatch.h>
+#include <ATen/ops/_sparse_log_softmax.h>
+#include <ATen/ops/_sparse_log_softmax_backward_data_native.h>
+#include <ATen/ops/_sparse_log_softmax_native.h>
+#include <ATen/ops/_sparse_softmax.h>
+#include <ATen/ops/_sparse_softmax_backward_data_native.h>
+#include <ATen/ops/_sparse_softmax_native.h>
+#endif
 
 #include <map>
 
@@ -71,9 +89,9 @@ std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes
     }
   }
 
-  for (int64_t i=0; i < nnz; i++) {
+  for (const auto i : c10::irange(nnz)) {
     int64_t acc = 0;
-    for (int64_t j=0; j < ndim; j++) {
+    for (const auto j : c10::irange(ndim)) {
       auto indices_row = indices_accessor[j];
       auto stride = strides[j];
       if (j != dim) {
@@ -119,9 +137,9 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
     }
   }
 
-  for (int64_t i=0; i < nnz; i++) {
+  for (const auto i : c10::irange(nnz)) {
     int64_t pool_index = 0;
-    for (int64_t j=0; j < ndim; j++) {
+    for (const auto j : c10::irange(ndim)) {
       if (j != dim) {
         const auto indices_row = indices_accessor[j];
         const auto stride = strides[j];
@@ -315,7 +333,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
   int64_t grain_size = 1;
   parallel_for(0, pools.size(), grain_size, [&](int64_t begin, int64_t end) {
-      for (auto p = begin; p < end; p++) {
+      for (const auto p : c10::irange(begin, end)) {
         auto pool_indices = pools[p];
 
         // Skip empty pools
@@ -329,7 +347,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         /* Compute mx */
         for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
-          for (int64_t j=0; j < nvalues; j++) {
+          for (const auto j : c10::irange(nvalues)) {
             mx_row[j] = std::max(mx_row[j], values_row[j]);
           }
         }
@@ -338,7 +356,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           auto out_values_row = out_values_accessor[i];
-          for (int64_t j=0; j < nvalues; j++) {
+          for (const auto j : c10::irange(nvalues)) {
             auto v = std::exp(values_row[j] - mx_row[j]);
             if (!LogSoftMax) {
               out_values_row[j] = v;
@@ -347,7 +365,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
           }
         }
 
-        for (int64_t j=0; j < nvalues; j++) {
+        for (const auto j : c10::irange(nvalues)) {
           if (LogSoftMax) {
             mx_row[j] += std::log(exp_sums_row[j]);
           } else {
@@ -359,7 +377,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           auto out_values_row = out_values_accessor[i];
-          for (int64_t j=0; j < nvalues; j++) {
+          for (const auto j : c10::irange(nvalues)) {
             if (LogSoftMax) {
               out_values_row[j] = values_row[j] - mx_row[j];
             } else {
@@ -421,7 +439,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
         values.set_(r);
       }
     } else {
-      for(int64_t i=0; i<out_nnz; i++) {
+      for (const auto i : c10::irange(out_nnz)) {
         auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
         auto j = low - grad_offsets.begin();
         if (j < grad_nnz && out_offsets[i] == grad_offsets[j]) {
@@ -456,7 +474,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
 
   int64_t grain_size = 1;
   parallel_for(0, pools.size(), grain_size, [&](int64_t begin, int64_t end) {
-      for (auto p = begin; p < end; p++) {
+      for (const auto p : c10::irange(begin, end)) {
         auto pool_indices = pools[p];
 
         // Skip empty pools
@@ -473,7 +491,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
 
           if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
             auto grad_values_row = grad_values_accessor[j];
-            for (int64_t k=0; k<nvalues; k++) {
+            for (const auto k : c10::irange(nvalues)) {
               if (LogSoftMax) {
                 tmp_row[k] -= grad_values_row[k];
               } else {
@@ -492,7 +510,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
 
           if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
             auto grad_values_row = grad_values_accessor[j];
-            for (int64_t k=0; k<nvalues; k++) {
+            for (const auto k : c10::irange(nvalues)) {
               if (LogSoftMax) {
                 values_row[k] = grad_values_row[k] + std::exp(out_values_row[k]) * tmp_row[k];
               } else {
@@ -500,7 +518,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
               }
             }
           } else {
-            for (int64_t k=0; k<nvalues; k++) {
+            for (const auto k : c10::irange(nvalues)) {
               if (LogSoftMax) {
                 values_row[k] = std::exp(out_values_row[k]) * tmp_row[k];
               } else {

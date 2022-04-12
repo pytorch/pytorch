@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -23,27 +22,26 @@ namespace cuda {
 
 namespace {
 
-class ConditionalFromPredicateModifier {
+class ConditionalFromPredicateModifier : public kir::IrVisitor {
  public:
-  ConditionalFromPredicateModifier(const std::vector<kir::Expr*>& exprs) {
-    FUSER_PERF_SCOPE(
-        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
-    for (auto* expr : exprs) {
-      handle(expr);
-    }
-  }
+  ConditionalFromPredicateModifier() = delete;
 
-  const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
-    return expr_replacement_map_;
+  static std::vector<Expr*> fillPredicates(const std::vector<Expr*>& exprs) {
+    ConditionalFromPredicateModifier cfpm(exprs);
+    return cfpm.exprs_;
   }
 
  private:
-  void handle(kir::Expr* expr) {
-    if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-    } else if (expr != nullptr && expr->predicate() != nullptr) {
+  ConditionalFromPredicateModifier(const std::vector<Expr*>& exprs) {
+    FUSER_PERF_SCOPE(
+        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
+    kir::IrVisitor::handle(exprs);
+  }
+
+  using kir::IrVisitor::handle;
+
+  void handle(Expr* expr) final {
+    if (expr != nullptr && expr->predicate() != nullptr) {
       // Replace expr predicate with bool conditional
       auto conditional = generateConditional(expr->predicate());
       TORCH_INTERNAL_ASSERT(conditional != nullptr);
@@ -51,9 +49,11 @@ class ConditionalFromPredicateModifier {
       TORCH_INTERNAL_ASSERT(expr->predicate()->value() != nullptr);
       setWritePredicate(expr, conditional);
     }
+
+    kir::IrVisitor::handle(expr);
   }
 
-  void setWritePredicate(kir::Expr* expr, kir::Bool* read_cond) {
+  void setWritePredicate(Expr* expr, Bool* read_cond) {
     if (expr->writePredicate() != nullptr) {
       auto write_cond = generateConditional(expr->writePredicate());
       if (write_cond) {
@@ -66,61 +66,43 @@ class ConditionalFromPredicateModifier {
     }
   }
 
-  void handle(kir::ForLoop* fl) {
-    for_loops_structure_.push_back(fl);
-
-    const auto exprs_copy = fl->body().exprs();
-    for (auto expr : exprs_copy) {
-      handle(expr);
-    }
-
-    for_loops_structure_.pop_back();
-  }
-
-  void handle(kir::IfThenElse* ite) {
+  void handle(kir::IfThenElse* ite) final {
     TORCH_INTERNAL_ASSERT(ite->predicate() != nullptr);
 
     // If ite already has Bool conditional, handle internal expressions
     // Otherwise, generate conditional and update predicate
-    if (ite->predicate()->hasValue()) {
-      const auto then_exprs_copy = ite->thenBody().exprs();
-      for (auto expr : then_exprs_copy) {
-        handle(expr);
-      }
-
-      const auto else_exprs_copy = ite->elseBody().exprs();
-      for (auto expr : else_exprs_copy) {
-        handle(expr);
-      }
-    } else {
+    if (!ite->predicate()->hasValue()) {
       auto conditional = generateConditional(ite->predicate());
       TORCH_INTERNAL_ASSERT(conditional != nullptr);
-      TORCH_INTERNAL_ASSERT(conditional->isA<kir::Bool>());
+      TORCH_INTERNAL_ASSERT(conditional->isA<Bool>());
 
       // Update bool conditional in-place
       ite->predicate()->setValue(conditional);
-      handle(ite);
       TORCH_INTERNAL_ASSERT(ite->predicate()->value() != nullptr);
     }
+    kir::IrVisitor::handle(ite);
   }
 
   // Generate conditional according to PredicateType
-  kir::Bool* generateConditional(kir::Predicate* pred) {
+  Bool* generateConditional(kir::Predicate* pred) {
     switch (pred->predicate_type()) {
       case PredicateType::Inline:
       case PredicateType::ReductionWrite:
-      case PredicateType::Misaligned: {
+      case PredicateType::Misaligned:
+      case PredicateType::Shift:
+      case PredicateType::Padding: {
         return PredicateCompute::getInlinePredicate(
             pred->expr(),
-            for_loops_structure_,
+            for_loops_,
             pred->thread_pred(),
             pred->predicate_type());
       }
       case PredicateType::Vectorize: {
         std::vector<kir::ForLoop*> outer_loops;
         kir::ForLoop* vectorized_loop = nullptr;
-        for (auto loop : for_loops_structure_) {
-          if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+        for (auto loop : for_loops_) {
+          if (loop->iter_domain()->getParallelType() ==
+              ParallelType::Vectorize) {
             vectorized_loop = loop;
             break;
           } else {
@@ -132,30 +114,7 @@ class ConditionalFromPredicateModifier {
         return UnswitchPredicate::get(outer_loops, vectorized_loop);
       }
       case PredicateType::Unswitch: {
-        return UnswitchPredicate::get(
-            for_loops_structure_, pred->unrolled_loop());
-      }
-      case PredicateType::Shift: {
-        kir::TensorView* out_tv = ir_utils::getTVOutput(pred->expr());
-        TORCH_INTERNAL_ASSERT(
-            out_tv != nullptr, "Missing kir::TensorView output");
-        return ShiftPredicateInserter::getPredicate(
-            pred->expr(),
-            for_loops_structure_,
-            out_tv,
-            pred->thread_pred(),
-            true);
-      }
-      case PredicateType::Padding: {
-        kir::TensorView* out_tv = ir_utils::getTVOutput(pred->expr());
-        TORCH_INTERNAL_ASSERT(
-            out_tv != nullptr, "Missing kir::TensorView output");
-        return ShiftPredicateInserter::getPredicate(
-            pred->expr(),
-            for_loops_structure_,
-            out_tv,
-            pred->thread_pred(),
-            false);
+        return UnswitchPredicate::get(for_loops_, pred->unrolled_loop());
       }
       case PredicateType::Manual: {
         return pred->value();
@@ -165,33 +124,19 @@ class ConditionalFromPredicateModifier {
     }
     return nullptr;
   }
-
- private:
-  // We will track which loops in the incoming IR will be replaced and by what
-  std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
-
-  // A depth-first ordering of nested for loops
-  // It is used for indexing and predicate generation
-  std::vector<kir::ForLoop*> for_loops_structure_;
 };
+
+void assertOnWarpOps(const Expr* expr) {
+  TORCH_INTERNAL_ASSERT(
+      !expr->isA<MmaOp>(),
+      "Mma op: cannot eliminate predicate for mma op, tiling not valid");
+}
 
 } // namespace
 
-std::vector<kir::Expr*> generateConditionalFromPredicate(
-    Fusion* fusion,
-    const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::generateConditionalFromPredicate");
-
-  ConditionalFromPredicateModifier p2cm(exprs);
-
-  std::vector<kir::Expr*> mutated_exprs;
-  mutated_exprs.reserve(exprs.size());
-  for (auto expr : exprs) {
-    mutated_exprs.push_back(
-        ir_utils::applyReplacements(p2cm.replacementMap(), expr));
-  }
-
-  return mutated_exprs;
+std::vector<Expr*> generateConditionalFromPredicate(
+    const std::vector<Expr*>& exprs) {
+  return ConditionalFromPredicateModifier::fillPredicates(exprs);
 }
 
 namespace {
@@ -212,6 +157,8 @@ class PredicateAnalyzer : public OptOutDispatch {
     // of the parallelized axis is the actual size of the axis, not
     // the number of threads. Since the number of threads can be
     // larger than the axis size, it's not safe to skip predication
+
+    // Check that parallel dimension will not generate out of bound index
     if (!(producer->getMemoryType() == MemoryType::Local &&
           consumer->getMemoryType() == MemoryType::Local)) {
       return true;
@@ -245,17 +192,14 @@ class PredicateAnalyzer : public OptOutDispatch {
     return needs_predicate_;
   }
 
-  using OptOutDispatch::handle;
-
   void handle(IterDomain* consumer_id) override {
     // The traversal should have ended if needs_predicate_ was true
     TORCH_INTERNAL_ASSERT(!needs_predicate_);
 
     // If consumer_id is not going to be materialized as a loop (e.g.,
     // broadcast), no need to predicate
-    const auto gpu_lower = GpuLower::current();
     if (consumer_id->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(consumer_id)) {
+        GpuLower::current()->trivialReductionInfo().isDerived(consumer_id)) {
       return;
     }
 
@@ -270,7 +214,7 @@ class PredicateAnalyzer : public OptOutDispatch {
       return;
     }
 
-    handle(consumer_id->definition());
+    OptOutDispatch::handle(consumer_id->definition());
   }
 
   // If it splits the input axis evenly, proceeds to check the input
@@ -311,7 +255,7 @@ class PredicateAnalyzer : public OptOutDispatch {
 } // namespace
 
 bool PredicateElimination::needsPredicate(Expr* expr) const {
-  if (!ir_utils::isTVOp(expr)) {
+  if (!ir_utils::isTvOp(expr)) {
     return false;
   }
 
@@ -414,11 +358,15 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
 }
 
 void PredicateElimination::handle(Expr* expr) {
-  if (!ir_utils::isTVOp(expr)) {
+  if (!ir_utils::isTvOp(expr)) {
     return;
   }
 
   if (needsPredicate(expr)) {
+    // Warp primitives are currently limited to un-predicated usage,
+    //   predicating these ops will require extra steps to ensure that
+    //   the whole warp will get the same value.
+    assertOnWarpOps(expr);
     return;
   }
 
@@ -453,6 +401,11 @@ void PredicateElimination::handle(Expr* expr) {
     // difference.
     if (expr->isA<ReductionOp>()) {
       setReductionInitValue(input, expr->as<ReductionOp>()->init());
+      continue;
+    }
+
+    if (expr->isA<MmaOp>()) {
+      setReductionInitValue(input, expr->as<MmaOp>()->init());
       continue;
     }
 
@@ -511,7 +464,7 @@ bool PredicateElimination::setReductionInitValue(
 
 bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   TORCH_INTERNAL_ASSERT(expr != nullptr);
-  const auto out_tv = ir_utils::getTVOutput(expr);
+  const auto out_tv = ir_utils::getTvOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Not a tensor expression");
   // No need to predicate local tensors to which a scalar is assigned
   if (out_tv->getMemoryType() == MemoryType::Local) {
@@ -528,38 +481,17 @@ bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   return false;
 }
 
-bool PredicateElimination::canOmitPredicate(const kir::Expr* kir_expr) const {
-  TORCH_INTERNAL_ASSERT(kir_expr != nullptr);
-  const auto out_tv = ir_utils::getTVOutput(kir_expr);
-  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Not a tensor expression");
-  // No need to predicate local tensors to which a scalar is assigned
-  if (out_tv->memoryType() == MemoryType::Local) {
-    if (auto uop = dynamic_cast<const kir::UnaryOp*>(kir_expr)) {
-      if (uop->operation() == UnaryOpType::Set && uop->in()->isScalar()) {
-        return true;
-      }
-    }
-  }
-  const auto fuser_tv = out_tv->fuserTv();
-  if (fuser_tv == nullptr) {
-    return false;
-  }
-  return canOmitPredicate(fuser_tv->definition());
-}
-
-kir::Val* PredicateElimination::getInitValue(TensorView* tv) const {
+Val* PredicateElimination::getInitValue(TensorView* tv) const {
   auto it = init_value_map_.find(tv);
   if (it == init_value_map_.end()) {
     return nullptr;
   }
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
   auto init_val = it->second;
   if (init_val == nullptr) {
     // No reduction restriction. Just use zero
-    return ir_builder.zeroVal();
+    return GpuLower::current()->kernel()->zeroVal();
   } else {
-    return gpu_lower->lowerValue(init_val);
+    return init_val;
   }
 }
 

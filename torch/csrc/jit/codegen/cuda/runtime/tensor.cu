@@ -19,3 +19,13 @@ struct Tensor<T, 0> {
 
   T* data;
 };
+
+// Specialization for 0-dim case that's easy to pass in a CPU based tensor.
+template <typename T>
+struct CpuScalarTensor {
+  __device__ T& operator[](int) {
+    return data;
+  };
+
+  T data;
+};

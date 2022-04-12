@@ -20,9 +20,7 @@
 
 namespace at {
 
-Context::Context()
-    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
-      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
+Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -147,6 +145,25 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  TORCH_CHECK((b != at::LinalgBackend::Cusolver) || hasCuSOLVER(),
+      "Cannot set preferred backend to cuSOLVER if PyTorch has not been compiled with cuSOLVER.");
+  TORCH_CHECK((b != at::LinalgBackend::Magma) || hasMAGMA(),
+      "Cannot set preferred backend to MAGMA if PyTorch has not been compiled with MAGMA.");
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+}
+
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -218,6 +235,10 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 #endif
     engines.push_back(at::kNoQEngine);
 #endif // C10_MOBILE
+
+#if AT_MKLDNN_ENABLED()
+    engines.push_back(at::kONEDNN);
+#endif
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {

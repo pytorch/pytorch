@@ -188,7 +188,7 @@ struct TuplePacker {
 
 template <typename... Args>
 struct TuplePacker<0, Args...> {
-  static void execute(Stack& stack, std::tuple<Args...>&& t){};
+  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){};
 };
 
 template <typename... Args>

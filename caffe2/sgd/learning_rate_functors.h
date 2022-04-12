@@ -36,7 +36,7 @@ class FixedLearningRate : public LearningRateFunctor<T> {
 };
 
 // Alter: alternatate learning rate with active_period and inactive_period.
-// update for for a duration of active_period and then stop for a duration of
+// update for a duration of active_period and then stop for a duration of
 // inactive_period if active_first, and vice versa
 template <typename T>
 class AlternateLearningRate : public LearningRateFunctor<T> {
@@ -319,9 +319,9 @@ class CyclicalLearningRate : public LearningRateFunctor<T> {
         decay_(decay) {}
   T operator()(const int64_t iter) const override {
     int64_t cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
-    T x = abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
+    T x = std::abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
     return 1 +
-        (T(abs(max_lr_)) / T(abs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)) *
+        (T(std::abs(max_lr_)) / T(std::abs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)) *
         std::pow(decay_, static_cast<int>(iter / (2 * stepsize_)));
   }
   T base_lr_;

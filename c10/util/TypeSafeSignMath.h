@@ -1,15 +1,24 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <limits>
 #include <type_traits>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wstring-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
 
 namespace c10 {
 
 /// Returns false since we cannot have x < 0 if x is unsigned.
 template <typename T>
 static inline constexpr bool is_negative(
-    const T& x,
-    std::true_type is_unsigned) {
+    const T& /*x*/,
+    std::true_type /*is_unsigned*/) {
   return false;
 }
 
@@ -17,7 +26,7 @@ static inline constexpr bool is_negative(
 template <typename T>
 static inline constexpr bool is_negative(
     const T& x,
-    std::false_type is_unsigned) {
+    std::false_type /*is_unsigned*/) {
   return x < T(0);
 }
 
@@ -33,13 +42,15 @@ inline constexpr bool is_negative(const T& x) {
 
 /// Returns the sign of an unsigned variable x as 0, 1
 template <typename T>
-static inline constexpr int signum(const T& x, std::true_type is_unsigned) {
+static inline constexpr int signum(const T& x, std::true_type /*is_unsigned*/) {
   return T(0) < x;
 }
 
 /// Returns the sign of a signed variable x as -1, 0, 1
 template <typename T>
-static inline constexpr int signum(const T& x, std::false_type is_unsigned) {
+static inline constexpr int signum(
+    const T& x,
+    std::false_type /*is_unsigned*/) {
   return (T(0) < x) - (x < T(0));
 }
 
@@ -71,8 +82,8 @@ inline constexpr bool greater_than_max(const T& x) {
 template <typename Limit, typename T>
 static inline constexpr bool less_than_lowest(
     const T& x,
-    std::false_type limit_is_unsigned,
-    std::false_type x_is_unsigned) {
+    std::false_type /*limit_is_unsigned*/,
+    std::false_type /*x_is_unsigned*/) {
   return x < std::numeric_limits<Limit>::lowest();
 }
 
@@ -80,9 +91,9 @@ static inline constexpr bool less_than_lowest(
 /// negative values but x cannot be negative because it is unsigned
 template <typename Limit, typename T>
 static inline constexpr bool less_than_lowest(
-    const T& x,
-    std::false_type limit_is_unsigned,
-    std::true_type x_is_unsigned) {
+    const T& /*x*/,
+    std::false_type /*limit_is_unsigned*/,
+    std::true_type /*x_is_unsigned*/) {
   return false;
 }
 
@@ -91,17 +102,17 @@ static inline constexpr bool less_than_lowest(
 template <typename Limit, typename T>
 static inline constexpr bool less_than_lowest(
     const T& x,
-    std::true_type limit_is_unsigned,
-    std::false_type x_is_unsigned) {
+    std::true_type /*limit_is_unsigned*/,
+    std::false_type /*x_is_unsigned*/) {
   return x < T(0);
 }
 
 /// Returns false sign both types are unsigned
 template <typename Limit, typename T>
 static inline constexpr bool less_than_lowest(
-    const T& x,
-    std::true_type limit_is_unsigned,
-    std::true_type x_is_unsigned) {
+    const T& /*x*/,
+    std::true_type /*limit_is_unsigned*/,
+    std::true_type /*x_is_unsigned*/) {
   return false;
 }
 
@@ -117,3 +128,5 @@ inline constexpr bool less_than_lowest(const T& x) {
 }
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
