@@ -9,6 +9,53 @@
 #include <type_traits>
 
 /*
+ * [Note: IListRef]
+ * Wrapper around different API containers (e.g. boxed and unboxed).
+ *
+ * What is it?
+ * ===========
+ * It is a tagged union of both boxed and unboxed API containers.
+ * Working implementations:
+ *
+ * - `IListRef<at::Tensor>`
+ * - `IListRef<at::OptionalTensorRef>`
+ *
+ * Note that `IListRef` is a view type. Meaning that it won't own the
+ * tensors it holds. It's intended to be used only as argument parameters.
+ * Specifically, where these 2 worlds overlap.
+ *
+ * What is this for?
+ * =================
+ * Historically, PyTorch has maintained 2 different APIs: the unboxed
+ * (called from C++ API and Python eager mode) and boxed APIs (called
+ * from the TorchScript JIT, mobile interpreter, and boxed fallbacks).
+ *
+ * Calling unboxed kernels from the boxed "world" and vice-versa may
+ * result in non-negligible overhead. Lists are one of those types:
+ *
+ * - Boxed world: `c10::List`
+ * - Unboxed world: `c10::ArrayRef`
+ *
+ * In this context, `c10::IListRef` solves this problem by wrapping those
+ * 2 container types, so that we don't need to convert from one to
+ * the other.
+ *
+ * (see https://github.com/pytorch/pytorch/issues/66328)
+ *
+ * What does it do?
+ * ================
+ * This container wraps around the different tagged containers
+ * (currently, only boxed and unboxed), without incurring in extra
+ * overhead for converting from one to another. It does so while
+ * exposing usual container methods, which dispatch to corresponding
+ * implementations.
+ *
+ * While it works with different container types, it introduces
+ * overhead for repeatedly calling member functions (since those will
+ * get dispatched, again). Therefore, you should only use it to iterate
+ * through the list up to one time. If you need to do more complex things,
+ * call `materialize()` first.
+ *
  * Adding support for a new Tag
  * ============================
  * Suppose we want to add a new tag: `Chest`. Here are the steps
@@ -291,7 +338,7 @@ using MaterializedIListRef = std::vector<_MaterializedIListRefElem<IListRefConst
  * ===========================
  * MSVC `vector<T>::iterator` implementation (used in the boxed variant)
  * makes it so this union's destructor, copy-constructor (assignment), and
- * move-constructor (assignment) are implcitly deleted.
+ * move-constructor (assignment) are implicitly deleted.
  *
  * Therefore, we need to explicitly define them as needed. Follows a list
  * of places where these are needed and their reason:
@@ -313,7 +360,7 @@ class IListRefIterator : public std::iterator<
           detail::IListRefConstRef<T>,
           ptrdiff_t,
           std::add_pointer<detail::IListRefConstRef<T>>,
-          std::add_rvalue_reference<detail::IListRefConstRef<T>>> {
+          std::add_lvalue_reference<detail::IListRefConstRef<T>>> {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...)                        \
   friend class detail::IListRefTagImpl<IListRefTag::TAG, T>; \
@@ -336,7 +383,7 @@ class IListRefIterator : public std::iterator<
 
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
   // See [Note: MSVC Iterator Debug]
-  ITensorListRefIterator(const ITensorListRefIterator& iterator)
+  IListRefIterator(const ITensorListRefIterator& iterator)
       : tag_(iterator.tag_) {
     switch (tag_) {
       case ITensorListRefTag::Boxed:
@@ -351,7 +398,7 @@ class IListRefIterator : public std::iterator<
 
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
   // See [Note: MSVC Iterator Debug]
-  ~ITensorListRefIterator() {
+  ~IListRefIterator() {
     switch (tag_) {
       case ITensorListRefTag::Boxed:
         payload_.boxed_iterator.~boxed_iterator_type();
@@ -433,51 +480,7 @@ class IListRefIterator : public std::iterator<
 };
 
 /*
- * Wrapper around different API containers (e.g. boxed and unboxed).
- *
- * What is it?
- * ===========
- * It is a tagged union of both boxed and unboxed API containers.
- * Working implementations:
- *
- * - `IListRef<at::Tensor>`
- * - `IListRef<at::OptionalTensorRef>`
- *
- * Note that `IListRef` is a view type. Meaning that it won't own the
- * tensors it holds. It's intended to be used only as argument parameters.
- * Specifically, where these 2 worlds overlap.
- *
- * What is this for?
- * =================
- * Historically, PyTorch has maintained 2 different APIs: the unboxed
- * (called from C++ API and Python eager mode) and boxed APIs (called
- * from the TorchScript JIT, mobile interpreter, and boxed fallbacks).
- *
- * Calling unboxed kernels from the boxed "world" and vice-versa may
- * result in non-negligible overhead. Lists are one of those types:
- *
- * - Boxed world: `c10::List`
- * - Unboxed world: `c10::ArrayRef`
- *
- * In this context, `c10::IListRef` solves this problem by wrapping those
- * 2 container types, so that we don't need to convert from one to
- * the other.
- *
- * (see https://github.com/pytorch/pytorch/issues/66328)
- *
- * What does it do?
- * ================
- * This container wraps around the different tagged containers
- * (currently, only boxed and unboxed), without incurring in extra
- * overhead for converting from one to another. It does so while
- * exposing usual container methods, which dispatch to corresponding
- * implementations.
- *
- * While it works with different container types, it introduces
- * overhead for repeatedly calling member functions (since those will
- * get dispatched, again). Therefore, you should only use it to iterate
- * through the list up to one time. If you need to do more complex things,
- * call `materialize()` first.
+ * See [Note: IListRef]
  */
 template <typename T>
 class IListRef {

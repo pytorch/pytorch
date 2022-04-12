@@ -308,18 +308,25 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
+bool isFunctionalTensor(ITensorListRef list) {
+  return isFunctionalTensorIListRef(list);
+}
+
 template <typename T>
-bool isFunctionalTensor(const c10::IListRef<t>& list) {
+bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
   if (list.size() == 0) return false;
+
   auto it = list.begin();
   bool any_functional = isFunctionalTensor(*it++);
-  while (it != list.end()) {
-    auto curr_functional = isFunctionalTensor(*it++);
+
+  for (; it != list.end(); it++) {
+    auto curr_functional = isFunctionalTensor(*it);
     TORCH_INTERNAL_ASSERT(
          curr_functional == any_functional,
         "Functionalization encountered a list of tensors where some are functional",
         "and some are not, which is not currently unsupported.");
   }
+
   return any_functional;
 }
 

@@ -119,8 +119,10 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(const Tenso
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
 TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t);
+TORCH_API bool isFunctionalTensor(ITensorListRef list);
+
 template <typename T>
-TORCH_API bool isFunctionalTensor(const c10::IListRef<T>& list);
+bool isFunctionalTensorIListRef(c10::IListRef<T> list);
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
 TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);

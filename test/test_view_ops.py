@@ -847,11 +847,6 @@ class TestViewOps(TestCase):
         v[0, 0] = 0
         self.assertEqual(t[0, 3], v[0, 0])
 
-    # Fails for meta tensors:
-    # Trying to assert equality with `self.assertEqual`
-    # does not raise an error for meta tensors (failing
-    # when `self.assertNotEqual` is called).
-    @skipMeta
     def test_advanced_indexing_nonview(self, device):
         t = torch.ones(3, 3, device=device)
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
