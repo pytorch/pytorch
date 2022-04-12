@@ -887,6 +887,9 @@ if(NOT MSVC)
   if(HAS_WERROR_CAST_FUNCTION_TYPE)
     string(APPEND CMAKE_CXX_FLAGS " -Werror=cast-function-type")
   endif()
+  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
+  # This doesn't work globally so we use the test on specific
+  # target_compile_options
 endif()
 
 if(USE_ASAN)
