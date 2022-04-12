@@ -6,6 +6,7 @@
 #include <vector>
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
@@ -28,7 +29,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
     CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");
     auto biggest = *std::max_element(mask.begin(), mask.end());
     dense_.assign(std::min(kMaxDenseSize, biggest + 1), -1);
-    for (int i = 0; i < mask.size(); i++) {
+    for (const auto i : c10::irange(mask.size())) {
       int64_t id = mask[i];
       CAFFE_ENFORCE_GE(id, 0, "Only positive IDs are allowed.");
       if (id >= kMaxDenseSize) {
@@ -57,6 +58,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
         return iter->second;
       }
     } else {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       return (id >= dense_.size()) ? -1 : dense_[id];
     }
   }
@@ -137,6 +139,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     // TODO: consider unrolling CopyItems to make elemental types copy faster
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(sparse_values.dtype()));
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < cols * rows; i++) {
       context_.CopyItemsSameDevice(
           default_value.dtype(),
@@ -152,7 +155,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     }
 
     int64_t offset = 0;
-    for (int r = 0; r < rows; r++) {
+    for (const auto r : c10::irange(rows)) {
       bool skippedSparseIndex = false;
       for (int c = 0; c < lengths_vec[r]; c++) {
         const auto sparse_index = sparse_indices_vec[offset + c];
@@ -269,7 +272,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     // SparseToDenseMask is not injective; gradient_used records
     // if the gradient is used for other input value from the same row
     vector<bool> gradient_used(cols, false);
-    for (int r = 0; r < rows; r++) {
+    for (const auto r : c10::irange(rows)) {
       std::fill(gradient_used.begin(), gradient_used.end(), false);
       for (int c = lengths_vec[r] - 1; c >= 0; c--) {
         int idx = this->getFeatureIdx(sparse_indices_vec[offset + c]);

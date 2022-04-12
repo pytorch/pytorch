@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 
 #include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
@@ -15,8 +17,6 @@ namespace torch {
 namespace jit {
 
 namespace {
-using graph_rewrite_helper::getFuncName;
-using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
@@ -126,7 +126,7 @@ std::vector<Value*> insertDeQuantForAllUse(
   // and changing the graph will also change the uses() list
   const std::vector<Use> uses = original_val->uses();
   std::vector<Value*> outputs;
-  for (size_t i = 0; i < uses.size(); ++i) {
+  for (const auto i : c10::irange(uses.size())) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
     // we want to make sure use node and dequantize node reside
@@ -226,7 +226,8 @@ c10::optional<std::string> findObserverName(Value* v) {
 bool isPlaceholderObserver(Value* observer) {
   if (getModuleName(observer).has_value()) {
     auto name = getModuleName(observer).value();
-    if (name == "__torch__.torch.quantization.observer.PlaceholderObserver") {
+    // if PlaceholderObserver is (anywhere) in name
+    if (name.find("PlaceholderObserver") != std::string::npos) {
       return true;
     }
   }
@@ -308,19 +309,27 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   std::vector<Value*> prepack_inputs = {observer_out};
   if (op_name == "embedding_bag_4bit") {
     bool optimized_qparams = false;
+    constexpr int NBINS = 200;
+    constexpr float RATIO = 0.16;
     Value* optimized_qparams_false = g->insertConstant(optimized_qparams);
+    Value* nbins_200 = g->insertConstant(NBINS);
+    Value* ratio_0_16 = g->insertConstant(RATIO);
     prepack_fn = "quantized::embedding_bag_4bit_prepack";
     quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
     prepack_inputs.push_back(optimized_qparams_false);
+    prepack_inputs.push_back(nbins_200);
+    prepack_inputs.push_back(ratio_0_16);
   } else if (op_name == "embedding_bag_byte") {
     prepack_fn = "quantized::embedding_bag_byte_prepack";
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
   } else {
     TORCH_INTERNAL_ASSERT(
+        false,
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
   std::vector<Use> uses = observer_out->uses();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
@@ -336,6 +345,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   g->insertNode(prepack);
 
   std::vector<Value*> embedding_bag_inputs =
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       embedding_bag_float_op->inputs().vec();
   std::vector<Value*> qembedding_bag_inputs = {prepack->output()};
   const auto inputs_size = embedding_bag_float_op->inputs().size();
@@ -349,11 +359,11 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
 
   if (is_aten_op) {
     TORCH_CHECK(
-        inputs_size == 8,
-        "Expecting FP aten::embedding_bag operator to have 8 inputs");
+        inputs_size == 9,
+        "Expecting FP aten::embedding_bag operator to have 9 inputs");
     // input 0 is the output of prepack op.
     // Last input is added after we account for extra input in 4-bit case.
-    for (auto i = 1; i < inputs_size - 1; ++i) {
+    for (unsigned long i = 1; i < inputs_size - 2; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
     // The sparse field in the float operator denotes sparse gradients.
@@ -362,8 +372,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
-        inputs_size == 11,
-        "Expecting F.embedding_bag operator to have 11 inputs");
+        inputs_size == 12,
+        "Expecting F.embedding_bag operator to have 12 inputs");
     qembedding_bag_inputs.push_back(embedding_bag_inputs[1]); // indices
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
@@ -375,7 +385,11 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
-  qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
+  qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 2]);
+
+  TORCH_CHECK(
+      embedding_bag_inputs[inputs_size - 1]->mustBeNone(),
+      "Expected aten::embedding_bag padding_idx input to be None");
 
   Node* qembedding_bag =
       g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);
@@ -383,7 +397,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     WithInsertPoint ins(embedding_bag_float_op);
     g->insertNode(qembedding_bag);
     // Verify that the outputs (apart from index 0) have no uses in the graph.
-    for (auto i = 1; i < embedding_bag_float_op->outputs().size(); ++i) {
+    for (const auto i :
+         c10::irange(1, embedding_bag_float_op->outputs().size())) {
       TORCH_CHECK(
           !embedding_bag_float_op->output(i)->hasUses(),
           "Expected aten::embedding_bag to only have use for its first output.");
@@ -419,6 +434,7 @@ void insertQuantizationOps(
     quantize_func = "quantize_per_tensor";
   }
   Value* original_val = observer->input(1);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *quant, *choose_qparams, *dequant;
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
@@ -523,6 +539,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
       user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *choose_qparams, *quant, *dequant;
   for (const auto& n : nodes_to_rewrite) {
     std::tie(choose_qparams, quant, dequant) = n;
@@ -643,7 +660,7 @@ void checkCalculateQParamsResult(const IValue& qparams) {
       "Tuple of size 2, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
-  for (size_t i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     TORCH_CHECK(
         tp->elements()[i].isTensor(),
         "Element of Tuple is expected to be Tensor, but element ",
@@ -708,15 +725,19 @@ class InsertQuantDeQuantHelper {
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
+      // FIXME[T110786721]: This check was broken before nevery failing.
+      // Once fixed, this check triggers and fails tests.
+      // Fix the tests that enabling this check produce!
+      /*
       TORCH_CHECK(
-          qscheme_for_graph_.at(g) == qscheme ||
-
-              "Quantizing same graph with different types of "
-              "QSchemes is not supported.\n",
+          qscheme_for_graph_.at(g) == qscheme,
+          "Quantizing same graph with different types of "
+          "QSchemes is not supported.\n",
           " Expecting:",
           c10::toString(qscheme_for_graph_.at(g)),
           " Got:",
           c10::toString(qscheme));
+      */
     } else {
       qscheme_for_graph_[g] = toAffine(qscheme);
     }
@@ -914,7 +935,7 @@ std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
     const std::vector<Node*>& nodes,
     const std::string& name) {
   auto observer_subgraph = std::make_shared<Graph>();
-  auto build_observer_graph = [&](Function& func) {
+  auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };
   return torch::make_unique<GraphFunction>(
@@ -1007,7 +1028,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
-      v->type()->isSubtypeOf(TensorType::get()),
+      v->type()->isSubtypeOf(*TensorType::get()),
       "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -1335,7 +1356,7 @@ void InsertQuantDeQuantHelper::runWeightObserver(
     blocks_to_visit.pop();
     for (auto n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         auto observer_name = findObserverName(v);
@@ -1397,9 +1418,9 @@ void InsertQuantDeQuantHelper::run(
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
   std::vector<Value*> input_values;
-  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
+  for (const auto idx : c10::irange(1, method.num_inputs())) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       input_values.push_back(v);
     }
   }
@@ -1412,7 +1433,7 @@ void InsertQuantDeQuantHelper::run(
     for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         collectObserverNodesAndValueToQuantize(module, v);
@@ -1450,38 +1471,6 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
 
 } // namespace
 
-void SwapFunctionalLinear(Module& module) {
-  for (auto& method : module.get_methods()) {
-    std::shared_ptr<Graph> g = method.graph();
-    SwapFunctionalLinear(g);
-  }
-  for (Module m : module.children()) {
-    SwapFunctionalLinear(m);
-  }
-}
-
-void SwapFunctionalLinear(std::shared_ptr<Graph>& graph) {
-  std::string functional_linear = R"(
-graph(%linear, %input, %weight, %bias):
-  %r = prim::CallFunction(%linear, %input, %weight, %bias)
-  return (%r) )";
-  std::string aten_linear = R"(
-graph(%linear, %input, %weight, %bias):
-  %r = aten::linear(%input, %weight, %bias)
-  return (%r) )";
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear = getValue("linear", match_vmap, vmap);
-    auto func_name = getFuncName(linear);
-    return func_name == "linear";
-  };
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(functional_linear, aten_linear);
-  // TODO: runOnGraph takes const ref?
-  rewriter.runOnGraph(graph, filter);
-}
-
 void ReplicateQuant(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;
   std::vector<Node*> quant_nodes_to_rewrite;
@@ -1505,7 +1494,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
-    for (auto i = 1; i < n->inputs().size(); ++i) {
+    for (const auto i : c10::irange(1, n->inputs().size())) {
       n->input(i)->node()->moveBefore(if_node);
     }
     // replace all uses of the quantized node with the output of if node

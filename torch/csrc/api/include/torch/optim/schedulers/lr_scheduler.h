@@ -2,7 +2,7 @@
 
 #include <torch/optim/optimizer.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace optim {
@@ -28,6 +28,7 @@ protected:
   //Get current learning rates from the optimizer
   std::vector<double> get_current_lrs() const;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   unsigned step_count_;
 
 private:

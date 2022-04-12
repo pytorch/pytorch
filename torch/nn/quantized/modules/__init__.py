@@ -2,6 +2,7 @@ import torch
 from torch.nn.modules.pooling import MaxPool2d
 
 from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid
+from .dropout import Dropout
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
@@ -20,9 +21,11 @@ class Quantize(torch.nn.Module):
      `scale`: scale of the output Quantized Tensor
      `zero_point`: zero_point of output Quantized Tensor
      `dtype`: data type of output Quantized Tensor
-
-    Attributes:
-      `scale`, `zero_point`, `dtype`
+     `factory_kwargs`: Dictionary of kwargs used for configuring initialization
+         of internal buffers. Currently, `device` and `dtype` are supported.
+         Example: `factory_kwargs={'device': 'cuda', 'dtype': torch.float64}`
+         will initialize internal buffers as type `torch.float64` on the current CUDA device.
+         Note that `dtype` only applies to floating-point buffers.
 
     Examples::
         >>> t = torch.tensor([[1., -1.], [1., -1.]])
@@ -37,10 +40,13 @@ class Quantize(torch.nn.Module):
     scale: torch.Tensor
     zero_point: torch.Tensor
 
-    def __init__(self, scale, zero_point, dtype):
+    def __init__(self, scale, zero_point, dtype, factory_kwargs=None):
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super(Quantize, self).__init__()
-        self.register_buffer('scale', torch.tensor([scale]))
-        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.long))
+        self.register_buffer('scale', torch.tensor([scale], **factory_kwargs))
+        self.register_buffer('zero_point',
+                             torch.tensor([zero_point], dtype=torch.long,
+                                          **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
         self.dtype = dtype
 
     def forward(self, X):
@@ -108,6 +114,7 @@ __all__ = [
     'Quantize',
     'ReLU6',
     'Sigmoid',
+    'Dropout',
     # Wrapper modules
     'FloatFunctional',
     'FXFloatFunctional',

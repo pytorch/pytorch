@@ -11,13 +11,15 @@ class LayerNorm(torch.nn.LayerNorm):
     """
 
     def __init__(self, normalized_shape, weight, bias, scale, zero_point, eps=1e-5,
-                 elementwise_affine=True):
+                 elementwise_affine=True, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(LayerNorm, self).__init__(
-            normalized_shape, eps=eps, elementwise_affine=elementwise_affine)
+            normalized_shape, eps=eps, elementwise_affine=elementwise_affine,
+            **factory_kwargs)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.tensor(scale))
-        self.register_buffer('zero_point', torch.tensor(zero_point))
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.layer_norm(
@@ -35,6 +37,12 @@ class LayerNorm(torch.nn.LayerNorm):
             int(zero_point), mod.eps, mod.elementwise_affine)
         return new_mod
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.normalized_shape, mod.weight, mod.bias, float(scale),
+            int(zero_point), mod.eps, mod.elementwise_affine)
+
 class GroupNorm(torch.nn.GroupNorm):
     r"""This is the quantized version of :class:`~torch.nn.GroupNorm`.
 
@@ -45,12 +53,15 @@ class GroupNorm(torch.nn.GroupNorm):
     """
     __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
 
-    def __init__(self, num_groups, num_channels, weight, bias, scale, zero_point, eps=1e-5, affine=True):
-        super(GroupNorm, self).__init__(num_groups, num_channels, eps, affine)
+    def __init__(self, num_groups, num_channels, weight, bias, scale, zero_point, eps=1e-5,
+                 affine=True, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(GroupNorm, self).__init__(num_groups, num_channels, eps, affine,
+                                        **factory_kwargs)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.tensor(scale))
-        self.register_buffer('zero_point', torch.tensor(zero_point))
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.group_norm(
@@ -78,13 +89,14 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
     """
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+                 track_running_stats=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(InstanceNorm1d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.tensor(scale))
-        self.register_buffer('zero_point', torch.tensor(zero_point))
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
@@ -102,6 +114,12 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
             mod.eps, mod.affine)
         return new_mod
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+
 class InstanceNorm2d(torch.nn.InstanceNorm2d):
     r"""This is the quantized version of :class:`~torch.nn.InstanceNorm2d`.
 
@@ -112,13 +130,14 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
     """
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+                 track_running_stats=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(InstanceNorm2d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.tensor(scale))
-        self.register_buffer('zero_point', torch.tensor(zero_point))
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
@@ -136,6 +155,12 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
             mod.eps, mod.affine)
         return new_mod
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+
 class InstanceNorm3d(torch.nn.InstanceNorm3d):
     r"""This is the quantized version of :class:`~torch.nn.InstanceNorm3d`.
 
@@ -146,13 +171,14 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
     """
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+                 track_running_stats=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(InstanceNorm3d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.tensor(scale))
-        self.register_buffer('zero_point', torch.tensor(zero_point))
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
@@ -169,3 +195,9 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)

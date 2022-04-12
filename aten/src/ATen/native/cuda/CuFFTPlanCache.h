@@ -1,9 +1,10 @@
-#include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <cufft.h>
 #include <cufftXt.h>
@@ -111,7 +112,7 @@ public:
 
   ~CuFFTHandle() {
 // Not using fftDestroy() for rocFFT to work around double freeing of handles
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     cufftDestroy(handle_);
 #endif
   }
@@ -122,7 +123,7 @@ static bool is_pow_of_two(int64_t x) {
   return (x & (x - 1)) == 0;
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     using cufft_size_type = int;
 #else
     using cufft_size_type = long long int;
@@ -142,7 +143,6 @@ struct CuFFTDataLayout {
 // e.g. if the input is cloned, this will be the resulting data layout
 // See NOTE [ cuFFT Embedded Strides ].
 inline CuFFTDataLayout cufft_simple_embed(IntArrayRef sizes, bool onesided) {
-  const auto signal_ndim = sizes.size() - 1;
   CuFFTDataLayout layout;
   layout.simple = true;
   layout.must_clone = false;
@@ -204,7 +204,7 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
     layout.stride = strides[signal_ndim];
     // Determine if layout represents a simple embedding (contiguous data)
     layout.simple = [&] {
-      for (int64_t i = 1; i < signal_ndim - 1; ++i) {
+      for (const auto i : c10::irange(1, signal_ndim - 1)) {
         if (layout.embed[i] != sizes[i + 1]) {
           return false;
         }
@@ -258,7 +258,7 @@ public:
     // use a flag to keep track throughout this function to see if we need to
     // input = input.clone();
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     // clone input to avoid issues with hipfft clobering the input and failing tests
     clone_input = true;
 #else
@@ -275,7 +275,7 @@ public:
                "cuFFT doesn't support signals of half type with compute "
                "capability less than SM_53, but the device containing input half "
                "tensor only has SM_", dev_prop->major, dev_prop->minor);
-      for (int64_t i = 0; i < signal_ndim; i++) {
+      for (const auto i : c10::irange(signal_ndim)) {
         TORCH_CHECK(is_pow_of_two(sizes[i + 1]),
             "cuFFT only supports dimensions whose sizes are powers of two when"
             " computing in half precision, but got a signal size of",
@@ -300,7 +300,7 @@ public:
 
     const bool simple_layout = in_layout.simple && out_layout.simple;
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     hipfftType exec_type = [&]{
       if (dtype == kFloat) {
         switch (fft_type) {
@@ -350,7 +350,7 @@ public:
       // by assuming istride = ostride = 1.
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
@@ -362,7 +362,7 @@ public:
         batch, &ws_size_t, exec_type));
 #endif
     } else {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         in_layout.embed.data(), in_layout.stride, in_layout.dist,
         out_layout.embed.data(), out_layout.stride, out_layout.dist,
@@ -392,19 +392,19 @@ private:
   ScalarType value_type_;
 };
 
-#if CUDA_VERSION < 10000
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 10000) || defined(USE_ROCM)
   // Note that the max plan number for CUDA version < 10 has to be 1023
   // due to a bug that fails on the 1024th plan
-  constexpr size_t CUFFT_MAX_PLAN_NUM = 1023;
-  constexpr size_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
 #else
-  constexpr size_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<size_t>::max();
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<int64_t>::max();
   // The default max cache size chosen for CUDA version > 10 is arbitrary.
   // This number puts a limit on how big of a plan cache should we maintain by
   // default. Users can always configure it via cufft_set_plan_cache_max_size.
-  constexpr size_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
+  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
 #endif
-static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
+static_assert(0 <= CUFFT_MAX_PLAN_NUM && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<int64_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
 static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= CUFFT_MAX_PLAN_NUM,
               "CUFFT_DEFAULT_CACHE_SIZE not in [0, CUFFT_MAX_PLAN_NUM] range");

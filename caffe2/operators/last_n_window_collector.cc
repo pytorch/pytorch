@@ -8,6 +8,7 @@ namespace caffe2 {
 namespace {
 
 template <class Context>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class LastNWindowCollectorOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -42,6 +43,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
              output->raw_mutable_data(input.dtype()))[0] != nullptr);
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
@@ -83,6 +85,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
 
     // output_num is >= output_batch_size
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (output_num > output_batch_size) {
       output->ExtendTo(output_num, 50);
     }

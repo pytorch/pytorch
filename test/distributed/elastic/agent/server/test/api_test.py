@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -7,6 +8,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import signal
 import unittest
 import uuid
 from typing import Any, Dict
@@ -22,9 +24,11 @@ from torch.distributed.elastic.agent.server.api import (
     _get_fq_hostname,
     _RoleInstanceInfo,
 )
+from torch.distributed.elastic.multiprocessing import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_utils import run_tests
 
 
 def do_nothing():
@@ -149,17 +153,6 @@ def monres(state: WorkerState):
 
 
 class SimpleElasticAgentTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # start a standalone, single process etcd server to use for all tests
-        cls._etcd_server = EtcdServer()
-        cls._etcd_server.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        # stop the standalone etcd server
-        cls._etcd_server.stop()
-
     def _get_worker_spec(
         self,
         max_restarts=1,
@@ -168,10 +161,15 @@ class SimpleElasticAgentTest(unittest.TestCase):
         local_world_size=8,
     ):
         run_id = str(uuid.uuid4().int)
-        endpoint = self._etcd_server.get_endpoint()
-
+        port = get_free_port()
+        endpoint = f"127.0.0.1:{port}"
         rdzv_params = RendezvousParameters(
-            backend="etcd", endpoint=endpoint, run_id=run_id, min_nodes=1, max_nodes=1
+            backend="static",
+            endpoint=endpoint,
+            run_id=run_id,
+            min_nodes=1,
+            max_nodes=1,
+            rank=0,
         )
         rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_params)
         spec = WorkerSpec(
@@ -531,26 +529,44 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEquals(expected_info.serialize(), store.value)
         store_mock.assert_called_once()
 
-    def test_get_agent_status_event(self):
+    def test_get_event(self):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
-        actual_event = agent.get_agent_status_event(state=WorkerState.SUCCEEDED)
-        self.assertEqual("AGENT", actual_event.source)
-        self.assertEqual("etcd", actual_event.metadata["rdzv_backend"])
-        self.assertEqual(WorkerState.SUCCEEDED.value, actual_event.metadata["state"])
-        self.assertEqual(spec.role, actual_event.metadata["role"])
+        event = agent.get_event_succeeded()
+        self.assertEqual("AGENT", event.source)
+        self.assertEqual("static", event.metadata["rdzv_backend"])
+        self.assertEqual("SUCCEEDED", event.metadata["state"])
+        self.assertEqual(spec.role, event.metadata["role"])
 
     def test_get_worker_status_event(self):
         spec = self._get_worker_spec(max_restarts=4)
         agent = TestAgent(spec)
         agent._remaining_restarts = spec.max_restarts - 2
         actual_event = agent._construct_event(
-            state=WorkerState.SUCCEEDED.value,
+            state="SUCCEEDED",
             source="WORKER",
             worker=agent._worker_group.workers[0],
         )
         self.assertEqual("WORKER", actual_event.source)
-        self.assertEqual("etcd", actual_event.metadata["rdzv_backend"])
-        self.assertEqual(WorkerState.SUCCEEDED.value, actual_event.metadata["state"])
+        self.assertEqual("static", actual_event.metadata["rdzv_backend"])
+        self.assertEqual("SUCCEEDED", actual_event.metadata["state"])
         self.assertEqual(spec.role, actual_event.metadata["role"])
         self.assertEqual(2, actual_event.metadata["agent_restarts"])
+
+    @patch("torch.distributed.elastic.agent.server.api.put_metric")
+    @patch.object(TestAgent, "_invoke_run")
+    def test_agent_process_signal_exception(self, invoke_run, _):
+        spec = self._get_worker_spec(max_restarts=0)
+        agent = TestAgent(spec)
+        invoke_run.side_effect = SignalException(
+            "signal exception", sigval=signal.SIGTERM
+        )
+        with patch.object(agent, "_shutdown") as shutdown_mock:
+            with self.assertRaises(SignalException):
+                agent.run()
+            args, _ = shutdown_mock.call_args
+            self.assertEqual(signal.SIGTERM, args[0])
+
+
+if __name__ == "__main__":
+    run_tests()

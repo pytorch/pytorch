@@ -20,7 +20,7 @@ void set_parameter_to_constants(Model& model, const torch::TensorOptions& tensor
 
 // a generic function to provide consistent encoder/decoder layer for all the transformer tests
 template<typename T_LAYER, typename T_OPTIONS>
-T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options) {
+T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options, bool use_callable_activation) {
   int64_t d_model = 4;
   int64_t nhead = 2;
   int64_t dim_feedforward = 16;
@@ -31,6 +31,9 @@ T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options) {
   if (tensor_options.device() == torch::kCUDA) {
     layer->to(torch::kCUDA);
   }
+  if (use_callable_activation) {
+    layer.get()->options.activation([&](const torch::Tensor& t) {return torch::nn::functional::relu(t);});
+  }
 
   // set constant weights of the model
   set_parameter_to_constants<T_LAYER>(layer, tensor_options);
@@ -38,13 +41,14 @@ T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options) {
   return layer;
 }
 
-void transformer_encoder_layer_test_helper(bool is_cuda) {
+void transformer_encoder_layer_test_helper(bool is_cuda, bool use_callable_activation) {
   // this is a deterministic test for TransformerEncoderLayer
   torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
   torch::TensorOptions tensor_options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
 
   TransformerEncoderLayer model =
-    get_a_test_layer<TransformerEncoderLayer, TransformerEncoderLayerOptions>(tensor_options);
+    get_a_test_layer<TransformerEncoderLayer, TransformerEncoderLayerOptions>(
+      tensor_options, use_callable_activation);
 
   // relu test case 1
   torch::Tensor encoder_input = torch::tensor({{{20, 30, 40, 50}}}, tensor_options);
@@ -153,14 +157,16 @@ void transformer_encoder_layer_test_helper(bool is_cuda) {
 }
 
 TEST_F(TransformerTest, TransformerEncoderLayer) {
-  transformer_encoder_layer_test_helper(false);
+  transformer_encoder_layer_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ false);
+  transformer_encoder_layer_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, TransformerEncoderLayer_CUDA) {
-  transformer_encoder_layer_test_helper(true);
+  transformer_encoder_layer_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ false);
+  transformer_encoder_layer_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ true);
 }
 
-void transformer_decoder_layer_test_helper(bool is_cuda){
+void transformer_decoder_layer_test_helper(bool is_cuda, bool use_callable_activation){
 
   torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
   torch::TensorOptions tensor_options = torch::TensorOptions()
@@ -168,7 +174,7 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
 
   TransformerDecoderLayer model = get_a_test_layer<
     TransformerDecoderLayer,
-    TransformerDecoderLayerOptions>(tensor_options);
+    TransformerDecoderLayerOptions>(tensor_options, use_callable_activation);
 
   // deterministic input
   torch::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
@@ -310,14 +316,16 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
 }
 
 TEST_F(TransformerTest, TransformerDecoderLayer){
-  transformer_decoder_layer_test_helper(false);
+  transformer_decoder_layer_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ false);
+  transformer_decoder_layer_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, TransformerDecoderLayer_CUDA){
-    transformer_decoder_layer_test_helper(true);
+  transformer_decoder_layer_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ false);
+  transformer_decoder_layer_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ true);
 }
 
-void transformer_decoder_layer_test_helper_gelu(bool is_cuda) {
+void transformer_decoder_layer_test_helper_gelu(bool is_cuda, bool use_callable_activation) {
 
   torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
   torch::TensorOptions tensor_options = torch::TensorOptions()
@@ -325,8 +333,12 @@ void transformer_decoder_layer_test_helper_gelu(bool is_cuda) {
 
   TransformerDecoderLayer model = get_a_test_layer<
     TransformerDecoderLayer,
-    TransformerDecoderLayerOptions>(tensor_options);
-  model.get()->options.activation(torch::kGELU);
+    TransformerDecoderLayerOptions>(tensor_options, use_callable_activation);
+  if (use_callable_activation) {
+    model.get()->options.activation([&](const torch::Tensor& t) {return torch::nn::functional::gelu(t);});
+  } else {
+    model.get()->options.activation(torch::kGELU);
+  }
 
   // deterministic input
   torch::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
@@ -405,20 +417,23 @@ void transformer_decoder_layer_test_helper_gelu(bool is_cuda) {
 }
 
 TEST_F(TransformerTest, TransformerDecoderLayer_gelu) {
-  transformer_decoder_layer_test_helper_gelu(false);
+  transformer_decoder_layer_test_helper_gelu(/*is_cuda=*/ false, /*use_callable_activation=*/ false);
+  transformer_decoder_layer_test_helper_gelu(/*is_cuda=*/ false, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, TransformerDecoderLayer_gelu_CUDA) {
-  transformer_decoder_layer_test_helper_gelu(true);
+  transformer_decoder_layer_test_helper_gelu(/*is_cuda=*/ true, /*use_callable_activation=*/ false);
+  transformer_decoder_layer_test_helper_gelu(/*is_cuda=*/ true, /*use_callable_activation=*/ true);
 }
 
-void transformer_encoder_test_helper(bool is_cuda) {
+void transformer_encoder_test_helper(bool is_cuda, bool use_callable_activation) {
   // this is a deterministic test for TransformerEncoderLayer
   torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
   torch::TensorOptions tensor_options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
 
   TransformerEncoderLayer encoder_layer =
-    get_a_test_layer<TransformerEncoderLayer, TransformerEncoderLayerOptions>(tensor_options);
+    get_a_test_layer<TransformerEncoderLayer, TransformerEncoderLayerOptions>(
+      tensor_options, use_callable_activation);
 
   TransformerEncoder model(TransformerEncoderOptions(encoder_layer, 1));
   if (is_cuda) {
@@ -522,11 +537,13 @@ void transformer_encoder_test_helper(bool is_cuda) {
 }
 
 TEST_F(TransformerTest, TransformerEncoder) {
-  transformer_encoder_test_helper(false);
+  transformer_encoder_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ false);
+  transformer_encoder_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, TransformerEncoder_CUDA) {
-  transformer_encoder_test_helper(true);
+  transformer_encoder_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ false);
+  transformer_encoder_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, PrettyPrintTransformerEncoderLayer) {
@@ -606,7 +623,7 @@ TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
       ")");
 }
 
-void transformer_decoder_test_helper(bool is_cuda) {
+void transformer_decoder_test_helper(bool is_cuda, bool use_callable_activation) {
   // this is a deterministic test for TransformerDecoder
   torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
   torch::TensorOptions tensor_options =
@@ -614,7 +631,7 @@ void transformer_decoder_test_helper(bool is_cuda) {
 
   TransformerDecoderLayer decoder_layer = get_a_test_layer<
     TransformerDecoderLayer,
-    TransformerDecoderLayerOptions>(tensor_options);
+    TransformerDecoderLayerOptions>(tensor_options, use_callable_activation);
 
   TransformerDecoder model(TransformerDecoderOptions(decoder_layer, 1));
   if (is_cuda) {
@@ -1021,11 +1038,13 @@ void transformer_decoder_test_helper(bool is_cuda) {
 }
 
 TEST_F(TransformerTest, TransformerDecoder) {
-  transformer_decoder_test_helper(false);
+  transformer_decoder_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ false);
+  transformer_decoder_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, TransformerDecoder_CUDA) {
-  transformer_decoder_test_helper(true);
+  transformer_decoder_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ false);
+  transformer_decoder_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ true);
 }
 
 
@@ -1077,20 +1096,24 @@ TEST_F(TransformerTest, PrettyPrintTransformerDecoder) {
       ")");
 }
 
-void transformer_test_helper(bool is_cuda) {
+void transformer_test_helper(bool is_cuda, bool use_callable_activation) {
     // this is a deterministic test for Transformere
     torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
     torch::TensorOptions tensor_options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
 
     // transformer created encoder/decoder
-    Transformer model(TransformerOptions()
+    auto options = TransformerOptions()
       .d_model(4)
       .nhead(2)
       .num_encoder_layers(2)
       .num_decoder_layers(1)
       .dim_feedforward(16)
       .dropout(0.0)
-      .activation(torch::kReLU));
+      .activation(torch::kReLU);
+    if (use_callable_activation) {
+      options.activation([&](const torch::Tensor& t) { return torch::nn::functional::relu(t); });
+    }
+    Transformer model(options);
 
     set_parameter_to_constants<Transformer>(model, tensor_options);
     if (tensor_options.device() == torch::kCUDA) {
@@ -1160,11 +1183,13 @@ void transformer_test_helper(bool is_cuda) {
 }
 
 TEST_F(TransformerTest, Transformer) {
-  transformer_test_helper(false);
+  transformer_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ false);
+  transformer_test_helper(/*is_cuda=*/ false, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, Transformer_CUDA) {
-  transformer_test_helper(true);
+  transformer_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ false);
+  transformer_test_helper(/*is_cuda=*/ true, /*use_callable_activation=*/ true);
 }
 
 TEST_F(TransformerTest, TransformerArgsCorrectness) {

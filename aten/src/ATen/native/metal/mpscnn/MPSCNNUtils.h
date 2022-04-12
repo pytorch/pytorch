@@ -1,5 +1,6 @@
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#include <string>
 
 namespace at {
 namespace native {
@@ -12,12 +13,12 @@ struct LaunchParams {
   MTLSize threadsPerGrid; // iOS 11.0
 };
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 LaunchParams spatialPointwiseKernelLaunchParams(
     id<MTLComputePipelineState> pipeline,
     MPSImage* im);
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 LaunchParams spatialPointwiseKernelLaunchParams(
     id<MTLComputePipelineState> pipeline,
     NSUInteger numberOfImages,
@@ -25,11 +26,11 @@ LaunchParams spatialPointwiseKernelLaunchParams(
     NSUInteger height,
     NSUInteger width);
 
-API_AVAILABLE(ios(10.0), macos(10.13))
-static inline NSString* kernelFor(
+API_AVAILABLE(ios(11.0), macos(10.13))
+static inline std::string kernelFor(
     MPSImage* image,
-    NSString* arrayKernel,
-    NSString* nonArrayKernel) {
+    const std::string& arrayKernel,
+    const std::string& nonArrayKernel) {
   if (image.featureChannels > 4 || image.numberOfImages > 1) {
     return arrayKernel;
   }

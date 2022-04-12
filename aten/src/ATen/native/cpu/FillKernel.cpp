@@ -1,11 +1,13 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
-#include <ATen/cpu/vec256/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 #include <ATen/native/Fill.h>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 namespace {
@@ -20,7 +22,7 @@ void fill_non_native_type(TensorIterator& iter, const Scalar& value_scalar) {
   cpu_kernel_vec</*check_dynamic_cast=*/false>(
       iter,
       [val]() -> H { return val; },
-      [val]() { return Vec256<H>(val); });
+      [val]() { return Vectorized<H>(val); });
 }
 
 template <>
@@ -31,7 +33,7 @@ void fill_non_native_type<c10::complex<at::Half>>(TensorIterator& iter, const Sc
   cpu_kernel_vec</*check_dynamic_cast=*/false>(
       iter,
       [val]() -> int32_t { return val; },
-      [val]() { return Vec256<int32_t>(val); });
+      [val]() { return Vectorized<int32_t>(val); });
 }
 
 void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
@@ -47,7 +49,7 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
       cpu_kernel_vec(
           iter,
           [=]() -> scalar_t { return value; },
-          [=]() { return Vec256<scalar_t>(value); });
+          [=]() { return Vectorized<scalar_t>(value); });
     });
   }
 }

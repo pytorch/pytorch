@@ -13,7 +13,7 @@ namespace xnnpack {
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -68,6 +68,13 @@ Tensor max_pool2d(
     const float output_max = +std::numeric_limits<float>::infinity());
 
 //
+// Global Average Pooling
+//
+
+bool use_global_average_pool(const Tensor& input);
+Tensor global_average_pool(const Tensor& input);
+
+//
 // Channel Shuffle
 //
 
@@ -78,6 +85,13 @@ bool use_channel_shuffle(
 Tensor channel_shuffle(
     const Tensor& input,
     const int64_t groups);
+
+//
+// Activations
+//
+bool use_hardswish(const Tensor& input);
+Tensor hardswish(const Tensor& input);
+Tensor& hardswish_(Tensor& input);
 
 } // namespace xnnpack
 } // namespace native

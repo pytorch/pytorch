@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapTransforms.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -10,18 +11,22 @@ namespace {
 
 TEST(VmapTest, TestBatchedTensor) {
   {
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     Tensor x = addBatchDim(ones({2, 3, 4}), /*lvl=*/1, /*dim=*/1);
     std::vector<int64_t> expected_size = {2, 4};
     ASSERT_EQ(x.sizes(), expected_size);
     ASSERT_EQ(x.dim(), 2);
     ASSERT_EQ(x.numel(), 8);
     ASSERT_EQ(x.is_contiguous(), false);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(x.storage(), c10::Error);
     ASSERT_EQ(x.storage_offset(), 0);
   }
   {
     // Test multiple batch dims
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     Tensor x = addBatchDim(ones({2, 3, 4}), /*lvl=*/1, /*dim=*/1);
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     x = addBatchDim(x, /*lvl=*/2, /*dim=*/1);
     std::vector<int64_t> expected_size = {2};
     ASSERT_EQ(x.sizes(), expected_size);
@@ -33,11 +38,13 @@ TEST(VmapTest, TestBatchedTensor) {
 
     // Should not throw
     std::vector<int64_t> sizes(kVmapMaxTensorDims, 1);
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     Tensor x = addBatchDim(ones(sizes), /*lvl=*/1, /*dim=*/1);
 
     // Should throw
     std::vector<int64_t> too_many_sizes(kVmapMaxTensorDims + 1, 1);
     auto big_dim_tensor = ones(too_many_sizes);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto,bugprone-argument-comment)
     ASSERT_THROW(addBatchDim(big_dim_tensor, /*lvl=*/1, /*dim=*/1), c10::Error);
   }
   {
@@ -49,7 +56,7 @@ TEST(VmapTest, TestBatchedTensor) {
 // returns {{lvl=0,dim=0}, {lvl=1,dim=1}, ..., {lvl=kVmapNumLevels-1,dim=kVmapNumLevels-1}};
 static BatchDims maxBatchDimsAtFront() {
   BatchDims result;
-  for (int64_t lvl = 0; lvl < kVmapNumLevels; lvl++) {
+  for (const auto lvl : c10::irange(kVmapNumLevels)) {
     result.emplace_back(lvl, /*dim=*/lvl);
   }
   return result;
@@ -63,12 +70,14 @@ TEST(VmapTest, TestBatchedTensorMaxLevel) {
   }
   {
     auto tensor = ones({2, 3, 4});
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(
         makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels, /*dim*/0}}),
         c10::Error);
   }
   {
     auto tensor = ones({2, 3, 4});
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(
         makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels + 5, /*dim*/0}}),
         c10::Error);
@@ -84,6 +93,7 @@ TEST(VmapTest, TestBatchedTensorMaxLevel) {
     auto tensor = ones(std::vector<int64_t>(kVmapNumLevels + 1, 1));
     auto batch_dims = maxBatchDimsAtFront();
     batch_dims.emplace_back(/*lvl*/kVmapNumLevels, /*dim*/kVmapNumLevels);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(makeBatched(tensor, batch_dims), c10::Error);
   }
 }
@@ -100,11 +110,15 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     // Test wrap around
     ASSERT_EQ(batched->actualDim(-1), 3);
     ASSERT_EQ(batched->actualDim(-4), 0);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched->actualDim(-5), c10::Error);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched->actualDim(4), c10::Error);
 
     // test wrap_dim = False
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched->actualDim(-1, /*wrap_dim*/false), c10::Error);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched->actualDim(-4, /*wrap_dim*/false), c10::Error);
   }
   {
@@ -114,6 +128,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     ASSERT_EQ(batched->actualDim(0), 1);
     ASSERT_EQ(batched->actualDim(2), 3);
     ASSERT_EQ(batched->actualDim(-1), 3);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched->actualDim(3), c10::Error);
   }
   {
@@ -155,7 +170,8 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // ActualDim on kVmapMaxTensorDims sized underlying tensor
     auto tensor = ones({});
-    for (int64_t i = 0; i < kVmapMaxTensorDims; i++) {
+    for (const auto i : c10::irange(kVmapMaxTensorDims)) {
+      (void)i; // Suppress unused variable warning
       tensor = tensor.unsqueeze(0);
     }
     ASSERT_EQ(tensor.dim(), kVmapMaxTensorDims);
@@ -174,6 +190,7 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
   {
     // Input is regular Tensor
     auto tensor = ones({2, 3, 5});
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(MultiBatchVmapTransform::logicalToPhysical(tensor), c10::Error);
   }
   {
@@ -245,7 +262,7 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
     BatchDims batch_dims = {
       {0, 2}, {1, 1}, {2, kVmapNumLevels - 1}, {3, 5}, {4, 0}, {5, 3}, {6, 4}
     };
-    for (int64_t level = 7; level < kVmapNumLevels; level++ ) {
+    for (const auto level : c10::irange(7, kVmapNumLevels)) {
       batch_dims.emplace_back(level, /*dim=*/level - 1);
     }
     auto tensor = ones(sizes);
@@ -263,12 +280,14 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDim) {
   ASSERT_EQ(physical_view.getPhysicalDim(0), 2);
   ASSERT_EQ(physical_view.getPhysicalDim(1), 3);
   ASSERT_EQ(physical_view.getPhysicalDim(2), 4);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(physical_view.getPhysicalDim(3), c10::Error);
 
   // Negative dims (testing wrap dim behavior)
   ASSERT_EQ(physical_view.getPhysicalDim(-1), 4);
   ASSERT_EQ(physical_view.getPhysicalDim(-2), 3);
   ASSERT_EQ(physical_view.getPhysicalDim(-3), 2);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(physical_view.getPhysicalDim(-4), c10::Error);
 }
 TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
@@ -278,13 +297,15 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
       physical_view.getPhysicalDims({0, 1, -1, -2}),
       VmapDimVector({3, 4, 4, 3}));
 
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(physical_view.getPhysicalDims({2, 0}), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(physical_view.getPhysicalDims({0, -3}), c10::Error);
 }
 
 static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims) {
   ASSERT_EQ(bdims.size(), expected_bdims.size());
-  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+  for (const auto idx : c10::irange(bdims.size())) {
     ASSERT_EQ(bdims[idx].dim(), expected_bdims[idx].dim());
     ASSERT_EQ(bdims[idx].level(), expected_bdims[idx].level());
   }
@@ -375,7 +396,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
 static void checkBroadcastingVmapTransform(TensorList inputs, TensorList expected_outputs) {
   auto outputs = BroadcastingVmapTransform::logicalToPhysical(inputs);
   ASSERT_EQ(outputs.size(), expected_outputs.size());
-  for (int64_t idx = 0; idx < outputs.size(); idx++) {
+  for (const auto idx : c10::irange(outputs.size())) {
     const auto& output = outputs[idx].tensor();
     ASSERT_EQ(output.data_ptr(), expected_outputs[idx].data_ptr());
     ASSERT_TRUE(at::allclose(output, expected_outputs[idx]));
@@ -622,7 +643,9 @@ TEST(VmapTest, TestBatchedTensorSize) {
     ASSERT_EQ(Bx.size(1), 7);
     ASSERT_EQ(Bx.size(-1), 7);
     ASSERT_EQ(Bx.size(-2), 5);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(Bx.size(2), c10::Error);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(Bx.size(-3), c10::Error);
   }
   {
@@ -636,7 +659,9 @@ TEST(VmapTest, TestBatchedTensorSize) {
     ASSERT_EQ(Bx.size(-1), 11);
     ASSERT_EQ(Bx.size(-2), 5);
     ASSERT_EQ(Bx.size(-3), 2);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(Bx.size(3), c10::Error);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(Bx.size(-4), c10::Error);
   }
 }
@@ -662,6 +687,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     // Expand size is too small
     auto tensor = at::randn({2, 3, 5});
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched.expand({5}), c10::Error);
   }
   {
@@ -678,6 +704,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     // Expand size has same dimensionality as the logical dim, incorrect expand size
     auto tensor = at::randn({2, 1, 5});
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched.expand({1, 25}), c10::Error);
   }
   {
@@ -694,6 +721,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     // Expand size has greater dimensionality as the logical dim, incorrect expand size
     auto tensor = at::randn({2, 3, 5});
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched.expand({7, 9, 5}), c10::Error);
   }
   {
@@ -808,10 +836,10 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
-    auto batched_out = batched.transpose(-2, -1);
+    auto batched_out = batched.mT();
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(out, tensor.transpose(-2, -1)));
+    ASSERT_TRUE(at::allclose(out, tensor.mT()));
   }
 }
 
@@ -852,7 +880,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
 static void checkMultiBatchVmapTransform(TensorList inputs, TensorList expected_outputs) {
   auto outputs = MultiBatchVmapTransform::logicalToPhysical(inputs);
   ASSERT_EQ(outputs.size(), expected_outputs.size());
-  for (int64_t idx = 0; idx < outputs.size(); idx++) {
+  for (const auto idx : c10::irange(outputs.size())) {
     const auto& output = outputs[idx].tensor();
     ASSERT_EQ(output.data_ptr(), expected_outputs[idx].data_ptr());
     ASSERT_EQ(output.sizes(), expected_outputs[idx].sizes());

@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 namespace at {
@@ -35,7 +36,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   const vTensor& v_self = convert(self);
 
   c10::SmallVector<int64_t, 4> output_size(input_dim);
-  for (size_t d = 0; d < input_dim; ++d) {
+  for (const auto d : c10::irange(input_dim)) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
     } else if (d == input_dim - 2) {
@@ -62,7 +63,12 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
       } block{
           v_output.extents(),
           0u,
-          {pad_left, pad_right, pad_top, pad_bottom},
+          {
+            safe_downcast<uint32_t>(pad_left),
+            safe_downcast<uint32_t>(pad_right),
+            safe_downcast<uint32_t>(pad_top),
+            safe_downcast<uint32_t>(pad_bottom)
+          },
       };
 
       context->dispatch(
@@ -97,7 +103,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("reflection_pad2d", TORCH_FN(reflection_pad2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::reflection_pad2d"), TORCH_FN(reflection_pad2d));
 }
 
 #endif /* USE_VULKAN_API */

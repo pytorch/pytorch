@@ -5,6 +5,8 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 namespace {
@@ -77,9 +79,10 @@ int takePrecedenceOver(
   if (left.size() == 0 || right.size() == 0) {
     return right.size() > left.size();
   }
-  for (int i = 0; i < right.size(); i++) {
+  for (auto i: c10::irange(right.size())) {
     // If right.size > left.size and left[0:i] == right[0:i],
     // right take precedence
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (i >= left.size()) {
       return 1;
     }
@@ -173,6 +176,16 @@ void BoundShapeInferencer::InferOps(
     InferSoftmax(op);
   } else if (op.type() == "LpNorm") {
     InferLpNorm(op);
+  } else if (op.type() == "Transpose") {
+    InferTranspose(op);
+  } else if (op.type() == "Bucketize") {
+    InferBucketize(op);
+  } else if (op.type() == "Clip") {
+    InferClip(op);
+  } else if (op.type() == "Div") {
+    InferDiv(op);
+  } else if (op.type() == "Mean") {
+    InferMean(op);
   } else {
     InferCommonOp(op);
   }
@@ -278,7 +291,7 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     // new value is skipped.
     if (precedence == 1) {
       shape_info.setDimType(t);
-      for (int i = 0; i < bound_dims.size(); i++) {
+      for (auto i: c10::irange(bound_dims.size())) {
         shape.set_dims(i, bound_dims[i]);
       }
     } else if (precedence == 0 && !allow_existing_shape) {
@@ -423,12 +436,6 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
        op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
        op.type() == "SparseLengthsSum4BitRowwiseSparse");
 
-  const bool isSparse =
-      (op.type() == "SparseLengthsSum4BitRowwiseSparse" ||
-       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
-       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
-       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse");
-
   if (weight) {
     CAFFE_ENFORCE_GE(
         op.input_size(),
@@ -549,6 +556,7 @@ void BoundShapeInferencer::InferElementwiseOpInput(const OperatorDef& op) {
 void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
   ArgumentHelper helper(op);
   const auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (add_axis) {
     return;
   } else if (op.output_size() == 0 || !shape_info_.count(op.output(0))) {
@@ -728,6 +736,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     dimTypes.push_back(TensorBoundShape_DimType_CONSTANT);
     current_dim_type_ = TensorBoundShape_DimType_BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     TensorProto::DataType w_data_type;
     if (fp16) {
       w_data_type = TensorProto_DataType_FLOAT;
@@ -775,6 +784,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   }
   std::vector<TensorShape> output_shapes = InferOutput(op, input_shapes);
   CAFFE_ENFORCE_EQ(output_shapes.size(), 1);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TensorProto::DataType output_data_type;
   if (fp16) {
     output_data_type = TensorProto_DataType_FLOAT;
@@ -863,7 +873,7 @@ void BoundShapeInferencer::InferUnPackRecords(const OperatorDef& op) {
     }
   }
 
-  for (int i = 0; i < output_shapes.size(); i++) {
+  for (auto i: c10::irange(output_shapes.size())) {
     const auto& shape = output_shapes[i];
 
     CheckAndSetTensorBoundShape(
@@ -911,7 +921,7 @@ void BoundShapeInferencer::InferSoftmax(const OperatorDef& op) {
 
   auto it = shape_info_.find(op.input(0));
   if (it == shape_info_.end()) {
-    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    LOG(WARNING) << "Didn't find shape info for the input of Softmax, skipping";
     return;
   }
 
@@ -923,6 +933,23 @@ void BoundShapeInferencer::InferSoftmax(const OperatorDef& op) {
       false);
 }
 
+void BoundShapeInferencer::InferBucketize(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, op.type(), " must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+
+  auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Didn't find shape info for the input of Bucketize, skipping";
+    return;
+  }
+
+  InferCommonOp(op);
+  auto it_output = shape_info_.find(op.output(0));
+  if (it_output != shape_info_.end()) {
+    it_output->second.setDimType(it->second.getDimType());
+  }
+}
+
 void BoundShapeInferencer::InferLpNorm(const OperatorDef& op) {
   CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
   InferCommonOp(op);
@@ -931,6 +958,88 @@ void BoundShapeInferencer::InferLpNorm(const OperatorDef& op) {
     it->second.setDimType(std::vector<TensorBoundShape::DimType>(
         it->second.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
   }
+}
+
+void BoundShapeInferencer::InferClip(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    auto it_input = shape_info_.find(op.input(0));
+    if (it_input != shape_info_.end()) {
+      it->second.setDimType(it_input->second.getDimType());
+    }
+  }
+}
+
+void BoundShapeInferencer::InferMean(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have at 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    auto it_input = shape_info_.find(op.input(0));
+    if (it_input != shape_info_.end()) {
+      it->second.setDimType(it_input->second.getDimType());
+    }
+  }
+}
+
+void BoundShapeInferencer::InferDiv(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    auto it_input = shape_info_.find(op.input(0));
+    if (it_input != shape_info_.end()) {
+      it->second.setDimType(it_input->second.getDimType());
+    }
+  }
+}
+
+void BoundShapeInferencer::InferTranspose(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, op.type(), " must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+
+  auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Didn't find shape info for the input of Transpose";
+    return;
+  }
+
+  ArgumentHelper helper(op);
+  std::vector<int> axes = helper.GetRepeatedArgument<int>("axes");
+  if (axes.empty()) {
+    // In this case it should be existing dims in reverse order
+    for (int i = it->second.shape.dims().size() - 1; i >= 0; --i) {
+      axes.push_back(i);
+    }
+  } else {
+    CAFFE_ENFORCE_EQ(
+        axes.size(),
+        it->second.shape.dims().size(),
+        op.type(),
+        " must specify all axes in Transpose."
+    );
+    auto valid_axes =
+        std::all_of(axes.begin(), axes.end(), [numDims = it->second.shape.dims().size()](int& axis) {
+          return axis >= 0 && axis < numDims;
+        });
+    CAFFE_ENFORCE(valid_axes, "Invalid axes were provided.");
+  }
+
+  std::vector<TensorBoundShape::DimType> dimTypes;
+  std::vector<int64_t> dims;
+  for (auto axis : axes) {
+    dimTypes.push_back(it->second.getDimType(axis));
+    dims.push_back(it->second.shape.dims()[axis]);
+  }
+
+  CheckAndSetTensorBoundShape(
+      op.output(0),
+      dimTypes,
+      dims,
+      it->second.shape.data_type(),
+      false);
 }
 
 void BoundShapeInferencer::InferCommonOp(
@@ -1003,6 +1112,7 @@ void BoundShapeInferencer::InferCommonOp(
       if (target == -1) {
         infered_data_type = TensorProto::UINT8;
       } else {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         CAFFE_ENFORCE(target < input_shapes.size());
         infered_data_type = input_shapes[target].data_type();
       }
@@ -1015,7 +1125,7 @@ void BoundShapeInferencer::InferCommonOp(
       infered_data_type = TensorProto::FLOAT;
     }
 
-    for (int i = 0; i < output_shapes.size(); i++) {
+    for (auto i: c10::irange(output_shapes.size())) {
       const auto& shape = output_shapes[i];
       if (shape.unknown_shape()) {
         continue;

@@ -3,6 +3,13 @@
 #include <ATen/Tensor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 struct TORCH_API SparseTensorImpl : public TensorImpl {
@@ -29,9 +36,16 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   // because many algorithms proceed by merging two sorted lists (of indices).
   bool coalesced_ = false;
 
+  // compute_numel with integer multiplication overflow check, see gh-57542
+  void refresh_numel() {
+    TensorImpl::safe_refresh_numel();
+  }
+
 public:
   // Public for now...
   explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
+
+  void release_resources() override;
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
@@ -41,7 +55,6 @@ public:
   Tensor values() const { return values_; }
 
   IntArrayRef strides() const override;
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   int64_t stride(int64_t d) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
@@ -103,7 +116,7 @@ public:
       bool shrinking_dense_dim = false;
       auto sparse_size_original = sizes().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
-      for (int64_t i = 0; i < sparse_dim; i++) {
+      for (const auto i : c10::irange(sparse_dim)) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
           shrinking_sparse_dims = true;
           break;
@@ -111,7 +124,7 @@ public:
       }
       auto dense_size_original = sizes().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
-      for (int64_t i = 0; i < dense_dim; i++) {
+      for (const auto i : c10::irange(dense_dim)) {
         if (dense_size_new[i] < dense_size_original[i]) {
           shrinking_dense_dim = true;
           break;

@@ -7,18 +7,21 @@
 #include <numeric>
 #include <vector>
 
-#include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
+#include <cub/block/block_reduce.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/conversions.h"
 
 #include "caffe2/utils/fixed_divisor.h"
 // TODO: Move this to fixed_divisor.h
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define FIXED_DIVISOR int32_t
 #define FIXED_DIVISOR_DIV(d, n) (n / d)
 #define FIXED_DIVISOR_MOD(d, n) (n % d)
@@ -28,15 +31,14 @@
     *q = n_copy / d;                      \
     *r = n_copy % d;                      \
   } while (0)
-#else // __HIP_PLATFORM_HCC__
+#else // USE_ROCM
 #define FIXED_DIVISOR FixedDivisor<int32_t>
 #define FIXED_DIVISOR_DIV(d, n) (d.Div(n))
 #define FIXED_DIVISOR_MOD(d, n) (d.Mod(n))
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
+#if defined(USE_ROCM)
 using CUBLAS_HALF_TYPE = rocblas_half;
 #else // __HIP_PLATFORM_HCC
 using CUBLAS_HALF_TYPE = __half;
@@ -605,7 +607,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     // rocblas doesn't support cublasSgemmEx type API yet.
     // It has more general rocblas_gemm_ex API which is more close to
     // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
@@ -654,7 +656,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         C,
         CUDA_R_16F,
         N));
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -720,7 +722,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext>(
     float** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDACC_VER_MAJOR__ < 8 || defined(USE_ROCM)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -789,7 +791,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<float, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIP_PLATFORM_HCC__)
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(USE_ROCM)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -960,7 +962,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIP_PLATFORM_HCC__)
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(USE_ROCM)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<at::Half, CUDAContext>(
@@ -982,7 +984,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     // D[i*stride_d] = alpha*op(A[i*stride_a])*op(B[i*stride_b]) +
     // beta*C[i*stride_c], for i in [0,batch_count-1]
     ROCBLAS_ENFORCE(rocblas_gemm_strided_batched_ex(
@@ -1040,7 +1042,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         batch_size,
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -1127,7 +1129,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     // rocblas doesn't support cublasSgemmEx type API yet.
     // It has more general rocblas_gemm_ex API which is more close to
     // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
@@ -1176,7 +1178,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         y,
         CUDA_R_16F,
         ldc));
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     const __half alpha_fp16 = at::Half(alpha);
     const __half beta_fp16 = at::Half(beta);
@@ -1203,7 +1205,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   }
 }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 // No change, but required. Defer to default CUDA engine
 template <>
@@ -1674,9 +1676,9 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined __HIP_PLATFORM_HCC__ && HIP_VERSION < 210
+#if defined(USE_ROCM) && (TORCH_HIP_VERSION < 210)
   CAFFE_THROW("HIP currently does not support FP16 completely yet.");
-#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210
+#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 210)
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(rocblas_hdot(
@@ -1996,7 +1998,7 @@ __global__ void Im2ColNCHWCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
@@ -2047,7 +2049,7 @@ __global__ void Im2ColNHWCCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
@@ -2109,7 +2111,7 @@ __global__ void Col2ImNCHWCUDAKernel(
               (((c * patch_h + h_k) * patch_w + w_k) * output_h + h_col) *
                   output_w +
               w_col;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
           val += __ldg(col_data + col_data_index);
 #else
           val += col_data[col_data_index];
@@ -2161,7 +2163,7 @@ __global__ void Col2ImNHWCCUDAKernel(
           h_k /= dilation_h;
           w_k /= dilation_w;
           const int c_col = (h_k * patch_w + w_k) * channels + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
           val += __ldg(
               col_data + (h_col * output_w + w_col) * channels_col + c_col);
 #else
@@ -2213,17 +2215,17 @@ __global__ void Im2ColNdNCHWCUDAKernel(
         is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, __ldg(X_data + col_index));
+        gpu_atomic_add(Y_data + img_index, __ldg(X_data + col_index));
       }
 #else
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : X_data[img_index];
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, X_data[col_index]);
+        gpu_atomic_add(Y_data + img_index, X_data[col_index]);
       }
 #endif
     }
@@ -2834,7 +2836,7 @@ __global__ void BroadcastCUDAKernel(
       FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[Y_index] = __ldg(X + X_index) * alpha;
 #else
     Y[Y_index] = X[X_index] * alpha;
@@ -2890,7 +2892,8 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
       const T alpha,                                 \
       const T* X,                                    \
       T* Y,                                          \
-      CUDAContext* context) {                        \
+      CUDAContext* context,                          \
+      bool) {                                        \
     CAFFE_ENFORCE_LE(X_ndim, Y_ndim);                \
     DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(          \
         Y_ndim,                                      \

@@ -176,7 +176,7 @@ struct BoxedKernelWrapper<
     DispatchKeySet dispatchKeySet,
     Args... args
   ) {
-    torch::jit::Stack stack = boxArgs(args...);
+    torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
@@ -200,7 +200,7 @@ struct BoxedKernelWrapper<
 // 3. in-place ops take a single non-const Tensor reference
 // as their first argument, and return it.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // Because of this, the generated BoxedKernelWrapper specializations simply
 // return the in-place argument.
 //
@@ -216,6 +216,33 @@ struct BoxedKernelWrapper<
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     at::Tensor& outArg, OtherArgs... otherArgs
+  ) {
+    torch::jit::Stack stack = boxArgs<at::Tensor&, OtherArgs...>(outArg, std::forward<OtherArgs>(otherArgs)...);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, ",
+      "but instead returned ", stack.size(), " values."
+    );
+
+    return outArg;
+  }
+};
+
+//
+// 3.5. In-process migration to make in-place ops take and return
+// const references instead.
+template <class... OtherArgs>
+struct BoxedKernelWrapper<
+  const at::Tensor&(const at::Tensor&, OtherArgs...),
+  std::enable_if_t<can_box_all<OtherArgs...>::value, void>
+> {
+  static const at::Tensor& call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
+    const at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
@@ -233,7 +260,7 @@ struct BoxedKernelWrapper<
 // 4. out of place ops that take a single non-const Tensor reference as their
 // final argument, and also return it.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
 // return out arguments.
 //
@@ -255,7 +282,7 @@ struct BoxedKernelWrapper<
     DispatchKeySet dispatchKeySet,
     FirstArg firstArg, RestArgs... restArgs
   ) {
-    torch::jit::Stack stack = boxArgs(firstArg, restArgs...);
+    torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
@@ -263,6 +290,8 @@ struct BoxedKernelWrapper<
       "but instead returned ", stack.size(), " values."
     );
 
+    // reusing restArgs after it has been forwarded here is ok because we know
+    // that the last element is of type `Tensor&`.
     return std::get<sizeof...(RestArgs) - 1>(std::tuple<RestArgs...>{restArgs...});
   }
 };
@@ -271,7 +300,7 @@ struct BoxedKernelWrapper<
 // 5. out of place ops that take multiple non-const Tensor references as their
 // final arguments, and return them in a std::tuple.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
 // return the out arguments.
 //
@@ -293,7 +322,7 @@ struct BoxedKernelWrapper<
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
-    torch::jit::Stack stack = boxArgs(args...);
+    torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
@@ -301,7 +330,9 @@ struct BoxedKernelWrapper<
       "but instead returned ", stack.size(), " values."
     );
 
-    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{args...});
+    // reusing args after it has been forwarded here is ok because we know
+    // that the last RetCount elements are of type `Tensor&`.
+    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{std::forward<Args>(args)...});
     static_assert(
         std::is_same<Result, decltype(result)>::value,
         "The parameter list of an op returning a tuple of Tensor references "

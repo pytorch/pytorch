@@ -60,7 +60,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            store_mean=st.booleans(),
            seed=st.integers(0, 1000),
            store_inv_stdev=st.booleans())
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_instance_norm_gradients(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
             epsilon, seed):

@@ -7,32 +7,42 @@ torch.fft
 Discrete Fourier transforms and related functions.
 
 .. automodule:: torch.fft
-    :noindex:
-
 .. currentmodule:: torch.fft
 
 Fast Fourier Transforms
 -----------------------
 
-.. autofunction:: fft
-.. autofunction:: ifft
-.. autofunction:: fft2
-.. autofunction:: ifft2
-.. autofunction:: fftn
-.. autofunction:: ifftn
-.. autofunction:: rfft
-.. autofunction:: irfft
-.. autofunction:: rfft2
-.. autofunction:: irfft2
-.. autofunction:: rfftn
-.. autofunction:: irfftn
-.. autofunction:: hfft
-.. autofunction:: ihfft
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fft
+    ifft
+    fft2
+    ifft2
+    fftn
+    ifftn
+    rfft
+    irfft
+    rfft2
+    irfft2
+    rfftn
+    irfftn
+    hfft
+    ihfft
+    hfft2
+    ihfft2
+    hfftn
+    ihfftn
 
 Helper Functions
 ----------------
 
-.. autofunction:: fftfreq
-.. autofunction:: rfftfreq
-.. autofunction:: fftshift
-.. autofunction:: ifftshift
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fftfreq
+    rfftfreq
+    fftshift
+    ifftshift

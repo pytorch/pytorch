@@ -11,10 +11,13 @@ namespace caffe2 {
 // TODO(dzhulgakov): remove _STR when all lengths ops are off generic version.
 
 using SparseLengthsSumOp =
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 0, 0>;
 using SparseLengthsWeightedSumOp =
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 1, 0>;
 using SparseLengthsMeanOp =
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 0, 1>;
 
 REGISTER_CPU_OPERATOR(SparseLengthsSum, SparseLengthsSumOp);
@@ -184,6 +187,7 @@ OPERATOR_SCHEMA(SparseLengthsMeanGradient)
     .DisallowInputFillers();
 REGISTER_GRADIENT(SparseLengthsMean, SparseLengthsMeanDef::GetGradient)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(TTSparseLengthsSumGradient).NumInputs(8).NumOutputs(3);
 
 class GetTTSparseLengthsGradient : public GradientMakerBase {

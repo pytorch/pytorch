@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import filecmp
+# Owner(s): ["oncall: r2p"]
+
 import json
 import os
 import shutil
@@ -8,9 +9,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, ProcessFailure, record
-from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
+from torch.distributed.elastic.multiprocessing.errors import (
+    ChildFailedError,
+    ProcessFailure,
+    record,
+)
+from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 
 
 class SentinelError(Exception):
@@ -32,7 +36,8 @@ def good_fn():
 @record
 def raise_child_failure_error_fn(name, child_error_file=""):
     if child_error_file:
-        _write_error(SentinelError("foobar"), child_error_file)
+        with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": child_error_file}):
+            ErrorHandler().record_exception(SentinelError("foobar"))
     pf = ProcessFailure(local_rank=0, pid=997, exitcode=1, error_file=child_error_file)
     raise ChildFailedError(name, {0: pf})
 
@@ -42,7 +47,6 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-@unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
@@ -51,8 +55,20 @@ class ApiTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
+    def test_failure_incorrect_reply_file(self):
+        content = {"unknown_key": "unknown_value"}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(content, fp)
+        with self.assertRaises(Exception):
+            ProcessFailure(
+                local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+            )
+
     def failure_with_error_file(self, exception):
-        _write_error(exception, self.test_error_file)
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            ErrorHandler().record_exception(exception)
         return ProcessFailure(
             local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
         )
@@ -61,6 +77,26 @@ class ApiTest(unittest.TestCase):
         return ProcessFailure(
             local_rank=0, pid=997, exitcode=exitcode, error_file="ignored.json"
         )
+
+    def test_process_failure_new_format(self):
+        error_data = {"message": "test error message", "timestamp": 10}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(error_data, fp)
+        pf = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+        )
+        self.assertEqual("test error message", pf.message)
+        self.assertEqual(10, pf.timestamp)
+
+    def test_process_mast_error_format(self):
+        error_data = {"message": "test error message", "timestamp": "10"}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(error_data, fp)
+        pf = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+        )
+        self.assertEqual("test error message", pf.message)
+        self.assertEqual(10, pf.timestamp)
 
     def test_process_failure(self):
         pf = self.failure_with_error_file(exception=SentinelError("foobar"))
@@ -85,7 +121,10 @@ class ApiTest(unittest.TestCase):
         pf = self.failure_without_error_file(exitcode=138)
         self.assertEqual("<N/A>", pf.signal_name())
         self.assertEqual("<N/A>", pf.error_file)
-        self.assertEqual("Process failed with exitcode 138", pf.message)
+        self.assertEqual(
+            "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+            pf.message,
+        )
 
     def test_child_failed_error(self):
         pf0 = self.failure_with_error_file(exception=SentinelError("rank 0"))
@@ -104,7 +143,7 @@ class ApiTest(unittest.TestCase):
           rank: 0 (local_rank: 0)
           exitcode: 1 (pid: 997)
           error_file: /tmp/ApiTesttbb37ier/error.json
-          msg: "SentinelError: rank 0"
+          traceback: "SentinelError: rank 0"
         =============================================
         Other Failures:
         [1]:
@@ -118,7 +157,7 @@ class ApiTest(unittest.TestCase):
           rank: 2 (local_rank: 0)
           exitcode: 138 (pid: 997)
           error_file: <N/A>
-          msg: "Process failed with exitcode 138"
+          traceback: To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
         *********************************************
         """
         print(ex)
@@ -162,11 +201,14 @@ class ApiTest(unittest.TestCase):
         ):
             with self.assertRaises(ChildFailedError) as cm:
                 raise_child_failure_error_fn("trainer", trainer_error_file)
-
+            pf = cm.exception.get_first_failure()[1]
+            # compare worker error file with reply file and overridden error code
+            expect = json.load(open(pf.error_file, "r"))
+            expect["message"]["errorCode"] = pf.exitcode
+            actual = json.load(open(self.test_error_file, "r"))
             self.assertTrue(
-                filecmp.cmp(
-                    self.test_error_file, cm.exception.get_first_failure()[1].error_file
-                )
+                json.dumps(expect, sort_keys=True),
+                json.dumps(actual, sort_keys=True),
             )
 
     def test_record_child_failure_no_child_error_file(self):

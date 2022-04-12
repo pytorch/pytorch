@@ -4,164 +4,137 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import abc
+from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from torch.distributed import Store
 
 
-class RendezvousException(Exception):
-    """
-    Represents the base type for rendezvous exceptions.
-    """
-
-    pass
+class RendezvousError(Exception):
+    """Represents the base type for rendezvous errors."""
 
 
-class RendezvousClosedException(RendezvousException):
-    """
-    Raised when a rendezvous is closed.
-
-    This is used to signal completion to nodes that arrive late.
-    """
-
-    pass
+class RendezvousClosedError(RendezvousError):
+    """Raised when a rendezvous is closed."""
 
 
-class RendezvousTimeoutException(RendezvousException):
-    """
-    Raised to signal that a rendezvous did not succeed within the allocated
-    time.
-
-    This is a non-retryable type of failure.
-    """
-
-    pass
+class RendezvousTimeoutError(RendezvousError):
+    """Raised when a rendezvous did not complete on time."""
 
 
-class RendezvousNonRetryableError(RendezvousException):
-    """
-    Raised when a failure occured that should not be retried within the same
-    worker process.
+class RendezvousConnectionError(RendezvousError):
+    """Raised when the connection to a rendezvous backend has failed."""
+
+
+class RendezvousStateError(RendezvousError):
+    """Raised when the state of a rendezvous is corrupt."""
+
+
+class RendezvousHandler(ABC):
+    """Main rendezvous interface.
+
+    Note:
+        Distributed Torch users normally **do not** need to implement their own
+        ``RendezvousHandler``. An implementation based on C10d Store is already
+        provided, and is recommended for most users.
     """
 
-    pass
-
-
-class RendezvousHandler(abc.ABC):
-    """
-    Main rendezvous interface.
-
-    .. note:: torchelastic users normally **do not** need to implement their
-              own ``RendezvousHandler``. An implementation based on
-              `etcd <https://etcd.io/>`__ is already provided, and is recommended
-              for most users, provided they can deploy it in their environment.
-
-    .. warning:: torchelastic is currently considered experimental,
-                 so the APIs may change!
-    """
-
-    @abc.abstractmethod
+    @abstractmethod
     def get_backend(self) -> str:
-        """
-        Return the string representation of the rendezvous handler.
-        """
-        pass
+        """Returns the name of the rendezvous backend."""
 
-    @abc.abstractmethod
+    @abstractmethod
     def next_rendezvous(
         self,
     ) -> Tuple[Store, int, int]:
-        """
-        Main entry-point into the rendezvous barrier.
-        Blocks until the rendezvous is complete (and the current
-        process is included in the formed worker group), or a timeout occurs, or
+        """Main entry-point into the rendezvous barrier.
+
+        Blocks until the rendezvous is complete and the current process is
+        included in the formed worker group, or a timeout occurs, or the
         rendezvous was marked closed.
 
-        Returns: a tuple of (``c10d Store``, ``rank``, ``world size``)
+        Returns:
+            A tuple of :py:class:`torch.distributed.Store`, ``rank``, and
+            ``world size``.
 
         Raises:
-            RendezvousClosedException - if rendezvous for the current
-               job is closed.
-            RendezvousTimeoutException - on timeout
+            RendezvousClosedError:
+                The rendezvous is closed.
+            RendezvousConnectionError:
+                The connection to the rendezvous backend has failed.
+            RendezvousStateError:
+                The rendezvous state is corrupt.
+            RendezvousTimeoutError:
+                The rendezvous did not complete on time.
         """
-        pass
 
-    @abc.abstractmethod
+    @abstractmethod
     def is_closed(self) -> bool:
-        """
-        Checks whether rendezvous for current job has been closed,
-        which means all future attempts to re-rendezvous (within same job) will
-        fail.
+        """Checks whether the rendezvous has been closed.
 
-        .. note:: ``is_closed`` and ``set_closed`` have semantics of eventual
-                  propagation, and should not be used for synchronization.
-                  The intention here is that if at least one worker decides
-                  the job is finished, it will close the rendezvous, and
-                  other workers will soon observe this and stop
-                  training/rendezvous-ing as well.
-        """
-        pass
+        A closed rendezvous means all future attempts to re-rendezvous within
+        same job will fail.
 
-    @abc.abstractmethod
+        ``is_closed()`` and :py:meth:`set_closed` have semantics of eventual
+        propagation and should not be used for synchronization. The intention is
+        that if at least one node decides the job is finished, it will close the
+        rendezvous, and other nodes will soon observe this and stop running as
+        well.
+        """
+
+    @abstractmethod
     def set_closed(self):
-        """
-        Used to mark the rendezvous (for current job) as closed.
-        """
-        pass
+        """Marks the rendezvous as closed."""
 
-    @abc.abstractmethod
+    @abstractmethod
     def num_nodes_waiting(self) -> int:
-        """
-        Returns number of workers who *arrived late* at
-        the rendezvous barrier, hence weren’t included in the current worker
-        group.
+        """Returns the number of nodes who arrived late at the rendezvous
+        barrier, hence were not included in the current worker group.
 
-        Callers should periodically call this method to check whether
-        new members are waiting to join the job and if so admit them by
-        calling ``next_rendezvous()`` (re-rendezvous).
+        Callers should periodically call this method to check whether new
+        nodes are waiting to join the job and if so admit them by calling
+        :py:meth:`next_rendezvous()` (re-rendezvous).
         """
-        pass
 
-    @abc.abstractmethod
+    @abstractmethod
     def get_run_id(self) -> str:
+        """Returns the run id of the rendezvous.
+
+        The run id is a user-defined id that uniquely identifies an instance of
+        a distributed application. It typically maps to a job id and is used to
+        allow nodes to join the correct distributed application.
         """
-        Returns the run_id of this rendezvous handler. The run_id is a user-defined
-        id that uniquely identifies an instance of a distributed application.
-        It typically maps to a job id and is used to allow workers to join the
-        correct distributed application.
-        """
-        pass
 
     def shutdown(self) -> bool:
+        """Closes all resources that were open for the rendezvous.
+
+        Example::
+
+            rdzv_handler = ...
+            try:
+                store, rank, world_size = rdzv_handler.next_rendezvous()
+            finally:
+                rdzv_handler.shutdown()
         """
-        Closes all resources that were open for rendezvous run.
-
-        Usage:
-
-        ::
-
-         def main():
-             rdzv_handler = ...
-             try:
-               rank, world_size, store = rdzv_handler.next_rendezvous()
-             finally:
-               rdzv_handler.shutdown()
-        """
-        pass
 
 
 class RendezvousParameters:
-    """
-    The data object holding parameters to construct a ``RendezvousHandler``.
-    """
+    """Holds the parameters to construct a :py:class:`RendezvousHandler`.
 
-    # Default timeout for the rendezvous.
-    _DEFAULT_TIMEOUT: int = 600  # 10 minutes
-
-    # Additional waiting time after reaching the minimum number of nodes
-    # in case the rendezvous is elastic (min != max).
-    _DEFAULT_LAST_CALL_TIMEOUT: int = 30  # 30 seconds
+    Args:
+        backend:
+            The name of the backend to use to handle the rendezvous.
+        endpoint:
+            The endpoint of the rendezvous, usually in form <hostname>[:<port>].
+        run_id:
+            The id of the rendezvous.
+        min_nodes:
+            The minimum number of nodes to admit to the rendezvous.
+        max_nodes:
+            The maximum number of nodes to admit to the rendezvous.
+        **kwargs:
+            Additional parameters for the specified backend.
+    """
 
     def __init__(
         self,
@@ -172,25 +145,17 @@ class RendezvousParameters:
         max_nodes: int,
         **kwargs,
     ):
-        """
-        Args:
-            backend: The backend that is used to register the rendezvous.
-            endpoint: The endpoint of the rendezvous. Usually it is a string in the format
-                <hostname>:<port>.
-            run_id: The id of the rendezvous.
-            min_nodes: The minimum number of nodes required to complete the rendezvous.
-            max_nodes: The maximum number of nodes that are allowed to join the rendezvous.
-            **kwargs: Additional parameters for the specified backend.
-        """
-        if backend is None:
-            raise ValueError("The backend cannot be None.")
+        if not backend:
+            raise ValueError("The rendezvous backend name must be a non-empty string.")
 
         if min_nodes < 1:
-            raise ValueError("The minimum number of nodes must be greater than zero.")
+            raise ValueError(
+                f"The minimum number of rendezvous nodes ({min_nodes}) must be greater than zero."
+            )
         if max_nodes < min_nodes:
             raise ValueError(
-                "The maximum number of nodes must be greater than"
-                " or equal to the minimum number of nodes."
+                f"The maximum number of rendezvous nodes ({max_nodes}) must be greater than or "
+                f"equal to the minimum number of rendezvous nodes ({min_nodes})."
             )
 
         self.backend = backend
@@ -200,95 +165,89 @@ class RendezvousParameters:
         self.max_nodes = max_nodes
         self.config = kwargs
 
-    @property
-    def timeout(self):
-        """
-        Gets the timeout for the rendezvous.
-        """
-        return self.get_as_int("timeout", self._DEFAULT_TIMEOUT)
-
-    @property
-    def last_call_timeout(self):
-        """
-        Gets additional waiting time after reaching the minimum number of nodes
-        in case the rendezvous is elastic (min != max).
-        """
-        return self.get_as_int("last_call_timeout", self._DEFAULT_LAST_CALL_TIMEOUT)
-
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        Returns the value for ``key`` if ``key`` exists, else ``default``.
-        """
+        """Returns the value for ``key`` if ``key`` exists, else ``default``."""
         return self.config.get(key, default)
 
     def get_as_bool(self, key: str, default: Optional[bool] = None) -> Optional[bool]:
-        """
-        Returns the value for ``key`` as a ``bool`` if ``key`` exists.
-        """
-        val = self.get(key, default)
-        if val is None:
-            return val
-        if isinstance(val, int) or isinstance(val, bool):
-            return True if val else False
-        if isinstance(val, str):
-            return val.lower() in ["1", "true", "t", "yes", "y"]
+        """Returns the value for ``key`` as a ``bool``."""
+        value = self.get(key, default)
+        if value is None or isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            if value == 1:
+                return True
+            if value == 0:
+                return False
+        elif isinstance(value, str):
+            if value.lower() in ["1", "true", "t", "yes", "y"]:
+                return True
+            if value.lower() in ["0", "false", "f", "no", "n"]:
+                return False
         raise ValueError(
-            f"The '{key}' rendezvous config does not represent a valid boolean value."
+            f"The rendezvous configuration option '{key}' does not represent a valid boolean value."
         )
 
     def get_as_int(self, key: str, default: Optional[int] = None) -> Optional[int]:
-        """
-        Returns the value for ``key`` as an ``int`` if ``key`` exists.
-        """
-        val = self.get(key, default)
-        if val is None:
-            return val
+        """Returns the value for ``key`` as an ``int``."""
+        value = self.get(key, default)
+        if value is None:
+            return value
         try:
-            return int(val)
+            return int(value)
         except ValueError:
             raise ValueError(
-                f"The '{key}' rendezvous config does not represent a valid integer value."
+                f"The rendezvous configuration option '{key}' does not represent a valid integer "
+                "value."
             )
 
 
 RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 
 
-class RendezvousHandlerFactory:
-    """
-    Creates ``RendezvousHandler`` instances for supported rendezvous backends.
-    """
+class RendezvousHandlerRegistry:
+    """Represents a registry of :py:class:`RendezvousHandler` backends."""
 
-    def __init__(self):
-        self._registry: Dict[str, RendezvousHandlerCreator] = {}
+    _registry: Dict[str, RendezvousHandlerCreator]
 
-    def register(self, backend: str, creator: RendezvousHandlerCreator):
+    def __init__(self) -> None:
+        self._registry = {}
+
+    def register(self, backend: str, creator: RendezvousHandlerCreator) -> None:
+        """Registers a new rendezvous backend.
+
+        Args:
+            backend:
+                The name of the backend.
+            creater:
+                The callback to invoke to construct the
+                :py:class:`RendezvousHandler`.
         """
-        Registers a new rendezvous backend.
-        """
+        if not backend:
+            raise ValueError("The rendezvous backend name must be a non-empty string.")
+
+        current_creator: Optional[RendezvousHandlerCreator]
         try:
             current_creator = self._registry[backend]
         except KeyError:
-            current_creator = None  # type: ignore[assignment]
+            current_creator = None
 
-        if current_creator is not None:
+        if current_creator is not None and current_creator != creator:
             raise ValueError(
-                f"The rendezvous backend '{backend}' cannot be registered with"
-                f" '{creator.__module__}.{creator.__name__}' as it is already"
-                f" registered with '{current_creator.__module__}.{current_creator.__name__}'."
+                f"The rendezvous backend '{backend}' cannot be registered with '{creator}' as it "
+                f"is already registered with '{current_creator}'."
             )
 
         self._registry[backend] = creator
 
     def create_handler(self, params: RendezvousParameters) -> RendezvousHandler:
-        """
-        Creates a new ``RendezvousHandler`` instance for the specified backend.
-        """
+        """Creates a new :py:class:`RendezvousHandler`."""
         try:
             creator = self._registry[params.backend]
         except KeyError:
             raise ValueError(
-                f"The rendezvous backend '{params.backend}' is not registered. Did you forget to call {self.register.__name__}?"
+                f"The rendezvous backend '{params.backend}' is not registered. Did you forget "
+                f"to call `{self.register.__name__}`?"
             )
 
         handler = creator(params)
@@ -296,7 +255,13 @@ class RendezvousHandlerFactory:
         # Do some sanity check.
         if handler.get_backend() != params.backend:
             raise RuntimeError(
-                f"The rendezvous handler backend '{handler.get_backend()}' does not match the requested backend '{params.backend}'."
+                f"The rendezvous backend '{handler.get_backend()}' does not match the requested "
+                f"backend '{params.backend}'."
             )
 
         return handler
+
+
+# The default global registry instance used by launcher scripts to instantiate
+# rendezvous handlers.
+rendezvous_handler_registry = RendezvousHandlerRegistry()

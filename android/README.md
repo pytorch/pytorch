@@ -14,9 +14,16 @@ repositories {
     jcenter()
 }
 
+# lite interpreter build
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.6.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0'
+    implementation 'org.pytorch:pytorch_android_lite:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.10.0'
+}
+
+# full jit build
+dependencies {
+    implementation 'org.pytorch:pytorch_android:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.10.0'
 }
 ```
 
@@ -32,10 +39,19 @@ repositories {
     }
 }
 
+# lite interpreter build
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.9.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.9.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_lite:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.12.0-SNAPSHOT'
+    ...
+}
+
+# full jit build
+dependencies {
+    ...
+    implementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.12.0-SNAPSHOT'
     ...
 }
 ```
@@ -49,7 +65,7 @@ For this you can use `./scripts/build_pytorch_android.sh` script.
 ```
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 sh ./scripts/build_pytorch_android.sh
 ```
 
@@ -68,7 +84,7 @@ They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
-`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk)
+`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK 21.x.
 
 `GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
 
@@ -95,13 +111,12 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     ...
-    implementation 'com.android.support:appcompat-v7:28.0.0'
-    implementation 'com.facebook.soloader:nativeloader:0.8.0'
-    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    implementation 'com.facebook.soloader:nativeloader:0.10.1'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'`, `'com.facebook.soloader:nativeloader:0.8.0'` and 'com.facebook.fbjni:fbjni-java-only:0.0.3', we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.1'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
 You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.
@@ -134,7 +149,7 @@ android {
 }
 
 dependencies {
-    extractForNativeBuild('org.pytorch:pytorch_android:1.6.0')
+    extractForNativeBuild('org.pytorch:pytorch_android:1.10.0')
 }
 
 task extractAARForNativeBuild {
@@ -201,8 +216,7 @@ After that, you can use libtorch C++ API from your native code.
 namespace pytorch_testapp_jni {
 namespace {
     struct JITCallGuard {
-      torch::autograd::AutoGradMode no_autograd_guard{false};
-      torch::AutoNonVariableTypeMode non_var_guard{true};
+      c10::InferenceMode guard;
       torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
     };
 }
@@ -223,4 +237,4 @@ To load torchscript model for mobile we need some special setup which is placed 
 
 ## PyTorch Android API Javadoc
 
-You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/docs/stable/packages.html).
+You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/javadoc/).

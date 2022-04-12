@@ -52,12 +52,12 @@ struct DeepAndWideFast : torch::nn::Module {
     torch::NoGradGuard no_grad;
     if (!allocated) {
       auto wide_offset = at::add(wide, mu_);
-      auto wide_normalized = at::cpu::mul(wide_offset, sigma_);
+      auto wide_normalized = at::mul(wide_offset, sigma_);
       // Placeholder for ReplaceNaN
-      auto wide_preproc = at::native::clamp(wide_normalized, -10.0, 10.0);
+      auto wide_preproc = at::cpu::clamp(wide_normalized, -10.0, 10.0);
 
       auto user_emb_t = at::native::transpose(user_emb, 1, 2);
-      auto dp_unflatten = at::native::bmm_cpu(ad_emb_packed, user_emb_t);
+      auto dp_unflatten = at::cpu::bmm(ad_emb_packed, user_emb_t);
       // auto dp = at::native::flatten(dp_unflatten, 1);
       auto dp = dp_unflatten.view({dp_unflatten.size(0), 1});
       auto input = at::native::_cat_cpu({dp, wide_preproc}, 1);
@@ -66,7 +66,7 @@ struct DeepAndWideFast : torch::nn::Module {
       fc_w_t_ = torch::t(fc_w_);
       auto fc1 = torch::addmm(fc_b_, input, fc_w_t_);
 
-      auto pred = at::native::sigmoid(fc1);
+      auto pred = at::cpu::sigmoid(fc1);
 
       prealloc_tensors = {
           wide_offset,
@@ -85,9 +85,9 @@ struct DeepAndWideFast : torch::nn::Module {
       // Potential optimization: add and mul could be fused together (e.g. with
       // Eigen).
       at::add_out(prealloc_tensors[0], wide, mu_);
-      at::cpu::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
+      at::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
-      at::native::clamp_out(
+      at::native::clip_out(
           prealloc_tensors[1], -10.0, 10.0, prealloc_tensors[2]);
 
       // Potential optimization: original tensor could be pre-transposed.
@@ -103,8 +103,7 @@ struct DeepAndWideFast : torch::nn::Module {
       }
 
       // Potential optimization: call MKLDNN directly.
-      at::native::bmm_out_cpu(
-          ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
+      at::cpu::bmm_out(ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
 
       if (prealloc_tensors[5].data_ptr() != prealloc_tensors[4].data_ptr()) {
         // in unlikely case that the input tensor changed we need to
@@ -116,10 +115,10 @@ struct DeepAndWideFast : torch::nn::Module {
       // Potential optimization: we can replace cat with carefully constructed
       // tensor views on the output that are passed to the _out ops above.
       at::native::_cat_out_cpu(
-          prealloc_tensors[6], {prealloc_tensors[5], prealloc_tensors[2]}, 1);
-      at::native::addmm_cpu_out(
-          prealloc_tensors[7], fc_b_, prealloc_tensors[6], fc_w_t_);
-      at::native::sigmoid_out(prealloc_tensors[8], prealloc_tensors[7]);
+          {prealloc_tensors[5], prealloc_tensors[2]}, 1, prealloc_tensors[6]);
+      at::cpu::addmm_out(
+          prealloc_tensors[7], fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1);
+      at::cpu::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
 
       return prealloc_tensors[8];
     }
@@ -138,3 +137,5 @@ torch::jit::Module getLeakyReLUScriptModel();
 torch::jit::Module getLeakyReLUConstScriptModel();
 
 torch::jit::Module getLongScriptModel();
+
+torch::jit::Module getSignedLog1pModel();

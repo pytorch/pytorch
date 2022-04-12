@@ -31,7 +31,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -43,7 +43,8 @@ Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight_t, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   const int64_t dim = self.dim();
   TORCH_CHECK(
@@ -162,4 +163,4 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

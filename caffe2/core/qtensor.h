@@ -5,6 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <c10/util/typeid.h>
 
 #include <algorithm>
@@ -59,7 +60,7 @@ class C10_EXPORT QTensor {
   void Resize(at::ArrayRef<int> dim_source) {
     if (dims_ != dim_source) {
       const auto source_size = c10::multiply_integers(dim_source);
-      if ((source_size * (precision_ + signed_)) > capacity_) {
+      if (static_cast<size_t>(source_size * (precision_ + signed_)) > capacity_) {
         data_ptr_.clear();
         capacity_ = 0;
       }
@@ -217,7 +218,7 @@ class C10_EXPORT QTensor {
    */
   inline int64_t size_from_dim(int k) const {
     int64_t r = 1;
-    for (int i = k; i < dims_.size(); ++i) {
+    for (const auto i : c10::irange(k, dims_.size())) {
       r *= dims_[i];
     }
     return r;
@@ -229,7 +230,7 @@ class C10_EXPORT QTensor {
   inline int64_t size_to_dim(int k) const {
     CAFFE_ENFORCE(k < dims_.size());
     int64_t r = 1;
-    for (int i = 0; i < k; ++i) {
+    for (const auto i : c10::irange(k)) {
       r *= dims_[i];
     }
     return r;

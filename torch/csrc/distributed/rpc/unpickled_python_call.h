@@ -24,7 +24,7 @@ class TORCH_API UnpickledPythonCall : public RpcCommandBase {
 
   // toMessage() method is not implemented, as objects of this class should
   // never be directly converted into a Message object.
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   const py::object& pythonUdf() const;
 
   inline bool isAsyncExecution() const {

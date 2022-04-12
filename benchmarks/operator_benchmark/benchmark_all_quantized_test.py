@@ -1,5 +1,5 @@
 import operator_benchmark as op_bench
-from pt import ( # noqa
+from pt import (  # noqa: F401
     qactivation_test,
     qarithmetic_test,
     qbatchnorm_test,
@@ -19,6 +19,7 @@ from pt import ( # noqa
     qunary_test,
     qembedding_pack_test,
     qembeddingbag_test,
+    qatembedding_ops_test,
 )
 
 

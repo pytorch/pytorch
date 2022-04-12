@@ -2,7 +2,12 @@
 
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at {
 namespace detail {
@@ -47,4 +52,16 @@ inline at::Tensor scalar_to_tensor(const Scalar& s, const Device device = at::kC
   }
 }
 
+} // namespace c10
+
+namespace at {
+namespace native {
+
+inline Tensor wrapped_scalar_tensor(const Scalar& scalar, const Device device = at::kCPU) {
+  auto tensor = scalar_to_tensor(scalar, device);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
 }
+
+} // namespace native
+} // namsepace at

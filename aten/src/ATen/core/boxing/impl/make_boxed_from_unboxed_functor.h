@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -79,7 +80,7 @@ class OperatorHandle;
  *
  * See below for how to register this kernel with PyTorch.
  */
-struct TORCH_API OperatorKernel {
+struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
   virtual ~OperatorKernel() = default;
 };
 
@@ -91,7 +92,7 @@ namespace impl {
     int64_t,
     double,
     bool,
-    std::string,
+    c10::string_view,
     at::Tensor,
     at::Scalar,
     c10::QScheme,
@@ -179,6 +180,13 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value,
+      "You tried to register a kernel with an unsupported input type: OptionalArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+  };
+
   template<class T, size_t N, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
@@ -199,7 +207,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported input type: const char*. Please use std::string instead.");
+      "You tried to register a kernel with an unsupported input type: const char*. Please use c10::string_view instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
@@ -230,6 +238,10 @@ namespace impl {
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
@@ -287,7 +299,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported output type: const char*. Please use std::string instead.");
+      "You tried to register a kernel with an unsupported output type: const char*. Please use c10::string_view instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
@@ -360,8 +372,19 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
-    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
+    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but implicitly convertible
     // to optional<ArrayRef<T>>.
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
+    }
+  };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<OptionalArrayRef<T>, AllowDeprecatedTypes> final {
+    // If an argument is OptionalArrayRef<T>, convert the IValue to an
+    // optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
+    // is basically a optional<std::vector<T>> but implicitly convertible to
+    // OptionalArrayRef<T>
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
@@ -377,6 +400,10 @@ namespace impl {
       assert_is_valid_output_type<T, AllowDeprecatedTypes>();
       return c10::ivalue::from(std::move(v));
     }
+    static IValue copy(const T& v) {
+      assert_is_valid_output_type<T, AllowDeprecatedTypes>();
+      return IValue(v);
+    }
   };
 
   // Special case to allow kernels to return `Tensor&`.
@@ -385,6 +412,9 @@ namespace impl {
   struct return_to_ivalue<at::Tensor&, AllowDeprecatedTypes, void> final {
     static IValue call(at::Tensor& v) {
       return c10::ivalue::from(v);
+    }
+    static IValue copy(at::Tensor& v) {
+      return IValue(v);
     }
   };
 
@@ -477,11 +507,17 @@ namespace impl {
     static void call(OutputType&& output, Stack* stack) {
       torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
     }
+    static void copy(const OutputType& output, Stack* stack) {
+      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::copy(output));
+    }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
   struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
       call_(std::move(output), stack, std::make_index_sequence<sizeof...(OutputTypes)>());
+    }
+    static void copy(const std::tuple<OutputTypes...>& output, Stack* stack) {
+      copy_(output, stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
 
   private:
@@ -489,10 +525,16 @@ namespace impl {
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
       torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
     }
+    template<size_t... indices>
+    static void copy_(const std::tuple<OutputTypes...>& output, Stack* stack, std::index_sequence<indices...>) {
+      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(std::get<indices>(output))...);
+    }
   };
   template<bool AllowDeprecatedTypes>
   struct push_outputs<void, AllowDeprecatedTypes> final {
     static void call(int /*dummy*/, Stack* /*stack*/) {
+    }
+    static void copy(int /*dummy*/, Stack* /*stack*/) {
     }
   };
 

@@ -4,7 +4,7 @@ import shlex
 import unittest
 from typing import List, Optional
 
-from tools import test_history
+from tools.stats import test_history
 from typing_extensions import TypedDict
 
 
@@ -53,6 +53,7 @@ def parse_description(description: str) -> List[Example]:
     return examples
 
 
+@unittest.skip("Skipping as this test is fragile, issue #73083")
 class TestTestHistory(unittest.TestCase):
     maxDiff = None
 

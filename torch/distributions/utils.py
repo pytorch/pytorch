@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 import torch.nn.functional as F
 from typing import Dict, Any
-from torch.overrides import has_torch_function
+from torch.overrides import is_tensor_like
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
@@ -24,17 +24,17 @@ def broadcast_all(*values):
         ValueError: if any of the values is not a `numbers.Number` instance,
             a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(isinstance(v, torch.Tensor) or has_torch_function((v,)) or isinstance(v, Number)
+    if not all(is_tensor_like(v) or isinstance(v, Number)
                for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number, '
                          'torch.Tensor or objects implementing __torch_function__.')
-    if not all([isinstance(v, torch.Tensor) or has_torch_function((v,)) for v in values]):
+    if not all(is_tensor_like(v) for v in values):
         options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
                 break
-        new_values = [v if isinstance(v, torch.Tensor) or has_torch_function((v,)) else torch.tensor(v, **options)
+        new_values = [v if is_tensor_like(v) else torch.tensor(v, **options)
                       for v in values]
         return torch.broadcast_tensors(*new_values)
     return torch.broadcast_tensors(*values)
@@ -92,7 +92,7 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-class lazy_property(object):
+class lazy_property:
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
@@ -101,15 +101,25 @@ class lazy_property(object):
     """
     def __init__(self, wrapped):
         self.wrapped = wrapped
-        update_wrapper(self, wrapped)  # type: ignore[arg-type]
+        update_wrapper(self, wrapped)
 
     def __get__(self, instance, obj_type=None):
         if instance is None:
-            return self
+            return _lazy_property_and_property(self.wrapped)
         with torch.enable_grad():
             value = self.wrapped(instance)
         setattr(instance, self.wrapped.__name__, value)
         return value
+
+
+class _lazy_property_and_property(lazy_property, property):
+    """We want lazy properties to look like multiple things.
+
+    * property when Sphinx autodoc looks
+    * lazy_property when Distribution validate_args looks
+    """
+    def __init__(self, wrapped):
+        return property.__init__(self, wrapped)
 
 
 def tril_matrix_to_vec(mat, diag=0):

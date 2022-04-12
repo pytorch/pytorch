@@ -1,4 +1,8 @@
+// aten_interned_strings.h includes the names of all operators
+#undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/core/interned_strings_class.h>
+#include <ATen/core/interned_strings.h>
 
 namespace c10 {
 
@@ -32,6 +36,7 @@ std::string qual_name_for_entry(const Entry& entry) {
 // I haven't implemented that because it's not clear to me how to
 // dedupe the namespaces array at compile-time, particularly in C++14,
 // but it would be straightforward if we switched to codegen.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 constexpr Entry entries[] = {
 #define SYMBOL_ENTRY(n, s) {#n, #s, n::s, namespaces::n},
 

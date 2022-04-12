@@ -91,7 +91,7 @@ class TORCH_API BoundShapeInferencer : public BoundShapeInferencerBase {
   explicit BoundShapeInferencer(const BoundShapeSpec& spec)
       : BoundShapeInferencerBase(spec) {}
 
-  virtual ~BoundShapeInferencer() override {}
+   ~BoundShapeInferencer() override {}
   void InferBoundShapeAndType(
       const NetDef& net,
       const ShapeInfoMap& info,
@@ -136,7 +136,12 @@ class TORCH_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferTile(const OperatorDef& op);
   void InferSparseLengthsSumSparseLookup(const OperatorDef& op);
   void InferSoftmax(const OperatorDef& op);
+  void InferBucketize(const OperatorDef& op);
   void InferLpNorm(const OperatorDef& op);
+  void InferClip(const OperatorDef& op);
+  void InferMean(const OperatorDef& op);
+  void InferDiv(const OperatorDef& op);
+  void InferTranspose(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function

@@ -52,6 +52,7 @@ class TorchBindTestClass : public torch::jit::CustomClassHolder {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char class_doc_string[] = R"(
   I am docstring for TorchBindTestClass
   Args:
@@ -60,6 +61,7 @@ constexpr char class_doc_string[] = R"(
   Return:
       How would I know? I am just a holder of some meaningless test methods.
   )";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char method_doc_string[] =
     "I am docstring for TorchBindTestClass get_with_docstring method";
 
@@ -97,6 +99,7 @@ TEST(CustomClassTest, Serialization) {
       "s",
       custom_class_obj.type(),
       custom_class_obj,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*is_parameter=*/false);
   m.define(R"(
     def forward(self):

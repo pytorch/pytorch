@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, cast, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
 from torch import Tensor, nn
@@ -117,20 +117,102 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
+
+class PipeSequential(nn.Sequential):
+    """
+    Pipe variant of ``nn.Sequential`` which supports multiple inputs.
+    """
+
+    def forward(self, *inputs):
+        for module in self:
+            if isinstance(inputs, Tuple):  # type: ignore[arg-type]
+                inputs = module(*inputs)
+            else:
+                # Don't expand single variables (ex: lists/Tensor)
+                inputs = module(inputs)
+        return inputs
+
+
+class WithDevice(nn.Module):
+    """
+    Wraps an ``nn.Module`` which is part of ``nn.Sequential`` passed into :class:`Pipe`
+    that overrides the device for that module. In cases where :class:`Pipe`
+    can't implicitly determine the device for the module and places it on CPU,
+    this wrapper can be used to override the implicit behavior and explicitly
+    specify which device a module should run on.
+
+    The provided module is also moved to the given device via ``.to(device)``
+    by :class:`Pipe`
+
+    Args:
+        module(:class:`torch.nn.Module`): The module to be wrapped.
+        device(:class:`torch.device`): The device to run the module on.
+
+    Example::
+        >>> fc1 = nn.Linear(16, 8).cuda(0)
+        >>> fc2 = nn.Linear(8, 4).cuda(1)
+        >>> dropout = nn.Dropout()
+        >>>
+        >>> # Dropout does not have any parameters/buffers, but we want to
+        >>> # run it on cuda:1 to avoid any GPU to CPU transfers.
+        >>> model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
+        >>> model = Pipe(model, chunks=8)
+    """
+    def __init__(self, module: nn.Module, device: torch.device):
+        super(WithDevice, self).__init__()
+        self._module = module
+        self._device = torch.device(device)
+
+    def forward(self, *args, **kwargs):
+        return self._module(*args, **kwargs)
+
+    @property
+    def module(self):
+        return self._module
+
+    @property
+    def device(self):
+        return self._device
+
+
+def _assemble_partition(modules: List[nn.Module]):
+    modules_list: List[nn.Module] = []
+    for module in modules:
+        if isinstance(module, nn.Sequential):
+            modules_list.extend(module.children())
+        else:
+            modules_list.append(module)
+    return PipeSequential(*modules_list)
+
 def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
     devices = []
+
+    current_partition = []
+    current_device = None
     for name, module in modules.named_children():
-        devices.append(_retrieve_device(module))
-        if isinstance(module, nn.Sequential):
-            partition = module
+        if isinstance(module, WithDevice):
+            # Process device override and move module to appropriate device.
+            device = module.device
+            module = module.module
+            module.to(device)
         else:
-            partition = nn.Sequential(OrderedDict([(name, module)]))
-        partitions.append(partition)
+            device = _retrieve_device(module)
+        if current_device is not None and (current_device != device or device.type == 'cpu'):
+            partitions.append(_assemble_partition(current_partition))
+            devices.append(current_device)
+            current_partition = []
+        current_device = device
+        current_partition.append(module)
+
+    if current_device is not None:
+        partitions.append(_assemble_partition(current_partition))
+        devices.append(current_device)
 
     partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
 
     return partitions, devices
+
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
@@ -150,7 +232,12 @@ class Pipe(Module):
 
     You should place all the modules on the appropriate devices and wrap them
     into an :class:`nn.Sequential <torch.nn.Sequential>` module defining the
-    desired order of execution.
+    desired order of execution. If a module does not contain any
+    parameters/buffers, it is assumed this module should be executed on CPU
+    and appropriate input tensors to the module are moved to CPU before
+    execution. This behavior can be overridden by the :class:`WithDevice`
+    wrapper which can be used to explicitly specify which device a module
+    should run on.
 
     Args:
         module (:class:`nn.Sequential <torch.nn.Sequential>`):
@@ -182,6 +269,12 @@ class Pipe(Module):
     Example::
         Pipeline of two FC layers across GPUs 0 and 1.
 
+        >>> # Need to initialize RPC framework first.
+        >>> os.environ['MASTER_ADDR'] = 'localhost'
+        >>> os.environ['MASTER_PORT'] = '29500'
+        >>> torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)
+        >>>
+        >>> # Build pipe.
         >>> fc1 = nn.Linear(16, 8).cuda(0)
         >>> fc2 = nn.Linear(8, 4).cuda(1)
         >>> model = nn.Sequential(fc1, fc2)
@@ -215,6 +308,12 @@ class Pipe(Module):
         deferred_batch_norm: bool = False,
     ) -> None:
         super().__init__()
+
+        # Check if RPC framework is initialized.
+        if not torch.distributed.rpc._is_current_rpc_agent_set():
+            raise RuntimeError(
+                'Please initialize RPC framework for Pipe using '
+                'torch.distributed.rpc.init_rpc')
 
         chunks = int(chunks)
         checkpoint = str(checkpoint)
@@ -323,15 +422,20 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input) -> RRef:  # type: ignore
+    def forward(self, *inputs) -> RRef:
         """
         Processes a single input mini-batch through the pipe and returns an
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
         :class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
-        there's type restriction. Input and output have to be a
-        :class:`~torch.Tensor` or a sequence of tensors. This restriction is
-        applied at partition boundaries too.
+        there's type restriction. Input and output have to contain at least one
+        tensor. This restriction is applied at partition boundaries too.
+
+        The sequence of inputs are fed into the first stage of the pipeline as
+        ``*inputs``. As a result the positional args for this function should
+        match the positional args for the first stage of the pipeline. The same
+        condition applies for output of one stage of the pipeline which is the
+        input for the next stage.
 
         The input tensor is split into multiple micro-batches based on the
         ``chunks`` parameter used to initialize :class:`Pipe`. The batch size
@@ -339,24 +443,39 @@ class Pipe(Module):
         size is less than ``chunks``, the number of micro-batches is equal to
         the batch size.
 
+        Only tensors are split into multiple micro-batches, non-Tensor inputs
+        are just replicated as-is in each micro-batch. For non-Tensor outputs
+        in the last stage of the pipeline, they are aggregated as a ``List``
+        and returned the user. For example, if you have 2 micro-batches
+        returning the integer 5, the user would receive the consolidated
+        output of `[5, 5]`
+
+        All the input tensors need to be on the same device as the first
+        partition of the pipeline.
+
+        If a tensor is wrapped with the :class:`NoChunk` wrapper, the tensor
+        is not split across micro-batches and is replicated as-is similar to
+        non-tensors.
+
         Args:
-            input (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
+            inputs: input mini-batch
 
         Returns:
             :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
 
         Raises:
-            TypeError: input is not a tensor or sequence of tensors.
+            TypeError: input doesn't contain at least one tensor
 
         """
-        microbatch.check(input)
+        first_partition_device = self.devices[0] if len(self.devices) != 0 else torch.device("cpu")
+        microbatch.check(first_partition_device, *inputs)
 
         if not self.devices:
             # Empty sequential module is not illegal.
-            return RRef(input)
+            return RRef(*inputs)
 
         # Divide a mini-batch into micro-batches.
-        batches = microbatch.scatter(input, self.chunks)
+        batches = microbatch.scatter(*inputs, chunks=self.chunks)
 
         # Run pipeline parallelism.
         self.pipeline.run(batches)

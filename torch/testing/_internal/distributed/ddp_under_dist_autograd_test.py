@@ -492,7 +492,8 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         self._do_test(DdpMode.INSIDE)
 
 
-class DdpComparisonTest(RpcAgentTestFixture):
+# Common utils for both CPU and CUDA test suites
+class CommonDdpComparisonTest(RpcAgentTestFixture):
     @property
     def world_size(self) -> int:
         return NUM_TRAINERS
@@ -501,6 +502,12 @@ class DdpComparisonTest(RpcAgentTestFixture):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
 
+    @staticmethod
+    def get_remote_grads(rref, context_id):
+        return dist_autograd.get_gradients(context_id)[rref.local_value().weight]
+
+
+class DdpComparisonTest(CommonDdpComparisonTest):
     def _run_test_ddp_comparision(self, simulate_uneven_inputs=False):
         gLogger.info(f"Running trainer rank: {self.rank}")
         # Each trainer uses a different random seed. Otherwise, they are going
@@ -510,7 +517,8 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            # Postfix file_name with "pg" since file_name is also used by RPC agent
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=f"{self.file_name}_pg"),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -600,10 +608,6 @@ class DdpComparisonTest(RpcAgentTestFixture):
             self.assertEqual(1, len(grads_dict))
             self.assertEqual(model.weight.grad, grads_dict[model.weight])
 
-    @staticmethod
-    def get_remote_grads(rref, context_id):
-        return dist_autograd.get_gradients(context_id)[rref.local_value().weight]
-
     @requires_gloo()
     @dist_init
     def test_ddp_dist_autograd_local_vs_remote(self):
@@ -647,11 +651,13 @@ class DdpComparisonTest(RpcAgentTestFixture):
                     layer1.weight.grad,
                     rpc.rpc_sync(
                         "worker0",
-                        DdpComparisonTest.get_remote_grads,
+                        CommonDdpComparisonTest.get_remote_grads,
                         args=(remote_layer1.module_rref, context_id),
                     ),
                 )
 
+
+class CudaDdpComparisonTest(CommonDdpComparisonTest):
     @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()
     @dist_init
@@ -710,7 +716,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    DdpComparisonTest.get_remote_grads,
+                    CommonDdpComparisonTest.get_remote_grads,
                     args=(remote_layer1.module_rref, context_id),
                 ),
             )
@@ -719,7 +725,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
                 layer3.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    DdpComparisonTest.get_remote_grads,
+                    CommonDdpComparisonTest.get_remote_grads,
                     args=(remote_layer3.module_rref, context_id),
                 ),
             )

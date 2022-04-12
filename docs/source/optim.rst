@@ -102,33 +102,41 @@ Example::
 
 .. _optimizer-algorithms:
 
-Algorithms
+Base class
 ----------
 
 .. autoclass:: Optimizer
-    :members:
-.. autoclass:: Adadelta
-    :members:
-.. autoclass:: Adagrad
-    :members:
-.. autoclass:: Adam
-    :members:
-.. autoclass:: AdamW
-    :members:
-.. autoclass:: SparseAdam
-    :members:
-.. autoclass:: Adamax
-    :members:
-.. autoclass:: ASGD
-    :members:
-.. autoclass:: LBFGS
-    :members:
-.. autoclass:: RMSprop
-    :members:
-.. autoclass:: Rprop
-    :members:
-.. autoclass:: SGD
-    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Optimizer.add_param_group
+    Optimizer.load_state_dict
+    Optimizer.state_dict
+    Optimizer.step
+    Optimizer.zero_grad
+
+Algorithms
+----------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Adadelta
+    Adagrad
+    Adam
+    AdamW
+    SparseAdam
+    Adamax
+    ASGD
+    LBFGS
+    NAdam
+    RAdam
+    RMSprop
+    Rprop
+    SGD
 
 How to adjust learning rate
 ---------------------------
@@ -139,6 +147,45 @@ allows dynamic learning rate reducing based on some validation measurements.
 
 Learning rate scheduling should be applied after optimizer's update; e.g., you
 should write your code this way:
+
+Example::
+
+    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
+    optimizer = SGD(model, 0.1)
+    scheduler = ExponentialLR(optimizer, gamma=0.9)
+
+    for epoch in range(20):
+        for input, target in dataset:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+        scheduler.step()
+
+Most learning rate schedulers can be called back-to-back (also referred to as
+chaining schedulers). The result is that each scheduler is applied one after the
+other on the learning rate obtained by the one preceding it.
+
+Example::
+
+    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
+    optimizer = SGD(model, 0.1)
+    scheduler1 = ExponentialLR(optimizer, gamma=0.9)
+    scheduler2 = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
+
+    for epoch in range(20):
+        for input, target in dataset:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+        scheduler1.step()
+        scheduler2.step()
+
+In many places in the documentation, we will use the following template to refer to schedulers
+algorithms.
 
     >>> scheduler = ...
     >>> for epoch in range(100):
@@ -155,26 +202,24 @@ should write your code this way:
   if you are calling ``scheduler.step()`` at the wrong time.
 
 
-.. autoclass:: torch.optim.lr_scheduler.LambdaLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.MultiplicativeLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.StepLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.MultiStepLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.ExponentialLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.CyclicLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.OneCycleLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    lr_scheduler.LambdaLR
+    lr_scheduler.MultiplicativeLR
+    lr_scheduler.StepLR
+    lr_scheduler.MultiStepLR
+    lr_scheduler.ConstantLR
+    lr_scheduler.LinearLR
+    lr_scheduler.ExponentialLR
+    lr_scheduler.CosineAnnealingLR
+    lr_scheduler.ChainedScheduler
+    lr_scheduler.SequentialLR
+    lr_scheduler.ReduceLROnPlateau
+    lr_scheduler.CyclicLR
+    lr_scheduler.OneCycleLR
+    lr_scheduler.CosineAnnealingWarmRestarts
 
 Stochastic Weight Averaging
 ---------------------------

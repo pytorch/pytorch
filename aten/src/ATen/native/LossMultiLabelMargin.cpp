@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/LossMulti.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -17,21 +18,21 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
   accscalar_t sum = 0;
-  for (int64_t ddt = 0; ddt < dim; ddt++) {
+  for (const auto ddt : c10::irange(dim)) {
     int64_t target_idx = target_data[ddt];
     if (target_idx < 0) {
       break;
     }
     is_target_data[target_idx] = 1;
   }
-  for (int64_t dt = 0; dt < dim; dt++) {
+  for (const auto dt : c10::irange(dim)) {
     int64_t target_idx = target_data[dt];
     if (target_idx < 0) {
       break;
     }
 
     scalar_t input_target = input_data[target_idx];
-    for (int64_t d = 0; d < dim; d++) {
+    for (const auto d : c10::irange(dim)) {
       if (!is_target_data[d]) {
         scalar_t z = 1 - input_target + input_data[d];
         if (z > 0) {
@@ -63,7 +64,8 @@ static void multilabel_margin_loss_forward_out_frame(
 
     accscalar_t sum = 0;
 
-    for (int64_t t = 0; t < nframe; t++) {
+    for (const auto t : c10::irange(nframe)) {
+      (void)t; //Suppress unused variable warning
       sum += multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -81,7 +83,7 @@ static void multilabel_margin_loss_forward_out_frame(
   } else {
     auto output_acc = output.accessor<scalar_t, 1>();
 
-    for (int64_t t = 0; t < nframe; t++) {
+    for (const auto t : c10::irange(nframe)) {
       scalar_t sum = multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -102,6 +104,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     Tensor& is_target,
     int64_t reduction) {
   auto target_arg = TensorArg(target, "target", 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const int64_t ndims = input.dim();
   if (ndims <= 1) {
@@ -155,7 +158,6 @@ static void multilabel_margin_loss_backward_out_frame(
     const Tensor& is_target_contiguous,
     int64_t nframe,
     int64_t dim) {
-  CheckedFrom c = "multilabel_margin_loss_backward_out_frame";
   auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
 
   TORCH_CHECK(
@@ -167,18 +169,20 @@ static void multilabel_margin_loss_backward_out_frame(
   int64_t* target_data = target_contiguous.data_ptr<int64_t>();
   scalar_t* is_target_data = is_target_contiguous.data_ptr<scalar_t>();
   scalar_t g = static_cast<scalar_t>(
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
   scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
-  for (int64_t t = 0; t < nframe; t++) {
-    for (int64_t dt = 0; dt < dim; dt++) {
+  for (const auto t : c10::irange(nframe)) {
+    (void)t; //Suppress unused variable warning
+    for (const auto dt : c10::irange(dim)) {
       int64_t target_idx = target_data[dt];
       if (target_idx < 0) {
         break;
       }
 
       scalar_t input_target = input_data[target_idx];
-      for (int64_t d = 0; d < dim; d++) {
+      for (const auto d : c10::irange(dim)) {
         if (!is_target_data[d]) {
           scalar_t z = 1 - input_target + input_data[d];
           if (z > 0) {
@@ -205,8 +209,8 @@ static void multilabel_margin_loss_backward_out_frame(
   } else {
     check_dim_size(grad_output, 1, 0, nframe);
     auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-    for (int64_t t = 0; t < nframe; t++) {
-      for (int64_t d = 0; d < dim; d++) {
+    for (const auto t : c10::irange(nframe)) {
+      for (const auto d : c10::irange(dim)) {
         grad_input_data[t * dim + d] *= grad_output_acc[t];
       }
     }
@@ -220,6 +224,7 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
@@ -262,12 +267,11 @@ static void multilabel_margin_loss_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(
-    Tensor& output,
-    Tensor& is_target,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(const Tensor& self,
     const Tensor& target,
-    int64_t reduction) {
+    int64_t reduction,
+    Tensor& output,
+    Tensor& is_target) {
   multilabel_margin_loss_forward_out_cpu_template(
       self, target, output, is_target, reduction);
   return std::tuple<Tensor&, Tensor&>(output, is_target);
@@ -279,18 +283,17 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cpu(
     int64_t reduction) {
   auto output = at::empty({0}, self.options());
   auto is_target = at::empty({0}, self.options());
-  multilabel_margin_loss_forward_out_cpu(
-      output, is_target, self, target, reduction);
+  at::native::multilabel_margin_loss_forward_out_cpu(
+      self, target, reduction, output, is_target);
   return std::make_tuple(output, is_target);
 }
 
-Tensor& multilabel_margin_loss_backward_cpu_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& multilabel_margin_loss_backward_cpu_out(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
     int64_t reduction,
-    const Tensor& is_target) {
+    const Tensor& is_target,
+    Tensor& grad_input) {
   multilabel_margin_loss_backward_out_cpu_template(
       grad_input, grad_output, self, target, reduction, is_target);
   return grad_input;
@@ -303,12 +306,12 @@ Tensor multilabel_margin_loss_backward_cpu(
     int64_t reduction,
     const Tensor& is_target) {
   auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  multilabel_margin_loss_backward_cpu_out(
-      grad_input, grad_output, self, target, reduction, is_target);
+  at::native::multilabel_margin_loss_backward_cpu_out(
+      grad_output, self, target, reduction, is_target, grad_input);
   return grad_input;
 }
 
-Tensor & multilabel_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
+Tensor & multilabel_margin_loss_out(const Tensor & self, const Tensor & target, int64_t reduction, Tensor & output) {
   Tensor is_target = at::empty({0}, self.options());
   return std::get<0>(at::multilabel_margin_loss_forward_out(output, is_target, self, target, reduction));
 }

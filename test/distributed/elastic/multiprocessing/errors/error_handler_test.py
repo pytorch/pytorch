@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
+
 import filecmp
 import json
 import os
@@ -7,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler, _write_error
+from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 from torch.distributed.elastic.multiprocessing.errors.handlers import get_error_handler
 
 
@@ -74,29 +76,32 @@ class ErrorHandlerTest(unittest.TestCase):
             except Exception as e:
                 eh.record_exception(e)
 
-    def test_copy_error_file(self):
+    def test_dump_error_file(self):
         src_error_file = os.path.join(self.test_dir, "src_error.json")
-        _write_error(RuntimeError("foobar"), src_error_file)
+        eh = ErrorHandler()
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": src_error_file}):
+            eh.record_exception(RuntimeError("foobar"))
 
         with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}):
-            eh = ErrorHandler()
-            eh.copy_error_file(src_error_file)
+            eh.dump_error_file(src_error_file)
             self.assertTrue(filecmp.cmp(src_error_file, self.test_error_file))
 
         with patch.dict(os.environ, {}):
-            eh = ErrorHandler()
-            eh.copy_error_file(src_error_file)
-            # just validate that copy_error_file works when
+            eh.dump_error_file(src_error_file)
+            # just validate that dump_error_file works when
             # my error file is not set
             # should just log an error with src_error_file pretty printed
 
-    def test_copy_error_file_overwrite_existing(self):
+    def test_dump_error_file_overwrite_existing(self):
         dst_error_file = os.path.join(self.test_dir, "dst_error.json")
         src_error_file = os.path.join(self.test_dir, "src_error.json")
-        _write_error(RuntimeError("foo"), dst_error_file)
-        _write_error(RuntimeError("bar"), src_error_file)
+        eh = ErrorHandler()
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": dst_error_file}):
+            eh.record_exception(RuntimeError("foo"))
+
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": src_error_file}):
+            eh.record_exception(RuntimeError("bar"))
 
         with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": dst_error_file}):
-            eh = ErrorHandler()
-            eh.copy_error_file(src_error_file)
+            eh.dump_error_file(src_error_file)
             self.assertTrue(filecmp.cmp(src_error_file, dst_error_file))

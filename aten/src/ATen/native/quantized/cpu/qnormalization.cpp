@@ -23,25 +23,25 @@ Tensor quantized_layer_norm_impl(
     double output_scale,
     int64_t output_zero_point) {
 
-  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto X = std::get<0>(inputs);
-  auto gamma = std::get<1>(inputs);
-  auto beta = std::get<2>(inputs);
-  auto M = std::get<3>(inputs);
-  auto N = std::get<4>(inputs);
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
 
   Tensor Y = at::_empty_affine_quantized(
-    X.sizes(),
-    X.scalar_type(),
+    X->sizes(),
+    X->scalar_type(),
     output_scale,
     output_zero_point,
-    X.suggest_memory_format());
+    X->suggest_memory_format());
 
   if (M > 0) {
     bool affine_per_channel = false;
     int num_channels = 1; // not relevant for LayerNorm
     int num_groups = 1; // not relevant for LayerNorm
-    quantized_normalize_stub(kCPU, X, gamma, beta, affine_per_channel,
+    quantized_normalize_stub(kCPU, *X, *gamma, *beta, affine_per_channel,
         num_channels, num_groups, M, N, eps, &Y);
   }
   return Y;

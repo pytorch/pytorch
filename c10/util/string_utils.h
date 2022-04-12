@@ -1,8 +1,8 @@
 #pragma once
 
 #include <sstream>
-#include <string>
 #include <stdexcept>
+#include <string>
 
 namespace c10 {
 
@@ -125,8 +125,8 @@ inline long long stoll(const std::string& str, size_t pos, int base) {
 #define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
 using std::stod;
 using std::stoi;
-using std::stoull;
 using std::stoll;
+using std::stoull;
 using std::to_string;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 
@@ -137,6 +137,6 @@ using std::to_string;
 // std::strtoll isn't available on Android NDK platform < 21 when building
 // with libstdc++, so bring the global version into std.
 namespace std {
-  using ::strtoll;
+using ::strtoll;
 }
 #endif

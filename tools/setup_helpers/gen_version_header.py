@@ -4,9 +4,12 @@
 
 import argparse
 import os
+from typing import Dict, Tuple, cast
+
+Version = Tuple[int, int, int]
 
 
-def parse_version(version: str) -> (int, int, int):
+def parse_version(version: str) -> Version:
     """
     Parses a version string into (major, minor, patch) version numbers.
 
@@ -24,10 +27,10 @@ def parse_version(version: str) -> (int, int, int):
             version_number_str = version[:i]
             break
 
-    return tuple([int(n) for n in version_number_str.split(".")])
+    return cast(Version, tuple([int(n) for n in version_number_str.split(".")]))
 
 
-def apply_replacements(replacements, text):
+def apply_replacements(replacements: Dict[str, str], text: str) -> str:
     """
     Applies the given replacements within the text.
 
@@ -43,7 +46,7 @@ def apply_replacements(replacements, text):
     return text
 
 
-def main(args):
+def main(args: argparse.Namespace) -> None:
     with open(args.version_path) as f:
         version = f.read().strip()
     (major, minor, patch) = parse_version(version)

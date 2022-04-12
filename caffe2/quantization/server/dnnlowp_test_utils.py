@@ -385,6 +385,8 @@ def run_conv_or_fc(
     outputs,
     scale=None,
     zero_point=None,
+    x_scale=None,
+    x_zero_point=None,
 ):
     if order:
         # Conv
@@ -407,6 +409,11 @@ def run_conv_or_fc(
             dnnlowp_pybind11.CreateInt8QuantParamsBlob(
                 "quant_param", float(scale), int(zero_point)
             )
+    if x_scale is not None and x_zero_point is not None:
+        with workspace.WorkspaceGuard(test_case.ws):
+            dnnlowp_pybind11.CreateInt8QuantParamsBlob(
+                "X_quant_param", float(x_scale), int(x_zero_point)
+            )
 
     if init_net:
         test_case.ws.run(init_net)
@@ -426,6 +433,10 @@ def run_conv_or_fc(
         if scale is not None and zero_point is not None:
             dnnlowp_pybind11.CreateInt8QuantParamsBlob(
                 "quant_param", float(scale), int(zero_point)
+            )
+        if x_scale is not None and x_zero_point is not None:
+            dnnlowp_pybind11.CreateInt8QuantParamsBlob(
+                "X_quant_param", float(x_scale), int(x_zero_point)
             )
 
         if init_net:

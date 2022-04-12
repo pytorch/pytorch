@@ -30,6 +30,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
       algo_ = ialgo::convolution_winograd;
     }
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -131,7 +132,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
     }
 
     if (fusion_type_ == FUSION_CONV_SUM
-        && fusion_type_ == FUSION_CONV_SUM_RELU) {
+        || fusion_type_ == FUSION_CONV_SUM_RELU) {
       CAFFE_ENFORCE_EQ(Y,  &(Input(InputSize() - 1)),
           "Convolution fusion op: InPlace is enforced for sum fusion.");
     }
@@ -140,15 +141,25 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   iprop pk_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ialgo algo_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   iattr attr_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int last_input_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool training_mode_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   FusionType fusion_type_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   itensor filter_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   iscale dummy_scale_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ideep::convolution_forward_params conv_param;
 
   INPUT_TAGS(INPUT_X, FILTER, BIAS_OR_INPUT_S, INPUT_S);
@@ -188,6 +199,7 @@ class IDEEPConvFusionOp final : public IDEEPConvOp {
         CAFFE_THROW("Unsupported conv fusion type!");
     }
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPConvFusionOp() {}
 };
 
@@ -249,6 +261,7 @@ operator. {conv_fusion_doc})DOC";
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 OPERATOR_SCHEMA(ConvFusion)
     .NumInputs(2, 4)
     .NumOutputs(1)
@@ -278,6 +291,7 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
         "In order to backward propagate weights correctly, "
         "please set training_mode=1");
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPConvGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override {
