@@ -1327,7 +1327,7 @@ TEST_F(FunctionalTest, Bias) {
     const auto x = torch::arange(100., 106).resize_({3, 2});
     const auto b = torch::arange(300., 302);
     const auto y = F::bias(x, b);
-    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.ndimension(), 2);
     ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2}));
     const auto y_exp = torch::tensor(
       {{400, 402},
