@@ -13,7 +13,7 @@ class TSBuiltinOpsModule(torch.nn.Module):
         y = torch.tensor(0.5)
         b = float(1)
         s = "abcde"
-        l = ["1", "2", "test"]
+        l = ["1", "2", "test", "a{}b"]
         d = {"key": 1}
         d2 = {0: 100}
         return len(
@@ -66,9 +66,10 @@ class TSBuiltinOpsModule(torch.nn.Module):
             min(x.item(), y.item()),
             min(int(x), int(y)),
             min(float(x), float(y)),
-            str(torch.tensor(1)),
             int(l[0]),
             float(l[0]),
+            # string
+            str(torch.tensor(1)),
             l[2].find("t"),
             l[2].replace("t", "x"),
             l[2].lower(),
@@ -78,6 +79,7 @@ class TSBuiltinOpsModule(torch.nn.Module):
             l[2].rstrip(),
             l[2].lstrip(),
             l[2][slice(2)],
+            l[3].format("x"),
             ord(l[2][0]),
             len(torch.randn(3)),
             len(l),
