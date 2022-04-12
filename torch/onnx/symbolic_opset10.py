@@ -300,9 +300,10 @@ def embedding_bag(g,
 
 @parse_args("v", "v", "v", "i", "i")
 def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
-    if quant_min not in [0, -128] or quant_max not in [127, 255]:
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
         raise RuntimeError(
-            "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
+            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            "Got ({}, {})".format(quant_min, quant_max))
     scale = sym_help._maybe_get_scalar(scale)
     if scale is None:
         sym_help._onnx_opset_unsupported_detailed("fake_quantize_per_tensor_affine", 10, 13, "Non-constant scale not supported")
