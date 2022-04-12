@@ -207,7 +207,7 @@ def cpp_string(s: str) -> str:
 # and similar functional combinators.
 
 def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
-    if backends is None:
+    if len(backends) == 0:
         return []
     else:
         return [backend.dispatch_key for backend in backends] + [
@@ -237,7 +237,7 @@ def static_dispatch_ops_header(
 
     output = []
     for index in backend_index:
-        dispatch_key = get_static_dispatch_backend(f, backend_index)
+        dispatch_key = get_static_dispatch_backend(f, index)
         if dispatch_key is not None:
             output.append(f'#include <ATen/ops/{f.root_name}_{dispatch_key.lower()}_dispatch.h>')
     return '\n'.join(output)
@@ -254,7 +254,7 @@ def static_dispatch_extra_headers(
     else:
         maybe_inl = ''
     inl_func_headers = [f'#include <ATen/{dispatch_key}Functions{maybe_inl}.h>'
-            for dispatch_key in static_dispatch_keys(backends)]
+                        for dispatch_key in static_dispatch_keys(backends)]
     if skip_dpkey_include:
         # See Note [Avoiding Include Cycles In Static Dispatch]
         return inl_func_headers
@@ -268,7 +268,7 @@ def generate_static_dispatch(
     backend_index: Optional[BackendIndex]
 ) -> str:
     if backend_index is None or f.manual_kernel_registration:
-        return None
+        return ""
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
     exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
@@ -296,7 +296,7 @@ def static_dispatch(
         f: NativeFunction, cpp_sig: CppSignature,
         *, method: bool, backend_indices: List[BackendIndex]
 ) -> Optional[str]:
-    if backend_indices is None or f.manual_kernel_registration:
+    if len(backend_indices) == 0 or f.manual_kernel_registration:
         return None
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
@@ -325,25 +325,28 @@ def static_dispatch(
     if not tensor_args and not tensor_opts:
         tensor_options = f.func.arguments.tensor_options
         if tensor_options:
-            stmts.append(f"c10::TensorOptions options = c10::TensorOptions().device({tensor_options.device.name}).dtype({tensor_options.dtype.name}).layout({tensor_options.layout.name});")
-            stmts.append(f"""\
-DispatchKey _dk = options.computeDispatchKey();""")
+            stmts.append(f"""c10::TensorOptions options = c10::TensorOptions()\
+.device({tensor_options.device.name})\
+.dtype({tensor_options.dtype.name})\
+.layout({tensor_options.layout.name});
+\tDispatchKey _dk = options.computeDispatchKey();""")
         else:
-            dispatch_key = next(get_static_dispatch_backend(f, backend_index=b) for b in backend_indices if get_static_dispatch_backend(f, b))
-            return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
+            dispatch_key = next(get_static_dispatch_backend(f, b)
+                                for b in backend_indices if get_static_dispatch_backend(f, b))
+            if dispatch_key is not None:
+                return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
+            else:
+                return f'TORCH_CHECK(false, "No dispatch key for last backend index {backend_indices[-1]}.");'
     elif not tensor_args:
         assert len(tensor_opts) == 1
-        stmts.append(f"""\
-DispatchKey _dk = {tensor_opts[0].name}.computeDispatchKey();""")
+        stmts.append(f"""DispatchKey _dk = {tensor_opts[0].name}.computeDispatchKey();""")
     else:
         subexprs: List[str] = []
-        subexprs.append(f"c10::detail::multi_dispatch_key_set({tensor_args})")
+        subexprs.append(f'c10::detail::multi_dispatch_key_set({tensor_args})')
         for tensor_opt in tensor_opts:
             subexprs.append(f'DispatchKeySet({tensor_opt.name}.computeDispatchKey())')
-        stmts.append(f"""\
-DispatchKeySet _dk_set = {' | '.join(subexprs)};""")
-        stmts.append("""\
-DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);""")
+        stmts.append(f"""DispatchKeySet _dk_set = {' | '.join(subexprs)};""")
+        stmts.append("""DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);""")
     dispatch_code = []
     if not has_backend_select:
         dispatch_code.append("""case DispatchKey::BackendSelect:""")
@@ -357,7 +360,9 @@ DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);""")
     elif f.has_composite_implicit_autograd_kernel:
         fallback = f'return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs_str});'
     else:
-        fallback = f"""TORCH_CHECK(false, "Static dispatch does not support {name} for {','.join([str(index.dispatch_key) for index in backend_indices])}, dispatch key: ", _dk);"""
+        fallback = f"""TORCH_CHECK(false, "Static dispatch does not support {name} for \
+{','.join([str(index.dispatch_key)for index in backend_indices])}, dispatch key: ", _dk);"""
+
     return f"""
     {connector.join(stmts)}
     switch (_dk) {{
@@ -1853,7 +1858,7 @@ def main() -> None:
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
 
-    static_dispatch_idx: List[BackendIndex] = None
+    static_dispatch_idx: List[BackendIndex] = []
     if options.static_dispatch_backend:
         static_dispatch_idx = [backend_indices[DispatchKey.parse(key)] for key in options.static_dispatch_backend]
 
