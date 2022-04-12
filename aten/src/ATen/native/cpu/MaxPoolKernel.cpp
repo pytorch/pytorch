@@ -27,8 +27,8 @@ void cpu_max_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
   auto indices = indices_.contiguous();
-  auto input_data = std::is_integral<scalar_t>::value ? reinterpret_cast<scalar_t*>(input.data_ptr()) : input.data_ptr<scalar_t>();
-  auto output_data = std::is_integral<scalar_t>::value ? reinterpret_cast<scalar_t*>(output.data_ptr()) : output.data_ptr<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t numel = output.numel();
@@ -105,9 +105,8 @@ void cpu_max_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
-
-  auto input_data = std::is_integral<scalar_t>::value ? reinterpret_cast<scalar_t*>(input.data_ptr()) : input.data_ptr<scalar_t>();
-  auto output_data = std::is_integral<scalar_t>::value ? reinterpret_cast<scalar_t*>(output.data_ptr()) : output.data_ptr<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t nbatch = input.size(0);
@@ -483,7 +482,7 @@ void max_pool2d_kernel_impl(
           cpu_max_pool_channels_last<scalar_t::underlying>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
         });
       } else {
-        AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
+        AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
           cpu_max_pool_channels_last<scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
         });
       }
