@@ -920,6 +920,31 @@ class AllocateReuseModifier {
           continue;
         }
 
+        if (alloc_info->alloc_expr->buffer()->isA<TensorView>()) {
+          if (!alloc_info->alloc_expr->buffer()->isA<TensorView>()) {
+            continue;
+          }
+          auto this_tv = alloc_info->alloc_expr->buffer()->as<TensorView>();
+          auto reuse_tv = alloc_info->alloc_expr->buffer()->as<TensorView>();
+          // Check that either both tv's are vectorized acceses, or neither are.
+          // Vectorized allocations require correct alignment so they can only
+          // alias with other allocations with the right alignment
+          const auto& va = GpuLower::current()->vectorizedAccesses();
+          if ((va.find(this_tv) == va.end()) !=
+              (va.find(reuse_tv) == va.end())) {
+            return false;
+          }
+
+          // Shared memory is all aligned to 128 bits, local memory might not be
+          if (this_tv->getMemoryType() == MemoryType::Local &&
+              va.find(this_tv) != va.end()) {
+            // Make sure alignment matches
+            if (va.at(this_tv) != va.at(reuse_tv)) {
+              return false;
+            }
+          }
+        }
+
         // TODO:
         //  Outer interval based sharing supports arbitrary re-indexing into
         //    the same buffer and would require additional syncs if fully
