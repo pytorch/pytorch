@@ -1,12 +1,12 @@
 # flake8: noqa C101
 import itertools
-from typing import List, Union, Iterable, Dict
+from typing import Union, Iterable, Dict, Iterator
 
 import torch
 import torch.distributed as dist
 
 def average_parameters(
-    params: List[torch.nn.Parameter], process_group: dist.ProcessGroup
+    params: Iterator[torch.nn.Parameter], process_group: dist.ProcessGroup
 ):
     """
     Averages all the given parameters.
@@ -62,4 +62,4 @@ def average_parameters_or_parameter_groups(params: Union[Iterable[torch.nn.Param
     """
     Averages parameters of a model or parameter groups of an optimizer.
     """
-    average_parameters(get_params_to_average(params), process_group)
+    average_parameters(iter(get_params_to_average(params)), process_group)
