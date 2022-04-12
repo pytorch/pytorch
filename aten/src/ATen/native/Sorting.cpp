@@ -888,9 +888,9 @@ TORCH_IMPL_FUNC(sort_stable_out)
  bool descending,
  const Tensor& values,
  const Tensor& indices) {
+  values.copy_(self);
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
-    values.copy_(self);
     indices.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
