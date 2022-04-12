@@ -427,3 +427,6 @@ class TestMasked(TestCase):
 
 
 instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
+
+if __name__ == "__main__":
+    run_tests()
