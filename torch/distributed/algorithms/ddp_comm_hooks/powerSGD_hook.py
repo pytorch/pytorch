@@ -131,6 +131,8 @@ class PowerSGDState(object):
 
     4. ``orthogonalization_epsilon`` can be a very small value (e.g., 1e-8) added to every normalized matrix column in orthogonalization step, to prevent div-by-zero error if any column has all 0s. If this can already be prevented (e.g., by batch normalization), an epsilon of 0 is recommended for accuracy.
 
+    5. ``batch_tensors_with_same_shape`` controls whether to compress and decompress tensors with same shape in a batched operation to achieve higher parallelism. Note that you should also increase the bucket size (i.e., ``bucket_cap_mb`` arg in DDP constructor) to make more same-shaped tensors appear in the same bucket, however this may reduce the overlap between computation and communication, and increase the memory footprint due to stacking the tensors of the same shape. Set to ``True`` if the compression / decompression computation is a bottleneck.
+
     .. warning ::
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
         This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
@@ -148,6 +150,7 @@ class PowerSGDState(object):
         # The fields below are the binary hyperparameters recommended to be turned on for performance and accuracy.
         "use_error_feedback",
         "warm_start",
+        "batch_tensors_with_same_shape",
         # The fields below are internal state.
         "rng",
         "error_dict",
@@ -172,11 +175,12 @@ class PowerSGDState(object):
         orthogonalization_epsilon=0,
         random_seed=0,
         compression_stats_logging_frequency=10_000,
+        batch_tensors_with_same_shape: bool = False,
     ):
         logger.info(
             "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
             "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
-            "random_seed = {}; compression_stats_logging_frequency = {}".format(
+            "random_seed = {}; compression_stats_logging_frequency = {}; batch_tensors_with_same_shape = {}".format(
                 matrix_approximation_rank,
                 start_powerSGD_iter,
                 min_compression_rate,
@@ -185,6 +189,7 @@ class PowerSGDState(object):
                 warm_start,
                 random_seed,
                 compression_stats_logging_frequency,
+                batch_tensors_with_same_shape,
             )
         )
 
@@ -247,6 +252,12 @@ class PowerSGDState(object):
             1, compression_stats_logging_frequency
         )
         self.next_stats_report = 0
+        # Batching tensors with same shape can increase parallelism in compressiom / decompression computation.
+        # This requires a larger bucket size to make more same-shaped tensor to appear in one bucket, however
+        # this may reduce the overlap between computation and communication, and increase the memory footprint
+        # due to stacking tensors.
+        # Turn on if compression / decompression computation is a bottleneck.
+        self.batch_tensors_with_same_shape = batch_tensors_with_same_shape
 
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
@@ -282,7 +293,7 @@ class PowerSGDState(object):
 
 
 def powerSGD_hook(
-    state: PowerSGDState, bucket: dist.GradBucket, batch_tensors_with_same_shape: bool = False
+    state: PowerSGDState, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
@@ -330,10 +341,6 @@ def powerSGD_hook(
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
-        batch_tensors_with_same_shape (bool): A boolean value that when set to ``True``, compress and decompress tensors with
-            same shape in a batched operation to achieve higher parallelism. Note that you should also increase the bucket size
-            to make more same-shaped tensors appear in the same bucket, however this may reduce the overlap between computation
-            and communication. Set to ``True`` if the compression / decompression computation is a bottleneck.
 
     Returns:
         Future handler of the communication, which updates the gradients in place.
@@ -447,7 +454,7 @@ def powerSGD_hook(
     # so the following process could share the same code.
     def maybe_batched_tensors_to_compress():
         for tensors in shape_to_tensors.values():
-            if batch_tensors_with_same_shape:
+            if state.batch_tensors_with_same_shape:
                 batch_size = len(tensors)
                 if batch_size == 1:
                     # Use the original tensor to avoid copy.
@@ -562,7 +569,7 @@ def powerSGD_hook(
             torch.bmm(p, q.transpose(1, 2), out=tensor)
 
         # Copy batched tensors back to original buffer.
-        if batch_tensors_with_same_shape:
+        if state.batch_tensors_with_same_shape:
             for tensor in tensors_to_compress:
                 if tensor.shape[0] == 1:
                     # Skip tensor with batch_size == 1 since itself is the original tensor.
