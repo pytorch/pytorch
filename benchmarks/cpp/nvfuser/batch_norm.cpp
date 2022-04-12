@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -44,8 +45,8 @@ static void setupBatchNorm(Fusion* fusion, DataType dtype) {
     bias = castOp(DataType::Float, bias);
   }
 
-  auto momentum_ptr = new Double(kMomentum);
-  auto eps_ptr = new Double(kEps);
+  auto momentum_ptr = IrBuilder::create<Double>(kMomentum);
+  auto eps_ptr = IrBuilder::create<Double>(kEps);
 
   auto result = batch_norm(
       input,
@@ -99,11 +100,11 @@ static void NvFuserScheduler_BatchNorm(
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
 
   benchmark_state.SetBytesProcessed(
-      (int64_t(benchmark_state.iterations()) *
-       (2 * (at_x.numel() + at_weight.numel() + at_bias.numel())) *
-       int64_t(dataTypeSize(dtype))) +
-      (2 * (at_run_mean.numel() + at_run_var.numel()) *
-       int64_t(dataTypeSize(DataType::Float))));
+      int64_t(benchmark_state.iterations()) *
+      ((2 * (at_x.numel() + at_weight.numel() + at_bias.numel())) *
+           int64_t(dataTypeSize(dtype)) +
+       (2 * (at_run_mean.numel() + at_run_var.numel()) *
+        int64_t(dataTypeSize(DataType::Float)))));
 }
 
 //------------------------------------------------------------------------------
@@ -130,56 +131,59 @@ static void Baseline_BatchNorm(
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_weight = at::ones({input_shape[1]}, options);
   at::Tensor at_bias = at::zeros({input_shape[1]}, options);
-  at::Tensor at_running_mean = at::zeros({input_shape[1]}, fp32_options);
-  at::Tensor at_running_var = at::ones({input_shape[1]}, fp32_options);
+  at::Tensor at_run_mean = at::zeros({input_shape[1]}, fp32_options);
+  at::Tensor at_run_var = at::ones({input_shape[1]}, fp32_options);
 
   auto ato_weight = c10::optional<at::Tensor>(at_weight);
   auto ato_bias = c10::optional<at::Tensor>(at_bias);
-  auto ato_running_mean = c10::optional<at::Tensor>(at_running_mean);
-  auto ato_running_var = c10::optional<at::Tensor>(at_running_var);
+  auto ato_run_mean = c10::optional<at::Tensor>(at_run_mean);
+  auto ato_run_var = c10::optional<at::Tensor>(at_run_var);
 
   auto output = at::batch_norm(
       at_x,
       ato_weight,
       ato_bias,
-      ato_running_mean,
-      ato_running_var,
+      ato_run_mean,
+      ato_run_var,
       true,
       kMomentum,
       kEps,
       true);
-  cudaDeviceSynchronize();
 
+  clearL2Cache();
+  cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = at::batch_norm(
         at_x,
         ato_weight,
         ato_bias,
-        ato_running_mean,
-        ato_running_var,
+        ato_run_mean,
+        ato_run_var,
         true,
         kMomentum,
         kEps,
         true);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
     cudaDeviceSynchronize();
+    clearL2Cache();
+    cudaDeviceSynchronize();
   }
   benchmark_state.SetBytesProcessed(
-      (int64_t(benchmark_state.iterations()) *
-       (2 * (at_x.numel() + at_weight.numel() + at_bias.numel())) *
-       int64_t(dataTypeSize(dtype))) +
-      (2 * (at_running_mean.numel() + at_running_var.numel()) *
-       int64_t(dataTypeSize(DataType::Float))));
+      int64_t(benchmark_state.iterations()) *
+      ((2 * (at_x.numel() + at_weight.numel() + at_bias.numel())) *
+           int64_t(dataTypeSize(dtype)) +
+       (2 * (at_run_mean.numel() + at_run_var.numel()) *
+        int64_t(dataTypeSize(DataType::Float)))));
 }
 
 //------------------------------------------------------------------------------
 
-static void Baseline_BatchNorm_fp32(benchmark::State& benchmark_state) {
+static void Baseline_BatchNorm_cuDNN_fp32(benchmark::State& benchmark_state) {
   Baseline_BatchNorm(benchmark_state, DataType::Float);
 }
 
-static void Baseline_BatchNorm_fp16(benchmark::State& benchmark_state) {
+static void Baseline_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
   Baseline_BatchNorm(benchmark_state, DataType::Half);
 }
 
@@ -192,26 +196,14 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Float);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -222,75 +214,40 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Half);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 //------------------------------------------------------------------------------
 
-BENCHMARK(Baseline_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+BENCHMARK(Baseline_BatchNorm_cuDNN_fp32)
+    // ->RangeMultiplier(2)
+    // cuDNN didn't make it to 1024
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
+BENCHMARK(Baseline_BatchNorm_cuDNN_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
+BENCHMARK(Baseline_BatchNorm_cuDNN_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_BatchNorm_fp32)
-    ->RangeMultiplier(4)
-    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(Baseline_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(Baseline_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(Baseline_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(Baseline_BatchNorm_fp16)
-    ->RangeMultiplier(4)
-    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
+BENCHMARK(Baseline_BatchNorm_cuDNN_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

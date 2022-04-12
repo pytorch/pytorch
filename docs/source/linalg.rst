@@ -19,6 +19,7 @@ Matrix Properties
     norm
     vector_norm
     matrix_norm
+    diagonal
     det
     slogdet
     cond
@@ -33,6 +34,7 @@ Decompositions
 
     cholesky
     qr
+    lu_factor
     eig
     eigvals
     eigh
@@ -48,6 +50,7 @@ Solvers
     :nosignatures:
 
     solve
+    solve_triangular
     lstsq
 
 Inverses
@@ -100,3 +103,4 @@ Experimental Functions
 
     cholesky_ex
     inv_ex
+    lu_factor_ex

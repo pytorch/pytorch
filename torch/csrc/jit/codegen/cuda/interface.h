@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
@@ -19,6 +19,11 @@ namespace cuda {
 
 TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
 
+TORCH_API bool getSingletonFusion();
+TORCH_API bool setSingletonFusion(bool value);
+TORCH_API bool getHorizontalFusion();
+TORCH_API bool setHorizontalFusion(bool value);
+
 // dummy struct to allow API registration
 struct CudaFuserInterface {
   void (*fn_compile_n)(Node*) = nullptr;
@@ -26,18 +31,23 @@ struct CudaFuserInterface {
   void (*fn_fuse_graph)(std::shared_ptr<Graph>&) = nullptr;
   bool (*fn_can_fuse_n)(const Node*) = nullptr;
   void (*fn_insert_profile_inodes)(ProfilingRecord* pr) = nullptr;
+  bool (*fn_profile_n)(const Node*) = nullptr;
+  bool (*fn_skip_n)(const std::string&, bool flip) = nullptr;
 };
 
 // Get interface, this is used by registration and user facing API internally
-C10_EXPORT CudaFuserInterface* getFuserInterface();
+TORCH_API CudaFuserInterface* getFuserInterface();
 
-C10_EXPORT void compileFusionGroup(Node* fusion_node);
-C10_EXPORT void runFusionGroup(const Node* fusion_node, Stack& stack);
-C10_EXPORT void fuseGraph(std::shared_ptr<Graph>&);
-C10_EXPORT bool canFuseNode(const Node* node);
-C10_EXPORT void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr);
+TORCH_API void compileFusionGroup(Node* fusion_node);
+TORCH_API void runFusionGroup(const Node* fusion_node, Stack& stack);
+TORCH_API void fuseGraph(std::shared_ptr<Graph>&);
+TORCH_API bool canFuseNode(const Node* node);
+TORCH_API void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr);
+TORCH_API bool profileNode(const Node* node);
 
-C10_EXPORT bool complyWith(
+TORCH_API bool skipNode(const std::string& symbol_str, bool flip = true);
+
+TORCH_API bool complyWith(
     const at::Tensor& tensor,
     const c10::TensorTypePtr& guard_tensor_type);
 

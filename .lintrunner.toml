@@ -92,6 +92,8 @@ exclude_patterns = [
     'torch/include/**',
     'torch/csrc/**',
     'torch/distributed/elastic/agent/server/api.py',
+    'torch/testing/_internal/**',
+    'torch/distributed/fsdp/fully_sharded_data_parallel.py'
 ]
 command = [
     'python3',

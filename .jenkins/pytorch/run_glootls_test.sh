@@ -10,7 +10,7 @@ export GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY=${TMP_CERT_DIR}/pkey.key
 export GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT=${TMP_CERT_DIR}/cert.pem
 export GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE=${TMP_CERT_DIR}/ca.pem
 
-time python test/run_test.py --include distributed/test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM" -- ProcessGroupGlooTest
+time python test/run_test.py --include distributed/test_c10d_gloo --verbose -- ProcessGroupGlooTest
 
 unset GLOO_DEVICE_TRANSPORT
 unset GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY

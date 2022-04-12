@@ -599,7 +599,11 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
     callbackRegisteredData_ = false;
   }
   void setCallbackRegistered() {
-    callbackRegisteredData_ = true;
+    {
+      std::unique_lock<std::mutex> callbackRegistrationLock(
+          callbackRegistrationMutex_);
+      callbackRegisteredData_ = true;
+    }
     callbackRegisteredCV_.notify_one();
   }
 
@@ -889,7 +893,9 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       static_cast<long>((value.count() % 1000) * 1000)};
 #else
   struct timeval timeoutTV = {
-      .tv_sec = value.count() / 1000, .tv_usec = (value.count() % 1000) * 1000};
+      .tv_sec = value.count() / 1000,
+      .tv_usec = static_cast<suseconds_t>((value.count() % 1000) * 1000),
+  };
 #endif
   SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
       socket_.handle(),
@@ -1026,6 +1032,7 @@ void TCPStore::waitForWorkers() {
 }
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommandForKey(detail::QueryType::SET, keyPrefix_ + key);
   client_->sendBytes(data);
 }
@@ -1034,6 +1041,7 @@ std::vector<uint8_t> TCPStore::compareSet(
     const std::string& key,
     const std::vector<uint8_t>& expectedValue,
     const std::vector<uint8_t>& desiredValue) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommandForKey(detail::QueryType::COMPARE_SET, keyPrefix_ + key);
   client_->sendBytes(expectedValue);
   client_->sendBytes(desiredValue);
@@ -1042,6 +1050,7 @@ std::vector<uint8_t> TCPStore::compareSet(
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   return doGet(keyPrefix_ + key);
 }
 
@@ -1052,16 +1061,19 @@ std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
 }
 
 int64_t TCPStore::add(const std::string& key, int64_t value) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   return incrementValueBy(keyPrefix_ + key, value);
 }
 
 bool TCPStore::deleteKey(const std::string& key) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommandForKey(detail::QueryType::DELETE_KEY, keyPrefix_ + key);
   auto numDeleted = client_->receiveValue<std::int64_t>();
   return numDeleted == 1;
 }
 
 void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   callbackClient_->setCallback(keyPrefix_ + key, callback);
 }
 
@@ -1072,11 +1084,13 @@ int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
 }
 
 int64_t TCPStore::getNumKeys() {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommand(detail::QueryType::GETNUMKEYS);
   return client_->receiveValue<std::int64_t>();
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys{};
   prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {
@@ -1103,6 +1117,7 @@ void TCPStore::wait(const std::vector<std::string>& keys) {
 void TCPStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys{};
   prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {

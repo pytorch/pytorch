@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/RangeFactories.h>
 #include <cmath>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>

@@ -3,12 +3,14 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <c10/util/irange.h>
+
 #include <sleef.h>
 
 namespace at {
 namespace vec {
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 
 template <>
@@ -190,10 +192,10 @@ class Vectorized<double> {
   double& operator[](int idx) = delete;
   Vectorized<double> map(double (*const f)(double)) const {
     Vectorized<double> ret;
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec0[i] = f(_vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec1[i] = f(_vec1[i]);
     }
     return ret;
@@ -202,10 +204,10 @@ class Vectorized<double> {
   Vectorized<double> mapbi(double (*const f)(double, double), const Vectorized<double>& other)
       const {
     Vectorized<double> ret;
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec0[i] = f(_vec0[i], other._vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec1[i] = f(_vec1[i], other._vec1[i]);
     }
     return ret;

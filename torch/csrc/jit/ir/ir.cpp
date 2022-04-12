@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1141,6 +1142,7 @@ bool Node::isNondeterministic() const {
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
       "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
       "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
@@ -2090,29 +2092,18 @@ void inlineCallStackOfNode(
   }
 }
 
-// inline_optimized_graph argument is used in substitute function call for
-// ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
     GraphFunction* callee,
-    bool inline_optimized_graph /*=true*/) {
+    Graph* callee_graph) {
   WithInsertPoint guard(to_replace);
   std::unordered_map<Value*, Value*> value_map;
-  std::vector<torch::jit::Value*> new_outputs;
+  std::vector<torch::jit::Value*> new_outputs = insertGraph(
+      *to_replace->owningGraph(),
+      *callee_graph,
+      to_replace->inputs(),
+      value_map);
 
-  if (inline_optimized_graph) {
-    new_outputs = insertGraph(
-        *to_replace->owningGraph(),
-        *(callee->optimized_graph()),
-        to_replace->inputs(),
-        value_map);
-  } else {
-    new_outputs = insertGraph(
-        *to_replace->owningGraph(),
-        *(callee->graph()),
-        to_replace->inputs(),
-        value_map);
-  }
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
@@ -2149,23 +2140,10 @@ std::vector<Value*> inlineCallTo(
      * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
      * on if it is inlined_optimized_graph
      */
-
-    if (inline_optimized_graph) {
-      auto is_graph_input = std::find(
-          callee->optimized_graph()->inputs().begin(),
-          callee->optimized_graph()->inputs().end(),
-          kv.first);
-      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
-        continue;
-      }
-    } else {
-      auto is_graph_input = std::find(
-          callee->graph()->inputs().begin(),
-          callee->graph()->inputs().end(),
-          kv.first);
-      if (is_graph_input != callee->graph()->inputs().end()) {
-        continue;
-      }
+    auto is_graph_input = std::find(
+        callee_graph->inputs().begin(), callee_graph->inputs().end(), kv.first);
+    if (is_graph_input != callee_graph->inputs().end()) {
+      continue;
     }
 
     Node* new_node = kv.second->node();
@@ -2192,6 +2170,17 @@ std::vector<Value*> inlineCallTo(
   to_replace->destroy();
 
   return new_outputs;
+}
+
+// inline_optimized_graph argument is used in substitute function call for
+// ONNX conversion
+std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    bool inline_optimized_graph /*=true*/) {
+  auto graph =
+      inline_optimized_graph ? callee->optimized_graph() : callee->graph();
+  return inlineCallTo(to_replace, callee, graph.get());
 }
 
 std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
@@ -2296,6 +2285,19 @@ const Symbol ProfileOp::Kind = ::c10::prim::profile;
 const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
+  insert(sig_literals);
+}
+
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
+  std::vector<std::shared_ptr<Operator>> result;
+  for (const auto& kv : ops) {
+    auto ops_for_symbol = kv.second;
+    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
+  }
+  return result;
+}
+
+void OperatorSet::insert(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);

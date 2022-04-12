@@ -39,7 +39,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
@@ -64,7 +64,7 @@ __m512i pack_saturate_and_clamp(
     T max_val);
 
 template <>
-__m512i pack_saturate_and_clamp<int32_t>(
+inline __m512i pack_saturate_and_clamp<int32_t>(
     __m512i first,
     __m512i second,
     int32_t min_val,
@@ -74,7 +74,7 @@ __m512i pack_saturate_and_clamp<int32_t>(
 }
 
 template <>
-__m512i pack_saturate_and_clamp<int8_t>(
+inline __m512i pack_saturate_and_clamp<int8_t>(
     __m512i first,
     __m512i second,
     int8_t min_val,
@@ -86,7 +86,7 @@ __m512i pack_saturate_and_clamp<int8_t>(
 }
 
 template <>
-__m512i pack_saturate_and_clamp<uint8_t>(
+inline __m512i pack_saturate_and_clamp<uint8_t>(
     __m512i first,
     __m512i second,
     uint8_t min_val,
@@ -909,7 +909,7 @@ Vectorized<c10::qint32> inline operator*(
     const Vectorized<c10::qint32>& a,
     const Vectorized<c10::qint32>& b) {
   Vectorized<c10::qint32> retval;
-  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+  for (const auto i : c10::irange(std::decay_t<decltype(a)>::size())) {
     retval.vals[i] = a.vals[i] * b.vals[i];
   }
   return retval;
@@ -920,7 +920,7 @@ Vectorized<c10::qint32> inline operator+(
     const Vectorized<c10::qint32>& a,
     const Vectorized<c10::qint32>& b) {
   Vectorized<c10::qint32> retval;
-  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+  for (const auto i : c10::irange(std::decay_t<decltype(a)>::size())) {
     retval.vals[i] = a.vals[i] + b.vals[i];
   }
   return retval;

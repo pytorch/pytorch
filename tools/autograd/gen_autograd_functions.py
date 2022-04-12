@@ -13,7 +13,8 @@ from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         uses_single_grad)
 from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, longT,
                                      doubleT, scalarT, stringT, boolT, intArrayRefT,
-                                     tensorListT, MutRefCType, ListCType, ArrayRefCType)
+                                     tensorListT, MutRefCType, ListCType, ArrayRefCType,
+                                     optionalIntArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.utils import FileManager
 from tools.codegen.model import Argument
@@ -204,7 +205,7 @@ return obj.release().ptr();
 
 GETTER_BODY_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i: c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack(self->cdata)));
 }
 return tup;
@@ -212,7 +213,7 @@ return tup;
 
 GETTER_BODY_RAW_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   pybind11::object obj = pybind11::cast(prop[i], pybind11::return_value_policy::reference);
   PyTuple_SetItem(tup, (Py_ssize_t) i, obj.release().ptr());
 }
@@ -221,7 +222,7 @@ return tup;
 
 GETTER_BODY_ARRAYREF_LONG = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
 }
 return tup;
@@ -229,7 +230,7 @@ return tup;
 
 GETTER_BODY_ARRAYREF_DOUBLE = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
 }
 return tup;
@@ -421,6 +422,10 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
+        elif type == BaseCType(optionalIntArrayRefT):
+            saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
+            getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
         elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')

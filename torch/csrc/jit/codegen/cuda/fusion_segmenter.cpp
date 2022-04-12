@@ -77,7 +77,7 @@ std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
   std::vector<bool> can_merge(true, neighbors.size());
 
   // Find neighbors with a level that is only 1 differant than this groups level
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (std::abs(neighbors[i].group->level_ - level_) > 1) {
       can_merge[i] = false;
     }
@@ -86,7 +86,7 @@ std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
   // Check neighbor of neighbors we're considering, if any of them are merged
   // with another node, make sure the resulting edge wouldn't have a level
   // difference of 1
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (!can_merge[i]) {
       continue;
     }
@@ -120,7 +120,7 @@ std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
   }
 
   std::vector<NeighborGroup> merge_candidates;
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (can_merge[i]) {
       merge_candidates.push_back(neighbors[i]);
     }
@@ -213,7 +213,7 @@ std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group) {
       [](auto expr_a, auto expr_b) -> bool {
         return expr_a->name() < expr_b->name();
       });
-  for (size_t i = 0; i < expr_to_print.size(); i++) {
+  for (const auto i : c10::irange(expr_to_print.size())) {
     os << expr_to_print[i]->name();
     if (i + 1 != expr_to_print.size())
       os << ", ";
@@ -322,7 +322,7 @@ void SegmentedFusion::draw() {
 
   for (auto group : groups()) {
     for (auto expr : group->exprs()) {
-      if (ir_utils::isTVOp(expr)) {
+      if (ir_utils::isTvOp(expr)) {
         expr_color_map[expr] = group_index;
       }
     }
@@ -636,11 +636,13 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 //!       fp32_tv = cast(fp16_tv)
 //!
 //!  All segmented groups that take TV0 as input will then
-//!   take fp16_tv instead and the cast to fp32 will be
+//!   take fp16_tv or bf16_tv instead and the cast to fp32 will be
 //!   automatically included in each of the groups.
 TensorView* castIntermediateValueInCompleteFusion(
     Fusion* fusion,
-    TensorView* original_tv) {
+    TensorView* original_tv,
+    std::unordered_set<Expr*> edge_from_group_uses,
+    DataType dtype) {
   FusionGuard fg(fusion);
 
   // A utility lambda that creates consumer tensordomain of
@@ -657,36 +659,38 @@ TensorView* castIntermediateValueInCompleteFusion(
     }
 
     // Create the actual domain and tv.
-    return new TensorView(
-        new TensorDomain(
+    return IrBuilder::create<TensorView>(
+        IrBuilder::create<TensorDomain>(
             new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
         data_type);
   };
 
   // create the tv's to cast
-  auto fp16_tv = make_consumer_tv(original_tv, DataType::Half);
+  auto half_precision_tv = make_consumer_tv(original_tv, dtype);
+
   auto fp32_tv = make_consumer_tv(original_tv, DataType::Float);
 
   // replace uses of original tv with fp32_tv in the complete
   //  fusion
   for (auto expr : fusion->unordered_uses(original_tv)) {
-    ir_utils::replaceValInExpr(expr, original_tv, fp32_tv);
+    // Don't modify internal uses of buffers, only cast for outputs.
+    if (edge_from_group_uses.find(expr) == edge_from_group_uses.end()) {
+      ir_utils::replaceValInExpr(expr, original_tv, fp32_tv);
+    }
   }
 
   // Insert the cast ops.
-  new UnaryOp(UnaryOpType::Cast, fp16_tv, original_tv);
-  new UnaryOp(UnaryOpType::Cast, fp32_tv, fp16_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, half_precision_tv, original_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, fp32_tv, half_precision_tv);
 
   // Return the new tv to replace original tv with
   //  on the segmented edges.
-  return fp16_tv;
+  return half_precision_tv;
 }
-
 } // namespace
 
 void SegmentedFusion::finalize() {
   impl_.cleanUnused();
-
   // Insert casts for the tensorviews that are on
   //  segmented edges and also on the force_to_fp16 list
   //
@@ -702,23 +706,48 @@ void SegmentedFusion::finalize() {
   //  including both the producer and consumer of the selected tv's that
   //  we cast to fp16.
   std::unordered_set<SegmentedGroup*> affected_group_set;
-
   // A map to keep track of the tv's that have been inserted cast
   //  and its fp16 version.
-  std::unordered_map<TensorView*, TensorView*> fp32_to_fp16_cast_map;
+  std::unordered_map<TensorView*, TensorView*> fp32_to_half_cast_map;
 
   // Go through all edges of the segmented fusion.
   for (auto edge : edges()) {
+    TORCH_INTERNAL_ASSERT(edge->val->isA<TensorView>());
     auto edge_tv = edge->val->as<TensorView>();
-    // Only look at ones that need to cast to fp16
-    if (force_fp16_tv_set_.count(edge_tv)) {
-      auto cast_tv_it = fp32_to_fp16_cast_map.find(edge->val->as<TensorView>());
+
+    // Uses of the edge value within the from group should not be replaced. This
+    // will cause the group to have an intermediate tensor
+    // tv -> float2half -> output
+    //            \ -> half2float -> other uses in group
+    // The conversion back and forth from half precision can hurt numerics.
+    // Collect expressions that use the edge value of concern within the from
+    // group to avoid replacing with the casted tensor.
+    std::unordered_set<Expr*> uses_in_from_group;
+
+    // All expressions in the from group of the edge
+    std::unordered_set<Expr*> from_group_exprs(
+        edge->from->exprs().begin(), edge->from->exprs().end());
+
+    // All uses of the edge val
+    for (auto edge_val_use_expr : edge_tv->uses()) {
+      if (from_group_exprs.count(edge_val_use_expr)) {
+        // Find uses in the to group of the val
+        uses_in_from_group.emplace(edge_val_use_expr);
+      }
+    }
+
+    // Only look at ones that need to cast to fp16 or bf16
+    if ((force_fp16_tv_set_.count(edge_tv) > 0)) {
+      auto cast_tv_it = fp32_to_half_cast_map.find(edge->val->as<TensorView>());
       TensorView* cast_tv = nullptr;
       // Insert cast ops for this tv if we haven't done so.
-      if (cast_tv_it == fp32_to_fp16_cast_map.end()) {
+      if (cast_tv_it == fp32_to_half_cast_map.end()) {
         cast_tv = castIntermediateValueInCompleteFusion(
-            complete_fusion_.get(), edge_tv);
-        fp32_to_fp16_cast_map[edge->val->as<TensorView>()] = cast_tv;
+            complete_fusion_.get(),
+            edge_tv,
+            uses_in_from_group,
+            force_half_precision_type_);
+        fp32_to_half_cast_map[edge->val->as<TensorView>()] = cast_tv;
       } else {
         cast_tv = cast_tv_it->second;
       }
@@ -729,21 +758,13 @@ void SegmentedFusion::finalize() {
       // Mark the groups for update later
       affected_group_set.insert(edge->from);
       affected_group_set.insert(edge->to);
+
+      // The expr pointers on the group's expr list might have been freed
+      //  by now after `ir_utils::replaceValInExpr`.
+      // Need a valid expression list to continue. Update from and to group.
+      edge->from->resetExprList();
+      edge->to->resetExprList();
     }
-  }
-
-  // Reset expression lists of all affected groups
-  // TODO : this could have been a general operation that
-  //  the group supports. Could consider moving this into
-  //  segmentedGroup in a follow up.
-  for (auto group : affected_group_set) {
-    auto input_group_vec = getAllInputs(group);
-    std::unordered_set<Val*> input_group_set(
-        input_group_vec.begin(), input_group_vec.end());
-
-    auto expr_set = DependencyCheck::getAllExprsBetween(
-        input_group_set, getAllOutputs(group));
-    group->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
   }
 }
 
@@ -922,7 +943,7 @@ GroupDependencyAnalysis::GroupSet GroupDependencyAnalysis::getCommonProducersOf(
 
   // Get intersection of producers
   GroupSet common_producers = *(known_producers_of_.at(groups[0]));
-  for (size_t i = 1; i < groups.size(); i++) {
+  for (const auto i : c10::irange(1, groups.size())) {
     common_producers = groupSetIntersection(
         common_producers, *(known_producers_of_.at(groups[i])));
   }
@@ -1090,7 +1111,7 @@ std::ostream& operator<<(
 
   // Do a reverse look up to check the order of sorted groups
   std::unordered_map<SegmentedGroup*, size_t> group_order;
-  for (size_t i = 0; i < sorted_groups_to_print.size(); i++) {
+  for (const auto i : c10::irange(sorted_groups_to_print.size())) {
     group_order[sorted_groups_to_print[i]] = i;
   }
 
@@ -1149,12 +1170,22 @@ std::unique_ptr<Fusion> SegmentedFusion::makeFusion(SegmentedGroup* sg) {
     fusion_segment->removeOutput(out);
   }
 
+  std::vector<TensorView*> view_tvs;
   for (auto inp : getAllInputs(sg)) {
-    fusion_segment->addInput(complete_to_segment_map.clone(inp));
+    auto clone_tv = complete_to_segment_map.clone(inp);
+    fusion_segment->addInput(clone_tv);
+    if (inp->isDefinitionType(ExprType::ViewOp)) {
+      TORCH_INTERNAL_ASSERT(clone_tv != nullptr && clone_tv->isA<TensorView>());
+      view_tvs.push_back(clone_tv->as<TensorView>());
+    }
   }
 
   for (auto out : getAllOutputs(sg)) {
     fusion_segment->addOutput(complete_to_segment_map.clone(out));
+  }
+
+  for (auto tv : view_tvs) {
+    tv->convertRfactorToRootDomain();
   }
 
   return fusion_segment;
@@ -1492,6 +1523,7 @@ class FusionSegmentGuard : public NonCopyable {
         old_outputs_(fusion->outputs()),
         new_inputs_(std::move(inputs)),
         new_outputs_(std::move(outputs)) {
+    FUSER_PERF_SCOPE("Segmenter::FusionSegmentGuard");
     TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
     for (auto old_inp : old_inputs_) {
       fusion_->removeInput(old_inp);
@@ -1608,6 +1640,15 @@ c10::optional<std::unique_ptr<SchedulerEntry>> SegmentedGroup::
       heuristic(), fusion, runtime_info, data_cache);
 }
 
+void SegmentedGroup::resetExprList() {
+  auto input_group_vec = getAllInputs(this);
+  std::unordered_set<Val*> input_group_set(
+      input_group_vec.begin(), input_group_vec.end());
+  auto expr_set =
+      DependencyCheck::getAllExprsBetween(input_group_set, getAllOutputs(this));
+  exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
+}
+
 // Custom merge node passes:
 //  These passes are added at the beginning or the end of
 //  the node merging process to direct the heuristics of
@@ -1691,10 +1732,6 @@ class TranslateApplicableWelford {
       Fusion* translated_fusion,
       SchedulerRuntimeInfo& runtime_info);
 
-  //! Update expression list of groups containing
-  //!  welford ops that have been translated.
-  void updateGroupExprs(SegmentedGroup* group);
-
  private:
   //! Indicates any translation happened.
   bool translated_any_welford_ = false;
@@ -1713,9 +1750,10 @@ TranslateApplicableWelford::TranslateApplicableWelford(
     Fusion* fusion,
     const at::ArrayRef<IValue>& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
+  auto exprs = fusion->exprs();
   std::vector<WelfordOp*> orignal_welfords(
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).begin(),
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).end());
+      ir_utils::filterByType<WelfordOp>(exprs).begin(),
+      ir_utils::filterByType<WelfordOp>(exprs).end());
 
   if (wouldTranslateToPersistent(orignal_welfords)) {
     for (auto welford : orignal_welfords) {
@@ -1755,8 +1793,8 @@ TranslateApplicableWelford::TranslateApplicableWelford(
 
   for (auto translated_group : translated_groups) {
     // Update heuristics and expr list of translated groups
-    translated_group->heuristic_ = ScheduleHeuristic::Normalization;
-    updateGroupExprs(translated_group);
+    translated_group->heuristic_ = ScheduleHeuristic::Persistent;
+    translated_group->resetExprList();
   }
 }
 
@@ -1764,12 +1802,12 @@ bool TranslateApplicableWelford::isValidPersistentFusion(
     Fusion* translated_fusion,
     SchedulerRuntimeInfo& runtime_info) {
   if (!SchedulerEntry::canSchedule(
-          ScheduleHeuristic::Normalization, translated_fusion, runtime_info)) {
+          ScheduleHeuristic::Persistent, translated_fusion, runtime_info)) {
     return false;
   }
 
   auto scheduler = SchedulerEntry::makeEntry(
-      ScheduleHeuristic::Normalization, translated_fusion, runtime_info);
+      ScheduleHeuristic::Persistent, translated_fusion, runtime_info);
 
   return scheduler->reductionParams().persistent_kernel;
 }
@@ -1802,6 +1840,14 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
       [&original_to_test_map](auto welford) {
         return original_to_test_map.clone(welford);
       });
+  // Copied welfords will be invalidated on translation, but Vals will be
+  // reused, keep a reference to them.
+  std::vector<Val*> welford_avgs;
+  std::vector<Val*> welford_vars;
+  for (auto welford : copied_welfords) {
+    welford_avgs.push_back(welford->outAvg());
+    welford_vars.push_back(welford->outVar());
+  }
 
   // Translate the welford ops
   for (auto welford_to_translate : copied_welfords) {
@@ -1832,6 +1878,21 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
         [&original_to_test_map](Val* out) {
           return original_to_test_map.clone(out);
         });
+
+    // If only average is used from welford, we should still translate, but we
+    // might not detect persistence if variance isn't actually used/marked as an
+    // output in the test.
+    for (auto outs_i : c10::irange(welford_avgs.size())) {
+      auto avg = welford_avgs[outs_i];
+      auto var = welford_vars[outs_i];
+      if (avg->uses().empty()) {
+        test_group_outputs_.push_back(avg);
+      }
+
+      if (var->uses().empty()) {
+        test_group_outputs_.push_back(var);
+      }
+    }
 
     // Temporarily localize test copy around
     //  the group boundary
@@ -1873,9 +1934,9 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
 
   // Create scalar version of the feature element
   //  counting.
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
-  for (size_t i = 0; i < in_root.size(); i++) {
+  for (const auto i : c10::irange(in_root.size())) {
     if (out_root[i]->isReduction()) {
       red_axes.push_back(i);
       broadcast_mask[i] = true;
@@ -1886,7 +1947,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   // Build a normalization expression group that is
   //  equivalent to a welford operation.
   auto x_sum = sum(in_val, red_axes);
-  new BinaryOp(BinaryOpType::Div, out_avg, x_sum, num_features);
+  IrBuilder::create<BinaryOp>(BinaryOpType::Div, out_avg, x_sum, num_features);
   // welford.avg may be broadcast. Reuse it if found.
   TensorView* x_avg_bcast = nullptr;
   for (auto& use_expr : out_avg->uses()) {
@@ -1922,27 +1983,17 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   }
 
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  new ReductionOp(BinaryOpType::Add, new Double(0.0), out_var, x_mean_sub_pow);
-  new UnaryOp(UnaryOpType::Set, out_N, num_features);
+  IrBuilder::create<ReductionOp>(
+      BinaryOpType::Add,
+      IrBuilder::create<Double>(0.0),
+      out_var,
+      x_mean_sub_pow);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_N, num_features);
 
   // out_avg, out_N are now outputs of a pointwise ops and we
   //  need to clear out its reduction domains.
   out_avg->clearReductionIterDomains();
   out_N->clearReductionIterDomains();
-}
-
-void TranslateApplicableWelford::updateGroupExprs(SegmentedGroup* group) {
-  // Re-evaluate expression list of the translated group
-  auto input_vec = getAllInputs(group);
-  auto output_vec = getAllOutputs(group);
-
-  if (input_vec.empty() || output_vec.empty()) {
-    return;
-  }
-
-  std::unordered_set<Val*> input_set(input_vec.begin(), input_vec.end());
-  auto expr_set = DependencyCheck::getAllExprsBetween(input_set, output_vec);
-  group->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
 }
 
 bool SegmentCandidateFinder::TranslateWelfordInFusion(
@@ -2015,9 +2066,8 @@ class CombineReductions {
 
       // Merge one pair of reduction groups at a time, and need
       //  the pass to update dependency info along the way to avoid cycles
-      for (size_t first_group_index = 0;
-           first_group_index < groups_with_reductions_.size();
-           first_group_index++) {
+      for (const auto first_group_index :
+           c10::irange(groups_with_reductions_.size())) {
         if (merged_groups) {
           // Need to break and re-enter this loop because
           // groups_with_reductions_ will be updated
@@ -2029,9 +2079,8 @@ class CombineReductions {
         auto first_group_signature =
             group_reduction_signature_map_.at(first_group);
 
-        for (size_t second_group_index = first_group_index + 1;
-             second_group_index < groups_with_reductions_.size();
-             second_group_index++) {
+        for (const auto second_group_index : c10::irange(
+                 first_group_index + 1, groups_with_reductions_.size())) {
           if (merged_groups) {
             // Need to break and re-enter this loop because
             // groups_with_reductions_ will be updated
@@ -2077,8 +2126,7 @@ class CombineReductions {
       SegmentedGroup* first_group,
       SegmentedGroup* second_group) {
     // This is part of ReductionCombine pass, and we should only call this
-    // function on a pair of
-    //  reduction/normalization groups
+    // function on a pair of reduction/normalization groups
     TORCH_INTERNAL_ASSERT(
         group_reduction_signature_map_.at(first_group)
             ->sameAs(group_reduction_signature_map_.at(second_group)));
@@ -2157,8 +2205,7 @@ class CombineReductions {
   //!  consumer.
   //!
   //!  TODO: This implementation looks at common producers only, since common
-  //!  consumers
-  //!          are not computed easily with current dependency analysis.
+  //!  consumers are not computed easily with current dependency analysis.
   SegmentedGroup* horizontalReductionMerge(
       SegmentedGroup* first_group,
       SegmentedGroup* second_group) {
@@ -2198,24 +2245,24 @@ class CombineReductions {
     //
     // The specific pattern we look for contains a common producer P with
     // immediate consumers C1, C2 such that all paths from C1 to first_group and
-    // all paths from C2
-    //  to second_group won't hit a reduction with a different signature.
+    // all paths from C2 to second_group won't hit a reduction with a different
+    // signature.
 
     // Topologically sort the common producers and start with the topologically
     // minimal,
     //  i.e. one that are closest to the two groups. This will cut the search
     //  space.
-    std::vector<SegmentedGroup*> common_producers(
-        common_producers_set.begin(), common_producers_set.end());
-    std::sort(
-        common_producers.begin(),
-        common_producers.end(),
-        [&dependency_analysis](SegmentedGroup* a, SegmentedGroup* b) {
-          return dependency_analysis->isConsumerOf(a, b);
-        });
-
-    // Use a visited filter to prune search space.
-    GroupSet visited_common_producers;
+    std::vector<SegmentedGroup*> common_producers;
+    for (auto producer : common_producers_set) {
+      if (!std::any_of(
+              common_producers_set.begin(),
+              common_producers_set.end(),
+              [dependency_analysis, producer](SegmentedGroup* group) {
+                return dependency_analysis->isProducerOf(producer, group);
+              })) {
+        common_producers.push_back(producer);
+      }
+    }
 
     // Visit the common producers found, starting from topologically minimum,
     // i.e. the ones closer to the groups
@@ -2225,12 +2272,6 @@ class CombineReductions {
       //  better than the other
       for (auto first_consumer_edge : common_producer->consumer_edges) {
         auto producer_of_first_group = first_consumer_edge->to;
-        if (visited_common_producers.count(producer_of_first_group)) {
-          // We have visited this node as common producer before and it
-          //  had conflicts. It'd hit the same conflict again if we continued
-          //  to pursue this edge.
-          continue;
-        }
         auto to_merge_with_first_group = getValidMinVerticalMergedGroupSet(
             producer_of_first_group, first_group);
         if (to_merge_with_first_group.empty()) {
@@ -2239,14 +2280,10 @@ class CombineReductions {
           //  no path to first group
           continue;
         }
+        TORCH_INTERNAL_ASSERT(!dependency_analysis->isProducerOf(
+            producer_of_first_group, second_group));
         for (auto second_consumer_edge : common_producer->consumer_edges) {
           auto producer_of_second_group = second_consumer_edge->to;
-          if (visited_common_producers.count(producer_of_second_group)) {
-            // We have visited this node as common producer before and it
-            //  had conflicts. It'd hit the same conflict again if we continued
-            //  to pursue this edge.
-            continue;
-          }
           auto to_merge_with_second_group = getValidMinVerticalMergedGroupSet(
               producer_of_second_group, second_group);
           if (to_merge_with_second_group.empty()) {
@@ -2256,7 +2293,8 @@ class CombineReductions {
             //  there's no path to second group
             continue;
           }
-
+          TORCH_INTERNAL_ASSERT(!dependency_analysis->isProducerOf(
+              producer_of_second_group, first_group));
           // At this point we should have a pair of valid candidates,final check
           // is to see if the combined group
           //  can be scheduled by schedulers
@@ -2295,10 +2333,6 @@ class CombineReductions {
           }
         }
       }
-      // Here we should have searched all consumer edges of this common producer
-      // and
-      //  found no valid pattern. Should just add it to the visted list.
-      visited_common_producers.insert(common_producer);
     }
 
     // Searched all possibilities and there is no valid horizontal merge pattern
@@ -2401,7 +2435,7 @@ class CombineReductions {
         return false;
       }
 
-      for (size_t i = 0; i < reduction_axes_.size(); i++) {
+      for (const auto i : c10::irange(reduction_axes_.size())) {
         if (reduction_axes_[i] != reduction_signature->reduction_axes_[i]) {
           return false;
         }
@@ -2464,7 +2498,7 @@ class CombineReductions {
       //  but T2 and T3 below are not
       //    T0 [R(1), R(1), R(i0), I(i1)]
       //    T1 [R(1), R(i0), I(i1)]
-      for (size_t i = 0; i < root_domain_size_; i++) {
+      for (const auto i : c10::irange(root_domain_size_)) {
         if (root_domain[i]->isReduction()) {
           reduction_axes_.push_back(i);
         }
@@ -2563,11 +2597,80 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
+  // Find all expresions that are simply unary ops from inputs. Don't segment
+  // these as they're easy targets for recomputation. Only go until the first
+  // expression that has multiple uses. We could continue, but the logic of
+  // hacking the fusion "inputs" logic gets a bit more complicated.
+
+  // Expressions to exclude from segmentation because they're just derived from
+  // unary ops on inputs to the complete fusion
+  std::unordered_set<Expr*> excluded_inp_unary_exprs;
+
+  // "Terminating" outputs from the excluded input unary exprs, these will be
+  // treated as complete fusion inputs.
+  std::unordered_set<Val*> forwarded_inputs;
+  {
+    std::deque<Expr*> to_visit;
+    for (auto inp : completeFusion()->inputs()) {
+      if (std::all_of(inp->uses().begin(), inp->uses().end(), [](Expr* expr) {
+            return expr->getExprType().value() == ExprType::UnaryOp;
+          })) {
+        to_visit.insert(to_visit.end(), inp->uses().begin(), inp->uses().end());
+      }
+    }
+
+    while (!to_visit.empty()) {
+      auto expr = to_visit.front();
+      to_visit.pop_front();
+      if (expr->getExprType().value() != ExprType::UnaryOp) {
+        continue;
+      }
+
+      if (expr->output(0)->uses().size() > 1) {
+        excluded_inp_unary_exprs.emplace(expr);
+        forwarded_inputs.emplace(expr->output(0));
+        continue;
+      }
+
+      to_visit.emplace_back(expr->output(0)->uses()[0]);
+    }
+  }
+
+  auto excluded_fusion_inputs = IterVisitor::getInputsTo(
+      {forwarded_inputs.begin(), forwarded_inputs.end()});
+
+  // List of vals to treat as complete fusion inputs for segmentation
+  auto forwarded_fusion_inputs = completeFusion()->inputs();
+
+  forwarded_fusion_inputs.erase(
+      std::remove_if(
+          forwarded_fusion_inputs.begin(),
+          forwarded_fusion_inputs.end(),
+          [&excluded_fusion_inputs](Val* inp) {
+            return std::find(
+                       excluded_fusion_inputs.begin(),
+                       excluded_fusion_inputs.end(),
+                       inp) != excluded_fusion_inputs.end();
+          }),
+      forwarded_fusion_inputs.end());
+
+  forwarded_fusion_inputs.insert(
+      forwarded_fusion_inputs.end(),
+      forwarded_inputs.begin(),
+      forwarded_inputs.end());
+
+  auto isFusionInput = [&forwarded_fusion_inputs](Val* val) -> bool {
+    return std::find(
+               forwarded_fusion_inputs.begin(),
+               forwarded_fusion_inputs.end(),
+               val) != forwarded_fusion_inputs.end();
+  };
+
   // Insert auxiliary groups to use group dependency on inputs as well
   // TODO: these groups should never merged into any other groups, but are
   //       just there to support the dependency analysis. Later re-factor should
   //       avoid introducing them explicitly on the segmented fusion.
-  for (auto input : completeFusion()->inputs()) {
+  for (auto input : forwarded_fusion_inputs) {
     // These groups are used to represent input as a common
     //  producer in horizontal merges, and should never be
     //  seen as a candidate for vertical merge
@@ -2582,9 +2685,13 @@ void SegmentCandidateFinder::findSegments() {
       continue;
     }
 
+    if (excluded_inp_unary_exprs.count(expr)) {
+      continue;
+    }
+
     auto expr_group = expr2group.at(expr);
     for (auto inp : expr->inputs()) {
-      if (inp->isFusionInput()) {
+      if (isFusionInput(inp)) {
         expr_group->input_vals.push_back(inp);
         auto aux_group = input2group.at(inp);
         auto new_edge = segmented_fusion_->newEdge(aux_group, expr_group, inp);
@@ -2618,14 +2725,20 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
+  auto reduction_ops = ir_utils::getReductionOps(
+      segmented_fusion_->completeFusion(), true /* ignore_trivial */);
+  auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+
   if (options_.run_translate_welford &&
-      segmented_fusion_->completeFusion()->hasWelford()) {
+      (welford_ops.begin() != welford_ops.end())) {
     TranslateApplicableWelford::run(segmented_fusion_.get(), runtime_inputs_);
   }
 
   for (auto group : groups()) {
-    // Set heuristics in case single reduction kernels were left out
-    group->setHeuristic(deriveHeuristic(group));
+    if (!group->outputs().empty()) {
+      // Set heuristics in case single reduction kernels were left out
+      group->setHeuristic(deriveHeuristic(group));
+    }
   }
 
   // Remove all scalar edges since they do not represent actual
@@ -2641,7 +2754,7 @@ void SegmentCandidateFinder::findSegments() {
   //  we can remove the input auxiliary groups. Should make the vertical
   //  merges avoid auxiliary group once we start general horizontal merges
   std::unordered_set<SegmentedGroup*> input_groups;
-  for (auto input : completeFusion()->inputs()) {
+  for (auto input : forwarded_fusion_inputs) {
     input_groups.insert(input2group.at(input));
   }
   eraseGroups(input_groups);
@@ -2695,12 +2808,12 @@ void SegmentCandidateFinder::findSegments() {
 
   if (options_.run_final_merge) {
     // TODO: consider interleaving herrmman merge and bruteforce merge, as
-    // bruteforce merge can introduce
-    //  opportunities for more herrmann merge
+    // bruteforce merge can introduce opportunities for more herrmann merge
     finalMerge();
   }
 
   finalize();
+
   if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
     segmented_fusion_->draw();
   }
@@ -2829,6 +2942,28 @@ void SegmentCandidateFinder::resolveScalarsInGroup(SegmentedGroup* group) {
   }
 }
 
+void SegmentCandidateFinder::resolveInputsInGroup(SegmentedGroup* group) {
+  std::vector<Val*> to_visit;
+  std::unordered_set<Val*> visited;
+
+  // Collect all inputs to group that are not inputs of fusion
+  for (auto input : group->inputs()) {
+    if (!input->isFusionInput()) {
+      to_visit.push_back(input);
+    }
+  }
+
+  // Reset group inputs to real inputs
+  group->input_vals = IterVisitor::getInputsTo(group->inputs());
+
+  // Grab all expressions needed to produce to_visit
+  auto input_exprs = StmtSort::getExprs(completeFusion(), to_visit);
+
+  // Insert those expressions at the beginning of the group
+  group->exprs_.insert(
+      group->exprs_.begin(), input_exprs.begin(), input_exprs.end());
+}
+
 void SegmentCandidateFinder::removeScalarEdges() {
   // Remove all scalar edges between groups
   //  They may have been created by welford
@@ -2880,8 +3015,14 @@ void SegmentCandidateFinder::finalize() {
     resolveScalarsInGroup(group);
   }
 
+  // Resolve all the scalar expressions needed in each group
+  for (auto group : segmented_fusion_->groups()) {
+    resolveInputsInGroup(group);
+  }
+
   // Finalize each group, fill in the missing inputs, i.e. tensor dims.
   for (auto g : groups()) {
+    g->setHeuristic(deriveHeuristic(g));
     g->finalize();
   }
 }
@@ -2939,27 +3080,36 @@ void SegmentedFusion::setCachedHeuristicDataFor(
 namespace {
 
 //! A thin traversal class that collects all the tensorviews
-//!  that could cast to fp16 if they were segmented edges.
+//!  that could cast to fp16 or bf16 if they were segmented edges.
 //!  The selected values are currently defined as all the
 //!  tensorviews that
 //!     1. are not complete fusion input/output,
 //!     2. have a use chain that ends with a fp16
 //!         complete fusion output
 //!     3. are fp32 datatype
-class ForceFP16Annotation : public IterVisitor {
+class ForceHalfAnnotation : public IterVisitor {
  public:
-  static std::unordered_set<TensorView*> getAnnotatedSet(Fusion* fusion) {
-    ForceFP16Annotation annotation;
+  static std::unordered_set<TensorView*> getFP16AnnotatedSet(Fusion* fusion) {
+    ForceHalfAnnotation annotation;
     std::vector<Val*> fp16_outputs;
-
+    auto& cast_to_type = annotation.cast_to_type_;
+    auto other_half_type =
+        cast_to_type == DataType::Half ? DataType::BFloat16 : DataType::Half;
     std::copy_if(
         fusion->outputs().begin(),
         fusion->outputs().end(),
         std::back_inserter(fp16_outputs),
-        [](auto* val) {
+        [&cast_to_type, &other_half_type](auto* val) {
+          auto dtype = val->getDataType().value();
+          if (cast_to_type) {
+            TORCH_INTERNAL_ASSERT(
+                other_half_type != dtype,
+                "Mix of BFloat16 and Float16 in the same graph is not supported.");
+          }
           return val->template isA<TensorView>() &&
               val->getDataType().has_value() &&
-              val->getDataType().value() == DataType::Half;
+              (val->getDataType().value() == DataType::Half ||
+               val->getDataType().value() == DataType::BFloat16);
         });
 
     annotation.traverseFrom(fusion, fp16_outputs);
@@ -2978,17 +3128,26 @@ class ForceFP16Annotation : public IterVisitor {
   }
 
   std::unordered_set<TensorView*> force_fp16_tv_set_;
+  c10::optional<DataType> cast_to_type_ = c10::nullopt;
 };
 
 } // namespace
 
 void SegmentedFusion::annotateFP16IntermediateTensors() {
   force_fp16_tv_set_ =
-      ForceFP16Annotation::getAnnotatedSet(complete_fusion_.get());
+      ForceHalfAnnotation::getFP16AnnotatedSet(complete_fusion_.get());
+  for (auto out_tv :
+       ir_utils::filterByType<TensorView>(complete_fusion_->outputs())) {
+    if (out_tv) {
+      auto dtype = out_tv->getDataType().value();
+      if (dtype == DataType::Half || dtype == DataType::BFloat16) {
+        force_half_precision_type_ = dtype;
+      }
+    }
+  }
 }
 
-TORCH_CUDA_CU_API std::string toString(
-    const SegmentCandidateFinderOptions& segment_options) {
+std::string toString(const SegmentCandidateFinderOptions& segment_options) {
   std::stringstream ss;
   ss << "segmentation phases {\n";
   if (segment_options.run_combine_reductions) {
