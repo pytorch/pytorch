@@ -29,6 +29,9 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -39,7 +42,8 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -137,8 +141,10 @@ jobs:
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
 
-      - uses: ./.github/actions/chown-workspace
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
         if: always()
 
-      - uses: ./.github/actions/teardown-linux
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
         if: always()

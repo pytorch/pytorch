@@ -110,9 +110,9 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
-              (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
-              "Expected both inputs to be Float or Double tensors but got ",
+  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble || a.scalar_type() == kHalf) &&
+              (b.scalar_type() == kFloat || b.scalar_type() == kDouble || b.scalar_type() == kHalf),
+              "Expected both inputs to be Half, Float or Double tensors but got ",
               a.scalar_type(), " and ", b.scalar_type());
 }
 
