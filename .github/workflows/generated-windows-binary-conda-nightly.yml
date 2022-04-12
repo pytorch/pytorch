@@ -74,6 +74,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -114,7 +118,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_7-cpu
@@ -173,6 +177,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -182,7 +190,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -299,7 +307,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -394,6 +402,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -434,7 +446,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_7-cuda11_3
@@ -494,6 +506,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -503,7 +519,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
@@ -621,7 +637,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
@@ -716,6 +732,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -756,7 +776,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_7-cuda11_5
@@ -816,6 +836,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -825,7 +849,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_5
@@ -943,7 +967,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_5
@@ -1037,6 +1061,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1077,7 +1105,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_8-cpu
@@ -1136,6 +1164,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1145,7 +1177,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -1262,7 +1294,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -1357,6 +1389,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1397,7 +1433,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_8-cuda11_3
@@ -1457,6 +1493,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1466,7 +1506,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
@@ -1584,7 +1624,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
@@ -1679,6 +1719,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1719,7 +1763,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_8-cuda11_5
@@ -1779,6 +1823,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1788,7 +1836,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_5
@@ -1906,7 +1954,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_5
@@ -2000,6 +2048,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2040,7 +2092,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_9-cpu
@@ -2099,6 +2151,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2108,7 +2164,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -2225,7 +2281,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -2320,6 +2376,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2360,7 +2420,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_9-cuda11_3
@@ -2420,6 +2480,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2429,7 +2493,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
@@ -2547,7 +2611,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
@@ -2642,6 +2706,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2682,7 +2750,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_9-cuda11_5
@@ -2742,6 +2810,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2751,7 +2823,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_5
@@ -2869,7 +2941,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_5
@@ -2963,6 +3035,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3003,7 +3079,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_10-cpu
@@ -3062,6 +3138,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3071,7 +3151,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -3188,7 +3268,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -3283,6 +3363,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3323,7 +3407,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_10-cuda11_3
@@ -3383,6 +3467,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3392,7 +3480,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
@@ -3510,7 +3598,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
@@ -3605,6 +3693,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3645,7 +3737,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         if: always()
         with:
           name: conda-py3_10-cuda11_5
@@ -3705,6 +3797,10 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Set-MpPreference -ExclusionPath $(Get-Location).tostring()
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3714,7 +3810,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_5
@@ -3832,7 +3928,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_5

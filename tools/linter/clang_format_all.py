@@ -23,6 +23,7 @@ CLANG_FORMAT_ALLOWLIST = [
     "c10/",
     "ios/",
     "torch/csrc/jit/",
+    "torch/csrc/deploy/",
     "test/cpp/jit/",
     "test/cpp/tensorexpr/"
 ]
