@@ -172,17 +172,13 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 # See [Note: IOptTensorListRef]
 # Materialize the tensor list once before using.
-MATERIALIZE_OPTIONAL_TENSORLIST = CodeTemplate("""\
+MATERIALIZE_OPTIONALTENSORLIST = CodeTemplate("""\
 auto ${tensorlist_name}_materialized = ${tensorlist_name}.materialize();
 """)
 
-# See [Note: IOptTensorListRef]
-# 'cpp_list_type' is needed here for supporting code generation using
-# both 'IOptTensorListRef' and 'List<optional<Tensor>>' types.
-# This should be temporary, until we migrate the unstructured.
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (typename ${cpp_list_type}::value_type tensor : ${tensorlist_name})
+for (const auto& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
 """)
@@ -229,7 +225,7 @@ SAVE_OPTIONALTENSORLIST_IMPL = CodeTemplate("""\
 std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   auto& t = ${tensorlist_name}[i];
-  if (t.has_value()) ${tensorlist_name}_impl_saved[i] = t->getIntrusivePtr();
+  if (t.has_value() && t.defined()) ${tensorlist_name}_impl_saved[i] = t->getIntrusivePtr();
 }
 """)
 
@@ -786,12 +782,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                      ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name)]
             elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))) or noref_cpp_type == BaseCType(iOptTensorListRefT):
                 if noref_cpp_type == BaseCType(iOptTensorListRefT):
-                    stmts_before_call += [MATERIALIZE_OPTIONAL_TENSORLIST.substitute(tensorlist_name=arg)]
+                    stmts_before_call += [MATERIALIZE_OPTIONALTENSORLIST.substitute(tensorlist_name=arg)]
                     tensorlist_name = f"{arg}_materialized"
                 else:
                     tensorlist_name = arg
-                stmts_before_call += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name,
-                                                                                 cpp_list_type=noref_cpp_type),
+                stmts_before_call += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name),
                                       SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name)]
                 stmts_after_call += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name),
                                      ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name)]
