@@ -3,6 +3,7 @@
 <!-- toc -->
 
   - [General Overview](#general-overview)
+  - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
     - [`pytorch/pytorch`](#pytorchpytorch)
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
@@ -30,9 +31,23 @@
 
 Releasing a new version of PyTorch generally entails 3 major steps:
 
+0. Cutting a release branch preparations
 1. Cutting a release branch and making release branch specific changes
 2. Drafting RCs (Release Candidates), and merging cherry picks
-3. Promoting RCs to stable
+3. Promoting RCs to stable and performing release day tasks
+
+## Cutting a release branch preparations
+
+Following Requirements needs to be met prior to final RC Cut:
+
+* Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
+``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
+* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
+* All the nighly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/nightly)
 
 ## Cutting release branches
 
