@@ -1,11 +1,11 @@
 import argparse
 import os
 import requests
+import shutil
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any
-import datetime
 
 import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
@@ -20,8 +20,11 @@ S3_RESOURCE = boto3.resource("s3")
 TEMP_DIR = Path(os.environ["RUNNER_TEMP"]) / "tmp-test-stats"
 
 
-def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
+def parse_xml_report(
+    report: Path, workflow_id: int, workflow_run_attempt: int
+) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
+    # [Job id in artifacts]
     # Retrieve the job id from the report path. In our GHA workflows, we append
     # the job id to the end of the report name, so `report` looks like:
     #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
@@ -29,15 +32,13 @@ def parse_xml_report(report: Path, workflow_id: int) -> List[Dict[str, Any]]:
     job_id = int(report.parts[0].rpartition("_")[2])
 
     print(f"Parsing test report: {report}, job id: {job_id}")
-    root = ET.parse(
-        report,
-        ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)),  # type: ignore[call-arg]
-    )
+    root = ET.parse(report)
 
     test_cases = []
     for test_case in root.findall("testcase"):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
+        case["workflow_run_attempt"] = workflow_run_attempt
         case["job_id"] = job_id
         test_cases.append(case)
 
@@ -57,16 +58,12 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
     # By default, all attributes are strings. Apply a few special conversions
     # here for well-known attributes so that they are the right type in Rockset.
-    if line := ret.get("line"):
+    line = ret.get("line")
+    if line:
         ret["line"] = int(line)
-    if time := ret.get("time"):
+    time = ret.get("time")
+    if time:
         ret["time"] = float(time)
-    if timestamp := ret.get("timestamp"):
-        # Timestamps reported are not valid ISO8601 because they have no timezone. Add one.
-        # This assumes that
-        ret["timestamp"] = (
-            datetime.datetime.fromisoformat(timestamp).astimezone().isoformat()
-        )
 
     # Convert inner and outer text into special dict elements.
     # e.g.
@@ -86,11 +83,7 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     # becomes
     #    {"foo": {"text": "hello"}}
     for child in element:
-        # Special handling for comments.
-        if child.tag is ET.Comment:  # type: ignore[comparison-overlap]
-            ret["comment"] = child.text
-        else:
-            ret[child.tag] = process_xml_element(child)
+        ret[child.tag] = process_xml_element(child)
     return ret
 
 
@@ -125,18 +118,37 @@ def unzip(p: Path) -> None:
         zip.extractall(unzipped_dir)
 
 
-def download_and_extract_artifact(artifact_name: Path, artifact_url: str) -> None:
-    response = requests.get(artifact_url, headers=REQUEST_HEADERS)
+def download_and_extract_artifact(
+    artifact_name: Path, artifact_url: str, workflow_run_attempt: int
+) -> None:
+    # [Artifact run attempt]
+    # All artifacts on a workflow share a single namespace. However, we can
+    # re-run a workflow and produce a new set of artifacts. To avoid name
+    # collisions, we add `-runattempt1<run #>-` somewhere in the artifact name.
+    #
+    # This code parses out the run attempt number from the artifact name. If it
+    # doesn't match the one specified on the command line, skip it.
+    atoms = str(artifact_name).split("-")
+    for atom in atoms:
+        if atom.startswith("runattempt"):
+            found_run_attempt = int(atom[len("runattempt") :])
+            if workflow_run_attempt != found_run_attempt:
+                print(f"Skipping {artifact_name} as it is an invalid run attempt.")
+
     print(f"Downloading and extracting {artifact_name}")
+
+    response = requests.get(artifact_url, headers=REQUEST_HEADERS)
     with open(artifact_name, "wb") as f:
         f.write(response.content)
     unzip(artifact_name)
 
 
-def download_and_extract_s3_reports(workflow_run_id: int) -> None:
+def download_and_extract_s3_reports(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> None:
     bucket = S3_RESOURCE.Bucket("gha-artifacts")
     objs = bucket.objects.filter(
-        Prefix=f"pytorch/pytorch/{workflow_run_id}/artifact/test-reports"
+        Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/test-reports"
     )
 
     for obj in objs:
@@ -154,7 +166,16 @@ if __name__ == "__main__":
         required=True,
         help="id of the workflow to get artifacts from",
     )
+    parser.add_argument(
+        "--workflow-run-attempt",
+        required=True,
+        help="which retry of the workflow this is",
+    )
     args = parser.parse_args()
+
+    if TEMP_DIR.exists():
+        print("rm: ", TEMP_DIR)
+        shutil.rmtree(TEMP_DIR)
 
     print("mkdir: ", TEMP_DIR)
     TEMP_DIR.mkdir()
@@ -162,15 +183,19 @@ if __name__ == "__main__":
     os.chdir(TEMP_DIR)
 
     # Download and extract all the reports (both GHA and S3)
-    download_and_extract_s3_reports(args.workflow_run_id)
+    download_and_extract_s3_reports(args.workflow_run_id, args.workflow_run_attempt)
     artifact_urls = get_artifact_urls(args.workflow_run_id)
     for name, url in artifact_urls.items():
-        download_and_extract_artifact(Path(name), url)
+        download_and_extract_artifact(Path(name), url, args.workflow_run_attempt)
 
     # Parse the reports and transform them to JSON
     test_cases = []
     for xml_report in Path(".").glob("**/*.xml"):
-        test_cases.extend(parse_xml_report(xml_report, int(args.workflow_run_id)))
+        test_cases.extend(
+            parse_xml_report(
+                xml_report, int(args.workflow_run_id), int(args.workflow_run_attempt)
+            )
+        )
 
     # Write the JSON to rockset
     print(f"Writing {len(test_cases)} test cases to Rockset")
