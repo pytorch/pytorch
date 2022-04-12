@@ -60,8 +60,6 @@ class BazelJob:
 
 
 WORKFLOW_DATA = [
-    BazelJob("build", {"resource_class": "large"}),
-    BazelJob("test"),
 ]
 
 

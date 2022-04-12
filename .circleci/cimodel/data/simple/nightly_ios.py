@@ -59,9 +59,7 @@ BUILD_CONFIGS = [
 ]
 
 
-WORKFLOW_DATA = BUILD_CONFIGS + [
-    IOSNightlyJob("binary", is_upload=True),
-]
+WORKFLOW_DATA = []
 
 
 def get_workflow_jobs():

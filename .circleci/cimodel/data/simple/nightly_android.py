@@ -54,22 +54,6 @@ class AndroidNightlyJob:
 BASE_REQUIRES = [DOCKER_REQUIREMENT_NDK]
 
 WORKFLOW_DATA = [
-    AndroidNightlyJob(["x86_32"], "pytorch_linux_build", requires=BASE_REQUIRES),
-    AndroidNightlyJob(["x86_64"], "pytorch_linux_build", requires=BASE_REQUIRES),
-    AndroidNightlyJob(["arm", "v7a"], "pytorch_linux_build", requires=BASE_REQUIRES),
-    AndroidNightlyJob(["arm", "v8a"], "pytorch_linux_build", requires=BASE_REQUIRES),
-    AndroidNightlyJob(["android_gradle"], "pytorch_android_gradle_build",
-                      with_docker=False,
-                      requires=[
-                          "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build",
-                          "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build",
-                          "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build",
-                          "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build"]),
-    AndroidNightlyJob(["x86_32_android_publish_snapshot"], "pytorch_android_publish_snapshot",
-                      extra_props={"context": "org-member"},
-                      with_docker=False,
-                      requires=["nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build"],
-                      no_build_suffix=True),
 ]
 
 

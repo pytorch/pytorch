@@ -60,7 +60,6 @@ class IOSJob:
 
 
 WORKFLOW_DATA = [
-    IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
 ]
 
 
