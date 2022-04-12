@@ -191,10 +191,10 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
 
 Tensor norm_backward(
     Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  // NB: Note that we mask fill the NaNs in the output to be zero. We are still doing division
-  //     by zero however, which ASAN complains about. One way to appease ASAN is to fill the problematic
-  //     values with something arbitrary before the division as well, but we decide not to due to
-  //     the perf hit. Instead we just silence ASAN where necessasry.
+  // NB: We mask fill the NaNs in the output to be zero but still do float division
+  //     by zero, which ASAN complains about. One way to appease ASAN is to fill the problematic
+  //     values with something arbitrary before the division, but we decide not to due to
+  //     the perf hit. Instead we just silence ASAN where necessary
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
