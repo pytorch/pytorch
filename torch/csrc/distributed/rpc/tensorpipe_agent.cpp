@@ -1231,11 +1231,18 @@ void TensorPipeAgent::updateGroupMembership(
         std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
 
-    // TODO: update only addition of new worker
-    reverseDeviceMaps_ = reverseDeviceMaps;
+    for (const auto it : reverseDeviceMaps) {
+      if (reverseDeviceMaps_.find(it.first) == reverseDeviceMaps_.end()) {
+        reverseDeviceMaps_[it.first] = it.second;
+      }
+    }
     // TODO: clean up mutex for devices_ usage
-    devices_ = devices;
-
+    // Add devices that have not been added yet
+    for (const auto it : devices) {
+      if (std::find(devices_.begin(), devices_.end(), it) == devices_.end()) {
+        devices_.push_back(it);
+      }
+    }
   }
   // TODO: Rank with workerInfo is leaving, update internal mappings
   else {
