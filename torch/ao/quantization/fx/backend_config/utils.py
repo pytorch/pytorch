@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Callable, Union
+from typing import Dict, Any, List, Callable, Union, Tuple
 
 import torch
 from torch.ao.quantization.utils import get_combined_dict
@@ -38,13 +38,33 @@ def get_pattern_to_quantize_handlers(
     return pattern_to_quantize_handlers
 
 def get_pattern_to_dtype_configs(
-        backend_config_dict: Dict[str, Any]) -> Dict[Pattern, List[Dict[str, torch.dtype]]]:
+        backend_config_dict: Dict[str, Any]) -> Dict[Pattern, List[Dict[str, Any]]]:
     pattern_to_dtype_configs: Dict[Pattern, List[Dict[str, torch.dtype]]] = dict()
     for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
         dtype_configs = config["dtype_configs"]
         pattern_to_dtype_configs[pattern] = dtype_configs
     return pattern_to_dtype_configs
+
+def get_qat_module_classes(
+        backend_config_dict: Dict[str, Any]) -> Tuple[type, ...]:
+    qat_module_classes = []
+    for config in backend_config_dict.get("configs", []):
+        pattern = config["pattern"]
+        qat_module = config.get("qat_module", None)
+        if qat_module is not None:
+            qat_module_classes.append(qat_module)
+    return tuple(set(qat_module_classes))
+
+def get_fused_module_classes(
+        backend_config_dict: Dict[str, Any]) -> Tuple[type, ...]:
+    fused_module_classes = []
+    for config in backend_config_dict.get("configs", []):
+        pattern = config["pattern"]
+        fused_module = config.get("fused_module", None)
+        if fused_module is not None:
+            fused_module_classes.append(fused_module)
+    return tuple(set(fused_module_classes))
 
 def get_pattern_to_input_type_to_index(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, Dict[str, int]]:
@@ -55,7 +75,7 @@ def get_pattern_to_input_type_to_index(
         pattern_to_input_type_to_index[pattern] = input_type_to_index
     return pattern_to_input_type_to_index
 
-def get_quantized_reference_module_mapping(
+def get_root_module_to_quantized_reference_module(
         backend_config_dict: Dict[str, Any]) -> Dict[Callable, Callable]:
     mapping: Dict[Callable, Callable] = dict()
     for config in backend_config_dict.get("configs", []):
@@ -140,6 +160,7 @@ def get_fusion_pattern_to_extra_inputs_getter(
 
     return extra_inputs_getter_mapping
 
+# TODO: remove when all uses are changed to backend_config_dict
 def get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, QuantizerCls] = None) -> Dict[Pattern, QuantizerCls]:
     """
     Return a map from pattern to quantize handlers based on the default patterns and the native backend_config_dict.
