@@ -775,7 +775,7 @@ WelfordResult TensorView::rFactor(
   return WelfordResult(producer_avg, producer_var, producer_n);
 }
 
-TensorView* TensorView::cache_before() {
+TensorView* TensorView::cacheBefore() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -783,17 +783,17 @@ TensorView* TensorView::cache_before() {
 
   TORCH_CHECK(
       definition() != nullptr && !isFusionInput(),
-      "Error adding cache_before ",
+      "Error adding cacheBefore ",
       this,
-      " its definition is a nullptr and we restrict using cache_before on an input.");
+      " its definition is a nullptr and we restrict using cacheBefore on an input.");
 
   TORCH_CHECK(
       isFusionOutput() ||
           definition()->getExprType() != ExprType::ReductionOp ||
           definition()->getExprType() != ExprType::WelfordOp,
-      "Error adding cache_before ",
+      "Error adding cacheBefore ",
       this,
-      " its definition is a reduction and it is not an output, instead please use cache_after.");
+      " its definition is a reduction and it is not an output, instead please use cacheAfter.");
 
   // Previously, caching computed-at tensors was allowed but was never
   // really robust. Make it an error unless it is really needed.
@@ -864,7 +864,7 @@ TensorView* TensorView::cache_before() {
   return producer;
 }
 
-TensorView* TensorView::cache_fork() {
+TensorView* TensorView::cacheFork() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -876,7 +876,7 @@ TensorView* TensorView::cache_fork() {
 
   TORCH_CHECK(
       this->isFusionOutput() && !this->uses().empty(),
-      "Error adding cache_fork ",
+      "Error adding cacheFork ",
       this,
       " this TensorView must be an output with subsequent uses");
 
@@ -911,7 +911,7 @@ TensorView* TensorView::cache_fork() {
   return new_output;
 }
 
-TensorView* TensorView::cache_after() {
+TensorView* TensorView::cacheAfter() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -920,9 +920,9 @@ TensorView* TensorView::cache_after() {
   // Get all the uses for this Tensorview
   TORCH_CHECK(
       !isFusionOutput(),
-      "Error adding cache_after ",
+      "Error adding cacheAfter ",
       this,
-      " we restrict using cache_after on an output.");
+      " we restrict using cacheAfter on an output.");
 
   // Previously, caching computed-at tensors was allowed but was never
   // really robust. Make it an error unless it is really needed.

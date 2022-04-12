@@ -5825,8 +5825,8 @@ TEST_F(NVFuserTest, FusionAdvancedIndexing10_CUDA) {
   // Register your outputs
   fusion.addOutput(tv3);
 
-  auto tv0_cache = tv0->cache_after();
-  auto tv1_cache = tv1->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
 
   std::vector<TensorView*> tvs = {tv0_cache, tv1_cache, tv2, tv3};
 
@@ -8070,7 +8070,7 @@ TEST_F(NVFuserTest, FusionCacheBefore_CUDA) {
   // Before: TV2 = TV1 * 3
   // After:  TV3 = TV1 * 3;
   //         TV2 = TV3;
-  TensorView* tv3 = tv2->cache_before();
+  TensorView* tv3 = tv2->cacheBefore();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
@@ -8108,7 +8108,7 @@ TEST_F(NVFuserTest, FusionCacheAfter_CUDA) {
   // Before: TV1 = TV0 + 1
   // After:  TV3 = TV0;
   //         TV1 = TV3 + 1
-  TensorView* tv3 = tv0->cache_after();
+  TensorView* tv3 = tv0->cacheAfter();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
@@ -8151,8 +8151,8 @@ TEST_F(NVFuserTest, FusionCacheFork_CUDA) {
   //          TV2 = TV1 * 1
   // Output:  TV3, TV2
 
-  // cache_fork !!does not!! automatically apply ComputeAt to the cache
-  auto tv3 = tv1->cache_fork();
+  // cacheFork !!does not!! automatically apply ComputeAt to the cache
+  auto tv3 = tv1->cacheFork();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
@@ -8200,10 +8200,10 @@ TEST_F(NVFuserTest, FusionCacheIndirect_CUDA) {
   fusion.addOutput(tv6);
   // t6 = ((t1 + (t2 - t3)) - t0)
 
-  tv5->cache_after();
-  tv5->cache_before();
+  tv5->cacheAfter();
+  tv5->cacheBefore();
 
-  // cache_after on inputs placed before schedule
+  // cacheAfter on inputs placed before schedule
   constexpr int BSX = 32;
   tv6->split(-1, BSX);
   tv2->computeAt(tv6, -1);
@@ -8246,16 +8246,16 @@ TEST_F(NVFuserTest, FusionCacheBcast_CUDA) {
   fusion.addOutput(tv4);
 
   // Case 1
-  tv0->cache_after();
+  tv0->cacheAfter();
 
   // Case 2
-  tv1->cache_before();
+  tv1->cacheBefore();
 
   // Case 3
-  tv1->cache_after();
+  tv1->cacheAfter();
 
   // Case 4
-  TensorView* tv8 = tv4->cache_before();
+  TensorView* tv8 = tv4->cacheBefore();
 
   constexpr int BSX = 128;
   tv4->split(0, BSX);
@@ -8304,8 +8304,8 @@ TEST_F(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
   fusion.addOutput(tv2);
   fusion.addOutput(tv4);
 
-  auto tv5 = tv1->cache_before();
-  auto tv6 = tv3->cache_before();
+  auto tv5 = tv1->cacheBefore();
+  auto tv6 = tv3->cacheBefore();
   tv5->setMemoryType(MemoryType::Shared);
   tv6->setMemoryType(MemoryType::Shared);
 
@@ -8313,7 +8313,7 @@ TEST_F(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
   tv3->computeAt(tv4, -1);
 
   // Fails because tensor must be recomputed twice
-  // auto tv7 = tv0->cache_after();
+  // auto tv7 = tv0->cacheAfter();
 
   constexpr int N = 800;
 
@@ -8347,8 +8347,8 @@ TEST_F(NVFuserTest, FusionSmem_CUDA) {
   fusion.addOutput(tv2);
 
   // Schedule
-  TensorView* tv3 = tv0->cache_after();
-  TensorView* tv4 = tv1->cache_after();
+  TensorView* tv3 = tv0->cacheAfter();
+  TensorView* tv4 = tv1->cacheAfter();
   tv3->setMemoryType(MemoryType::Shared);
   tv4->setMemoryType(MemoryType::Shared);
 
@@ -8400,7 +8400,7 @@ TEST_F(NVFuserTest, FusionSmemReduce_CUDA) {
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
-  TensorView* tv2 = tv0->cache_after();
+  TensorView* tv2 = tv0->cacheAfter();
   tv2->setMemoryType(MemoryType::Shared);
 
   // Schedule
@@ -8527,7 +8527,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   // Remove reduction axis from tv5
   // tv6 = (M, R, N)
   // tv5 = (M, N)
-  TensorView* tv6 = tv5->cache_before();
+  TensorView* tv6 = tv5->cacheBefore();
 
   constexpr int BSX = 16;
   tv5->split(1, BSX);
@@ -8618,7 +8618,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
 
   // Read Input into Shared Memory
   // Load Input + Pwise into shared memory
-  auto cache_x = x->cache_after();
+  auto cache_x = x->cacheAfter();
   cache_x->setMemoryType(MemoryType::Shared);
   exp->setMemoryType(MemoryType::Shared);
 
@@ -9352,8 +9352,8 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   fusion.addOutput(sx_softmax);
   fusion.addOutput(dx_softmax);
 
-  auto sx_cache = sx->cache_after();
-  auto dx_cache = dx->cache_after();
+  auto sx_cache = sx->cacheAfter();
+  auto dx_cache = dx->cacheAfter();
   dx_cache->setMemoryType(MemoryType::Shared);
   dx_exp->setMemoryType(MemoryType::Shared);
 
@@ -9511,8 +9511,8 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
 
   // Read Input into Shared Memory
   // Read Input minus Input_Mean into Shared Memory
-  auto sx_cache = sx->cache_after();
-  auto dx_cache = dx->cache_after();
+  auto sx_cache = sx->cacheAfter();
+  auto dx_cache = dx->cacheAfter();
   dx_cache->setMemoryType(MemoryType::Shared);
   dx_mean_sub->setMemoryType(MemoryType::Shared);
 
@@ -9667,7 +9667,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
 
   // Read Input into Shared Memory
   // Read Input minus Input_Mean into Shared Memory
-  auto cache_x = x->cache_after();
+  auto cache_x = x->cacheAfter();
   cache_x->setMemoryType(MemoryType::Shared);
   x_mean_sub->setMemoryType(MemoryType::Shared);
 
@@ -9804,7 +9804,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
   TensorView* tv1 = sum(tv0, {1}); // M, R, N
   fusion.addOutput(tv1);
 
-  TensorView* tv2 = tv0->cache_after();
+  TensorView* tv2 = tv0->cacheAfter();
   tv2->setMemoryType(MemoryType::Shared);
 
   // Schedule
@@ -11780,7 +11780,7 @@ TEST_F(NVFuserTest, FusionCacheBeforeReduction_CUDA) {
 
   tv2->split(0, 4);
 
-  auto tv3 = tv2->cache_before();
+  auto tv3 = tv2->cacheBefore();
 
   tv0->computeAt(tv3, -1);
   tv3->computeAt(tv2, -1);
@@ -11816,7 +11816,7 @@ TEST_F(NVFuserTest, FusionCacheBeforeReduction2_CUDA) {
   fusion.addOutput(tv2);
   fusion.addOutput(tv3);
 
-  auto tv4 = tv2->cache_before();
+  auto tv4 = tv2->cacheBefore();
 
   tv4->computeAt(tv3, 1);
   tv0->computeAt(tv4, -1);
@@ -13733,9 +13733,9 @@ TEST_F(NVFuserTest, FusionVectorizeSimple_CUDA) {
 
   fusion.addOutput(tv1);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
-  auto tv1_cache = tv1->cache_before();
+  auto tv1_cache = tv1->cacheBefore();
 
   tv1->merge(0);
   tv1->merge(0);
@@ -13786,9 +13786,9 @@ TEST_F(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
   // Register your outputs
   fusion.addOutput(tv3);
 
-  auto tv0_cache = tv0->cache_after();
-  auto tv1_cache = tv1->cache_after();
-  auto tv3_cache = tv3->cache_before();
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
+  auto tv3_cache = tv3->cacheBefore();
 
   // Do transformations, remember, transformations are outputs to inputs
   // This doesn't have to be in this order
@@ -13985,7 +13985,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
   // tv1: [I1/BS, I0/BS, BS(I1), BS(I0)]
 
   // Create a smem buffer to cache each tile
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv0_cache->setMemoryType(MemoryType::Shared);
 
   tv0->computeAt(tv1, 2);
@@ -14048,7 +14048,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
   // tv1: [I1/BS, I0/BS, BS(I1), BS(I0)]
 
   // Create a smem buffer to cache each tile
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv0_cache->setMemoryType(MemoryType::Shared);
 
   tv0->computeAt(tv1, 2);
@@ -14328,9 +14328,9 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwise_CUDA) {
 
   tv2->split(1, kNumElems);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   tv2->split(-1, kVecSize);
 
@@ -14382,9 +14382,9 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
 
   tv2->split(-1, kNumElems);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   tv2->split(0, 128);
   tv2->split(-1, kVecSize);
@@ -14437,9 +14437,9 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
   fusion.addOutput(tv2);
 
   // Create caches for vectorization
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   // Merge all dimensions together except inner-most dim
   for (const auto idx : c10::irange(kNumDims - 2)) {
@@ -14499,9 +14499,9 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   fusion.addOutput(tv2);
 
   // Create caches for vectorization
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   // Merge all dimensions together
   // Backward merge order is necessary for vectorize validation
@@ -14556,8 +14556,8 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
 
   fusion.addOutput(tv3);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
 
   tv3->split(-1, 128 * 4);
   tv3->split(-1, 4);
@@ -14617,9 +14617,9 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(2)->parallelize(ParallelType::TIDx);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -14656,8 +14656,8 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStride_CUDA) {
 
   tv2->split(1, kNumElems);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
 
   tv2->split(-1, kVecSize);
 
@@ -14705,9 +14705,9 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
 
   tv2->split(1, kNumElems);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   tv2->split(-1, kVecSize);
 
@@ -14755,9 +14755,9 @@ TEST_F(NVFuserTest, FusionVectorization1_CUDA) {
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(2)->parallelize(ParallelType::TIDx);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -14804,9 +14804,9 @@ TEST_F(NVFuserTest, FusionVectorization2_CUDA) {
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(2)->parallelize(ParallelType::TIDx);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -14843,9 +14843,9 @@ TEST_F(NVFuserTest, FusionVectorization3_CUDA) {
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(2)->parallelize(ParallelType::TIDx);
 
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
-  auto c2 = tv2->cache_before();
+  auto c0 = tv0->cacheAfter();
+  auto c1 = tv1->cacheAfter();
+  auto c2 = tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -14905,8 +14905,8 @@ TEST_F(NVFuserTest, FusionVectorizationRFactor_CUDA) {
   auto tv4 = tv3->rFactor({-3, -1});
   // Tv3 will reduce threads
 
-  auto tv6 = tv0->cache_after();
-  auto tv7 = tv1->cache_after();
+  auto tv6 = tv0->cacheAfter();
+  auto tv7 = tv1->cacheAfter();
 
   tv0->computeAt(tv3, 1);
   tv1->computeAt(tv3, 1);
@@ -15388,7 +15388,7 @@ TEST_F(NVFuserTest, FusionReductionPredicate_CUDA) {
   auto tv1 = sum(tv0, {0});
   fusion.addOutput(tv1);
 
-  auto tv2 = tv0->cache_after();
+  auto tv2 = tv0->cacheAfter();
 
   const int bdimx = 128;
   tv1->split(1, bdimx);
@@ -16587,7 +16587,7 @@ TEST_F(NVFuserTest, FusionSimpleWarpPad_CUDA) {
   fusion->addOutput(tv3);
 
   // Schedule a persistent kernel
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv1->split(1, 8, false);
   auto tv1_rf = tv1->rFactor({1});
   tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
@@ -16634,7 +16634,7 @@ TEST_F(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
   fusion->addOutput(tv3);
 
   // Schedule a persistent kernel
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv1->merge(1);
   tv1->split(1, 8, false);
 
@@ -16678,7 +16678,7 @@ TEST_F(NVFuserTest, FusionSerialWarpReduction_CUDA) {
   fusion->addOutput(tv3);
 
   // Schedule a persistent kernel
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv1->merge(1);
   tv1->split(1, 8, false);
 
@@ -16719,7 +16719,7 @@ TEST_F(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
   fusion->addOutput(tv3);
 
   // Schedule a persistent kernel
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv1->merge(1);
   tv1->split(1, 8, false);
 
@@ -16767,7 +16767,7 @@ TEST_F(NVFuserTest, FusionMultipleDimBinding_CUDA) {
   fusion->addOutput(tv4);
 
   // Schedule a persistent kernel
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv1->split(1, 8, false);
   auto tv1_rf = tv1->rFactor({1});
   tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
@@ -16892,7 +16892,7 @@ TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
   fusion->addOutput(tv3);
 
   // Schedule a persistent kernel
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv1->split(1, 8, false);
   tv1->split(0, 4);
   auto tv1_rf = tv1->rFactor({2});
@@ -17540,7 +17540,7 @@ TEST_F(NVFuserTest, FusionIssue1021_CUDA) {
   auto tv2 = broadcast(tv1, {false, true});
   fusion.addOutput(tv2);
 
-  auto tv3 = tv2->cache_before();
+  auto tv3 = tv2->cacheBefore();
 
   tv2->split(0, 2);
 
@@ -20316,8 +20316,8 @@ TEST_F(NVFuserTest, FusionDoubleBuffering9_CUDA) {
   auto out = tv1;
   fusion.addOutput(out);
 
-  auto tv2 = tv0->cache_after();
-  auto tv3 = tv2->cache_after();
+  auto tv2 = tv0->cacheAfter();
+  auto tv3 = tv2->cacheAfter();
 
   out->split(0, 32);
   out->split(0, 4);
@@ -20363,15 +20363,15 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
   fusion.addInput(tv1);
   fusion.addOutput(tv5);
 
-  TensorView* tv6 = tv5->cache_before();
+  TensorView* tv6 = tv5->cacheBefore();
 
   // For smem double buffering
-  auto tv0_cache_local = tv0->cache_after();
-  auto tv1_cache_local = tv1->cache_after();
+  auto tv0_cache_local = tv0->cacheAfter();
+  auto tv1_cache_local = tv1->cacheAfter();
 
   // For register double buffering
-  auto tv0_cache_smem = tv0->cache_after();
-  auto tv1_cache_smem = tv1->cache_after();
+  auto tv0_cache_smem = tv0->cacheAfter();
+  auto tv1_cache_smem = tv1->cacheAfter();
 
   const int BSX = 32;
   const int TSX = 8;
@@ -21156,12 +21156,12 @@ TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
 
   auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
   auto tv2 = sum(tv1, {0});
-  auto tv2c = tv2->cache_before();
+  auto tv2c = tv2->cacheBefore();
 
   fusion.addOutput(tv2);
 
-  auto tv1cw = tv1->cache_after();
-  auto tv1cr = tv1cw->cache_after();
+  auto tv1cw = tv1->cacheAfter();
+  auto tv1cr = tv1cw->cacheAfter();
 
   tv1cw->split(-1, 32);
   tv1cr->split(-1, 32);
@@ -21278,11 +21278,11 @@ TEST_F(NVFuserTest, FusionSmemAlignment_CUDA) {
   auto tv4 = sum(tv3, {1});
   fusion.addOutput(tv4);
 
-  auto tv0c = tv0->cache_after();
-  auto tv1bc = tv1->cache_before();
-  auto tv2bc = tv2->cache_before();
-  auto tv3bc = tv3->cache_before();
-  auto tv4bc = tv4->cache_before();
+  auto tv0c = tv0->cacheAfter();
+  auto tv1bc = tv1->cacheBefore();
+  auto tv2bc = tv2->cacheBefore();
+  auto tv3bc = tv3->cacheBefore();
+  auto tv4bc = tv4->cacheBefore();
 
   tv0c->setMemoryType(MemoryType::Shared);
   tv1bc->setMemoryType(MemoryType::Shared);

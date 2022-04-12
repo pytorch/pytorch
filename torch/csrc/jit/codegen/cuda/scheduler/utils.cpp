@@ -1009,7 +1009,7 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll) {
     if (tv->uses().empty() || tv->isFusionOutput()) {
       continue;
     }
-    auto cached_tv = tv->cache_after();
+    auto cached_tv = tv->cacheAfter();
     cached_inputs.emplace_back(cached_tv);
   }
   return cached_inputs;
@@ -1021,17 +1021,17 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
     Fusion* fusion,
     bool unroll) {
   std::vector<std::pair<TensorView*, TensorView*>> cached_outputs;
-  // For intermediate outputs, apply cache_fork
+  // For intermediate outputs, apply cacheFork
   for (const auto output :
        ir_utils::filterByType<TensorView>(fusion->outputs())) {
     if (output->definition() == nullptr) {
       continue;
     }
     if (!output->uses().empty()) {
-      auto cached_output = output->cache_fork();
+      auto cached_output = output->cacheFork();
       cached_outputs.emplace_back(std::make_pair(output, cached_output));
     } else if (unroll) {
-      auto cached_output = output->cache_before();
+      auto cached_output = output->cacheBefore();
       cached_outputs.emplace_back(std::make_pair(cached_output, output));
     }
   }

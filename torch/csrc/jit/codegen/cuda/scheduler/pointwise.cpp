@@ -705,12 +705,12 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       ir_utils::getReductionOps(fusion /*, ignore_trivial=true */).empty(),
       "This scheduler only handles pointwise ops.");
 
-  // For intermediate outputs, apply cache_fork
+  // For intermediate outputs, apply cacheFork
   auto outs = fusion->outputs();
   for (const auto output : outs) {
     if (!output->uses().empty() && output->definition() != nullptr) {
       if (output->getValType().value() == ValType::TensorView) {
-        output->as<TensorView>()->cache_fork();
+        output->as<TensorView>()->cacheFork();
       }
     }
   }
@@ -769,7 +769,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // Caches of inputs
   std::vector<TensorView*> cached_inputs;
 
-  // Output, cache_before of output
+  // Output, cacheBefore of output
   std::vector<std::pair<TensorView*, TensorView*>> cached_outputs;
 
   // Track what should be vectorized versus unrolled
@@ -780,7 +780,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     if (inp->uses().empty() || inp->isFusionOutput()) {
       continue;
     }
-    cached_inputs.emplace_back(inp->cache_after());
+    cached_inputs.emplace_back(inp->cacheAfter());
   }
 
   // Figure out which outputs to cache for unrolling or vectorization
@@ -788,7 +788,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     if (out->definition() == nullptr) {
       continue;
     }
-    cached_outputs.emplace_back(std::make_pair(out, out->cache_before()));
+    cached_outputs.emplace_back(std::make_pair(out, out->cacheBefore()));
   }
 
   auto all_tvs = ir_utils::allTvs(fusion);

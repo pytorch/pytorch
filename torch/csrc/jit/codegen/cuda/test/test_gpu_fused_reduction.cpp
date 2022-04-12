@@ -507,15 +507,15 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   fusion.addOutput(tv17);
   fusion.addOutput(tv29);
 
-  auto tv0_cache = tv0->cache_after();
-  auto tv1_cache = tv1->cache_after();
-  auto tv2_cache = tv2->cache_after();
-  auto tv3_cache = tv3->cache_after();
-  auto tv4_cache = tv4->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
+  auto tv2_cache = tv2->cacheAfter();
+  auto tv3_cache = tv3->cacheAfter();
+  auto tv4_cache = tv4->cacheAfter();
 
-  auto tv13_cache = tv13->cache_before();
-  auto tv17_cache = tv17->cache_before();
-  auto tv29_cache = tv29->cache_before();
+  auto tv13_cache = tv13->cacheBefore();
+  auto tv17_cache = tv17->cacheBefore();
+  auto tv29_cache = tv29->cacheBefore();
 
   tv0->split(1, NamedScalar::getParallelDim(ParallelType::BIDx), false);
   tv0->split(0, NamedScalar::getParallelDim(ParallelType::BIDy), false);

@@ -507,7 +507,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         TORCH_INTERNAL_ASSERT(
             uop->getUnaryOpType() == UnaryOpType::Set,
             "Cannot vectorize operations that are not sets. ",
-            "Use cache_before and cache_after to store/load with vectorized reads into buffers.");
+            "Use cacheBefore and cacheAfter to store/load with vectorized reads into buffers.");
         is_vector_op = true;
       }
 
