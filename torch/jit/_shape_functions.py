@@ -912,4 +912,11 @@ add_shape_compute_mapping("aten::quantize_per_tensor(Tensor self, float scale, i
 add_shape_compute_mapping("aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", unary)
 add_shape_compute_mapping("aten::dequantize(Tensor self) -> Tensor", unary)
 add_shape_compute_mapping("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", broadcast)
+
+# TODO: migrate over all of symbolic_shape_registry_util.cpp
+# These are duplicated here so that the functions will be serialiazed
+add_shape_compute_mapping("aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", broadcast_three)
+add_shape_compute_mapping("aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", broadcast_one_three)
+add_shape_compute_mapping("aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", broadcast_inplace)
+
 # quantized_conv_prepack TODO

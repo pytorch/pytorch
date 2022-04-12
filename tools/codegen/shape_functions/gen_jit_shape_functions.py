@@ -81,8 +81,8 @@ def gen_serialized_decompisitions() -> str:
 
     final_output = ""
     for output_str in output_strs:
-        start = 'R"=====("'
-        end = '\n")====="\n'
+        start = 'R"=====('
+        end = '\n)====="\n'
         final_output += start + output_str + end
     final_output += ";"
     return final_output
