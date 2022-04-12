@@ -191,8 +191,10 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
 
 Tensor norm_backward(
     Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  // NB: we could've masked_fill the zero elements with an arbitrary value like 1 to
-  //     appease the ASAN but decided not to because of the perf hit from the masked_fill
+  // NB: Note that we mask fill the NaNs in the output to be zero. We are still doing division
+  //     by zero however, which ASAN complains about. One way to appease ASAN is to fill the problematic
+  //     values with something arbitrary before the division as well, but we decide not to due to
+  //     the perf hit. Instead we just silence ASAN where necessasry.
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -224,15 +226,15 @@ Tensor norm_backward(
     scale_v = grad / nb_max;
     return self_scaled * scale_v;
   } else if (p < 1.0) {
-    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
+    self_scaled = self.abs().pow_(p - 1).masked_fill_(self == 0, 0).mul_(self.sgn());
     return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow_(p - 1);
+    self_scaled = self.abs().pow_(p - 1).mul_(self.sgn());
     scale_v = grad / norm.pow(p - 1);
     scale_v.masked_fill_(norm == 0, 0);
     return self_scaled * scale_v;
   } else {
-    self_scaled = self * self.abs().pow_(p - 2);
+    self_scaled = self.abs().pow_(p - 2).mul_(self);
     scale_v = grad / norm.pow(p - 1);
     scale_v.masked_fill_(norm == 0, 0);
     return self_scaled * scale_v;
