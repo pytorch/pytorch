@@ -279,7 +279,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
@@ -748,7 +748,7 @@ std::string generate_code(
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
   }
-  if (f_inputs_type == "std::complex<Half>" || result_type == "std::complex<Half>" || dynamic_casting) {
+  if (f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>" || dynamic_casting) {
     env.s("traits_string", get_traits_string());
     env.s("half_string", jiterator_half_support_literal);
     env.s("complex_body_string", get_complex_body_string()+get_complex_half_body_string());

@@ -602,6 +602,9 @@ struct alignas(2) complex<at::Half> {
     return {real_, imag_};
   }
 
+  at::Half real() const {return real_;}
+  at::Half imag() const {return imag_;}
+
 };
 }
 )ESCAPE";
