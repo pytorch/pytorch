@@ -983,15 +983,21 @@ void add_out_sparse_csr(
   auto C_col_indices_ptr = C_col_indices.data_ptr<int>();
 
   // Windows compilers don't support nested macros
-  // so we need this lambda outside of the AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES
-  auto fix_nnz = [&C_crow_indices, &m](int nnz) -> int {
-    // For some reason POINTER_MODE_HOST is not working here
-    // Let's extract manually the nnz from the C_crow_indices
-    #if AT_ROCM_ENABLED()
+  // so we need this lambda outside of the
+  // AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES
+  auto fix_nnz = [
+#if AT_ROCM_ENABLED()
+                     &C_crow_indices,
+                     &m
+#endif
+  ](int nnz) -> int {
+// For some reason POINTER_MODE_HOST is not working here
+// Let's extract manually the nnz from the C_crow_indices
+#if AT_ROCM_ENABLED()
     return std::max({nnz, C_crow_indices.narrow(-1, m, 1).item<int>()});
-    #else
+#else
     return nnz;
-    #endif
+#endif
   };
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
