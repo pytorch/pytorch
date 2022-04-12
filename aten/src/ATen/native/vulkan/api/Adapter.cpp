@@ -100,11 +100,12 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
     properties_{},
     memory_properties_{},
     queue_families_{},
-    num_compute_queues_{},
     num_requested_queues_{num_queues},
     queue_usage_{},
     handle_(VK_NULL_HANDLE),
-    queues_{} {
+    queues_{},
+    num_compute_queues_{},
+    has_unified_memory_{false} {
   // This should never happen, but double check to be safe
   TORCH_CHECK(
       VK_NULL_HANDLE != physical_handle_,
@@ -112,6 +113,17 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
 
   vkGetPhysicalDeviceProperties(physical_handle_, &properties_);
   vkGetPhysicalDeviceMemoryProperties(physical_handle_, &memory_properties_);
+
+  // Check if there are any memory types have both the HOST_VISIBLE and the
+  // DEVICE_LOCAL property flags
+  const VkMemoryPropertyFlags unified_memory_flags =
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+  for (const uint32_t i : c10::irange(memory_properties_.memoryTypeCount)) {
+    if (memory_properties_.memoryTypes[i].propertyFlags | unified_memory_flags) {
+      has_unified_memory_ = true;
+      break;
+    }
+  }
 
   uint32_t queue_family_count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(
@@ -139,11 +151,12 @@ Adapter::Adapter(Adapter&& other) noexcept
     properties_(other.properties_),
     memory_properties_(other.memory_properties_),
     queue_families_(std::move(other.queue_families_)),
-    num_compute_queues_(other.num_compute_queues_),
     num_requested_queues_(other.num_requested_queues_),
     queue_usage_(std::move(other.queue_usage_)),
     handle_(other.handle_),
-    queues_(std::move(other.queues_)) {
+    queues_(std::move(other.queues_)),
+    num_compute_queues_(other.num_compute_queues_),
+    has_unified_memory_(other.has_unified_memory_) {
   other.physical_handle_ = VK_NULL_HANDLE;
   other.handle_ = VK_NULL_HANDLE;
 }
@@ -269,7 +282,7 @@ Adapter::Queue Adapter::request_queue() {
   // Lock the mutex as multiple threads can request a queue at the same time
   std::lock_guard<std::mutex> lock(mutex_);
 
-  Adapter::UsageHeuristic min_usage = UINT32_MAX;
+  uint32_t min_usage = UINT32_MAX;
   uint32_t min_used_i = 0;
   for (const uint32_t i : c10::irange(queues_.size())) {
     if (queue_usage_[i] < min_usage) {

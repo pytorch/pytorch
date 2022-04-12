@@ -6,6 +6,7 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <ostream>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -64,30 +65,35 @@ class Adapter final {
   VkPhysicalDeviceMemoryProperties memory_properties_;
   std::vector<VkQueueFamilyProperties> queue_families_;
   // Queue Management
-  uint32_t num_compute_queues_;
   uint32_t num_requested_queues_;
-  using UsageHeuristic = uint32_t; // In case the UsageHeuristic type needs to be changed later
-  std::vector<UsageHeuristic> queue_usage_;
+  std::vector<uint32_t> queue_usage_;
   // Handles
   VkDevice handle_;
   std::vector<Queue> queues_;
+  // Metadata
+  uint32_t num_compute_queues_;
+  bool has_unified_memory_;
 
  public:
-  VkPhysicalDevice physical_handle() const;
-  VkDevice device_handle() const;
+  inline VkPhysicalDevice physical_handle() const {
+    return physical_handle_;
+  }
 
-  uint32_t num_compute_queues() const;
+  inline VkDevice device_handle() const {
+    return handle_;
+  }
+
+  inline bool has_unified_memory() const {
+    return has_unified_memory_;
+  }
+
+  inline uint32_t num_compute_queues() const {
+    return num_compute_queues_;
+  }
 
   void init_device();
   Queue request_queue();
   void return_queue(Queue& compute_queue);
-
-  inline bool has_unified_memory() const {
-    // Ideally iterate over all memory types to see if there is a pool that
-    // is both host-visible, and device-local.  This should be a good proxy
-    // for now.
-    return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU == properties_.deviceType;
-  }
 
   inline Shader::WorkGroup local_work_group_size() const {
     return { 4u, 4u, 4u, };
@@ -96,22 +102,6 @@ class Adapter final {
   std::string stringize() const;
   friend std::ostream& operator<<(std::ostream& os, const Adapter& adapter);
 };
-
-//
-// Impl
-//
-
-inline VkPhysicalDevice Adapter::physical_handle() const {
-  return physical_handle_;
-}
-
-inline VkDevice Adapter::device_handle() const {
-  return handle_;
-}
-
-inline uint32_t Adapter::num_compute_queues() const {
-  return num_compute_queues_;
-}
 
 } // namespace api
 } // namespace vulkan

@@ -43,64 +43,51 @@ class Runtime final {
 
   ~Runtime();
 
-  VkInstance instance() const;
-
-  using Selector = std::function<uint32_t (const std::vector<Adapter>&)>;
-  uint32_t init_adapter(const Selector& selector);
-
-  Adapter* get_adapter_p();
-  Adapter& get_adapter();
-
-  Adapter* get_adapter_p(uint32_t i);
-  Adapter& get_adapter(uint32_t i);
-
-  uint32_t default_adapter_i() const;
-
  private:
   VkInstance instance_;
   std::vector<Adapter> adapters_;
   uint32_t default_adapter_i_;
 
   VkDebugReportCallbackEXT debug_report_callback_;
+
+ public:
+  inline VkInstance instance() const {
+    return instance_;
+  }
+
+  inline Adapter* get_adapter_p() {
+    TORCH_CHECK(
+        default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
+        "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
+    return &adapters_[default_adapter_i_];
+  }
+
+  inline Adapter& get_adapter() {
+    TORCH_CHECK(
+        default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
+        "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
+    return adapters_[default_adapter_i_];
+  }
+
+  inline Adapter* get_adapter_p(uint32_t i) {
+    return &adapters_[i];
+  }
+
+  inline Adapter& get_adapter(uint32_t i) {
+    return adapters_[i];
+  }
+
+  inline uint32_t default_adapter_i() const {
+    return default_adapter_i_;
+  }
+
+  using Selector = std::function<uint32_t (const std::vector<Adapter>&)>;
+  uint32_t init_adapter(const Selector& selector);
 };
 
 // The global runtime is retrieved using this function, where it is declared as
 // a static local variable.
 Runtime* runtime();
-
-//
-// Impl
-//
-
-inline VkInstance Runtime::instance() const {
-  return instance_;
-}
-
-inline Adapter* Runtime::get_adapter_p() {
-  TORCH_CHECK(
-      default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
-      "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
-  return &adapters_[default_adapter_i_];
-}
-
-inline Adapter& Runtime::get_adapter() {
-  TORCH_CHECK(
-      default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
-      "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
-  return adapters_[default_adapter_i_];
-}
-
-inline Adapter* Runtime::get_adapter_p(uint32_t i) {
-  return &adapters_[i];
-}
-
-inline Adapter& Runtime::get_adapter(uint32_t i) {
-  return adapters_[i];
-}
-
-inline uint32_t Runtime::default_adapter_i() const {
-  return default_adapter_i_;
-}
 
 } // namespace api
 } // namespace vulkan

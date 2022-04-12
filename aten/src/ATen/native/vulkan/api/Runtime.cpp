@@ -107,7 +107,7 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
   return instance;
 }
 
-std::vector<Adapter> enumerate_adapters(const VkInstance instance,
+std::vector<Adapter> create_adapters(const VkInstance instance,
                                         const uint32_t num_queues) {
   if (VK_NULL_HANDLE == instance) {
     return std::vector<Adapter>();
@@ -278,7 +278,7 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
 Runtime::Runtime(const RuntimeConfiguration config)
   : instance_(create_instance(config)),
-    adapters_(enumerate_adapters(instance_, config.numRequestedQueues)),
+    adapters_(create_adapters(instance_, config.numRequestedQueues)),
     default_adapter_i_{},
     debug_report_callback_(create_debug_report_callback(instance_, config)) {
   if (config.initDefaultDevice) {
