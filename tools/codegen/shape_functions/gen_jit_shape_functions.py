@@ -23,7 +23,7 @@ namespace torch {
 namespace jit {
 
 
-const std::string shape_funcs =
+std::string shape_funcs = ""
 """
 
 
@@ -80,9 +80,11 @@ def gen_serialized_decompisitions() -> str:
     output_strs.append(curr_str)
 
     final_output = ""
+    # Windows compiler doesnt correctly handle adjacent
+    # string literals
     for output_str in output_strs:
-        start = 'R"=====('
-        end = '\n)====="\n'
+        start = '+ std::string(R"=====('
+        end = '\n)=====")\n'
         final_output += start + output_str + end
     final_output += ";"
     return final_output

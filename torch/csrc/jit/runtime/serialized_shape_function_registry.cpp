@@ -17,8 +17,8 @@ namespace torch {
 namespace jit {
 
 
-const std::string shape_funcs =
-R"=====(
+std::string shape_funcs = ""
++ std::string(R"=====(
 def unary(self: List[int]) -> List[int]:
   out = annotate(List[int], [])
   for _0 in range(torch.len(self)):
@@ -88,8 +88,8 @@ def arange_start(start: Union[float, int],
   _0 = int(torch.ceil(torch.sub(end, start)))
   return [_0]
 
-)====="
-R"=====(def arange_start_step(start: Union[float, int],
+)=====")
++ std::string(R"=====(def arange_start_step(start: Union[float, int],
     end: Union[float, int],
     step: Union[float, int],
     inp0: Any,
@@ -154,8 +154,8 @@ def squeeze(li: List[int],
       _3 = torch.append(out, li[i])
   return out
 
-)====="
-R"=====(def unsqueeze(li: List[int],
+)=====")
++ std::string(R"=====(def unsqueeze(li: List[int],
     dim: int) -> List[int]:
   _0 = torch.add(torch.len(li), 1)
   if torch.le(_0, 0):
@@ -183,8 +183,8 @@ R"=====(def unsqueeze(li: List[int],
   torch.insert(out, dim0, 1)
   return out
 
-)====="
-R"=====(def slice(self: List[int],
+)=====")
++ std::string(R"=====(def slice(self: List[int],
     dim: int,
     start: Optional[int],
     end: Optional[int],
@@ -262,8 +262,8 @@ R"=====(def slice(self: List[int],
   _5 = torch._set_item(out, dim0, torch.floordiv(_4, step))
   return out
 
-)====="
-R"=====(def select(self: List[int],
+)=====")
++ std::string(R"=====(def select(self: List[int],
     dim: int,
     index: int) -> List[int]:
   ndim = torch.len(self)
@@ -306,8 +306,8 @@ R"=====(def select(self: List[int],
       pass
   return out
 
-)====="
-R"=====(def index_select(self: List[int],
+)=====")
++ std::string(R"=====(def index_select(self: List[int],
     dim: int,
     index: List[int]) -> List[int]:
   _0 = torch.len(self)
@@ -353,8 +353,8 @@ R"=====(def index_select(self: List[int],
       _5 = torch.append(result_size, self[i])
   return result_size
 
-)====="
-R"=====(def embedding(weight: List[int],
+)=====")
++ std::string(R"=====(def embedding(weight: List[int],
     indices: List[int],
     padding_idx: int=-1,
     scale_grad_by_freq: bool=False,
@@ -421,8 +421,8 @@ def mm(self: List[int],
     ops.prim.RaiseException("AssertionError: ")
   return [self[0], mat2[1]]
 
-)====="
-R"=====(def dot(self: List[int],
+)=====")
++ std::string(R"=====(def dot(self: List[int],
     tensor: List[int]) -> List[int]:
   if torch.eq(torch.len(self), 1):
     _0 = torch.eq(torch.len(tensor), 1)
@@ -454,8 +454,8 @@ def mv(self: List[int],
     ops.prim.RaiseException("AssertionError: ")
   return [self[0]]
 
-)====="
-R"=====(def matmul(tensor1: List[int],
+)=====")
++ std::string(R"=====(def matmul(tensor1: List[int],
     tensor2: List[int]) -> List[int]:
   _0 = "AssertionError: self must be a matrix"
   _1 = "AssertionError: mat2 must be a matrix"
@@ -644,8 +644,8 @@ R"=====(def matmul(tensor1: List[int],
     _8 = _11
   return _8
 
-)====="
-R"=====(def linear(input: List[int],
+)=====")
++ std::string(R"=====(def linear(input: List[int],
     weight: List[int],
     bias: Optional[List[int]]) -> List[int]:
   _0 = "AssertionError: self must be a matrix"
@@ -887,8 +887,8 @@ R"=====(def linear(input: List[int],
     pass
   return out
 
-)====="
-R"=====(def max_pool2d(input: List[int],
+)=====")
++ std::string(R"=====(def max_pool2d(input: List[int],
     kernel_size: List[int],
     stride: List[int],
     padding: List[int],
@@ -1100,8 +1100,8 @@ R"=====(def max_pool2d(input: List[int],
     _35 = _37
   return _35
 
-)====="
-R"=====(def max_pool2d_with_indices(input: List[int],
+)=====")
++ std::string(R"=====(def max_pool2d_with_indices(input: List[int],
     kernel_size: List[int],
     stride: List[int],
     padding: List[int],
@@ -1312,8 +1312,8 @@ R"=====(def max_pool2d_with_indices(input: List[int],
     out = _35
   return (out, out)
 
-)====="
-R"=====(def t(self: List[int]) -> List[int]:
+)=====")
++ std::string(R"=====(def t(self: List[int]) -> List[int]:
   if torch.le(torch.len(self), 2):
     pass
   else:
@@ -1388,8 +1388,8 @@ def transpose(self: List[int],
     _2 = out0
   return _2
 
-)====="
-R"=====(def conv1d(input: List[int],
+)=====")
++ std::string(R"=====(def conv1d(input: List[int],
     weight: List[int],
     bias: Optional[List[int]],
     stride: List[int],
@@ -1491,8 +1491,8 @@ R"=====(def conv1d(input: List[int],
     _19 = torch.append(output_size, torch.add(_18, 1))
   return output_size
 
-)====="
-R"=====(def conv2d(input: List[int],
+)=====")
++ std::string(R"=====(def conv2d(input: List[int],
     weight: List[int],
     bias: Optional[List[int]],
     stride: List[int],
@@ -1594,8 +1594,8 @@ R"=====(def conv2d(input: List[int],
     _19 = torch.append(output_size, torch.add(_18, 1))
   return output_size
 
-)====="
-R"=====(def batch_norm(input: List[int],
+)=====")
++ std::string(R"=====(def batch_norm(input: List[int],
     weight: Optional[List[int]],
     bias: Optional[List[int]],
     running_mean: Optional[List[int]],
@@ -1610,8 +1610,8 @@ R"=====(def batch_norm(input: List[int],
     _1 = torch.append(out, elem)
   return out
 
-)====="
-R"=====(def conv3d(input: List[int],
+)=====")
++ std::string(R"=====(def conv3d(input: List[int],
     weight: List[int],
     bias: Optional[List[int]],
     stride: List[int],
@@ -1713,8 +1713,8 @@ R"=====(def conv3d(input: List[int],
     _19 = torch.append(output_size, torch.add(_18, 1))
   return output_size
 
-)====="
-R"=====(def flatten(input: List[int],
+)=====")
++ std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
     end_dim: int) -> List[int]:
   _0 = torch.len(input)
@@ -1788,8 +1788,8 @@ R"=====(def flatten(input: List[int],
     _4 = _5
   return _4
 
-)====="
-R"=====(def cat(tensors: List[List[int]],
+)=====")
++ std::string(R"=====(def cat(tensors: List[List[int]],
     dim: int) -> List[int]:
   _0 = "AssertionError: Tensors must have same number of dimensions"
   _1 = "AssertionError: Sizes of tensors must match except in dimension"
@@ -1906,8 +1906,8 @@ R"=====(def cat(tensors: List[List[int]],
     _11 = result_size
   return _11
 
-)====="
-R"=====(def permute(input: List[int],
+)=====")
++ std::string(R"=====(def permute(input: List[int],
     dims: List[int]) -> List[int]:
   _0 = torch.eq(torch.len(input), torch.len(dims))
   if _0:
@@ -1949,8 +1949,8 @@ R"=====(def permute(input: List[int],
         ops.prim.RaiseException("AssertionError: ")
   return newSizes
 
-)====="
-R"=====(def view(self: List[int],
+)=====")
++ std::string(R"=====(def view(self: List[int],
     sizes: List[int]) -> List[int]:
   _0 = "AssertionError: only one dimension can be inferred"
   _1 = "AssertionError: invalid shape dimensions"
@@ -2006,8 +2006,8 @@ R"=====(def view(self: List[int],
     pass
   return out
 
-)====="
-R"=====(def expand(self: List[int],
+)=====")
++ std::string(R"=====(def expand(self: List[int],
     sizes: List[int]) -> List[int]:
   _0 = torch.ge(torch.len(sizes), torch.len(self))
   if _0:
@@ -2052,8 +2052,8 @@ R"=====(def expand(self: List[int],
     _1 = out0
   return _1
 
-)====="
-R"=====(def expand_one_unused(self: List[int],
+)=====")
++ std::string(R"=====(def expand_one_unused(self: List[int],
     sizes: List[int],
     inp0: Any) -> List[int]:
   _0 = torch.ge(torch.len(sizes), torch.len(self))
@@ -2099,8 +2099,8 @@ R"=====(def expand_one_unused(self: List[int],
     _1 = out0
   return _1
 
-)====="
-R"=====(def mean_dim(self: List[int],
+)=====")
++ std::string(R"=====(def mean_dim(self: List[int],
     dims: List[int],
     keep_dim: bool,
     dt: Any) -> List[int]:
@@ -2143,8 +2143,8 @@ R"=====(def mean_dim(self: List[int],
       _4 = torch.append(out, self[idx])
   return out
 
-)====="
-R"=====(def max_dim(self: List[int],
+)=====")
++ std::string(R"=====(def max_dim(self: List[int],
     dim: int,
     keep_dim: bool) -> Tuple[List[int], List[int]]:
   _0 = [dim]
@@ -2187,8 +2187,8 @@ R"=====(def max_dim(self: List[int],
       _5 = torch.append(out, self[idx])
   return (out, out)
 
-)====="
-R"=====(def addmm(self: List[int],
+)=====")
++ std::string(R"=====(def addmm(self: List[int],
     mat1: List[int],
     mat2: List[int],
     beta: Any,
@@ -2244,8 +2244,8 @@ R"=====(def addmm(self: List[int],
     _8 = torch.append(expandedSizes, _7)
   return expandedSizes
 
-)====="
-R"=====(def upsample_nearest2d(input: List[int],
+)=====")
++ std::string(R"=====(def upsample_nearest2d(input: List[int],
     output_size: Optional[List[int]],
     scale_factors: Optional[List[float]]) -> Optional[List[int]]:
   _0 = "AssertionError: Must specify exactly one of output_size and scale_factors"
@@ -2291,8 +2291,8 @@ R"=====(def upsample_nearest2d(input: List[int],
     _4 = _9
   return _4
 
-)====="
-R"=====(def broadcast(a: List[int],
+)=====")
++ std::string(R"=====(def broadcast(a: List[int],
     b: List[int]) -> List[int]:
   _0 = "The size of tensor a {} must match the size of tensor b ({}) at non-singleton dimension {}"
   dimsA = torch.len(a)
@@ -2331,8 +2331,8 @@ R"=====(def broadcast(a: List[int],
     _5 = torch.append(expandedSizes, _4)
   return expandedSizes
 
-)====="
-R"=====(def broadcast_three(a: List[int],
+)=====")
++ std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
   _0 = "The size of tensor a {} must match the size of tensor b ({}) at non-singleton dimension {}"
@@ -2407,8 +2407,8 @@ R"=====(def broadcast_three(a: List[int],
     _11 = torch.append(expandedSizes0, _10)
   return expandedSizes0
 
-)====="
-R"=====(def broadcast_one_three(a: List[int],
+)=====")
++ std::string(R"=====(def broadcast_one_three(a: List[int],
     b: Any,
     c: List[int]) -> List[int]:
   _0 = "The size of tensor a {} must match the size of tensor b ({}) at non-singleton dimension {}"
@@ -2448,8 +2448,8 @@ R"=====(def broadcast_one_three(a: List[int],
     _5 = torch.append(expandedSizes, _4)
   return expandedSizes
 
-)====="
-R"=====(def broadcast_inplace(a: List[int],
+)=====")
++ std::string(R"=====(def broadcast_inplace(a: List[int],
     b: List[int]) -> List[int]:
   _0 = "The dims of tensor b ({}) must be less than or equal tothe dims of tensor a ({}) "
   _1 = "The size of tensor a {} must match the size of tensor b ({}) at non-singleton dimension {}"
@@ -2482,7 +2482,7 @@ R"=====(def broadcast_inplace(a: List[int],
     _6 = torch.append(out, elem)
   return out
 
-)====="
+)=====")
 ;
 
 
