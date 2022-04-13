@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Pattern
 
 
@@ -55,7 +56,6 @@ RESULTS_RE: Pattern[str] = re.compile(
 )
 
 
-
 def run_command(
     args: List[str],
     *,
@@ -81,6 +81,7 @@ severities = {
     "note": LintSeverity.ADVICE,
 }
 
+
 def check_files(
     filenames: List[str],
     config: str,
@@ -104,9 +105,7 @@ def check_files(
                 name="command-failed",
                 original=None,
                 replacement=None,
-                description=(
-                    f"Failed due to {err.__class__.__name__}:\n{err}"
-                ),
+                description=(f"Failed due to {err.__class__.__name__}:\n{err}"),
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
@@ -173,15 +172,21 @@ def main() -> None:
 
     # Use a dictionary here to preserve order. mypy cares about order,
     # tragically, e.g. https://github.com/python/mypy/issues/2015
-    filenames = {f: True for f in args.filenames}
+    filenames: Dict[str, bool] = {}
 
-    # If a stub file exists, do not call mypy on the "real" file, in accordance
-    # with PEP-484 (see https://www.python.org/dev/peps/pep-0484/#stub-files)
-    stubs = [f for f in filenames if f.endswith(".pyi")]
-    for stub in stubs:
-        real = stub[:-1]
-        if real in filenames:
-            del filenames[real]
+    # If a stub file exists, have mypy check it instead of the original file, in
+    # accordance with PEP-484 (see https://www.python.org/dev/peps/pep-0484/#stub-files)
+    for filename in args.filenames:
+        if filename.endswith(".pyi"):
+            filenames[filename] = True
+            continue
+
+        stub_filename = filename.replace(".py", ".pyi")
+        if Path(stub_filename).exists():
+            filenames[stub_filename] = True
+        else:
+            filenames[filename] = True
+
 
     lint_messages = check_files(list(filenames), args.config, args.binary, args.retries)
     for lint_message in lint_messages:
