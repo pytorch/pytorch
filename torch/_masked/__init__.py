@@ -520,14 +520,8 @@ def _sparse_coo_scatter_reduction_helper(op,
     reduce = op.__name__
     assert reduce in {'sum', 'prod', 'mean', 'amax', 'amin'}, \
         "op must be one of torch.sum, torch.prod, torch.mean, torch.amax or torch.amin"
-    output_dtype = dtype
-    # if output_dtype is None:
-    #     if mask_input.is_floating_point() or mask_input.is_complex():
-    #         output_dtype = mask_input.dtype
-    #     else:
-    #         # promote integer types to int64
-    #         output_dtype = torch.int64
 
+    output_dtype = dtype
     values, indices = mask_input._values(), mask_input._indices()
     input_dims = mask_input.dim()
     num_sparse_dims = mask_input.sparse_dim()
@@ -555,13 +549,11 @@ def _sparse_coo_scatter_reduction_helper(op,
 
     # Reduce dense dimensions
     if len(reduced_dense_dims) > 0:
-        new_values = values
-        if reduce == "prod":
-            # Workaround https://github.com/pytorch/pytorch/issues/56586
-            for dd in reversed(reduced_dense_dims):
-                new_values = op(new_values, dim=dd, keepdim=bool(keepdim))
-        else:
+        if reduce == "sum":
             new_values = op(new_values, dim=reduced_dense_dims, keepdim=bool(keepdim))
+        else:
+            # FIXME: Implement reductions for dense dimensions for ops with non-zero reduction identities
+            raise NotImplementedError(f'{reduce}() does not support reducing dense dims of hybrid sparse coo tensors')
     else:
         new_values = values.clone()
 
@@ -595,8 +587,7 @@ def _sparse_coo_scatter_reduction_helper(op,
         for _ in range(new_values.ndim - 1):
             inverse_indices = inverse_indices.unsqueeze(-1)
         scatter_indices = inverse_indices.expand(new_values.shape)
-        # FIXME: temporary workaround for issue with bfloat16
-        # remove this when acctype is implemented for scatter_reduce
+        # FIXME: temporary workaround for issue with bfloat16 remove when acctype is implemented for scatter_reduce
         if output_dtype in {torch.bfloat16}:
             new_values = new_values.to(torch.float)
             out = new_values.new_empty(out_shape)
