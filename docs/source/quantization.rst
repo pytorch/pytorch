@@ -155,7 +155,7 @@ This is the simplest to apply form of quantization where the weights are
 quantized ahead of time but the activations are dynamically quantized
 during inference. This is used for situations where the model execution time
 is dominated by loading weights from memory rather than computing the matrix
-multiplications. This is true for for LSTM and Transformer type models with
+multiplications. This is true for LSTM and Transformer type models with
 small batch size.
 
 Diagram::
@@ -488,6 +488,17 @@ and supported quantized modules and functions.
     quantization-support
     torch.ao.ns._numeric_suite
     torch.ao.ns._numeric_suite_fx
+
+Quantization Backend Configuration
+----------------------------------
+
+The :doc:`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
+on how to configure the quantization workflows for various backends.
+
+.. toctree::
+    :hidden:
+
+    quantization-backend-configuration
 
 Quantized Tensors
 ---------------------------------------
