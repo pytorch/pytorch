@@ -94,7 +94,7 @@ jobs:
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
 
-      # !{{ common_android.upload_androind_binary_size("", "")}}
+      # !{{ common_android.upload_android_binary_size("", "")}}
       - name: Test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210

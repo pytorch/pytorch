@@ -56,7 +56,7 @@ def _replicate_module_recurse(module, process_group):
     return replica
 
 def _replicate_module(network, process_group):
-    from torch.nn.parallel.replicate import _replicatable_module
+    from torch.nn.parallel.replicate import _replicatable_module  # type: ignore[attr-defined]
     if not _replicatable_module(network):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
