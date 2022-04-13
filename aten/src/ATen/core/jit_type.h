@@ -467,6 +467,14 @@ struct TORCH_API SymbolicShape {
   // result will be unranked.
   SymbolicShape merge(const SymbolicShape& other) const;
 
+  friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
+  }
+
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };

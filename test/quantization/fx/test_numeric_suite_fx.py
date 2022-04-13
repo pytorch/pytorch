@@ -691,7 +691,16 @@ class TestFXGraphMatcher(QuantizationTestCase):
                     f"{base_op} not in sets of related ops")
             else:
                 # torch.sum does not have quantized equivalents
-                if base_op == torch.sum:
+                if base_op in [
+                        torch.sum,
+                        nn.GRUCell,
+                        nn.GRU,
+                        nn.LSTMCell,
+                        nn.RNNCell,
+                ]:
+                    continue
+                if isinstance(base_op, tuple):
+                    # skip fusion patterns
                     continue
                 # didn't match explicit quantize handler class, we can check if the
                 # operator is in the related op set directly
