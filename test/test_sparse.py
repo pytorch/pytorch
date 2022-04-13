@@ -1675,7 +1675,6 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/73173")
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
