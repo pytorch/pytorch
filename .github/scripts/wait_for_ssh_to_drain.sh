@@ -2,6 +2,9 @@
 
 set -eou pipefail
 
+echo "Holding runner for 5 minutes to give an opportunity to log in..."
+sleep 300
+
 echo "Holding runner for 2 hours until all ssh sessions have logged out"
 for _ in $(seq 1440); do
     # Break if no ssh session exists anymore

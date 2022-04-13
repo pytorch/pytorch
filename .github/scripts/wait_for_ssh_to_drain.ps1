@@ -9,6 +9,9 @@ function Get-SSH-Users {
 
 $usersLoggedOn = Get-SSH-Users
 
+Write-Output "Holding runner for 5 minutes to give an opportunity to log in..."
+Start-Sleep -s 300
+
 Write-Output "Holding runner until all ssh sessions have logged out"
 while ($usersLoggedOn.Count -gt 0) {
     $usersLoggedOn = Get-SSH-Users
