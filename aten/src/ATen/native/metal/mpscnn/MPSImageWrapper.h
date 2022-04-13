@@ -9,7 +9,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
+class API_AVAILABLE(ios(11.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
   ~MPSImageWrapper();

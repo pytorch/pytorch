@@ -13,7 +13,7 @@ def _cmake_configure_file_impl(ctx):
         )
 
     # Replace any that remain with /* #undef FOO */.
-    command.append("| sed --regexp-extended 's@#cmakedefine (\\w+)@/* #undef \\1 */@'")
+    command.append("| sed -r 's@#cmakedefine ([A-Z0-9_]+)@/* #undef \\1 */@'")
     command.append("> $2")
 
     ctx.actions.run_shell(

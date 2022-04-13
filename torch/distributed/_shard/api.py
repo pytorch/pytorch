@@ -1,24 +1,17 @@
-import copy
 import torch
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
-from .sharding_spec import (
-    ChunkShardingSpec,
-    ShardingSpec,
-)
-from torch.distributed._shard.sharding_spec._internals import (
-    get_chunked_dim_size,
-    get_split_size,
-)
 from torch.distributed._shard.sharded_tensor import (
-    Shard,
-    ShardMetadata,
     ShardedTensor,
 )
+from .sharding_spec import (
+    ShardingSpec,
+)
+from .replicated_tensor import ReplicatedTensor
 
 def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
-):
+) -> ShardedTensor:
     """
     Given a :class:`torch.Tensor`, it shards that tensor according to the provided
     ``sharding_spec``. ``src_rank`` denotes the source rank which would be
@@ -45,14 +38,12 @@ def _shard_tensor(
         Only :class:`torch.distributed._shard.sharding_spec.ChunkShardingSpec` is
         currently supported as the ``sharding_spec``.
     """
-    if not isinstance(sharding_spec, ChunkShardingSpec):
-        raise NotImplementedError('Only ChunkShardingspec is supported.')
     if not tensor.is_contiguous():
         raise ValueError('input tensor is not a contiguous Tensor')
 
     pg = process_group if process_group is not None else distributed_c10d._get_default_group()
     world_size = dist.get_world_size(pg)
-    rank = dist.get_rank(pg)
+    current_rank = dist.get_rank(pg)
 
     # Validate src_rank and sharding_spec are same across all ranks.
     gathered_list = [None] * world_size
@@ -61,64 +52,14 @@ def _shard_tensor(
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
-                f'src_rank={src_rank} on rank: {rank} does not '  # type: ignore[index]
+                f'src_rank={src_rank} on rank: {current_rank} does not '  # type: ignore[index]
                 f'match with src_rank={entry[0]} on rank: {idx}')
         if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
-                f'sharding_spec={sharding_spec} on rank: {rank} does not '  # type: ignore[index]
+                f'sharding_spec={sharding_spec} on rank: {current_rank} does not '  # type: ignore[index]
                 f'match with sharding_spec={entry[1]} on rank: {idx}')
 
-    # Rearrange chunks according to placement.
-    local_metadata = None
-    current_offsets = [0] * len(tensor.size())
-    shards_metadata = []
-    sharding_dim_size = tensor.size(sharding_spec.dim)  # type: ignore[arg-type]
-    split_size = get_split_size(sharding_dim_size, world_size)
-    tensor_sizes = list(tensor.size())
-    for idx, placement in enumerate(sharding_spec.placements):
-        chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
-        shard_size = copy.deepcopy(tensor_sizes)
-        shard_size[sharding_spec.dim] = chunked_dim_size  # type: ignore[index]
-
-        shard_metadata = ShardMetadata(
-            shard_offsets=copy.deepcopy(current_offsets),
-            shard_sizes=shard_size,
-            placement=placement,
-        )
-        shards_metadata.append(shard_metadata)
-
-        if rank == placement.rank():  # type: ignore[union-attr]
-            local_metadata = shard_metadata
-
-        current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
-
-    # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
-    dist.broadcast(tensor, src=src_rank, group=pg)
-
-    # Reshape to get shard for this rank and we don't want autograd
-    # recording here for the narrow op and 'local_shard' should be a
-    # leaf variable in the autograd graph.
-    local_shard = tensor.narrow(
-        sharding_spec.dim,  # type: ignore[arg-type]
-        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-    ).clone().detach().contiguous()
-
-    # Sync requires_grad to local_shard.
-    local_shard.requires_grad = tensor.requires_grad
-
-    # Create ShardedTensor based on local shards.
-    local_shards = [
-        Shard(
-            tensor=local_shard,
-            metadata=local_metadata,  # type: ignore[arg-type]
-        )
-    ]
-
-    st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=pg)
-
-    # Manually set sharding_spec
-    st._sharding_spec = sharding_spec
+    st = sharding_spec.shard(tensor, src_rank=src_rank, process_group=process_group)
 
     return st
 
@@ -178,3 +119,20 @@ def shard_parameter(
 
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
+
+
+def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
+    """
+    Given a :class:`torch.Tensor`, mark it as a ReplicatedTensor where all
+    ranks have the same value.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the tensor to be marked as replicated.
+    Keyword args:
+        process_group (ProcessGroup, optional): The process group to replicate on.
+            If None, the default process group will be used.
+    Returns:
+        A :class:`ReplicatedTensor` from the given tensor.
+
+    """
+    return ReplicatedTensor(tensor, process_group=process_group)

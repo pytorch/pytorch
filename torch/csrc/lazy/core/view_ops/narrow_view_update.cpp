@@ -15,7 +15,7 @@ NarrowViewUpdate::NarrowViewUpdate(
           /*num_outputs=*/1,
           MHash(base_indices)),
       base_indices_(base_indices.begin(), base_indices.end()) {
-  SetShapeDeferred([&]() { return GetShapeFromTsOutput(operand(0)); });
+  SetShapeDeferred([&]() { return operand(0).shape(); });
 }
 
 std::string NarrowViewUpdate::ToString() const {
