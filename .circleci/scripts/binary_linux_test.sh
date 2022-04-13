@@ -53,7 +53,7 @@ if [[ "\$python_nodot" = *39*  ]]; then
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "$DESIRED_CUDA" == "cu112" || "$DESIRED_CUDA" == "cu115" ]]; then
+if [[ "$DESIRED_CUDA" == "cu115" || "$DESIRED_CUDA" == "cu116" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
 
@@ -67,7 +67,8 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 # TODO there is duplicated and inconsistent test-python-env setup across this
 #   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
 #   conda build scripts themselves. These should really be consolidated
-pkg="/final_pkgs/\$(ls /final_pkgs)"
+# Pick only one package of multiple available (which happens as result of workflow re-runs)
+pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
     # For some reason conda likes to re-activate the conda environment when attempting this install

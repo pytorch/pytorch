@@ -143,7 +143,7 @@ class TestFreezingWeights(FSDPTest):
             optimizer.step()
 
         if with_fsdp:
-            get_full_params(model)
+            return get_full_params(model)
 
         return list(model.parameters())
 
