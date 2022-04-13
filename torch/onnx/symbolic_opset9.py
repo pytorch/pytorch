@@ -1661,7 +1661,7 @@ def cosine_similarity(g, x1, x2, dim, eps):
 
 
 def pairwise_distance(g, input1, input2, p, eps, keepdim):
-    inv_p = div(g, g.op("Constant", value_t=torch.tensor([1], dtype=torch.float)), sum(g, p, eps))
+    inv_p = div(g, g.op("Constant", value_t=torch.tensor([1], dtype=torch.float)), add(g, p, eps))
     summation = sym_help._reducesum_helper(g, pow(g, sub(g, input1, input2), p),
                                            axes_i=[-1], keepdims_i=_parse_arg(keepdim, "i"))
     return pow(g, summation, inv_p)
