@@ -14,17 +14,24 @@ on:
   workflow_dispatch:
   pull_request:
 
+concurrency:
+  group: buck-build-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash -e -l {0}
 
 jobs:
 
-  test-for-buck:
+  buck-build-test:
     runs-on: ubuntu-latest
     env:
       JOB_BASE_NAME: ubuntu-latest-buck
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
       - name: Set up JDK 8
         uses: actions/setup-java@v3
         with:
@@ -56,10 +63,6 @@ jobs:
         run: |
           wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
           sudo apt install ./buck.2021.01.12.01_all.deb
-          java -version
-
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Build Buck target
         run: |
