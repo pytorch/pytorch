@@ -420,7 +420,7 @@ class TestSaveLoad(JitTestCase):
             @torch.jit.script_method
             def forward(self, x):
                 return 2 * x
-            
+
         foo = Foo()
         with TemporaryDirectoryName() as dirname:
             path = pathlib.Path(f"{dirname}/../../{dirname}/test.pt")
