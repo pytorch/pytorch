@@ -1,17 +1,69 @@
+
+import torch
+
 import inspect
 import typing
+import pathlib
+import sys
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
+from types import CodeType
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
-    from monkeytype.config import default_code_filter  # type: ignore[import]
+    from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
+
+# Checks whether a class is defind in `torch.*` modules
+def is_torch_native_class(cls):
+    if not hasattr(cls, '__module__'):
+        return False
+
+    parent_modules = cls.__module__.split('.')
+    if not parent_modules:
+        return False
+
+    root_module = sys.modules.get(parent_modules[0])
+    return root_module is torch
+
+def get_type(type):
+    """
+    Helper function which converts the given type to a torchScript acceptable format.
+    """
+    if isinstance(type, str):
+        return type
+    elif inspect.getmodule(type) == typing:
+        # If the type is a type imported from typing
+        # like Tuple, List, Dict then replace `typing.`
+        # with a null string. This needs to be done since
+        # typing.List is not accepted by TorchScript.
+        type_to_string = str(type)
+        return type_to_string.replace(type.__module__ + '.', '')
+    elif is_torch_native_class(type):
+        # If the type is a subtype of torch module, then TorchScript expects a fully qualified name
+        # for the type which is obtained by combining the module name and type name.
+        return type.__module__ + '.' + type.__name__
+    else:
+        # For all other types use the name for the type.
+        return type.__name__
+
+def get_optional_of_element_type(types):
+    """
+    Helper function to extracts the type of the element to be annotated to Optional
+    from the list of consolidated types and returns `Optional[element type]`.
+    TODO: To remove this check once Union support lands.
+    """
+    elem_type = types[1] if type(None) == types[0] else types[0]
+    elem_type = get_type(elem_type)
+
+    # Optional type is internally converted to Union[type, NoneType], which
+    # is not supported yet in TorchScript. Hence, representing the optional type as string.
+    return 'Optional[' + elem_type + ']'
 
 def get_qualified_name(func):
     return func.__qualname__
@@ -52,7 +104,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # and create a dictionary of all the types
             # for arguments.
             records = self.trace_records[qualified_name]
-            all_args = defaultdict(set)  # type:  ignore[var-annotated]
+            all_args = defaultdict(set)
             for record in records:
                 for arg, arg_type in record.arg_types.items():
                     all_args[arg].add(arg_type)
@@ -64,22 +116,15 @@ if _IS_MONKEYTYPE_INSTALLED:
             # then consolidate the type to `Any` and replace the entry
             # by type `Any`.
             for arg, types in all_args.items():
-                _all_type = " "
-                for _type in types:
-                    # If the type is a type imported from typing
-                    # like Tuple, List, Dict then replace "typing."
-                    # with a null string.
-                    if inspect.getmodule(_type) == typing:
-                        _type_to_string = str(_type)
-                        _all_type += _type_to_string.replace('typing.', '') + ','
-                    else:
-                        _all_type += _type.__name__ + ','
-                _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
-
-                if len(types) > 1:
-                    all_args[arg] = {'Any'}
-                else:
-                    all_args[arg] = {_all_type[:-1]}
+                types = list(types)
+                type_length = len(types)
+                if type_length == 2 and type(None) in types:
+                    # TODO: To remove this check once Union suppport in TorchScript lands.
+                    all_args[arg] = get_optional_of_element_type(types)
+                elif type_length > 1:
+                    all_args[arg] = 'Any'
+                elif type_length == 1:
+                    all_args[arg] = get_type(types[0])
             return all_args
 
         def get_args_types(self, qualified_name: str) -> Dict:
@@ -101,7 +146,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             return self.s
 
         def code_filter(self) -> Optional[CodeFilter]:
-            return default_code_filter
+            return jit_code_filter
 else:
     # When MonkeyType is not installed, we provide dummy class definitions
     # for the below classes.
@@ -117,4 +162,22 @@ else:
         def __init__(self):
             pass
 
-    monkeytype_trace = None  # type:  ignore[assignment]  # noqa: F811
+    monkeytype_trace = None  # noqa: F811
+
+def jit_code_filter(code: CodeType) -> bool:
+    """
+    Custom CodeFilter for Torchscript to trace forward calls.
+    The custom CodeFilter is required while scripting a FX Traced forward calls.
+    FX Traced forward calls have `code.co_filename` start with '<' which is used
+    to exclude tracing of stdlib and site-packages in the default code filter.
+    Since we need all forward calls to be traced, this custom code filter
+    checks for code.co_name to be 'forward' and enables tracing for all such calls.
+    The code filter is similar to default code filter for monkeytype and
+    excludes tracing of stdlib and site-packages.
+    """
+    # Filter code without a source file and exclude this check for 'forward' calls.
+    if code.co_name != 'forward' and (not code.co_filename or code.co_filename[0] == '<'):
+        return False
+
+    filename = pathlib.Path(code.co_filename).resolve()
+    return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)

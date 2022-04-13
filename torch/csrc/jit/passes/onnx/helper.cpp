@@ -1,4 +1,13 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+
+#include <ATen/ScalarOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/unsqueeze.h>
+#endif
 
 #include <onnx/onnx_pb.h>
 
@@ -157,6 +166,108 @@ Node* createONNXUnsqueeze(
     unsqueeze_node->is_(attr::axes, {0});
   }
   return unsqueeze_node;
+}
+
+bool isValidToTransformToONNXConcatNode(Node* lc_node) {
+  return !lc_node->inputs().empty();
+}
+
+Node* transformToONNXConcatNode(
+    Graph* g,
+    Node* lc_node,
+    bool need_new_input,
+    int opset_version) {
+  // ListConstruct Int[] output case, we need to transform to ONNX
+  // Concat to ensure the output is a single tensor(dynamic) type in
+  // order to be consumed as inputs
+  std::vector<Value*> unsqueezed;
+  auto new_node = need_new_input ? g->return_node() : lc_node;
+
+  for (auto* input : lc_node->inputs()) {
+    auto new_input =
+        need_new_input ? g->addInput()->copyMetadata(input) : input;
+    // This particular Concat operation concats along axis=0 and this requires
+    // inputs to the node to have the same shape along dim-0. To ensure this,
+    // unsqueeze nodes are added such that all shapes along dim-0 are 1.
+    // Certain inputs from ListConstruct Int[] could be combinations of scalars
+    // and 1-D tensors, For inputs that are already 1-D tensors, we skip the
+    // step of creating a corresponding unsqueeze node.
+    if (auto type = new_input->type()->cast<TensorType>()) {
+      if (type->dim() && type->dim() == 1U) {
+        unsqueezed.emplace_back(new_input);
+        continue;
+      }
+    }
+    Node* unsqueezed_node =
+        createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
+    unsqueezed_node->copyMetadata(lc_node);
+    unsqueezed.emplace_back(unsqueezed_node->output());
+  }
+
+  Node* concat_node = need_new_input
+      ? g->insertNode(g->create(onnx::Concat, 1))
+      : g->create(onnx::Concat, 1)->insertBefore(lc_node);
+  concat_node->i_(attr::axis, 0);
+  for (auto v : unsqueezed) {
+    concat_node->addInput(v);
+  }
+
+  return concat_node;
+}
+
+void ONNXLintGraph(
+    const Block* b,
+    std::vector<NodeKind>& n_miss_source_range,
+    std::vector<NodeKind>& n_miss_scope) {
+  for (const auto* n : b->nodes()) {
+    for (const auto* sub_b : n->blocks()) {
+      ONNXLintGraph(sub_b, n_miss_source_range, n_miss_scope);
+    }
+
+    if (nullptr == n->sourceRange().source()) {
+      GRAPH_DEBUG("Node does not set sourceRange:", *n);
+      n_miss_source_range.emplace_back(n->kind());
+    }
+    if (n->scopeName() == "") {
+      GRAPH_DEBUG("Node does not set scope:", *n);
+      n_miss_scope.emplace_back(n->kind());
+    }
+  }
+}
+
+void ONNXLintGraph(const std::shared_ptr<Graph>& graph) {
+  // Print nodes that do not have scope/source range covered.
+  std::vector<NodeKind> n_miss_source_range, n_miss_scope;
+  ONNXLintGraph(graph->block(), n_miss_source_range, n_miss_scope);
+  auto count_const = [](const std::vector<NodeKind>& vec) -> size_t {
+    size_t count = 0;
+    for (auto k : vec) {
+      switch (k) {
+        case prim::Constant:
+        case prim::ListConstruct:
+        case onnx::Constant:
+          count++;
+          break;
+      }
+    }
+    return count;
+  };
+  auto const_count_src = count_const(n_miss_source_range);
+  auto const_count_scope = count_const(n_miss_scope);
+  GRAPH_UPDATE(
+      "Missing source range.\n",
+      "Total ",
+      n_miss_source_range.size(),
+      " nodes. Including ",
+      const_count_src,
+      " constants.");
+  GRAPH_UPDATE(
+      "Missing scope.\n",
+      "Total ",
+      n_miss_scope.size(),
+      " nodes. Including ",
+      const_count_scope,
+      " constants.");
 }
 
 } // namespace jit

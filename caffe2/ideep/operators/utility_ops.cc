@@ -1,4 +1,4 @@
-#include "caffe2/operators/utility_ops.h"
+  #include "caffe2/operators/utility_ops.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/ideep/ideep_utils.h"
 
@@ -64,7 +64,10 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
         }
         auto* Y =
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
-        X.to_public(Y->template mutable_data<float>());
+        itensor temp_ten(
+            X.get_desc().to_default_format(),
+            Y->template mutable_data<float>());
+        X.reorder_to(temp_ten);
       } else {
         CAFFE_THROW("Unsupported ideep type: ",
                     static_cast<int>(X.get_data_type()));
@@ -109,13 +112,9 @@ class IDEEPWeightedSumOp : public IDEEPOperator {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(CopyCPUToIDEEP, CopyCPUToIDEEPOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(CopyIDEEPToCPU, CopyIDEEPToCPUOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Copy, IDEEPCopyOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(WeightedSum, IDEEPWeightedSumOp);
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function,cppcoreguidelines-avoid-non-const-global-variables)

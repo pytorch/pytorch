@@ -8,11 +8,11 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
 #if defined(__CUDACC__)
-#include <THC/THCDeviceUtils.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
-#include <aten/src/THH/THHDeviceUtils.cuh>
-#include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
+#include <ATen/hip/DeviceUtils.cuh>
+#include <ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/pair.h>
@@ -80,8 +80,15 @@ struct WelfordData {
   scalar_t m2;
   index_t n;
   combine_t nf;
-  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0)  {}
-  C10_DEVICE WelfordData(scalar_t mean, scalar_t m2, index_t n, combine_t nf) : mean(mean), m2(m2), n(n), nf(nf) {}
+
+  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0) {}
+
+  C10_HOST_DEVICE WelfordData(
+      scalar_t mean,
+      scalar_t m2,
+      index_t n,
+      combine_t nf)
+      : mean(mean), m2(m2), n(n), nf(nf) {}
 };
 
 
@@ -145,7 +152,7 @@ struct WelfordOps {
     };
   }
 #endif
-  WelfordOps(index_t correction, bool take_sqrt)
+  C10_HOST_DEVICE WelfordOps(index_t correction, bool take_sqrt)
       : correction(correction), take_sqrt(take_sqrt) {}
 };
 
@@ -337,17 +344,17 @@ template<typename acc_t>
 struct AbsSwitch {};
 
 template<typename scalar_t, typename acc_t>
-inline C10_DEVICE acc_t abs_if_complex(scalar_t data, AbsSwitch<acc_t> s) {
+inline C10_DEVICE acc_t abs_if_complex(scalar_t data, AbsSwitch<acc_t>) {
   return static_cast<acc_t>(data);
 }
 
 template<typename scalar_t, typename acc_t>
-inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<acc_t> s) {
+inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<acc_t>) {
   return static_cast<acc_t>(std::abs(data));
 }
 
 template<typename scalar_t, typename acc_t>
-inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t> s) {
+inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t>) {
   return static_cast<acc_t>(std::abs(data));
 }
 

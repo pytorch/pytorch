@@ -9,15 +9,15 @@ TORCH_LIBRARY_IMPL(_, Named, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Named, m) {
-  m.impl("_bmm", CppFunction::makeFallthrough());
-  m.impl("_bmm.out", CppFunction::makeFallthrough());
   m.impl("_cdist_forward", CppFunction::makeFallthrough());
   m.impl("_fused_dropout", CppFunction::makeFallthrough());
+  m.impl("native_dropout", CppFunction::makeFallthrough());
   m.impl("_local_scalar_dense", CppFunction::makeFallthrough());
   m.impl("_sparse_log_softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("_sparse_log_softmax.int", CppFunction::makeFallthrough());
   m.impl("_sparse_softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("_sparse_softmax.int", CppFunction::makeFallthrough());
+  m.impl("_to_copy", CppFunction::makeFallthrough());
   m.impl("abs", CppFunction::makeFallthrough());
   m.impl("abs.out", CppFunction::makeFallthrough());
   m.impl("abs_", CppFunction::makeFallthrough());
@@ -117,7 +117,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("clamp_min_.Tensor", CppFunction::makeFallthrough());
   m.impl("clone", CppFunction::makeFallthrough());
   m.impl("conj", CppFunction::makeFallthrough());
-  m.impl("conj.out", CppFunction::makeFallthrough());
   m.impl("contiguous", CppFunction::makeFallthrough());
   m.impl("copy_", CppFunction::makeFallthrough());
   m.impl("cos", CppFunction::makeFallthrough());
@@ -531,4 +530,5 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
   m.impl("_fw_primal", CppFunction::makeFallthrough());
+  m.impl("_make_dual", CppFunction::makeFallthrough());
 }

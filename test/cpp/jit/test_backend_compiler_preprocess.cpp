@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
-#include <torch/csrc/jit/backends/generate_debug_handles.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
@@ -13,14 +12,15 @@ namespace {
 // can be passed when there's no usage of compilation in runtime backend lib.
 c10::IValue preprocess(
     const Module& mod,
-    const c10::Dict<IValue, IValue>& method_compile_spec) {
+    const c10::Dict<IValue, IValue>& method_compile_spec,
+    const BackendDebugHandleGenerator& generate_debug_handles) {
   // The output of this process would produce a dictionary
   // Key: method name.
   // Val: compiled blob (represented by a string).
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
 
   for (const auto& method : mod.get_methods()) {
-    auto graph = method.function().graph()->copy();
+    auto graph = toGraphFunction(method.function()).graph()->copy();
     // Must inline the graph for debug info map.
     Inline(*graph);
     // This is here because to test module hierarchy we will have
@@ -69,7 +69,6 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "backend_with_compiler_demo";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 } // namespace
 

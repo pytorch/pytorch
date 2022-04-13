@@ -1,15 +1,14 @@
 #include <c10/mobile/CPUCachingAllocator.h>
 
+#include <c10/core/impl/alloc_cpu.h>
+
 namespace c10 {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CPUCachingAllocator* caching_allocator_ptr{nullptr};
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex CPUCachingAllocator::mutex_;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ska::flat_hash_map<void*, size_t> CPUCachingAllocator::allocation_map_;
 
 inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {

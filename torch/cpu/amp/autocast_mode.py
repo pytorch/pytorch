@@ -1,36 +1,31 @@
 import torch
-import functools
-import warnings
+from typing import Any
 
-class autocast(object):
-    def __init__(self, enabled=True, dtype=torch.bfloat16):
-        supported_dtype = [torch.bfloat16]
-        if dtype not in supported_dtype :
-            warnings.warn("In CPU autocast, but the target dtype is not supported. Disable the autocast.")
-            warnings.warn("CPU Autocast only support dtype of torch.bfloat16 currently.")
-            enabled = False
-            dtype = torch.bfloat16
-        self._enabled = enabled
-        self._dtype = dtype
+class autocast(torch.amp.autocast_mode.autocast):
+    r"""
+    See :class:`torch.autocast`.
+    ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``
+    """
+    def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.bfloat16, cache_enabled : bool = True):
+        if torch._jit_internal.is_scripting():
+            self._enabled = enabled
+            self.device = "cpu"
+            self.fast_dtype = dtype
+            return
+        super().__init__("cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
 
     def __enter__(self):
-        self.prev = torch.is_autocast_cpu_enabled()
-        self.prev_dtype = torch.get_autocast_cpu_dtype()
-        torch.set_autocast_cpu_enabled(self._enabled)
-        torch.set_autocast_cpu_dtype(self._dtype)
-        torch.autocast_increment_nesting()
+        if torch._jit_internal.is_scripting():
+            return self
+        return super().__enter__()
 
-    def __exit__(self, *args):
-        # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
-        if torch.autocast_decrement_nesting() == 0:
-            torch.clear_autocast_cache()
-        torch.set_autocast_cpu_enabled(self.prev)
-        torch.set_autocast_cpu_dtype(self.prev_dtype)
-        return False
+    # TODO: discuss a unified TorchScript-friendly API for autocast
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+        if torch._jit_internal.is_scripting():
+            return
+        return super().__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, func):
-        @functools.wraps(func)
-        def decorate_autocast(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return decorate_autocast
+        if torch._jit_internal.is_scripting():
+            return func
+        return super().__call__(func)

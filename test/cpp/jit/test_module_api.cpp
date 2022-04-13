@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-static const auto moduleInterfaceSrc = R"JIT(
+static constexpr c10::string_view moduleInterfaceSrc = R"JIT(
 class OneInterface(ModuleInterface):
     def one(self, x: Tensor, y: Tensor) -> Tensor:
         pass
@@ -27,7 +27,7 @@ def forward(self, x: Tensor) -> Tensor:
     return self.attr + x
 )JIT"};
 
-static const auto parentForward = R"JIT(
+static const std::string parentForward = R"JIT(
 def forward(self, x: Tensor) -> Tensor:
     return self.subMod1.one(x, x) + self.subMod2.one(x, x)
 )JIT";
@@ -45,7 +45,6 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, MethodRunAsync) {
   // Module m("m");
   // m.define(R"(
@@ -84,7 +83,6 @@ TEST(ModuleAPITest, MethodRunAsync) {
   ASSERT_GE(counter, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Clone) {
   auto cu = std::make_shared<CompilationUnit>();
   // creating child module
@@ -114,7 +112,6 @@ TEST(ModuleAPITest, Clone) {
   ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, CloneWithModuleInterface) {
   auto cu = std::make_shared<CompilationUnit>();
 
@@ -159,7 +156,6 @@ TEST(ModuleAPITest, CloneWithModuleInterface) {
   ASSERT_NE(clonedMod.type(), parentMod.type());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Copy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -189,7 +185,6 @@ TEST(ModuleAPITest, Copy) {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, DeepCopy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -249,7 +244,6 @@ TEST(ModuleAPITest, DeepCopy) {
   ASSERT_TRUE(t1.equal(t3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, DeepCopyString) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -266,7 +260,45 @@ TEST(ModuleAPITest, DeepCopyString) {
   ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ModuleAPITest, DeepCopyEnum) {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto enum_attr = "enum_attr";
+  auto int_enum_type = EnumType::create(
+      "enum_class",
+      IntType::get(),
+      {{"enum_name_1", 1}, {"enum_name_2", 2}},
+      cu);
+  cls->addAttribute(enum_attr, int_enum_type);
+  Module m(cu, cls);
+  m.setattr(
+      enum_attr,
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type, "enum_name_1", 1)));
+  Module m2 = m.deepcopy();
+
+  // Make sure deepcopy works
+  c10::ivalue::EnumHolder* m2_holder = m2.attr(enum_attr).toEnumHolder().get();
+  ASSERT_EQ(m2_holder->value().toInt(), 1);
+  ASSERT_EQ(m2_holder->name(), "enum_name_1");
+  ASSERT_EQ(m2_holder->type(), int_enum_type);
+
+  // Test overlaps
+  ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
+
+  // Deepcopy will preserve the type
+  ASSERT_EQ(m.type(), m2.type());
+
+  // Change original, should not affect deepcopy
+  m.setattr(
+      enum_attr,
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type, "enum_name_2", 2)));
+  ASSERT_NE(
+      m.attr(enum_attr).toEnumHolder().get()->value().toInt(),
+      m2.attr(enum_attr).toEnumHolder().get()->value().toInt());
+}
+
 TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   // check deepcopy preserves aliasing
   auto cu = std::make_shared<CompilationUnit>();
@@ -304,7 +336,6 @@ TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Constants) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -321,7 +352,6 @@ TEST(ModuleAPITest, Constants) {
   ASSERT_EQ(m.attr(const_name).toInt(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Parameters) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -341,7 +371,6 @@ TEST(ModuleAPITest, Parameters) {
   ASSERT_TRUE(m.hasattr("none_param2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Define) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -353,7 +382,6 @@ TEST(ModuleAPITest, Define) {
   AT_ASSERT(result.toTensor().item<float>() == 6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Freezing) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -362,16 +390,42 @@ TEST(ModuleAPITest, Freezing) {
       return self.foo + x + b
   )");
   m.eval();
+  auto forward_g = m.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+
+  // Removal of GetAttr is done by freezing
   auto frozen_mod = torch::jit::freeze(m);
-  auto forward_g = frozen_mod.get_method("forward").graph();
+  forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 
+  // If no training mode is set, the module is NOT frozen by OFI
   auto frozen_mod2 = torch::jit::optimize_for_inference(m);
+  forward_g = frozen_mod2.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+}
+
+TEST(ModuleAPITest, OfiFreezesTraining) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  m.register_attribute("training", BoolType::get(), true);
+  m.eval();
+
+  // Before freezing, we have a GetAttr check
+  auto forward_g = m.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+
+  // Demonstrate that freezing happens when OFI is called
+  // Removal of GetAttr is done by freezing, but only when training
+  // attribute is set
+  auto frozen_mod = torch::jit::optimize_for_inference(m);
   forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, To_CUDA) {
   Module m("test");
   {

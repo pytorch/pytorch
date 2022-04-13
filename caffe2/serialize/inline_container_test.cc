@@ -5,12 +5,12 @@
 #include <gtest/gtest.h>
 
 #include "caffe2/serialize/inline_container.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 namespace serialize {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   int64_t kFieldAlignment = 64L;
 
@@ -23,21 +23,23 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (int i = 0; i < data1.size(); ++i) {
+  for (auto i: c10::irange( data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (int i = 0; i < data2.size(); ++i) {
+  for (auto i: c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
-  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
-  ASSERT_EQ(written_records[0], "key1");
-  ASSERT_EQ(written_records[1], "key2");
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
 
   writer.writeEndOfFile();
 
@@ -72,7 +74,6 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(the_file.c_str() + off2, data2.data(), data2.size()), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   std::ostringstream oss;
   // write records through writers
@@ -83,21 +84,23 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (int i = 0; i < data1.size(); ++i) {
+  for (auto i: c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (int i = 0; i < data2.size(); ++i) {
+  for (auto i: c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
-  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
-  ASSERT_EQ(written_records[0], "key1");
-  ASSERT_EQ(written_records[1], "key2");
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
 
   writer.writeEndOfFile();
 

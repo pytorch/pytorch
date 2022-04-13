@@ -19,8 +19,20 @@ class LiteNativePeer implements INativePeer {
   private static native HybridData initHybrid(
       String moduleAbsolutePath, Map<String, String> extraFiles, int deviceJniCode);
 
+  private static native HybridData initHybridAndroidAsset(
+      String assetName, /* android.content.res.AssetManager */
+      Object androidAssetManager,
+      int deviceJniCode);
+
   LiteNativePeer(String moduleAbsolutePath, Map<String, String> extraFiles, Device device) {
     mHybridData = initHybrid(moduleAbsolutePath, extraFiles, device.jniCode);
+  }
+
+  LiteNativePeer(
+      String assetName, /* android.content.res.AssetManager */
+      Object androidAssetManager,
+      Device device) {
+    mHybridData = initHybridAndroidAsset(assetName, androidAssetManager, device.jniCode);
   }
 
   /**

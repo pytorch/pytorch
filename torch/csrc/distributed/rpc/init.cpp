@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
@@ -111,11 +110,26 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
-          .def("__repr__", [](const WorkerInfo& workerInfo) {
-            std::ostringstream os;
-            os << workerInfo;
-            return os.str();
-          });
+          .def(
+              "__repr__",
+              [](const WorkerInfo& workerInfo) {
+                std::ostringstream os;
+                os << workerInfo;
+                return os.str();
+              })
+          .def(py::pickle(
+              /* __getstate__ */
+              [](const WorkerInfo& workerInfo) {
+                return py::make_tuple(workerInfo.name_, workerInfo.id_);
+              },
+              /* __setstate__ */
+              [](py::tuple t) {
+                TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
+
+                WorkerInfo info(
+                    t[0].cast<std::string>(), t[1].cast<worker_id_t>());
+                return info;
+              }));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -514,97 +528,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           // not releasing GIL to avoid context switch
           .def("__repr__", &PyRRef::str);
 
-  shared_ptr_class_<ProcessGroupRpcBackendOptions>(
-      module,
-      "ProcessGroupRpcBackendOptions",
-      rpcBackendOptions,
-      R"(
-          The backend options class for ``ProcessGroupAgent``, which is derived
-          from ``RpcBackendOptions``.
-
-          Args:
-              num_send_recv_threads (int, optional): The number of threads in
-                  the thread-pool used by ``ProcessGroupAgent`` (default: 4).
-              rpc_timeout (float, optional): The default timeout, in seconds,
-                  for RPC requests (default: 60 seconds). If the
-                  RPC has not completed in this timeframe, an exception
-                  indicating so will be raised. Callers can override this
-                  timeout for individual RPCs in
-                  :meth:`~torch.distributed.rpc.rpc_sync` and
-                  :meth:`~torch.distributed.rpc.rpc_async` if necessary.
-              init_method (str, optional): The URL to initialize
-                  ``ProcessGroupGloo`` (default: ``env://``).
-      )")
-      .def(
-          py::init<int, float, std::string>(),
-          py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
-          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod)
-      .def_readwrite(
-          "num_send_recv_threads",
-          &ProcessGroupRpcBackendOptions::numSendRecvThreads,
-          R"(
-              The number of threads in the thread-pool used by ProcessGroupAgent.
-          )");
-
-  module.attr("_DEFAULT_NUM_SEND_RECV_THREADS") =
-      py::cast(kDefaultNumSendRecvThreads);
-
-  shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                       std::string workerName,
-                       const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
-                       int numSendRecvThreads,
-                       std::chrono::milliseconds rpcTimeout) {
-        return std::shared_ptr<ProcessGroupAgent>(
-            new ProcessGroupAgent(
-                store,
-                std::move(workerName),
-                pg,
-                numSendRecvThreads,
-                rpcTimeout,
-                std::make_unique<RequestCallbackImpl>()),
-            impl::destroy_without_gil<ProcessGroupAgent>);
-      }))
-      .def(
-          "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void) const) &
-              RpcAgent::getWorkerInfo,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&) const) &
-              ProcessGroupAgent::getWorkerInfo,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
-              ProcessGroupAgent::getWorkerInfo,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_worker_infos",
-          (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
-              ProcessGroupAgent::getWorkerInfos,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_get_device_map",
-          (DeviceMap(ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
-              ProcessGroupAgent::getDeviceMap,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "join",
-          &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>(),
-          py::arg("shutdown") = false)
-      .def(
-          "shutdown",
-          &ProcessGroupAgent::shutdown,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "sync",
-          &ProcessGroupAgent::sync,
-          py::call_guard<py::gil_scoped_release>());
-
 #ifdef USE_TENSORPIPE
 
   // Base class: torch.distributed.rpc.RpcBackendOptions.
@@ -653,8 +576,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 int worldSize,
-                 c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
+                 optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -664,7 +586,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                         std::move(selfName),
                         selfId,
                         worldSize,
-                        std::move(processGroup),
                         std::move(opts),
                         std::move(reverseDeviceMaps),
                         std::move(devices),
@@ -675,7 +596,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("process_group"),
           py::arg("rpc_backend_options"),
           py::arg("reverse_device_maps"),
           py::arg("devices"))
@@ -740,9 +660,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("_reset_current_rpc_agent", []() {
-    RpcAgent::setCurrentRpcAgent(nullptr);
-  });
+  module.def(
+      "_reset_current_rpc_agent",
+      []() { RpcAgent::setCurrentRpcAgent(nullptr); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_delete_all_user_and_unforked_owner_rrefs",

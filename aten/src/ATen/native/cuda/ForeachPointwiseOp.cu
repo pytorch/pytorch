@@ -1,7 +1,23 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/NumericUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_addcdiv_native.h>
+#include <ATen/ops/_foreach_addcmul_native.h>
+#include <ATen/ops/_foreach_div_native.h>
+#include <ATen/ops/_foreach_maximum_native.h>
+#include <ATen/ops/_foreach_minimum_native.h>
+#include <ATen/ops/_foreach_mul_native.h>
+#include <ATen/ops/_foreach_sub_native.h>
+
+#include <ATen/ops/empty_like_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -19,8 +35,8 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
     tensor_lists.emplace_back(tensors2.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         multi_tensor_apply<4>(tensor_lists,
                               PointwiseOpScalarFunctor<scalar_t,
                                                        /* depth */ 4,
@@ -40,8 +56,8 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
 
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         multi_tensor_apply<3>(tensor_lists,
                               PointwiseOpScalarFunctor<scalar_t,
                                                        /* depth */ 3,
@@ -60,8 +76,8 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
 
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         multi_tensor_apply<3, opmath_t>(tensor_lists,
                                         scalars,
                                         PointwiseOpScalarListFunctor<scalar_t,
@@ -87,8 +103,8 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
     tensor_lists.emplace_back(tensors2.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         multi_tensor_apply<4, opmath_t>(tensor_lists,
                                         scalars,
                                         PointwiseOpScalarListFunctor<scalar_t,
@@ -171,8 +187,8 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList
     tensor_lists.emplace_back(tensors2.vec());                                                             \
     tensor_lists.emplace_back(std::move(vec_res));                                                         \
                                                                                                            \
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, tensors1[0].scalar_type(), "foreach_maximum_minimum_op_cuda", [&]() { \
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;                                                 \
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensors1[0].scalar_type(), "foreach_maximum_minimum_op_cuda", [&]() { \
+        using opmath_t = at::opmath_type<scalar_t>;                                                 \
         auto op = []  GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t {                                    \
             opmath_t c = a OP b ? a : b;                                                                   \
             if (_isnan(a)) {                                                                               \

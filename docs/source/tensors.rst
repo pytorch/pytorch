@@ -32,7 +32,7 @@ Data type                               dtype                                   
 Boolean                                 ``torch.bool``                              :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
 quantized 8-bit integer (unsigned)      ``torch.quint8``                            :class:`torch.ByteTensor`     /
 quantized 8-bit integer (signed)        ``torch.qint8``                             :class:`torch.CharTensor`     /
-quantized 32-bit integer (signed)       ``torch.qfint32``                           :class:`torch.IntTensor`      /
+quantized 32-bit integer (signed)       ``torch.qint32``                            :class:`torch.IntTensor`      /
 quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``                          :class:`torch.ByteTensor`     /
 ======================================= =========================================== ============================= ================================
 
@@ -177,6 +177,9 @@ Tensor class reference
      use ``tensor.new_*`` creation ops.
 
 .. autoattribute:: Tensor.T
+.. autoattribute:: Tensor.H
+.. autoattribute:: Tensor.mT
+.. autoattribute:: Tensor.mH
 
 .. autosummary::
     :toctree: generated
@@ -220,14 +223,17 @@ Tensor class reference
     Tensor.addmv_
     Tensor.addr
     Tensor.addr_
+    Tensor.adjoint
     Tensor.allclose
     Tensor.amax
     Tensor.amin
+    Tensor.aminmax
     Tensor.angle
     Tensor.apply_
     Tensor.argmax
     Tensor.argmin
     Tensor.argsort
+    Tensor.argwhere
     Tensor.asin
     Tensor.asin_
     Tensor.arcsin
@@ -239,6 +245,8 @@ Tensor class reference
     Tensor.arctan_
     Tensor.atan2
     Tensor.atan2_
+    Tensor.arctan2
+    Tensor.arctan2_
     Tensor.all
     Tensor.any
     Tensor.backward
@@ -256,6 +264,10 @@ Tensor class reference
     Tensor.bitwise_or_
     Tensor.bitwise_xor
     Tensor.bitwise_xor_
+    Tensor.bitwise_left_shift
+    Tensor.bitwise_left_shift_
+    Tensor.bitwise_right_shift
+    Tensor.bitwise_right_shift_
     Tensor.bmm
     Tensor.bool
     Tensor.byte
@@ -276,13 +288,19 @@ Tensor class reference
     Tensor.contiguous
     Tensor.copy_
     Tensor.conj
+    Tensor.conj_physical
+    Tensor.conj_physical_
+    Tensor.resolve_conj
+    Tensor.resolve_neg
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
     Tensor.cos_
     Tensor.cosh
     Tensor.cosh_
+    Tensor.corrcoef
     Tensor.count_nonzero
+    Tensor.cov
     Tensor.acosh
     Tensor.acosh_
     Tensor.arccosh
@@ -308,6 +326,7 @@ Tensor class reference
     Tensor.diag_embed
     Tensor.diagflat
     Tensor.diagonal
+    Tensor.diagonal_scatter
     Tensor.fill_diagonal_
     Tensor.fmax
     Tensor.fmin
@@ -379,6 +398,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.histogram
     Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
@@ -410,6 +430,7 @@ Tensor class reference
     Tensor.isnan
     Tensor.is_contiguous
     Tensor.is_complex
+    Tensor.is_conj
     Tensor.is_floating_point
     Tensor.is_inference
     Tensor.is_leaf
@@ -478,6 +499,7 @@ Tensor class reference
     Tensor.max
     Tensor.maximum
     Tensor.mean
+    Tensor.nanmean
     Tensor.median
     Tensor.nanmedian
     Tensor.min
@@ -560,6 +582,7 @@ Tensor class reference
     Tensor.resize_
     Tensor.resize_as_
     Tensor.retain_grad
+    Tensor.retains_grad
     Tensor.roll
     Tensor.rot90
     Tensor.round
@@ -570,7 +593,10 @@ Tensor class reference
     Tensor.scatter_
     Tensor.scatter_add_
     Tensor.scatter_add
+    Tensor.scatter_reduce_
+    Tensor.scatter_reduce
     Tensor.select
+    Tensor.select_scatter
     Tensor.set_
     Tensor.share_memory_
     Tensor.short
@@ -593,6 +619,7 @@ Tensor class reference
     Tensor.arcsinh_
     Tensor.size
     Tensor.slogdet
+    Tensor.slice_scatter
     Tensor.solve
     Tensor.sort
     Tensor.split

@@ -1,14 +1,16 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <c10/util/irange.h>
+
 #include <sleef.h>
 
 namespace at {
 namespace vec {
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 
 template <>
@@ -169,7 +171,7 @@ class Vectorized<double> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
@@ -179,7 +181,7 @@ class Vectorized<double> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<value_type*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<value_type*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, tmp_values);
       vec_vsx_st(_vec1, offset16, tmp_values);
       std::memcpy(
@@ -188,27 +190,24 @@ class Vectorized<double> {
   }
   const double& operator[](int idx) const = delete;
   double& operator[](int idx) = delete;
-  void dump() const {
-      std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec1[0] << "," << _vec1[1] << std::endl;
-  }
-  Vectorized<double> map(double (*f)(double)) const {
+  Vectorized<double> map(double (*const f)(double)) const {
     Vectorized<double> ret;
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec0[i] = f(_vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec1[i] = f(_vec1[i]);
     }
     return ret;
   }
 
-  Vectorized<double> mapbi(double (*f)(double, double), const Vectorized<double>& other)
+  Vectorized<double> mapbi(double (*const f)(double, double), const Vectorized<double>& other)
       const {
     Vectorized<double> ret;
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec0[i] = f(_vec0[i], other._vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {
+    for (const auto i : c10::irange(size()/2)) {
         ret._vec1[i] = f(_vec1[i], other._vec1[i]);
     }
     return ret;
@@ -254,7 +253,9 @@ class Vectorized<double> {
   }
 
   Vectorized<double> angle() const {
-    return Vectorized<double>{0};
+    auto tmp = blendv(
+      Vectorized<double>(0), Vectorized<double>(c10::pi<double>), *this < Vectorized<double>(0));
+    return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {
     return *this;
@@ -386,8 +387,8 @@ class Vectorized<double> {
   DEFINE_MEMBER_OP(operator-, double, vec_sub)
   DEFINE_MEMBER_OP(operator*, double, vec_mul)
   DEFINE_MEMBER_OP(operator/, double, vec_div)
-  DEFINE_MEMBER_OP(maximum, double, vec_max)
-  DEFINE_MEMBER_OP(minimum, double, vec_min)
+  DEFINE_MEMBER_OP(maximum, double, vec_max_nan2)
+  DEFINE_MEMBER_OP(minimum, double, vec_min_nan2)
   DEFINE_MEMBER_OP(operator&, double, vec_and)
   DEFINE_MEMBER_OP(operator|, double, vec_or)
   DEFINE_MEMBER_OP(operator^, double, vec_xor)

@@ -1,10 +1,12 @@
 #include <torch/nn/init.h>
 
+#include <torch/linalg.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cmath>
@@ -82,7 +84,7 @@ Tensor dirac_(Tensor tensor) {
   const auto min_dim = std::min(sizes[0], sizes[1]);
 
   tensor.zero_();
-  for (int64_t d = 0; d < min_dim; ++d) {
+  for (const auto d : c10::irange(min_dim)) {
     switch (tensor.ndimension()) {
       case 3: // Temporal convolution
         tensor[d][d][sizes[2] / 2] = 1;
@@ -133,7 +135,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 
   // Compute the qr factorization
   Tensor q, r;
-  std::tie(q, r) = torch::qr(flattened);
+  std::tie(q, r) = torch::linalg::qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();
@@ -159,7 +161,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   const auto columns = tensor.size(1);
   const int64_t num_zeros = std::ceil(sparsity * rows);
   tensor.normal_(0, std);
-  for (int64_t column = 0; column < columns; ++column) {
+  for (const auto column : c10::irange(columns)) {
     auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);

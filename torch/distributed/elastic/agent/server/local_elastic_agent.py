@@ -9,6 +9,7 @@
 
 import os
 import shutil
+import signal
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
@@ -20,9 +21,10 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerState,
 )
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import start_processes, PContext
+from torch.distributed.elastic.multiprocessing import PContext, start_processes
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
+
 
 log = get_logger()
 
@@ -154,10 +156,13 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),
                 "TORCHELASTIC_USE_AGENT_STORE": str(use_agent_store),
-                "NCCL_ASYNC_ERROR_HANDLING": str(1),
+                "NCCL_ASYNC_ERROR_HANDLING": os.getenv(
+                    "NCCL_ASYNC_ERROR_HANDLING", str(1)
+                ),
             }
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
+
             envs[local_rank] = worker_env
             worker_args = list(spec.args)
             worker_args = macros.substitute(worker_args, str(local_rank))
@@ -183,9 +188,9 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         return self._pcontext.pids()
 
-    def _shutdown(self) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         if self._pcontext:
-            self._pcontext.close()
+            self._pcontext.close(death_sig)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -205,7 +210,6 @@ class LocalElasticAgent(SimpleElasticAgent):
         result = self._pcontext.wait(0)
         if result:
             if result.is_failed():
-                log.error(f"[{role}] Worker group failed")
                 # map local rank failure to global rank
                 worker_failures = {}
                 for local_rank, failure in result.failures.items():

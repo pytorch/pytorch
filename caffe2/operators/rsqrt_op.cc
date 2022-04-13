@@ -25,14 +25,12 @@ bool RsqrtGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Rsqrt,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         RsqrtFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RsqrtGradient,
     BinaryElementwiseOp<
@@ -40,7 +38,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         RsqrtGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Rsqrt)
     .NumInputs(1)
     .NumOutputs(1)
@@ -50,7 +47,6 @@ OPERATOR_SCHEMA(Rsqrt)
     .Input(0, "X", "ND input tensor")
     .Output(0, "Y", "ND output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RsqrtGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -72,7 +68,6 @@ class GetRsqrtGradient final : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Rsqrt, GetRsqrtGradient);
 
 } // namespace caffe2

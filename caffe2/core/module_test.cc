@@ -8,7 +8,6 @@
 
 // An explicitly defined module, testing correctness when we statically link a
 // module
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_MODULE(caffe2_module_test_static, "Static module for testing.");
 
 namespace caffe2 {
@@ -24,13 +23,10 @@ class Caffe2ModuleTestStaticDummyOp : public OperatorBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
   Caffe2ModuleTestStaticDummy, Caffe2ModuleTestStaticDummyOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Caffe2ModuleTestStaticDummy);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleTest, StaticModule) {
   const string name = "caffe2_module_test_static";
   const auto& modules = CurrentModules();
@@ -53,7 +49,6 @@ TEST(ModuleTest, StaticModule) {
 }
 
 #ifdef CAFFE2_BUILD_SHARED_LIBS
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleTest, DynamicModule) {
   const string name = "caffe2_module_test_dynamic";
   const auto& modules = CurrentModules();

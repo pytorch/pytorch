@@ -101,8 +101,11 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   // Windows always little endian
   #define __BYTE_ORDER __LITTLE_ENDIAN
 
+  #if !defined(_M_ARM64)
   // intrinsics / prefetching
   #include <xmmintrin.h>
+  #endif
+
   #ifdef __MINGW32__
     #define PREFETCH(location) __builtin_prefetch(location)
   #else
@@ -127,12 +130,12 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
     #endif
 #elif defined(__ARMEB__)
   #define __BYTE_ORDER __BIG_ENDIAN
-#elif defined(__BYTE_ORDER__)
-  #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-      #define __BYTE_ORDER __BIG_ENDIAN
-  #else
-      #define __BYTE_ORDER __LITTLE_ENDIAN
-  #endif
+#elif (defined(__BYTE_ORDER__) and !defined(__BYTE_ORDER))
+    #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        #define __BYTE_ORDER __BIG_ENDIAN
+    #else
+        #define __BYTE_ORDER __LITTLE_ENDIAN
+    #endif
 #else
   // defines __BYTE_ORDER as __LITTLE_ENDIAN or __BIG_ENDIAN
   #include <sys/param.h>

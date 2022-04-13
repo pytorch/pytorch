@@ -1,13 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <THC/THCGeneral.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/eye_native.h>
+#include <ATen/ops/tril_indices_native.h>
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_indices_native.h>
+#include <ATen/ops/triu_native.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -37,38 +52,28 @@ Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
 }
 
 Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  AT_ASSERT(device_or_default(device_opt).is_cuda());
-  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
-  check_size_nonnegative(size);
-
-  auto* allocator = at::cuda::getCUDADeviceAllocator();
-  int64_t nelements = c10::multiply_integers(size);
-  auto dtype = dtype_or_default(dtype_opt);
-  auto dtype_meta = scalarTypeToTypeMeta(dtype);
-  int64_t size_bytes = nelements * dtype_meta.itemsize();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      size_bytes,
-      allocator->allocate(size_bytes),
-      allocator,
-      /*resizeable=*/true);
-
-  auto tensor =
-      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype_meta);
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-
-  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-  return tensor;
+  return at::detail::empty_cuda(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
+Tensor _efficientzerotensor_cuda(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    auto device_ = device_or_default(device);
+    if (!device_.has_index()) {
+      device_.set_index(at::cuda::current_device());
+    }
+    auto allocator = at::native::ZeroTensorAllocator(device_);
+    auto dtype_ = dtype_or_default(dtype);
+    auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CUDA) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    return out;
+}
+
+
 Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  auto t = at::native::empty_cuda({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  return at::detail::empty_strided_cuda(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,7 +229,7 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_1(512)
 #endif
 void tril_indices_kernel(scalar_t * tensor,

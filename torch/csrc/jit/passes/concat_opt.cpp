@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch {
 namespace jit {
@@ -32,32 +34,20 @@ bool equal(at::ArrayRef<Value*> list1, at::ArrayRef<Value*> list2) {
       std::equal(list1.begin(), list1.end(), list2.begin());
 }
 
-// TODO: Use the function `isDominatedBy` in Node class once
-// https://github.com/pytorch/pytorch/pull/56437 lands.
-bool isDominatedBy(Node* node, Node* dominator) {
-  while (node) {
-    if (node->owningBlock() == dominator->owningBlock()) {
-      return dominator->isBefore(node);
-    }
-    node = node->owningBlock()->owningNode();
-  }
-  return false;
-}
-
 class ConcatCommonInputsEliminator {
  public:
   explicit ConcatCommonInputsEliminator(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
-  void run() {
+  bool run() {
     handleBlock(graph_->block());
-    postprocess();
+    return postprocess();
   }
 
  private:
   void handleBlock(Block* block) {
     for (auto node : block->nodes()) {
-      if (node->kind() == aten::cat) {
+      if (node->kind() == prim::VarConcat) {
         handleCat(node);
       }
       for (Block* block : node->blocks()) {
@@ -69,19 +59,10 @@ class ConcatCommonInputsEliminator {
   void handleCat(Node* node) {
     GRAPH_DEBUG("Considering cat node for CSE opt: ", node);
 
-    // Do not optimize cat nodes whose inputs are mutated in the graph.
-    // TODO: Improve this by checking if it is mutated in the graph region
-    // where this optimization is applied.
-    if (getOrCreateAliasDb()->hasWriters(node->input(0))) {
-      return;
-    }
-
-    // cat ops are of the following form:
-    //   %inputs = prim::ListConstruct(%inp1, %inp2, %inp3)
-    //   %concat = aten::cat(%inputs, %concat_dim)
-
-    auto curr_list = node->input(0)->node();
-    auto curr_inputs = curr_list->inputs();
+    auto curr_all_inputs = node->inputs();
+    auto curr_tensor_inputs =
+        curr_all_inputs.slice(0, curr_all_inputs.size() - 1);
+    auto curr_dim = curr_all_inputs.back();
 
     // Save the input list and the current cat node, so that this can be
     // used for subsequent cat nodes, unless there are writes to this cat
@@ -90,11 +71,13 @@ class ConcatCommonInputsEliminator {
     // not perform such fine-grained analysis. So, if there are any writes to
     // the output, we do not use this cat node for optimization here.
     if (!getOrCreateAliasDb()->hasWriters(node->output())) {
-      concated_lists_[curr_list] = node;
+      concated_outputs_.insert(node);
     }
 
-    if (curr_inputs.size() <= 1) {
-      // No need for CSE
+    if (curr_tensor_inputs.size() <= 2) {
+      // The case when concat has 2 input tensors could only be optimized if
+      // there is another concat of the exact same 2 input tensors. That case
+      // is expected to be handled by the CSE pass.
       return;
     }
 
@@ -102,37 +85,41 @@ class ConcatCommonInputsEliminator {
     // the previous cat ops.
     //
     // Example:
-    //    %10 = prim::ListConstruct(%0, %1)
-    //    %11 = aten::cat(%10, ...)
+    //    %11 = prim::VarConcat(%0, %1, <dim>)
     //    ...
-    //    %12 = prim::ListConstruct(%0, %1, %2)  // first 2 inputs same as %11
-    //    %13 = aten::cat(%12, ...)
+    //    %13 = prim::VarConcat(%0, %1, %2, <dim>) // first 2 inputs same as %11
     //    ...
     //        = %13 ... // Use %13
     //
     // After CSE opt:
-    //    %10 = prim::ListConstruct(%0, %1)
-    //    %11 = aten::cat(%10, ...)
+    //    %11 = prim::VarConcat(%0, %1, <dim>)
     //    ...
-    //    %12 = prim::ListConstruct(%11, %2) // Replace first 2 inputs with %11
-    //    %13 = aten::cat(%12, ...)
+    //    %14 = prim::VarConcat(%11, %2, <dim>) // Replace first 2 inputs
+    //                                          // with %11
     //    ...
-    //        = %13 ... // Use %13
-    auto curr_inputs_prefix = curr_inputs.slice(0, curr_inputs.size() - 1);
-    for (const auto& it : concated_lists_) {
-      if (equal(curr_inputs_prefix, it.first->inputs())) {
-        if (!isDominatedBy(curr_list, it.first)) {
-          // We can't use the previous concatenated list if it does not
-          // dominate the current list.
+    //        = %14 ... // Replace use of %13 with %14
+
+    auto curr_tensor_inputs_prefix =
+        curr_tensor_inputs.slice(0, curr_tensor_inputs.size() - 1);
+    for (const auto& prev : concated_outputs_) {
+      auto prev_all_inputs = prev->inputs();
+      auto prev_tensor_inputs =
+          prev_all_inputs.slice(0, prev_all_inputs.size() - 1);
+      auto prev_dim = prev_all_inputs.back();
+      if (equal(curr_tensor_inputs_prefix, prev_tensor_inputs) &&
+          curr_dim == prev_dim) {
+        if (!node->isDominatedBy(prev)) {
+          // We can't use the previous concatenated output if it does not
+          // dominate the current concat node.
           continue;
         }
 
-        std::vector<Value*> new_list_values = {
-            it.second->output(), curr_inputs.back()};
-        auto curr_list_type = curr_list->output()->type()->expect<ListType>();
-        auto new_list_node = node->owningGraph()->createList(
-            curr_list_type->getElementType(), new_list_values);
-        lists_to_replace_[curr_list] = new_list_node;
+        std::vector<Value*> new_inputs = {
+            prev->output(), curr_tensor_inputs.back(), curr_dim};
+        auto new_concat =
+            node->owningGraph()->create(prim::VarConcat, new_inputs);
+        new_concat->output()->setType(node->output()->type());
+        concats_to_replace_[node] = new_concat;
         return;
       }
     }
@@ -157,20 +144,27 @@ class ConcatCommonInputsEliminator {
     //    %13 = aten::cat(%12, ...)
     //    ...
     //        = %13 ... // Use %13
-    auto curr_inputs_suffix = curr_inputs.slice(1, curr_inputs.size() - 1);
-    for (const auto& it : concated_lists_) {
-      if (equal(curr_inputs_suffix, it.first->inputs())) {
-        if (!isDominatedBy(curr_list, it.first)) {
+    auto curr_tensor_inputs_suffix =
+        curr_tensor_inputs.slice(1, curr_tensor_inputs.size() - 1);
+    for (const auto& prev : concated_outputs_) {
+      auto prev_all_inputs = prev->inputs();
+      auto prev_tensor_inputs =
+          prev_all_inputs.slice(0, prev_all_inputs.size() - 1);
+      auto prev_dim = prev_all_inputs.back();
+      if (equal(curr_tensor_inputs_suffix, prev_tensor_inputs) &&
+          curr_dim == prev_dim) {
+        if (!node->isDominatedBy(prev)) {
           // We can't use the previous concatenated list if it does not
           // dominate the current list.
           continue;
         }
 
-        std::vector<Value*> new_list_values = {
-            curr_inputs.front(), it.second->output()};
-        auto new_list_node =
-            node->owningGraph()->createList(TensorType::get(), new_list_values);
-        lists_to_replace_[curr_list] = new_list_node;
+        std::vector<Value*> new_inputs = {
+            curr_tensor_inputs.front(), prev->output(), curr_dim};
+        auto new_concat =
+            node->owningGraph()->create(prim::VarConcat, new_inputs);
+        new_concat->output()->setType(node->output()->type());
+        concats_to_replace_[node] = new_concat;
         return;
       }
     }
@@ -180,9 +174,10 @@ class ConcatCommonInputsEliminator {
     // TODO.
   }
 
-  void postprocess() {
+  bool postprocess() {
     // Replace the list nodes that have been marked.
-    for (auto it : lists_to_replace_) {
+    bool changed = false;
+    for (auto it : concats_to_replace_) {
       auto curr_node = it.first;
       auto new_node = it.second;
       GRAPH_UPDATE("Inserting\n", *new_node, "before\n", *curr_node);
@@ -191,15 +186,9 @@ class ConcatCommonInputsEliminator {
       curr_node->output()->replaceAllUsesWith(new_node->output());
       GRAPH_UPDATE("Deleting\n", *curr_node);
       curr_node->destroy();
+      changed = true;
     }
-    // Remove redundant cats.
-    for (auto it : redundant_cats_) {
-      auto curr_node = it.first;
-      auto new_node = it.second;
-      GRAPH_UPDATE("Replacing uses of\n", *curr_node, "with\n", *new_node);
-      curr_node->output()->replaceAllUsesWith(new_node->output());
-      removeCatNodeFromGraph(curr_node);
-    }
+    return changed;
   }
 
   AliasDb* getOrCreateAliasDb() {
@@ -212,10 +201,22 @@ class ConcatCommonInputsEliminator {
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 
-  std::unordered_map<Node*, Node*> concated_lists_;
-  std::unordered_map<Node*, Node*> lists_to_replace_;
-  std::unordered_map<Node*, Node*> redundant_cats_;
+  std::unordered_set<Node*> concated_outputs_;
+  std::unordered_map<Node*, Node*> concats_to_replace_;
 };
+
+} // namespace
+
+bool EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("Before eliminating Concat common inputs", graph);
+  bool changed = ConcatCommonInputsEliminator(graph).run();
+  if (changed) {
+    GRAPH_DUMP("After eliminating Concat common inputs", graph);
+  }
+  return changed;
+}
+
+namespace {
 
 class ConcatExpander {
  public:
@@ -335,6 +336,7 @@ class ConcatExpander {
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type);
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type->dim());
       auto cat_inp_tensortype_sizes = cat_inp_tensor_type->sizes();
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int end_idx = start_idx + *cat_inp_tensortype_sizes[cat_dim_value];
       auto end = graph_->insertConstant(end_idx);
 
@@ -491,23 +493,206 @@ class ConcatExpander {
 
 } // namespace
 
-void EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph) {
-  ConcatCommonInputsEliminator(graph).run();
-  GRAPH_DUMP("After eliminating Concat common inputs", graph);
-}
-
 void ExpandConcatAndEliminateRedundancy(const std::shared_ptr<Graph>& graph) {
   ConcatExpander(graph).run();
   GRAPH_DUMP("After expanding Concat and eliminating redundancy", graph);
 }
 
-void OptimizeConcat(const std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before ConcatOpt", graph);
-  EliminateConcatCommonInputs(graph);
-  ExpandConcatAndEliminateRedundancy(graph);
-  ConstantPooling(graph);
-  EliminateDeadCode(graph);
-  GRAPH_DUMP("After ConcatOpt", graph);
+namespace {
+
+size_t determineUsageIdx(Value* value, Node* user) {
+  const auto idx =
+      std::find(user->inputs().begin(), user->inputs().end(), value) -
+      user->inputs().begin();
+  TORCH_CHECK(idx != user->inputs().size());
+  return idx;
+}
+
+std::vector<Value*> getConcatInputs(Node* concat) {
+  TORCH_CHECK(concat->kind() == aten::cat);
+  auto* list = concat->input(0);
+  auto* list_construct = list->node();
+  TORCH_CHECK(list_construct->kind() == prim::ListConstruct);
+  return list_construct->inputs().vec();
+}
+
+class ConcatCombiner {
+ public:
+  explicit ConcatCombiner(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)), aliasDb_(graph_) {}
+
+  bool run() {
+    collectOptimizableConcats();
+    bool changed = combineConcats();
+    if (changed) {
+      EliminateDeadCode(graph_);
+    }
+    return changed;
+  }
+
+ private:
+  // Given a concat node, see if it can be optimized with another.
+  // If so, add a CombinablePair to combinable_concats_.
+  void handleConcat(Node* node) {
+    auto* list = node->input(0);
+    auto* list_node = list->node();
+
+    const auto dim_opt = toIValue(node->input(1));
+    // We need to be able to determine dim statically to match it with another
+    // concat.
+    if (!dim_opt || !dim_opt->isInt()) {
+      return;
+    }
+    const auto dim = dim_opt->toInt();
+
+    // Check that the input of this node is an unmodified list construct
+    if (list_node->kind() != prim::ListConstruct ||
+        !aliasDb_.couldMoveBeforeTopologically(list_node, node)) {
+      return;
+    }
+
+    // Check that the only output of this node is used in an unmodified list
+    // construct.
+    const auto& concat_uses = node->output()->uses();
+    if (concat_uses.size() != 1) {
+      return;
+    }
+
+    auto* next_list = concat_uses[0].user;
+    if (next_list->kind() != prim::ListConstruct) {
+      return;
+    }
+
+    const auto& next_list_uses = next_list->output()->uses();
+    if (next_list_uses.size() != 1) {
+      return;
+    }
+
+    auto* next_concat = next_list_uses[0].user;
+
+    if (next_concat->kind() == aten::cat) {
+      // Dimension must be determined statically and match the one we've already
+      // seen.
+      const auto next_dim_opt = toIValue(next_concat->input(1));
+      if (!next_dim_opt || next_dim_opt->toInt() != dim) {
+        return;
+      }
+      combinable_concats_.emplace_back(
+          node, next_concat, determineUsageIdx(node->output(), next_list));
+    }
+  }
+
+  void collectOptimizableConcats() {
+    DepthFirstGraphNodeIterator graph_it(graph_);
+    for (auto* node = graph_it.next(); node != nullptr;
+         node = graph_it.next()) {
+      if (node->kind() == aten::cat) {
+        handleConcat(node);
+      }
+    }
+  }
+
+  Node* createListConstruct(const std::deque<Value*>& inputs) {
+    auto* output = graph_->create(prim::ListConstruct);
+    for (auto* v : inputs) {
+      output->addInput(v);
+    }
+    return output;
+  }
+
+  using ListConstructInputs = std::shared_ptr<std::deque<Value*>>;
+  // Construct a map (concat node) -> (new list inputs for this node).
+  // std::deque is used so we can do O(1) insertions to the front.
+  std::unordered_map<Node*, ListConstructInputs> getListConstructInputs() {
+    std::unordered_map<Node*, ListConstructInputs> cur_list_construct_inputs;
+    for (const auto& combinable : combinable_concats_) {
+      // Combine the list inputs of first_concat with those of second_concat
+      const auto& inputs_to_add = getConcatInputs(combinable.second_concat);
+
+      auto it = cur_list_construct_inputs.find(combinable.first_concat);
+      std::shared_ptr<std::deque<Value*>> cur_list;
+      if (it != cur_list_construct_inputs.end()) {
+        cur_list = it->second;
+        // We're moving all inputs to second_concat.
+        cur_list_construct_inputs.erase(combinable.first_concat);
+      } else {
+        cur_list = std::make_shared<std::deque<Value*>>();
+      }
+      cur_list_construct_inputs.emplace(combinable.second_concat, cur_list);
+
+      // If cur_list is not empty, it's guaranteed to already contain all of
+      // first_concat's inputs.
+      if (cur_list->empty()) {
+        const auto& starting_values = getConcatInputs(combinable.first_concat);
+        cur_list->insert(
+            cur_list->end(), starting_values.begin(), starting_values.end());
+      }
+
+      cur_list->insert(
+          cur_list->begin(),
+          inputs_to_add.begin(),
+          inputs_to_add.begin() + combinable.idx);
+
+      cur_list->insert(
+          cur_list->end(),
+          inputs_to_add.begin() + combinable.idx + 1,
+          inputs_to_add.end());
+    }
+    return cur_list_construct_inputs;
+  }
+
+  bool combineConcats() {
+    if (combinable_concats_.empty()) {
+      return false;
+    }
+
+    auto list_construct_inputs = getListConstructInputs();
+
+    for (const auto& node_and_new_list : list_construct_inputs) {
+      auto* node = node_and_new_list.first;
+      auto& inputs = node_and_new_list.second;
+
+      auto* new_list_construct = createListConstruct(*inputs);
+      auto* old_list_construct = node->input(0)->node();
+      new_list_construct->output()->setType(
+          old_list_construct->output()->type());
+      new_list_construct->insertBefore(node);
+      old_list_construct->replaceAllUsesWith(new_list_construct);
+    }
+    return true;
+  }
+
+  // Represents an optimizable pair of concat nodes.
+  // - first_concat must appear before second_concat
+  // - idx is the index where first_concat's inputs must be inserted into
+  //   second_concat's new inputs.
+  // Example:
+  //    %inputs.1 = prim::ListConstruct(%0, %0)
+  //    %concat.1 = aten::cat(%inputs.1, %dim)
+  //    %inputs.2 = prim::ListConstruct(%1, %concat.1, %1)
+  //    %concat.2 = aten::cat(%inputs.2, %dim)
+  // -> first_concat = &concat.1, second_concat = &concat.2, idx = 1
+  struct CombinableConcat {
+    CombinableConcat(Node* a, Node* b, size_t i)
+        : first_concat(a), second_concat(b), idx(i) {}
+
+    Node* first_concat;
+    Node* second_concat;
+    size_t idx;
+  };
+
+  std::vector<CombinableConcat> combinable_concats_;
+
+  std::shared_ptr<Graph> graph_;
+  AliasDb aliasDb_;
+};
+
+} // namespace
+
+bool CombineConcats(const std::shared_ptr<Graph>& graph) {
+  bool changed = ConcatCombiner(graph).run();
+  GRAPH_DUMP("After combining concats", graph);
+  return changed;
 }
 
 } // namespace jit

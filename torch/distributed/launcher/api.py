@@ -8,14 +8,14 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union, cast, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
-from torch.distributed.elastic.agent.server.api import WorkerSpec, WorkerState  # type: ignore[import]
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent  # type: ignore[import]
-from torch.distributed.elastic.multiprocessing import Std
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
+from torch.distributed.elastic.agent.server.api import WorkerSpec
+from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
+from torch.distributed.elastic.multiprocessing import SignalException, Std
+from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
@@ -27,33 +27,44 @@ logger = get_logger()
 @dataclass
 class LaunchConfig:
     """
-    min_nodes: Minimum amount of nodes that the user function will
-                     be launched on. Elastic agent ensures that the user
-                     function start only when the min_nodes amount enters
-                     the rendezvous.
-    max_nodes: Maximum amount of nodes that the user function
-                     will be launched on.
-    nproc_per_node: On each node the elastic agent will launch
-                          this amount of workers that will execute user
-                          defined function.
-    rdzv_backend: rdzv_backend to use in the rendezvous (zeus-adapter, etcd).
-    rdzv_endpoint: The endpoint of the rdzv sync. storage.
-    rdzv_id: The unique run id of the job (if not passed a unique one will be
-             deduced from run environment - flow workflow id in flow - or auto generated).
-    role: User defined role of the worker (defaults to "trainer").
-    max_restarts: The maximum amount of restarts that elastic agent will conduct
-                  on workers before failure.
-    monitor_interval: The interval in seconds that is used by the elastic_agent
-                      as a period of monitoring workers.
-    start_method: The method is used by the elastic agent to start the
-                  workers (spawn, fork, forkserver).
-    log_dir: base log directory where log files are written. If not set,
-             one is created in a tmp dir but NOT removed on exit.
-    redirects: configuration to redirect stdout/stderr to log files.
-               Pass a single ``Std`` enum to redirect all workers,
-               or a mapping keyed by local_rank to selectively redirect.
-    tee: configuration to "tee" stdout/stderr to console + log file.
-    metrics_cfg: configuration to initialize metrics.
+    Creates a rendezvous config.
+
+    Args:
+        min_nodes: Minimum amount of nodes that the user function will
+                        be launched on. Elastic agent ensures that the user
+                        function start only when the min_nodes amount enters
+                        the rendezvous.
+        max_nodes: Maximum amount of nodes that the user function
+                        will be launched on.
+        nproc_per_node: On each node the elastic agent will launch
+                            this amount of workers that will execute user
+                            defined function.
+        rdzv_backend: rdzv_backend to use in the rendezvous (zeus-adapter, etcd).
+        rdzv_endpoint: The endpoint of the rdzv sync. storage.
+        rdzv_configs: Key, value pair that specifies rendezvous specific configuration.
+        rdzv_timeout: Legacy argument that specifies timeout for the rendezvous. It is going
+            to be removed in future versions, see the note below. The default timeout is 900 seconds.
+        run_id: The unique run id of the job (if not passed a unique one will be
+                deduced from run environment - flow workflow id in flow - or auto generated).
+        role: User defined role of the worker (defaults to "trainer").
+        max_restarts: The maximum amount of restarts that elastic agent will conduct
+                    on workers before failure.
+        monitor_interval: The interval in seconds that is used by the elastic_agent
+                        as a period of monitoring workers.
+        start_method: The method is used by the elastic agent to start the
+                    workers (spawn, fork, forkserver).
+        log_dir: base log directory where log files are written. If not set,
+                one is created in a tmp dir but NOT removed on exit.
+        redirects: configuration to redirect stdout/stderr to log files.
+                Pass a single ``Std`` enum to redirect all workers,
+                or a mapping keyed by local_rank to selectively redirect.
+        tee: configuration to "tee" stdout/stderr to console + log file.
+        metrics_cfg: configuration to initialize metrics.
+
+    ..note:
+        `rdzv_timeout` is a legacy argument that will be removed in future.
+        Set the timeout via `rdzv_configs['timeout']`
+
     """
 
     min_nodes: int
@@ -64,7 +75,7 @@ class LaunchConfig:
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
     rdzv_configs: Dict[str, Any] = field(default_factory=dict)
-    rdzv_timeout: int = 900
+    rdzv_timeout: int = -1
     max_restarts: int = 3
     monitor_interval: float = 30
     start_method: str = "spawn"
@@ -74,7 +85,11 @@ class LaunchConfig:
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.rdzv_configs["timeout"] = self.rdzv_timeout
+        default_timeout = 900
+        if self.rdzv_timeout != -1:
+            self.rdzv_configs["timeout"] = self.rdzv_timeout
+        elif "timeout" not in self.rdzv_configs:
+            self.rdzv_configs["timeout"] = default_timeout
 
 
 class elastic_launch:
@@ -114,19 +129,6 @@ class elastic_launch:
 
     def __call__(self, *args):
         return launch_agent(self._config, self._entrypoint, list(args))
-
-
-def _construct_event(config: LaunchConfig) -> events.Event:
-    metadata = {
-        "rdzv_backend": config.rdzv_backend,
-        "run_id": config.run_id,
-        "role": config.role,
-    }
-    return events.Event(
-        name="torch.distributed.elastic.launch_agent",
-        source=events.EventSource.AGENT,
-        metadata=cast(Dict[str, events.EventMetadataValue], metadata),
-    )
 
 
 def _get_entrypoint_name(
@@ -170,9 +172,6 @@ def _get_addr_and_port(
     return (master_addr, master_port)
 
 
-# pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-# torch.distributed.elastic.multiprocessing.errors.record.
-@record
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
@@ -180,7 +179,7 @@ def launch_agent(
 ) -> Dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
-        logger.warning(f"config has no run_id, generate a new one: {run_id}")
+        logger.warning(f"config has no run_id, generated a random run_id: {run_id}")
         config.run_id = run_id
 
     entrypoint_name = _get_entrypoint_name(entrypoint, args)
@@ -210,33 +209,34 @@ def launch_agent(
         **config.rdzv_configs,
     )
 
-    agent = None
-    rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_parameters)
     master_addr, master_port = _get_addr_and_port(rdzv_parameters)
+
+    spec = WorkerSpec(
+        role=config.role,
+        local_world_size=config.nproc_per_node,
+        entrypoint=entrypoint,
+        args=tuple(args),
+        rdzv_handler=rdzv_registry.get_rendezvous_handler(rdzv_parameters),
+        max_restarts=config.max_restarts,
+        monitor_interval=config.monitor_interval,
+        redirects=config.redirects,
+        tee=config.tee,
+        master_addr=master_addr,
+        master_port=master_port,
+    )
+
+    agent = LocalElasticAgent(
+        spec=spec, start_method=config.start_method, log_dir=config.log_dir
+    )
+
+    shutdown_rdzv = True
     try:
-        spec = WorkerSpec(
-            role=config.role,
-            local_world_size=config.nproc_per_node,
-            entrypoint=entrypoint,
-            args=tuple(args),
-            rdzv_handler=rdzv_handler,
-            max_restarts=config.max_restarts,
-            monitor_interval=config.monitor_interval,
-            redirects=config.redirects,
-            tee=config.tee,
-            master_addr=master_addr,
-            master_port=master_port,
-        )
-
-        cfg = metrics.MetricsConfig(config.metrics_cfg) if config.metrics_cfg else None
-        metrics.initialize_metrics(cfg)
-
-        agent = LocalElasticAgent(
-            spec=spec, start_method=config.start_method, log_dir=config.log_dir
-        )
+        metrics.initialize_metrics(metrics.MetricsConfig(config.metrics_cfg))
 
         result = agent.run()
-        events.record(agent.get_agent_status_event(WorkerState.SUCCEEDED))
+        # records that agent.run() has succeeded NOT that workers have succeeded
+        events.record(agent.get_event_succeeded())
+
         if result.is_failed():
             # ChildFailedError is treated specially by @record
             # if the error files for the failed children exist
@@ -246,15 +246,20 @@ def launch_agent(
                 name=entrypoint_name,
                 failures=result.failures,
             )
-        else:
-            return result.return_values
+
+        return result.return_values
     except ChildFailedError:
         raise
+    except SignalException:
+        # when the agent dies with a signal do NOT shutdown the rdzv_handler
+        # since this closes the rendezvous on this rdzv_id permanently and
+        # prevents any additional scaling events
+        shutdown_rdzv = False
+        events.record(agent.get_event_failed())
+        raise
     except Exception:
-        if agent:
-            events.record(agent.get_agent_status_event(WorkerState.FAILED))
-        else:
-            events.record(_construct_event(config))
+        events.record(agent.get_event_failed())
         raise
     finally:
-        rdzv_handler.shutdown()
+        if shutdown_rdzv:
+            spec.rdzv_handler.shutdown()

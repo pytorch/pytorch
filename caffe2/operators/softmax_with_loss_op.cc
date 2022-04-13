@@ -6,15 +6,12 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SoftmaxWithLoss, SoftmaxWithLossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SoftmaxWithLossGradient,
     SoftmaxWithLossGradientOp<float, CPUContext>);
 
 // Input: X (logits), T (labels); Output: P (probs), Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxWithLoss)
     .NumInputs(2, 3)
     .NumOutputs({2, 3})
@@ -160,7 +157,6 @@ avgloss: 10.667433
     .Output(1, "loss", "*(type: float)* Averaged cross-entropy loss output.");
 
 // Input: X, T, P, dY; Output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxWithLossGradient).NumOutputs(1);
 
 #define DONT_CARE (-1)
@@ -399,7 +395,6 @@ class GetSoftmaxWithLossGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SoftmaxWithLoss, GetSoftmaxWithLossGradient);
 } // namespace
 } // namespace caffe2

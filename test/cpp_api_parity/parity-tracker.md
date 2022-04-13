@@ -37,6 +37,7 @@ torch::nn::AdaptiveAvgPool2d|Yes|No
 torch::nn::AdaptiveAvgPool3d|Yes|No
 torch::nn::ReflectionPad1d|Yes|No
 torch::nn::ReflectionPad2d|Yes|No
+torch::nn::ReflectionPad3d|Yes|No
 torch::nn::ReplicationPad1d|Yes|No
 torch::nn::ReplicationPad2d|Yes|No
 torch::nn::ReplicationPad3d|Yes|No
@@ -98,6 +99,7 @@ torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
 torch::nn::Flatten|Yes|No
+torch::nn::Unflatten|Yes|No
 torch::nn::Dropout|Yes|No
 torch::nn::Dropout2d|Yes|No
 torch::nn::Dropout3d|Yes|No

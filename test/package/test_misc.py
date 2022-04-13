@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: package/deploy"]
+
 import inspect
+import platform
 from io import BytesIO
+from pathlib import Path
 from textwrap import dedent
+from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
-from torch.testing._internal.common_utils import run_tests
+from torch.package.package_exporter import PackagingError
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from .common import PackageTestCase
@@ -28,6 +34,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── python_version
                 │   └── version
                 ├── main
                 │   └── main
@@ -51,6 +58,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── python_version
                 │   └── version
                 ├── main
                 │   └── main
@@ -63,7 +71,7 @@ class TestMisc(PackageTestCase):
             """
         )
 
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import module_a
             import package_a
             import package_a.subpackage
@@ -96,12 +104,42 @@ class TestMisc(PackageTestCase):
             import_exclude,
         )
 
+    def test_python_version(self):
+        """
+        Tests that the current python version is stored in the package and is available
+        via PackageImporter's python_version() method.
+        """
+        buffer = BytesIO()
+
+        with PackageExporter(buffer) as he:
+            from package_a.test_module import SimpleTest
+
+            he.intern("**")
+            obj = SimpleTest()
+            he.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+
+        self.assertEqual(hi.python_version(), platform.python_version())
+
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
+    def test_load_python_version_from_package(self):
+        """Tests loading a package with a python version embdded"""
+        importer1 = PackageImporter(
+            f"{Path(__file__).parent}/package_e/test_nn_module.pt"
+        )
+        self.assertEqual(importer1.python_version(), "3.9.7")
+
     def test_file_structure_has_file(self):
         """
         Test Directory's has_file() method.
         """
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import package_a.subpackage
 
             he.intern("**")
@@ -115,6 +153,34 @@ class TestMisc(PackageTestCase):
         self.assertTrue(file_structure.has_file("package_a/subpackage.py"))
         self.assertFalse(file_structure.has_file("package_a/subpackage"))
 
+    def test_exporter_content_lists(self):
+        """
+        Test content list API for PackageExporter's contained modules.
+        """
+
+        with PackageExporter(BytesIO()) as he:
+            import package_b
+
+            he.extern("package_b.subpackage_1")
+            he.mock("package_b.subpackage_2")
+            he.intern("**")
+            he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+            self.assertEqual(he.externed_modules(), ["package_b.subpackage_1"])
+            self.assertEqual(he.mocked_modules(), ["package_b.subpackage_2"])
+            self.assertEqual(
+                he.interned_modules(),
+                ["package_b", "package_b.subpackage_0.subsubpackage_0"],
+            )
+            self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
+
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(BytesIO()) as he:
+                import package_b
+
+                he.deny("package_b")
+                he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+                self.assertEqual(he.denied_modules(), ["package_b"])
+
     def test_is_from_package(self):
         """is_from_package should work for objects and modules"""
         import package_a.subpackage
@@ -122,7 +188,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -144,7 +210,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -168,7 +234,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -187,7 +253,7 @@ class TestMisc(PackageTestCase):
 
         buffer = BytesIO()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_module(mod.__name__)
 
@@ -196,6 +262,26 @@ class TestMisc(PackageTestCase):
         imported_mod = pi.import_module(mod.__name__)
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
+
+    def test_std_lib_sys_hackery_checks(self):
+        """
+        The standard library performs sys.module assignment hackery which
+        causes modules who do this hackery to fail on import. See
+        https://github.com/pytorch/pytorch/issues/57490 for more information.
+        """
+        import package_a.std_sys_module_hacks
+
+        buffer = BytesIO()
+        mod = package_a.std_sys_module_hacks.Module()
+
+        with PackageExporter(buffer) as pe:
+            pe.intern("**")
+            pe.save_pickle("obj", "obj.pkl", mod)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        mod = pi.load_pickle("obj", "obj.pkl")
+        mod()
 
 
 if __name__ == "__main__":

@@ -44,10 +44,19 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *key, *hook;
-  Py_ssize_t pos = 0;
-  while (PyDict_Next(dict, &pos, &key, &hook)) {
+  // Note: [Extend Hook Lifetime]
+  // Hold a reference to hooks till we iterate over them.
+  // This is to handle the case when hook calls `handle.remove` inside it
+  // and it's refcount goes to `0`, Python is free to GC it.
+  // We hold onto a stale pointer and subsequent call to
+  // `check_single_result`, which tries to fetch the `hook`'s name segfaults.
+  // So, we use `PyDict_Values` which returns a new reference to the values
+  // i.e. we hold the reference to the hooks till we have iterated over them.
+  // Reference: https://github.com/pytorch/pytorch/issues/58354
+  auto hooks = THPObjectPtr{PyDict_Values(dict)};
+  const auto len = PyList_Size(hooks);
+  for (Py_ssize_t idx = 0; idx < len; ++idx) {
+    const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
@@ -81,10 +90,11 @@ auto PyFunctionPostHook::operator()(
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *key, *hook;
-  Py_ssize_t pos = 0;
-  while (PyDict_Next(dict, &pos, &key, &hook)) {
+  // See Note: [Extend Hook Lifetime]
+  auto hooks = THPObjectPtr{PyDict_Values(dict)};
+  const auto len = PyList_Size(hooks);
+  for (Py_ssize_t idx = 0; idx < len; ++idx) {
+    const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(
         hook, outputs.get(), inputs.get(), nullptr));
     if (!res) throw python_error();
@@ -104,7 +114,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(num_vars));
   if (!tuple) throw python_error();
-  for (size_t i = 0; i < num_vars; ++i) {
+  for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
     if (!var) throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
@@ -148,7 +158,7 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
     throw std::runtime_error(ss.str());
   }
 
-  for (auto i = 0; i < prev_size; i++) {
+  for (const auto i : c10::irange(prev_size)) {
     check_single_result(PyTuple_GET_ITEM(prev, i), PyTuple_GET_ITEM(result, i), hook);
   }
 }

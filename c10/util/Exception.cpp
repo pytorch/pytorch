@@ -140,11 +140,9 @@ class ThreadWarningHandler {
   }
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local WarningHandler* warning_handler_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 } // namespace
@@ -178,7 +176,6 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {
@@ -187,6 +184,15 @@ void set_warnAlways(bool setting) noexcept(true) {
 
 bool get_warnAlways() noexcept(true) {
   return warn_always;
+}
+
+WarnAlways::WarnAlways(bool setting /*=true*/)
+    : prev_setting(get_warnAlways()) {
+  set_warnAlways(setting);
+}
+
+WarnAlways::~WarnAlways() {
+  set_warnAlways(prev_setting);
 }
 
 } // namespace Warning

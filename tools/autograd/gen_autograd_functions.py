@@ -11,11 +11,12 @@ from typing import List, Sequence, Tuple
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, uses_retain_variables,
                                         uses_single_grad)
-from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, intT,
+from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, longT,
                                      doubleT, scalarT, stringT, boolT, intArrayRefT,
-                                     tensorListT, MutRefCType, ListCType, ArrayRefCType)
+                                     tensorListT, MutRefCType, ListCType, ArrayRefCType,
+                                     optionalIntArrayRefT)
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import FileManager
+from tools.codegen.utils import FileManager
 from tools.codegen.model import Argument
 
 FUNCTION_DECLARATION = CodeTemplate("""\
@@ -107,6 +108,9 @@ static struct PyGetSetDef ${op}_properties[] = {
 PY_GETSETDEF_STRUCT = CodeTemplate("""\
 {(char*)"_saved_${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
 
+PY_RAW_GETSETDEF_STRUCT = CodeTemplate("""\
+{(char*)"_raw_saved_${name}", (getter)THP${op}_${name}_raw_getter, nullptr, nullptr, nullptr}""")
+
 # Getter templates
 GETTER_DEFINITION = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
@@ -126,8 +130,31 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 }
 """)
 
+GETTER_DEFINITION_RAW_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+""")
+
 GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name}_;
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+""")
+
+GETTER_DEFINITION_RAW_VEC_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -171,17 +198,31 @@ GETTER_BODY_SAVEDVAR = """\
 return THPVariable_Wrap(prop.unpack(self->cdata));
 """
 
+GETTER_BODY_RAW_SAVEDVAR = """\
+pybind11::object obj = pybind11::cast(prop, pybind11::return_value_policy::reference);
+return obj.release().ptr();
+"""
+
 GETTER_BODY_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i: c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack(self->cdata)));
+}
+return tup;
+"""
+
+GETTER_BODY_RAW_VEC_SAVEDVAR = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (auto i : c10::irange(prop.size())) {
+  pybind11::object obj = pybind11::cast(prop[i], pybind11::return_value_policy::reference);
+  PyTuple_SetItem(tup, (Py_ssize_t) i, obj.release().ptr());
 }
 return tup;
 """
 
 GETTER_BODY_ARRAYREF_LONG = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong((uint64_t) prop[i]));
 }
 return tup;
@@ -189,7 +230,7 @@ return tup;
 
 GETTER_BODY_ARRAYREF_DOUBLE = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
-for (int i = 0; i < prop.size(); i++) {
+for (auto i : c10::irange(prop.size())) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble((double) prop[i]));
 }
 return tup;
@@ -236,7 +277,7 @@ if (prop.isComplex()) {
 """
 
 MISC_GETTER_DEFS = {
-    OptionalCType(BaseCType(intT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
+    OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
     BaseCType(doubleT): (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
     OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
@@ -257,21 +298,6 @@ def gen_autograd_functions_lib(
     differentiability_infos: Sequence[DifferentiabilityInfo],
     template_path: str,
 ) -> None:
-    gen_autograd_functions(out, differentiability_infos, template_path, "Functions")
-
-def gen_autograd_functions_python(
-    out: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
-    template_path: str,
-) -> None:
-    gen_autograd_functions(out, differentiability_infos, template_path, "python_functions")
-
-def gen_autograd_functions(
-    out: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
-    template_path: str,
-    file_basename: str,
-) -> None:
     """Functions.h and Functions.cpp body
 
     These contain the auto-generated subclasses of torch::autograd::Node
@@ -282,9 +308,8 @@ def gen_autograd_functions(
     infos = list(filter(lambda info: info.args_with_derivatives, differentiability_infos))
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
-    py_function_initializers = list(map(lambda f: process_function(f, PY_FUNCTION_DEFINITION), infos))
-    py_function_props_and_getters = list(map(lambda f: process_function(f, PY_FUNCTION_PROPS_AND_GETTERS), infos))
 
+    file_basename = 'Functions'
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     for suffix in ['.h', '.cpp']:
         fname = file_basename + suffix
@@ -292,9 +317,43 @@ def gen_autograd_functions(
             'generated_comment': '@' + f'generated from {fm.template_dir}/' + fname,
             'autograd_function_declarations': declarations,
             'autograd_function_definitions': definitions,
-            'py_function_initializers': py_function_initializers,
-            'py_function_props_and_getters': py_function_props_and_getters
         })
+
+def gen_autograd_functions_python(
+    out: str,
+    differentiability_infos: Sequence[DifferentiabilityInfo],
+    template_path: str,
+) -> None:
+
+    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    num_shards = 5
+    fm.write('python_functions.h', lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/python_functions.h',
+        'shard_forward_declare': [
+            f"void initialize_autogenerated_functions_{i}();"
+            for i in range(num_shards)
+        ],
+        'shard_call': [
+            f"initialize_autogenerated_functions_{i}();"
+            for i in range(num_shards)
+        ]
+    })
+
+    infos = list(filter(lambda info: info.args_with_derivatives, differentiability_infos))
+    fm.write_sharded(
+        'python_functions.cpp',
+        infos,
+        key_fn=lambda info: info.name,
+        base_env={
+            'generated_comment': f'@generated from {fm.template_dir}/python_functions.cpp',
+        },
+        env_callable=lambda info: {
+            'py_function_initializers': [process_function(info, PY_FUNCTION_DEFINITION)],
+            'py_function_props_and_getters': [process_function(info, PY_FUNCTION_PROPS_AND_GETTERS)],
+        },
+        num_shards=num_shards,
+        sharded_keys={'py_function_initializers', 'py_function_props_and_getters'}
+    )
 
 def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str:
     saved_variables: List[str] = []
@@ -318,17 +377,20 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         name = var.nctype.name
         type = var.nctype.type
         should_append_getsetdef = True
+        should_append_raw_getsetdef = False
 
         if type == BaseCType(tensorT) or type == OptionalCType(BaseCType(tensorT)) or \
                 type == MutRefCType(OptionalCType(BaseCType(tensorT))) or \
                 (type == BaseCType(scalarT) and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
             release_variables.append(f'{name}_.reset_data();')
-            release_variables.append(f'{name}_.reset_grad_function();')
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_SAVEDVAR))
+            getter_definitions.append(GETTER_DEFINITION_RAW_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_RAW_SAVEDVAR))
+            should_append_raw_getsetdef = True
         elif type == BaseCType(tensorListT):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
@@ -340,6 +402,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
+            getter_definitions.append(GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR))
+            should_append_raw_getsetdef = True
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
@@ -351,9 +416,16 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
+            getter_definitions.append(GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR))
+            should_append_raw_getsetdef = True
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
+        elif type == BaseCType(optionalIntArrayRefT):
+            saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
+            getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
         elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
@@ -363,7 +435,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'c10::OptionalArray<double> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE))
-        elif type == BaseCType(intT):
+        elif type == BaseCType(longT):
             saved_variables.append(f'{type.cpp_type()} {name} = 0;')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_INT64_T))
@@ -389,6 +461,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
 
         if should_append_getsetdef:
             py_getsetdef_structs.append(PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
+        if should_append_raw_getsetdef:
+            py_getsetdef_structs.append(PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
 
     for var in info.all_saved_inputs:
         save_var(var, is_output=False)
@@ -410,7 +484,12 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     body: List[str] = []
 
     if uses_single_grad(info):
-        body.append('auto& grad = grads[0];')
+        body.append('const auto& grad = grads[0];')
+    else:
+        # Generate aliases for gradients named for returned values.
+        body.extend(
+            f'const auto& {name} = grads[{info.available_named_gradients.index(name)}];'
+            for name in info.used_named_gradients)
 
     def emit_derivative(
         derivative: Derivative,

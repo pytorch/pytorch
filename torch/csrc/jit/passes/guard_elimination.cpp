@@ -234,7 +234,7 @@ struct GuardElimination {
       if ((input->node()->kind() == prim::Guard &&
            !input->type()->expectRef<TensorType>().isSummarized()) ||
           input->node()->kind() == prim::Constant ||
-          (allow_numbers && input->type()->isSubtypeOf(NumberType::get())) ||
+          (allow_numbers && input->type()->isSubtypeOf(*NumberType::get())) ||
           except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
@@ -455,7 +455,6 @@ struct GuardElimination {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::unordered_set<Symbol> simple_ops_;
 };
 

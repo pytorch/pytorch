@@ -1,18 +1,66 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
+#include <ATen/code_template.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 
+#include <memory>
+#include <stack>
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace detail {
 namespace {
+
+/*
+ * This is the API via which backend's preprocess function will obtain debug
+ * handles corresponding to the nodes of the graph for the lowered methods of
+ * the module.
+ * Implementation: Given graph
+ * For each node of the graph, request debug handle via debug_info_recorder.
+ * debug_info_recorder returns the next debug handle and record node with
+ * corresponding debug info, such as source range and inlined callstack.
+ *
+ * Backend code for lowering module, preprocess, calls
+ * generate_debug_handles(graph)) which will return debug handles corresponding
+ * to the Node* of the said graph.
+ *
+ * In to_backend, after lowering, stopRecording is called on
+ * BackendModuleDebugInfoRecorder: It will extract debug map. This map gets
+ * stored as part of the lowered module.
+ * During serialization, specifically for bytecode serialization, check is made
+ * to see if the model being serialized has any lowered modules. If so
+ * corresponding debug map is extracted and serialized.
+ */
+
+NodeToDebugHandle generate_debug_handles(
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::shared_ptr<Graph>& graph) {
+  NodeToDebugHandle node_to_debug_handles;
+
+  std::stack<Block*> blocks_to_visit;
+  // TODO: Look into using DepthFirstGraphNodeIterator
+  // At the moment it takes non-const graph but maybe we can make it
+  // general such that it can work with both.
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      DebugHandleType debug_handle = debug_info_recorder.getNextDebugHandle(n);
+      node_to_debug_handles.emplace(n, debug_handle);
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  return node_to_debug_handles;
+}
+
 std::unordered_map<std::string, BackendPreprocessFunction>&
 backendPreprocessFunctions() {
   static std::unordered_map<std::string, BackendPreprocessFunction>
@@ -58,10 +106,17 @@ Module codegen_backend_module(
   // Clone orig_module to make sure backend transformation is
   // functional.
   auto cloned_module = orig_module.clone();
+  auto module_name = orig_module.type()->name()->qualifiedName();
 
   // Generate LoweredModule.
   Module loweredModule(
-      "torch.jit." + backend_name + "LoweredModule",
+      "torch.jit.LoweredModule." + backend_name + "." + module_name,
+      std::make_shared<CompilationUnit>(),
+      /*shouldMangle=*/true);
+
+  // Generate WrapperModule.
+  Module wrapper(
+      "torch.jit.LoweredWrapper." + backend_name + "." + module_name,
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
@@ -69,7 +124,6 @@ Module codegen_backend_module(
   // 2. Later call debug_info_recorder.stopRecording() to gather
   //    recorded debug info and save it in __backend_debug_info.
   BackendDebugInfoRecorder debug_info_recorder;
-  WithBackendDebugInfoRecorder recorder_context(&debug_info_recorder);
 
   // Generate attributes.
   // This is the preprocessed module.
@@ -77,11 +131,15 @@ Module codegen_backend_module(
   // the backend interface rather than as a separate function, we just pass
   // the cloned original Module.
 
+  BackendDebugHandleGenerator debug_handle_generator =
+      [&](const std::shared_ptr<Graph>& g) {
+        return generate_debug_handles(debug_info_recorder, g);
+      };
   loweredModule.register_attribute(
       "__processed_module",
       AnyType::get(),
       detail::getBackendPreprocessFunction(backend_name)(
-          cloned_module, method_compile_spec),
+          cloned_module, method_compile_spec, debug_handle_generator),
       /*is_param=*/false);
 
   // This is for the method_compile_spec passed in to to_<backend> or
@@ -113,11 +171,11 @@ Module codegen_backend_module(
 
   // This is a helper function for creating a new instance of the
   // backend class.
-  static const auto create_backend_ct = CodeTemplate(R"(
+  static const auto create_backend_ct = at::jit::CodeTemplate(R"(
             def __create_backend(self):
                 self.__backend = $name()
             )");
-  TemplateEnv create_backend_te;
+  at::jit::TemplateEnv create_backend_te;
   create_backend_te.s("name", qual_backend_name.qualifiedName());
   loweredModule.define(
       create_backend_ct.format(create_backend_te), loweredModuleResolver());
@@ -158,11 +216,11 @@ Module codegen_backend_module(
       "__backend_debug_info",
       OptionalType::create(debug_info_cls),
       IValue::make_capsule(backend_debug_info_class));
-  static const auto create_backend_debug_info_ct = CodeTemplate(R"(
+  static const auto create_backend_debug_info_ct = at::jit::CodeTemplate(R"(
             def __create_backend_debug_info(self):
                 self.__backend_debug_info = $backend_debug_info()
             )");
-  TemplateEnv create_backend_debug_info_te;
+  at::jit::TemplateEnv create_backend_debug_info_te;
   create_backend_debug_info_te.s(
       "backend_debug_info", backend_debug_info_class_name.qualifiedName());
   loweredModule.define(
@@ -203,9 +261,10 @@ Module codegen_backend_module(
 
   // This loop generates one method on the LoweredModule for every key
   // in method_compile_spec.
+  std::vector<std::string> wrapper_methods;
   for (auto& e : method_compile_spec) {
     std::string method_name = e.key().toStringRef();
-    static const auto method_ct = CodeTemplate(R"(
+    static const auto method_ct = at::jit::CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
                 if self.__backend.is_available() :
@@ -215,9 +274,14 @@ Module codegen_backend_module(
                 else:
                   raise Exception("Backend is not available.")
             )");
+    static const auto wrapper_method_ct = at::jit::CodeTemplate(R"(
+            def $method(self${,def_inputs}):
+                return self.__loweredModule__.$method(${fwd_inputs})
+            )");
 
-    TemplateEnv method_te;
+    at::jit::TemplateEnv method_te, wrapper_method_te;
     method_te.s("method", method_name);
+    wrapper_method_te.s("method", method_name);
     auto method = orig_module.get_method(method_name);
     auto& function = method.function();
     auto& schema = function.getSchema();
@@ -242,7 +306,8 @@ Module codegen_backend_module(
         // backend_execute.
         TORCH_INTERNAL_ASSERT(default_value.has_value());
         std::stringstream def_ss, fwd_ss;
-        def_ss << name << "=";
+        // Annotate type of the arg
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr) << "=";
         fwd_ss << name << "=" << name;
         default_value->repr(
             def_ss, [](std::ostream&, const IValue&) -> bool { return false; });
@@ -251,7 +316,10 @@ Module codegen_backend_module(
       } else {
         // If this is not a kwarg, it should be emitted as is in the
         // signature and the call to backend_execute.
-        def_inputs.emplace_back(name);
+        std::stringstream def_ss;
+        // Annotate type of the arg
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr);
+        def_inputs.emplace_back(def_ss.str());
         fwd_inputs.emplace_back(name);
       }
     }
@@ -271,18 +339,18 @@ Module codegen_backend_module(
 
     if (out_tuple_ty) {
       auto tuple_elements = out_tuple_ty->elements();
-      type_check_ss << tuple_elements[0]->str() << ")";
+      type_check_ss << tuple_elements[0]->annotation_str() << ")";
       type_checks.emplace_back(type_check_ss.str());
       for (unsigned i = 1, e = tuple_elements.size(); i < e; ++i) {
         type_check_ss.str(std::string());
         type_check_ss.clear();
         out_ss << ", _" << i;
         type_check_ss << "assert isinstance(_" << i << ", "
-                      << tuple_elements[i]->str() << ")";
+                      << tuple_elements[i]->annotation_str() << ")";
         type_checks.emplace_back(type_check_ss.str());
       }
     } else {
-      type_check_ss << out_ty->str() << ")";
+      type_check_ss << out_ty->annotation_str() << ")";
       type_checks.emplace_back(type_check_ss.str());
     }
 
@@ -290,6 +358,10 @@ Module codegen_backend_module(
     method_te.v("fwd_inputs", fwd_inputs);
     method_te.v("refine", type_checks);
     method_te.s("unpack", out_ss.str());
+
+    wrapper_method_te.v("def_inputs", def_inputs);
+    wrapper_method_te.v("fwd_inputs", fwd_inputs);
+    wrapper_methods.push_back(wrapper_method_ct.format(wrapper_method_te));
 
     // If the output type is a single element tuple then add an extra comma
     // to ensure the final output maintains this type.
@@ -328,7 +400,13 @@ Module codegen_backend_module(
                                 .toCustomClass<PyTorchBackendDebugInfo>();
   backend_debug_info->setDebugInfoMap(std::move(debug_info_map));
 
-  return loweredModule;
+  // Wrap lowered module to obfuscate custom serialization logic
+  wrapper.register_module("__loweredModule__", loweredModule);
+  for (auto& method : wrapper_methods) {
+    wrapper.define(method);
+  }
+
+  return wrapper;
 }
 } // namespace detail
 } // namespace jit

@@ -6,11 +6,16 @@
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
+
 C10_DECLARE_bool(torch_jit_disable_warning_prints);
+C10_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
 
 namespace at {
 class Tensor;
@@ -42,7 +47,7 @@ using c10::ivalue::Future;
 using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
-  Code() : pImpl(nullptr) {}
+  Code() = default;
   explicit Code(interpreter::CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain
@@ -82,6 +87,8 @@ struct TORCH_API MobileCode : Code {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       bool emit_default_input_instructions = true,
+      bool support_default_args_before_out = true,
+      bool emit_promoted_ops = true,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };
@@ -110,6 +117,7 @@ struct Suspend : public std::exception {
     return "Suspend";
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Suspend(c10::intrusive_ptr<Future> future_)
       : future(std::move(future_)) {}
 
@@ -120,6 +128,7 @@ struct Suspend : public std::exception {
 // through (and only through) the forward pass manually, other
 // thread local settings are propagated with ThreadLocalState
 struct InterpreterContinuation {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   InterpreterContinuation(
       const InterpreterState& state_,
       Stack stack_,
@@ -152,6 +161,9 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
 
 // current (TLS) TorchScript interpreter callstack
 TORCH_API std::vector<StackEntry> currentCallstack();
+TORCH_API std::vector<std::string> currentModuleHierarchy();
 
 } // namespace jit
 } // namespace torch
+
+C10_CLANG_DIAGNOSTIC_POP()

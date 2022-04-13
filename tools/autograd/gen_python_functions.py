@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, torch._C._linalg or torch._C._special objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._sparse or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -52,19 +52,13 @@ from tools.codegen.api.python import (PythonArgument, PythonSignature,
                                       dispatch_lambda_return_str,
                                       has_tensor_options,
                                       namedtuple_fieldnames, signature)
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.gen import cpp_string, parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
                                  Type, Variant)
-from tools.codegen.utils import split_name_params
+from tools.codegen.utils import split_name_params, YamlLoader, FileManager
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 #
 # declarations blocklist
@@ -75,12 +69,12 @@ except ImportError:
 #
 
 # These functions require manual Python bindings or are not exposed to Python
-SKIP_PYTHON_BINDINGS = [
+_SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_?sparse_csr_tensor.*',
-    '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
+    '_arange.*', '_range.*', 'linspace.*', 'logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
@@ -90,37 +84,45 @@ SKIP_PYTHON_BINDINGS = [
     '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
+    '_to_copy',
     'copy_sparse_to_sparse_', 'copy_',
-    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'numpy_T', 'matrix_H', 'mT', 'mH',  # these need to be an attributes in Python, not functions
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_',
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_new_zeros_with_same_feature_meta', '_has_same_storage_numel',  # used for forward AD internals
+    '_reshape_alias',
+    'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
+
+SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
 
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
 SKIP_PYTHON_BINDINGS_SIGNATURES = [
-    'add(Tensor, Scalar, Scalar)', 'add_(Tensor, Scalar, Scalar)',
-    'sub(Tensor, Scalar, Scalar)', 'sub_(Tensor, Scalar, Scalar)',
-    'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
-    'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
+    'add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor',
+    'add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)',
+    'sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor',
+    'sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)',
+    'mul.Scalar(Tensor self, Scalar other) -> Tensor',
+    'mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)',
+    'div.Scalar(Tensor self, Scalar other) -> Tensor',
+    'div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)',
 ]
 
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
     name = cpp.name(f.func)
-    for pattern in SKIP_PYTHON_BINDINGS:
-        if re.match('^' + pattern + '$', name):
+    for skip_regex in SKIP_PYTHON_BINDINGS:
+        if skip_regex.match(name):
             return False
 
-    args = ', '.join(argument_type_str(arg.type)
-                     for arg in signature(f).arguments())
-    sig = f'{name}({args})'
+    signature = str(f.func)
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
-        if pattern == sig:
+        if pattern == signature:
             return False
 
     return True
@@ -146,6 +148,9 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
 
+def is_py_sparse_function(f: NativeFunction) -> bool:
+    return f.python_module == 'sparse'
+
 def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == 'special'
 
@@ -157,14 +162,19 @@ def is_py_special_function(f: NativeFunction) -> bool:
 
 def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
 
-    methods = load_signatures(native_yaml_path, deprecated_yaml_path, method=True)
+    methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
     create_python_bindings(
         fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
 
-    functions = load_signatures(native_yaml_path, deprecated_yaml_path, method=False)
-    create_python_bindings(
-        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp', method=False)
+    # NOTE: num_shards here must be synced with gatherTorchFunctions in
+    #       torch/csrc/autograd/python_torch_functions_manual.cpp
+    functions = load_signatures(native_functions, deprecated_yaml_path, method=False)
+    create_python_bindings_sharded(
+        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp',
+        method=False, num_shards=3)
 
     create_python_bindings(
         fm, functions, is_py_nn_function, 'torch.nn', 'python_nn_functions.cpp', method=False)
@@ -176,7 +186,27 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
         fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
 
     create_python_bindings(
+        fm, functions, is_py_sparse_function, 'torch.sparse', 'python_sparse_functions.cpp', method=False)
+
+    create_python_bindings(
         fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
+
+    # Currently, we only use `functions` to generate `return_types` bindings.
+    # All methods which return namedtuple have function variant at this point.
+    # If any method only operator with namedtuple is added in the future,
+    # we will have to address that.
+    create_python_return_type_bindings(
+        fm, functions, lambda fn: True, 'python_return_types.cpp')
+
+def group_filter_overloads(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool]
+) -> Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]:
+    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    for pair in pairs:
+        if pred(pair.function):
+            grouped[pair.function.func.name.name].append(pair)
+    return grouped
 
 def create_python_bindings(
     fm: FileManager,
@@ -189,37 +219,102 @@ def create_python_bindings(
 ) -> None:
     """Generates Python bindings to ATen functions"""
     py_methods: List[str] = []
+    ops_headers: List[str] = []
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
-    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
-    for pair in pairs:
-        if pred(pair.function):
-            grouped[pair.function.func.name.name].append(pair)
+    grouped = group_filter_overloads(pairs, pred)
 
     for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
         py_methods.append(method_impl(name, module, overloads, method=method))
         py_method_defs.append(method_def(name, module, overloads, method=method))
         py_forwards.extend(forward_decls(name, overloads, method=method))
+        ops_headers.append(f'#include <ATen/ops/{name.base}.h>')
 
     fm.write_with_template(filename, filename, lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
+        'ops_headers': ops_headers,
         'py_forwards': py_forwards,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
     })
 
+def create_python_return_type_bindings(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    filename: str,
+) -> None:
+    """
+    Generate function to initialize and return named tuple for native functions
+    which returns named tuple and relevant entry for the map in `python_return_types.cpp`.
+    """
+    py_return_types_definition: List[str] = []
+    py_return_types_map: List[str] = []
+
+    grouped = group_filter_overloads(pairs, pred)
+
+    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+        overloads = grouped[name]
+        definitions, map_entries = generate_return_type_definition_and_map_entry(overloads)
+        py_return_types_definition.append("" if not definitions else "\n".join(definitions))
+        py_return_types_map.append("" if not map_entries else "\n".join(map_entries))
+
+    fm.write_with_template(filename, filename, lambda: {
+        'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
+        'py_return_types': py_return_types_definition,
+        'py_return_types_map' : py_return_types_map,
+    })
+
+def create_python_bindings_sharded(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    module: Optional[str],
+    filename: str,
+    *,
+    method: bool,
+    num_shards: int
+) -> None:
+    """Generates Python bindings to ATen functions"""
+    grouped = group_filter_overloads(pairs, pred)
+
+    def key_func(kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]) -> str:
+        return kv[0].base
+
+    def env_func(
+        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
+    ) -> Dict[str, List[str]]:
+        name, fn_pairs = kv
+        return {
+            'ops_headers': [f'#include <ATen/ops/{name.base}.h>'],
+            'py_forwards': list(forward_decls(name, fn_pairs, method=method)),
+            'py_methods': [method_impl(name, module, fn_pairs, method=method)],
+            'py_method_defs': [method_def(name, module, fn_pairs, method=method)],
+        }
+
+    fm.write_sharded(
+        filename,
+        grouped.items(),
+        base_env={
+            'generated_comment':
+            '@' + f'generated from {fm.template_dir}/{filename}',
+        },
+        key_fn=key_func,
+        env_callable=env_func,
+        num_shards=num_shards,
+        sharded_keys={'ops_headers', 'py_forwards', 'py_methods', 'py_method_defs'}
+    )
+
 def load_signatures(
-    native_yaml_path: str,
+    native_functions: List[NativeFunction],
     deprecated_yaml_path: str,
     *,
     method: bool,
     skip_deprecated: bool = False,
     pyi: bool = False,
 ) -> Sequence[PythonSignatureNativeFunctionPair]:
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
-    native_functions = list(filter(should_generate_py_binding, native_functions))
 
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
@@ -282,7 +377,7 @@ def load_deprecated_signatures(
     results: List[PythonSignatureNativeFunctionPair] = []
 
     with open(deprecated_yaml_path, 'r') as f:
-        deprecated_defs = yaml.load(f, Loader=Loader)
+        deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
         _, params = split_name_params(deprecated['name'])
@@ -355,15 +450,13 @@ def gen_namedtuple_typename_key(f: NativeFunction) -> str:
     fieldnames = namedtuple_fieldnames(f.func.returns)
     return '_'.join([name] + fieldnames)
 
-def emit_namedtuple_typedefs(
+def emit_namedtuple_call(
     overloads: Sequence[PythonSignatureNativeFunctionPair]
 ) -> Tuple[List[str], Dict[str, str]]:
     """
     Generate block of named tuple type def inits, and add typeref snippets
     to declarations that use them
     """
-    flddefnames: Dict[str, str] = {}  # map from unique field name lists to field def name
-    flddefs: List[str] = []           # field def declarations
     typenames: Dict[str, str] = {}    # map from unique name + field name lists to typedef name
     typedefs: List[str] = []          # typedef declarations and init code
 
@@ -372,16 +465,6 @@ def emit_namedtuple_typedefs(
         if not fieldnames:
             continue
 
-        fn_key = '_'.join(fieldnames)
-        fieldsname = flddefnames.get(fn_key)
-        if fieldsname is None:
-            fieldsname = f'NamedTuple_fields{"" if not flddefs else len(flddefs)}'
-            flddefnames[fn_key] = fieldsname
-            fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
-            flddefs.append(f"""\
-static PyStructSequence_Field {fieldsname}[] = {{ {fields},  {{nullptr}} }};
-""")
-
         name = cpp.name(overload.function.func)  # use @with_native_function?
         tn_key = gen_namedtuple_typename_key(overload.function)
         typename = typenames.get(tn_key)
@@ -389,17 +472,54 @@ static PyStructSequence_Field {fieldsname}[] = {{ {fields},  {{nullptr}} }};
             typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
             typenames[tn_key] = typename
             typedefs.append(f"""\
-static PyTypeObject {typename};
-static bool {typename}_initialized = false;
-if (!{typename}_initialized) {{
-  {typename}_initialized = true;
-  static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, {fieldsname}, {len(fieldnames)} }};
-  PyStructSequence_InitType(&{typename}, &desc);
-  {typename}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
+static PyTypeObject* {typename} = get_namedtuple("{name}");""")
+
+    return typedefs, typenames
+
+
+def generate_return_type_definition_and_map_entry(
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+) -> Tuple[List[str], List[str]]:
+    """
+    Generate block of function in `python_return_types.cpp` to initialize
+    and return named tuple for a native function which returns named tuple
+    and relevant entry for the map in same file.
+    """
+    typenames: Dict[str, str] = {}  # map from unique name + field name lists to typedef name
+    definitions: List[str] = []  # function defintion to register the typedef
+    map_entries: List[str] = []  # C++ map entry of <function_name, function creates it namedtuple>
+
+    for overload in overloads:
+        fieldnames = namedtuple_fieldnames(overload.function.func.returns)
+        if not fieldnames:
+            continue
+
+        fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
+
+        name = cpp.name(overload.function.func)  # use @with_native_function?
+        tn_key = gen_namedtuple_typename_key(overload.function)
+        typename = typenames.get(tn_key)
+
+        if typename is None:
+            typename = f'{name}NamedTuple{"" if not definitions else len(definitions)}'
+            typenames[tn_key] = typename
+            definitions.append(f"""\
+PyTypeObject* get_{name}_namedtuple() {{
+    static PyStructSequence_Field NamedTuple_fields[] = {{ {fields},  {{nullptr}} }};
+    static PyTypeObject {typename};
+    static bool is_initialized = false;
+    static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, NamedTuple_fields, {len(fieldnames)} }};
+    if (!is_initialized) {{
+        PyStructSequence_InitType(&{typename}, &desc);
+        {typename}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
+        is_initialized = true;
+    }}
+    return &{typename};
 }}
 """)
+            map_entries.append(f'{{"{name}", get_{name}_namedtuple()}}, ')
 
-    return flddefs + typedefs, typenames
+    return definitions, map_entries
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -481,7 +601,7 @@ def method_impl(
     """
     pycname = get_pycname(name)
     noarg = is_noarg(overloads)
-    namedtuple_inits, namedtuple_typenames = emit_namedtuple_typedefs(overloads)
+    namedtuple_inits, namedtuple_typenames = emit_namedtuple_call(overloads)
 
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
@@ -549,6 +669,7 @@ if(check_has_torch_function(self_)) {{
         "torch.nn": "THPNNVariableFunctionsModule",
         "torch.fft": "THPFFTVariableFunctionsModule",
         "torch.linalg": "THPLinalgVariableFunctionsModule",
+        "torch.sparse": "THPSparseVariableFunctionsModule",
         "torch.special": "THPSpecialVariableFunctionsModule",
     }[module] if module else "THPVariableClass"
 
@@ -871,7 +992,7 @@ Py_RETURN_NONE;
 """
         else:
             typename = namedtuple_typenames.get(gen_namedtuple_typename_key(f))
-            namedtuple_typeref = f'&{typename}, ' if typename is not None else ''
+            namedtuple_typeref = f'{typename}, ' if typename is not None else ''
             return f"""\
 {schema_comment}
 {inits}

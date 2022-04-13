@@ -15,7 +15,6 @@ struct THPQScheme {
   char name[QSCHEME_NAME_LEN + 1];
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPQSchemeType;
 
 inline bool THPQScheme_Check(PyObject *obj) {

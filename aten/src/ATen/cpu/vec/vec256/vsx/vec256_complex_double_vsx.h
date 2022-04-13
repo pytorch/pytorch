@@ -1,13 +1,14 @@
 #pragma once
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 using ComplexDbl = c10::complex<double>;
 
 template <>
@@ -141,7 +142,7 @@ class Vectorized<ComplexDbl> {
           vec_vsx_ld(offset16, reinterpret_cast<const double*>(ptr))};
     }
 
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -153,7 +154,7 @@ class Vectorized<ComplexDbl> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<double*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<double*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, reinterpret_cast<double*>(tmp_values));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<double*>(tmp_values));
       std::memcpy(
@@ -164,19 +165,19 @@ class Vectorized<ComplexDbl> {
   const ComplexDbl& operator[](int idx) const = delete;
   ComplexDbl& operator[](int idx) = delete;
 
-  Vectorized<ComplexDbl> map(ComplexDbl (*f)(ComplexDbl)) const {
-    __at_align32__ ComplexDbl tmp[size()];
+  Vectorized<ComplexDbl> map(ComplexDbl (*const f)(ComplexDbl)) const {
+    __at_align__ ComplexDbl tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
   }
 
-  Vectorized<ComplexDbl> map(ComplexDbl (*f)(const ComplexDbl&)) const {
-    __at_align32__ ComplexDbl tmp[size()];
+  Vectorized<ComplexDbl> map(ComplexDbl (*const f)(const ComplexDbl&)) const {
+    __at_align__ ComplexDbl tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -237,17 +238,14 @@ class Vectorized<ComplexDbl> {
     // angle = atan2(b/a)
     // auto b_a = _mm256_permute_pd(values, 0x05);     // b        a
     // return Sleef_atan2d4_u10(values, b_a);          // 90-angle angle
-    auto ret = el_swapped();
-    for (int i = 0; i < 2; i++) {
-      ret._vec0[i] = std::atan2(_vec0[i], ret._vec0[i]);
-      ret._vec1[i] = std::atan2(_vec1[i], ret._vec0[i]);
-    }
+    Vectorized<ComplexDbl> ret;
+    ret._vec0[0] = std::atan2(_vec0[1], _vec0[0]);
+    ret._vec1[0] = std::atan2(_vec1[1], _vec1[0]);
     return ret;
   }
 
   Vectorized<ComplexDbl> angle() const {
-    auto a = angle_().el_swapped();
-    return a & vd_real_mask;
+    return angle_() & vd_real_mask;
   }
 
   Vectorized<ComplexDbl> real_() const {
@@ -359,11 +357,6 @@ class Vectorized<ComplexDbl> {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
   }
 
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << std::endl;
-  }
-
   Vectorized<ComplexDbl> sqrt() const {
     return map(std::sqrt);
   }
@@ -458,11 +451,11 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> pow(const Vectorized<ComplexDbl>& exp) const {
-    __at_align32__ ComplexDbl x_tmp[size()];
-    __at_align32__ ComplexDbl y_tmp[size()];
+    __at_align__ ComplexDbl x_tmp[size()];
+    __at_align__ ComplexDbl y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
     }
     return loadu(x_tmp);

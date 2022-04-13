@@ -11,6 +11,8 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+
 #include <c10/util/Exception.h>
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
@@ -35,12 +37,10 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
-#include <TH/TH.h>
 
 namespace torch { namespace autograd {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -50,11 +50,19 @@ static void forked_autograd_child() { in_bad_autograd_fork = true; }
 
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__XROS__)
   static std::once_flag flag;
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
 #endif
+}
+
+inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
+  if (device == c10::kCPU || device == c10::kMeta || device == c10::kLazy) {
+    return true;
+  } else {
+    return false;
+  }
 }
 }
 
@@ -66,28 +74,23 @@ static void track_bad_autograd_forks() {
 //    backward call we use the caller thread to drive engine execution.
 // This is used when handling reentrant backwards calls;
 // See Note [Reentrant backwards]
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int worker_device = NO_DEVICE;
 
 // This variable is true if ALL invocations in the stack of re-entrant engine
 // invocations are imperative backwards. This special variable is needed for the
 // gradient checkpointing feature only.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int current_depth = 0;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total nested
 //   reentrant backwards depths over all device threads.
 // For CPU devices, it is the total depth associated with the original backward call.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int total_depth = 0;
 
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 #define current_graph_task (tls_current_graph_task.get())
 
@@ -97,15 +100,15 @@ C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 // Engine::init_local_ready_queue() call in each corresponding thread before execution.
 //
 // The CUDA, XLA threads are shared among all invocations of backwards via
-// device_ready_queues_, while CPU threads are dedicated to processing CPU work for
-// the backward they invoked. So any given graph task maintains its own cpu_ready_queue_
-// where you should send work for it to be done
+// device_ready_queues_, while the caller thread is dedicated to processing work for
+// devices returning true in should_run_in_cpu_ready_queue (most notably the CPU device).
+// So any given graph task maintains its own cpu_ready_queue_ where you should send work
+// for it to be done.
 //
 // For reentrant backward calls, if we spawn new thread from the current thread
 // because we reached the maximum depth, the new thread will just reuse the same
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 #define local_ready_queue (tls_local_ready_queue.get())
 
@@ -155,18 +158,20 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 // stream used to run the function OR the inputs are on different devices
 // and the function is responsible for properly acquiring them.
 //
-// Historically, the autograd engine ran all CUDA operations on their
-// device's DEFAULT stream. This meant that syncing (implicitly or
-// explicitly) with the default streams was required before and after
-// calling backward(). It also meant, however, that syncing with
-// the default streams after backward() was sufficient to ensure
-// that backward() had finished running. To preserve this historic
-// behavior the engine records "leaf streams," the streams of the
-// leaf variables, and syncs them with their device's default stream
-// at the end of backward. All other streams are already synchronized
-// to happen before at least one leaf stream (per the above), so syncing
-// the leaf streams with the default streams is sufficient to implement
-// the historic behavior.
+// User-facing stream semantics of a backward() (or torch.autograd.grad())
+// call with respect to surrounding ops are the same as for any other call.
+// See "Stream semantics of backward passes" on
+// https://pytorch.org/docs/stable/notes/cuda.html
+//
+// Internally, backward() runs ops (including leaf nodes) on side threads.
+// And streams are thread local. So GraphTask achieves the above semantics by
+//  1. remembering the current streams on all active CUDA devices
+//     in the user-facing thread (aka, the thread that called execute() to
+//     launch the GraphTask)
+//  2. remembering the "leaf streams" (streams each backward leaf node ran on)
+//  3. during exec_post_processing, for each leaf stream, sync the remembered
+//     current streams (on the leaf stream's device) with that
+//     leaf stream.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
@@ -410,7 +415,12 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
       }
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        // Set the ThreadLocalState before calling the function.
+        // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+        // always saves ThreadLocalState without grad_mode.
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
+        c10::Warning::WarningHandlerGuard warnings_guard(&local_graph_task->warning_handler_);
+
         try {
           // The guard sets the thread_local current_graph_task on construction
           // and restores it on exit. The current_graph_task variable helps
@@ -418,7 +428,18 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
           NodeGuard ndguard(task.fn_);
-          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
+          {
+            RECORD_FUNCTION(
+                c10::str(
+                    "autograd::engine::evaluate_function: ",
+                    task.fn_.get()->name()),
+                std::vector<c10::IValue>());
+            evaluate_function(
+                local_graph_task,
+                task.fn_.get(),
+                task.inputs_,
+                local_graph_task->cpu_ready_queue_);
+          }
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
         }
@@ -533,24 +554,59 @@ void GraphTask::exec_post_processing() {
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(final_callbacks_lock_);
-  // WARNING: Don't use a range-for loop here because more callbacks may be
-  // added in between callback calls, so iterators may become invalidated.
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < final_callbacks_.size(); ++i) {
-    cb_lock.unlock();
-    final_callbacks_[i]();
-    cb_lock.lock();
+
+  // caller_current_streams_ with nullopt entries removed
+  std::vector<c10::Stream> caller_current_streams_filtered;
+
+  // See Note [Streaming backwards].
+  // Syncs caller_current_stream with leaf streams, so final_callbacks may use
+  // any grad on its device's current stream.
+  if (leaf_streams.size() > 0) {
+    for (const auto& leaf_stream : leaf_streams) {
+      // stash_current_streams() stashed streams for all device IDs that already had a
+      // CUDA context before the GraphTask executed. For inactive devices, it stashed
+      // a c10::nullopt. I don't expect GraphTask's backward pass ran leaf nodes on
+      // any new devices, so the stashed streams should be enough.
+      // If leaf_stream.device_index() happens to be for a new device,
+      // operator* on the c10::nullopt should throw an error.
+      const auto caller_current_stream = *caller_current_streams_[leaf_stream.device_index()];
+
+      if (caller_current_stream != leaf_stream) {
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(leaf_stream);
+        caller_current_stream.wait(event);
+      }
+    }
+
+    caller_current_streams_filtered.reserve(caller_current_streams_.size());
+    for (const auto& opt_stream : caller_current_streams_) {
+      if (opt_stream.has_value()) {
+        caller_current_streams_filtered.push_back(*opt_stream);
+      }
+    }
   }
 
-  // Syncs leaf streams with default streams (if necessary)
-  // See note "Streaming backwards"
-  for (const auto& leaf_stream : leaf_streams) {
-    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-    const auto default_stream = guard.getDefaultStream(leaf_stream.device());
-    if (leaf_stream != default_stream) {
-      auto event = c10::Event{c10::DeviceType::CUDA};
-      event.record(leaf_stream);
-      default_stream.wait(event);
+  {
+    // final_callbacks run on the per-device caller_current_streams (the ambient streams
+    // surrounding the user's call to backward()). This has two benefits:
+    //  1. caller_current_streams have been synced with leaf_streams, so callbacks may
+    //     safely access any grad.
+    //  2. The callback's results can safely be used on (user-facing) caller_current_streams
+    //     after backward().
+    c10::MultiStreamGuard g(caller_current_streams_filtered);
+
+    // Set the ThreadLocalState before calling the function.
+    // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+    // always saves ThreadLocalState without grad_mode.
+    at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
+
+    // WARNING: Don't use a range-for loop here because more callbacks may be
+    // added in between callback calls, so iterators may become invalidated.
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+      cb_lock.unlock();
+      final_callbacks_[i]();
+      cb_lock.lock();
     }
   }
 }
@@ -585,12 +641,6 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
     outputs = (*hook)(outputs, inputs);
   }
   return outputs;
-}
-
-static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
-  // Types are compatible if they exactly match or if the gradient is a sparse
-  // version of the expected type.
-  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
 }
 
 void set_device(int device) {
@@ -654,22 +704,37 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (grad.device() != metadata.device() &&
-        grad.dim() == 0) {
-      grad = grad.to(metadata.device());
-    }
-    if (!is_compatible_type(metadata.options(), grad.options())) {
+    if (grad.dtype() != metadata.dtype()) {
        std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grad.options();
+       ss << "invalid gradient at index " << i << " - expected dtype ";
+       ss << metadata.dtype() << " but got " << grad.dtype();
        AT_ERROR(format_error(ss.str()));
     }
-    auto grad_device = grad.device();
-    if (grad_device != metadata.device()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << grad_device;
-      AT_ERROR(format_error(ss.str()));
+    if (grad.layout() != metadata.layout()) {
+       // TODO: Currently we only support (*, Sparse) combination for (tensor.layout(), tensor.grad.layout())
+       // In future, there will be an oppportunity to support more combinations of layouts if they are composable
+       // (example., operations like addition etc., are well defined between tensors of different layouts.),
+       // as well as all parts of autograd like AccumulateGrad correctly handle this.
+       if (!grad.is_sparse()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected layout ";
+        ss << metadata.layout() << " but got " << grad.layout();
+        AT_ERROR(format_error(ss.str()));
+       }
+    }
+
+    if (grad.device() != metadata.device()) {
+      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
+      if (!(metadata.is_tensor_subclass() || grad.unsafeGetTensorImpl()->is_python_dispatch())) {
+        if (grad.dim() == 0) {
+          grad = grad.to(metadata.device());
+        } else {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - expected device ";
+          ss << metadata.device() << " but got " << grad.device();
+          AT_ERROR(format_error(ss.str()));
+        }
+      }
     }
     // We should not build graph for Tensors that are not differentiable
     TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
@@ -732,6 +797,13 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
+  // The InputBuffer::adds that supplied incoming grads took pains to
+  // ensure they're safe to consume in the context of the present
+  // func's stream (if applicable). So we guard onto that stream
+  // before working with the grads in any capacity.
+  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
@@ -745,6 +817,10 @@ void Engine::evaluate_function(
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
+        if (opt_parent_stream) {
+          // No need to take graph_task->mutex_ here, we already hold it
+          graph_task->leaf_streams.emplace(*opt_parent_stream);
+        }
       }
     }
     if (!fn_info.needed_) {
@@ -752,15 +828,6 @@ void Engine::evaluate_function(
       return;
     }
   }
-
-  // Set the ThreadLocalState before calling the function.
-  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-  // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
-
-  // Switches to a function's CUDA stream (if applicable) before calling it
-  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   auto outputs = call_function(graph_task, func, inputs);
 
@@ -772,7 +839,7 @@ void Engine::evaluate_function(
   int num_outputs = outputs.size();
   if (num_outputs == 0) { // Note: doesn't acquire the mutex
     // Records leaf stream (if applicable)
-    // See note "Streaming backwards"
+    // See Note [Streaming backwards]
     if (opt_parent_stream) {
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
@@ -782,7 +849,7 @@ void Engine::evaluate_function(
 
   if (AnomalyMode::is_enabled()) {
     AutoGradMode grad_mode(false);
-    for (int i = 0; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && isnan(output).any().item<uint8_t>()) {
@@ -795,7 +862,7 @@ void Engine::evaluate_function(
 
   // Lock mutex for the accesses to GraphTask dependencies_, not_ready_ and cpu_ready_queue_ below
   std::lock_guard<std::mutex> lock(graph_task->mutex_);
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     auto& output = outputs[i];
     const auto& next = fn.next_edge(i);
 
@@ -878,6 +945,8 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
   // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
+  bool might_use_cuda = at::globalContext().hasCUDA();
+  bool will_use_cuda = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -887,6 +956,9 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
     if (fn->topological_nr() < min_topo_nr) {
       continue;
     }
+    if (might_use_cuda && !will_use_cuda) {
+      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -894,6 +966,12 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
         if (was_inserted) queue.push_back(next_ptr);
       }
     }
+  }
+
+  if (will_use_cuda) {
+    // Collects current streams for devices where this process has a context,
+    // so GraphTask::exec_post_processing can sync them with leaf_streams.
+    task.stash_current_streams();
   }
 }
 
@@ -907,6 +985,20 @@ auto Engine::execute(const edge_list& roots,
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
+  if (accumulate_grad && create_graph) {
+    TORCH_WARN_ONCE(
+      "Using backward() with create_graph=True will create a reference cycle "
+      "between the parameter and its gradient which can cause a memory leak. "
+      "We recommend using autograd.grad when creating the graph to avoid this. "
+      "If you have to use this function, make sure to reset the .grad fields of "
+      "your parameters to None after use to break the cycle and avoid the leak.");
+  }
+
+  // accumulate_grad is true if and only if the frontend call was to
+  // grad(), not backward(). grad() returns the sum of the gradients
+  // w.r.t. the inputs and thus needs the inputs to be present.
+  TORCH_CHECK_VALUE(accumulate_grad || !outputs.empty(),
+                    "grad requires non-empty inputs.");
 
   // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
@@ -956,11 +1048,11 @@ auto Engine::execute(const edge_list& roots,
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
+  graph_task->warning_handler_.replay_warnings();
   return fut->value().toTensorVector();
 }
 
 void Engine::initialize_device_threads_pool() {
-  track_bad_autograd_forks();
   TORCH_CHECK(!in_bad_autograd_fork,
               "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
               "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
@@ -1049,7 +1141,6 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
@@ -1084,23 +1175,14 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   }
 }
 
-size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {
-  if (device_ready_queues_.empty()) {
-    // The vector device_ready_queues_ is initialized in start_device_threads, but this method
-    // can be called before start_device_threads. Adding this check to avoid index
-    // out of bound error.
-    return 0;
-  }
-  return ready_queue(graph_task->cpu_ready_queue_, device)->size();
-}
-
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
 auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
-  if (device.type() == at::kCPU || device.type() == at::DeviceType::Meta) {
+  if (should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    TORCH_INTERNAL_ASSERT(0 <= device.index() && device.index() < static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     return device_ready_queues_.at(device.index());
   }
@@ -1112,8 +1194,7 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
-    // Static cast is ok here as the number of device should never overflow an int.
-    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<int>(device_ready_queues_.size()));
+    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
     // per device, rather than colocate.
@@ -1122,26 +1203,37 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
 }
 
 auto Engine::start_device_threads() -> void {
+  // First always initialize the thread pool for re-entrant threads
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
+  // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
-    if (impl) {
+    // Only record the number of devices for device that don't run on the
+    // cpu ready queue.
+    if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
     }
   }
+
+  // If there are no device except cpu, no need to create worker threads
+  if (num_devices == 0) {
+    return;
+  }
+
+  // Since we're about to create threads, forking is not possible anymore
+  track_bad_autograd_forks();
 
   // allocate one thread for every GPU device (but colocate GPUs of different
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
-    // NOLINTNEXTLINE(modernize-make-shared)
-    queue.reset(new ReadyQueue());
+    queue = std::make_shared<ReadyQueue>();
   }
 
-  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
-
-  for (int i = 0; i < num_devices; ++i) {
+  for (const auto i : c10::irange(num_devices)) {
     std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
   }
@@ -1164,12 +1256,38 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   // Don't need to be holding the lock while actually creating the thread
   lck.unlock();
   if (create_thread) {
+    // If we're creating a new thread, forking is not allowed anymore
+    track_bad_autograd_forks();
     std::thread t(&Engine::reentrant_thread_init, this);
     t.detach();
   }
   // This works even if new thread is created because wait() will test the
   // predicate before waiting
   thread_pool_shared_->work_.notify_one();
+}
+
+// Remembers current streams on all devices where a context has been created.
+// Only called if Engine::execute detects at least one node runs on a cuda stream.
+void GraphTask::stash_current_streams() {
+  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+  auto num_gpus = guard.deviceCount();
+  caller_current_streams_.resize(num_gpus);
+  if (num_gpus > 0) {
+    for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
+#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
+      // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
+      // https://github.com/pytorch/pytorch/issues/59750.
+      // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.
+      if (true) {
+#else
+      if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
+#endif
+        caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
+      } else {
+        caller_current_streams_[idx] = c10::nullopt;
+      }
+    }
+  }
 }
 
 void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr) {

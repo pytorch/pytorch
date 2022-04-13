@@ -1,5 +1,6 @@
 #ifdef TORCH_ENABLE_LLVM
 
+#include <torch/csrc/jit/tensorexpr/external_functions.h>
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -113,12 +114,14 @@ static void registerIntrinsics(
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
 
-  for (const auto& kv : getNNCFunctionRegistry()) {
+  for (auto& kv : getNNCFunctionRegistry()) {
     assertSuccess(
         JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
   }
   assertSuccess(JD.define(
       absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
+  assertSuccess(
+      JD.define(absoluteSymbols({entry("nnc_aten_free", nnc_aten_free)})));
 }
 
 namespace llvm {

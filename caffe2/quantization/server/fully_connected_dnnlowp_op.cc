@@ -13,7 +13,6 @@
 #include "fbgemm_pack_op.h"
 #include "mmio.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_dnnlowp_enforce_default_operators,
     false,
@@ -21,9 +20,7 @@ C10_DEFINE_bool(
     "instead of using its own implementation that uses AVX2 instructions"
     "(currently only honored by FC)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_dump_tensors);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
@@ -37,6 +34,8 @@ FullyConnectedDNNLowPOp<T, ReluFused>::FullyConnectedDNNLowPOp(
     : BaseType(operator_def, ws),
       axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
       axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
+      X_scale_(this->template GetSingleArgument<float>("X_scale", -1.0)), // for fused static int8 not valid if less than 0
+      X_zero_point_(this->template GetSingleArgument<int32_t>("X_zero_point", 0)),
       quantize_channelwise_(this->template GetSingleArgument<bool>(
           "quantize_channelwise",
           false)),
@@ -112,9 +111,22 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
     t_very_begin = t_begin;
   }
 #endif
+  float X_scale = X_scale_;
+  int32_t X_zero_point = X_zero_point_;
+  if (InputSize() == 5) {
+    // float in float out, two possibilities
+    // if there are only 3 input (no qparams): dyanmic
+    // if there are 5 input (+ input qparams): fused int8 static
+    // output qparams need to be added anyway even it's dummy when dequantize_output=1
+    const auto* input_qparam_blob =
+        this->template Input<caffe2::unique_ptr<Int8QuantParamsBlob>>(4).get();
+    // input_params overwrite input arguments
+    X_scale = input_qparam_blob->qparam.scale;
+    X_zero_point = input_qparam_blob->qparam.zero_point;
+  }
 
   // Get quantization parameters
-  if (!GetQuantizationParameters_()) {
+  if (!GetQuantizationParameters_(X_scale, X_zero_point)) {
     return false;
   }
 
@@ -171,7 +183,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       /* if (VLOG_IS_ON(1)) */
       { t_begin = chrono::system_clock::now(); }
 #endif
-
       Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -184,7 +195,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
         t_begin = chrono::system_clock::now();
       }
 #endif
-    }
+     }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
     /* if (VLOG_IS_ON(1)) */
@@ -298,6 +309,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 
       if (!X.template IsType<T>()) {
         // Both input and output are float
+        // the path for dyanmic and fused staic
         row_offsets_.resize(
             PackAWithQuantRowOffset<uint8_t>::rowOffsetBufferSize());
         X_pack_buf_.resize(
@@ -631,7 +643,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 }
 
 template <typename T, bool ReluFused>
-bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
+bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_(float X_scale, int X_zero_point) {
   using namespace dnnlowp;
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -641,7 +653,13 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   // Choose quantization for X
-  in_qparams_[0] = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+  if (X_scale <= 0) { // non-fused static or Dynamic
+    in_qparams_[0] = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+  }
+  else { // fused int8 static
+    in_qparams_[0].scale = X_scale;
+    in_qparams_[0].zero_point = X_zero_point;
+  }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
   /* if (VLOG_IS_ON(1)) */
@@ -890,8 +908,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   if (!dequantize_output_ && !requantization_param_selected_) {
-    CAFFE_ENFORCE(InputSize() <= 4);
-    if (InputSize() == 4) {
+    CAFFE_ENFORCE(InputSize() <= 5);
+    if (InputSize() >= 4) {
       const auto* input_qparam_blob =
           this->template Input<caffe2::unique_ptr<caffe2::Int8QuantParamsBlob>>(
                   3)
@@ -945,53 +963,44 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 
 template class FullyConnectedDNNLowPOp<uint8_t>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_16,
     FullyConnectedDNNLowPOp<uint16_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ROWWISE_16,
     FullyConnectedDNNLowPOp<uint16_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCRelu,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCRelu,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t, true>);
 
 using namespace std::placeholders;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8FCRelu)
     .NumInputs(3, 4)
     .NumOutputs(1)

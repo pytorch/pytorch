@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
@@ -6,6 +7,7 @@
 #include <ATen/native/cpu/Loops.h>
 
 #include <ATen/native/Fill.h>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 namespace {
@@ -54,7 +56,6 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
 
 } // namespace native

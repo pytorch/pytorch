@@ -265,7 +265,7 @@ def _barrier(worker_names):
         )
 
 @_require_initialized
-def _wait_all_workers():
+def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Block until all local and remote RPC processes reach this method and wait
     for all outstanding work to complete. Every RPC process must call this
@@ -274,15 +274,16 @@ def _wait_all_workers():
     framework will work after this method returns.
     """
     try:
-        _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+        _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
         logger.error(
             f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
         )
+        raise ex
 
 
 @_require_initialized
-def shutdown(graceful=True):
+def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
     stops the local agent from accepting outstanding requests, and shuts
@@ -331,9 +332,17 @@ def shutdown(graceful=True):
         >>> rpc.shutdown()
     """
     if graceful:
-        _wait_all_workers()
-        _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join(shutdown=True)
+        try:
+            _wait_all_workers(timeout)
+            _delete_all_user_and_unforked_owner_rrefs()
+            _get_current_rpc_agent().join(shutdown=True)
+        finally:
+            # In case of errors, continue to complete the local shutdown.
+            _finalize_shutdown()
+    else:
+        _finalize_shutdown()
+
+def _finalize_shutdown():
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
@@ -352,7 +361,6 @@ def shutdown(graceful=True):
         # resolved.
         _cleanup_python_rpc_handler()
         _reset_current_rpc_agent()
-
 
 @_require_initialized
 def get_worker_info(worker_name=None):
@@ -575,6 +583,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
+    torch._C._log_api_usage_once("torch.distributed.rpc_remote")
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
     should_profile = torch.autograd._profiler_enabled()
@@ -753,6 +762,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.shutdown()
 
     """
+    torch._C._log_api_usage_once("torch.distributed.rpc_sync")
     fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs, timeout)
     return fut.wait()
 
@@ -845,6 +855,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
+    torch._C._log_api_usage_once("torch.distributed.rpc_async")
     fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)
     if hasattr(_thread_local_var, "future_list"):
         _thread_local_var.future_list.append(fut)

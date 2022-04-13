@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
+#include <ATen/Parallel.h>
+#include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
@@ -10,9 +12,9 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
-#include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
 
@@ -48,9 +50,7 @@ void window_function_checks(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(complex_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -110,9 +110,9 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
-              (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
-              "Expected both inputs to be Float or Double tensors but got ",
+  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble || a.scalar_type() == kHalf) &&
+              (b.scalar_type() == kFloat || b.scalar_type() == kDouble || b.scalar_type() == kHalf),
+              "Expected both inputs to be Half, Float or Double tensors but got ",
               a.scalar_type(), " and ", b.scalar_type());
 }
 
@@ -201,10 +201,7 @@ Tensor empty(
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor& empty_out(IntArrayRef size,
@@ -265,65 +262,8 @@ Tensor empty_like(
       !(options.layout() != kStrided &&
           optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
-  if (options.layout() == kSparse && self.is_sparse()) {
-    auto result = at::empty({0}, options); // to be resized
-    result.sparse_resize_and_clear_(
-        self.sizes(), self.sparse_dim(), self.dense_dim());
-    return result;
-  }
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
-
-  if (self.is_quantized()) {
-
-    // TODO: To support all features of MemoryFormat::Preserve we need to add
-    // _empty_affine_quantized_strided function and use it similarly to
-    // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
-    // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
-    if (memory_format == MemoryFormat::Preserve) {
-      memory_format = self.suggest_memory_format();
-    }
-
-
-    // Note [Explicit nullopt MemoryFormat argument]
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // Some functions which we call default the OPTIONAL MemoryFormat
-    // argument to something that's not nullopt.  If we pass the
-    // MemoryFormat via TensorOptions, we must explicitly disable this
-    // defaulting process, by explicitly passing nullopt for the MemoryFormat
-    // argument.  When codegen is adjusted so we can delete this argument from
-    // the method signature, the argument will just disappear entirely.
-    //
-    // BTW, there are a few places where the optional MemoryFormat is None,
-    // but I still pass in nullopt for robustness.
-
-    // We could check if dtype is still quantized?  But then should we shift/scale
-    // the q_zero_point / q_scale or not?
-    TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
-                "It is currently not supported to specify a dtype that doesn't match "
-                "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
-                " Input tensor's dtype: ", self.dtype());
-    auto qscheme = self.qscheme();
-    if (qscheme == kPerTensorAffine) {
-      return at::_empty_affine_quantized(self.sizes(), options.memory_format(memory_format),
-                                         self.q_scale(),
-                                         self.q_zero_point(),
-                                         // See Note [Explicit nullopt MemoryFormat argument]
-                                         c10::nullopt);
-    } else if (qscheme == kPerChannelAffine) {
-      // Copy the tensors with channels to avoid accidental overrides
-      return at::_empty_per_channel_affine_quantized(
-          self.sizes(),
-          self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
-          self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
-          self.q_per_channel_axis(),
-          options.memory_format(memory_format),
-          // See Note [Explicit nullopt MemoryFormat argument]
-          c10::nullopt);
-    } else {
-      TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
-    }
-  }
 
   Tensor result;
 
@@ -349,7 +289,88 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
+  // never propagate Conjugate, Negative, and ZeroTensor dispatch key
+  result._set_conj(false);
+  result._set_neg(false);
+  result._set_zero(false);
   return result;
+}
+
+Tensor empty_like_quantized(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_memory_format(optional_memory_format);
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
+
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
+
+
+  // TODO: To support all features of MemoryFormat::Preserve we need to add
+  // _empty_affine_quantized_strided function and use it similarly to
+  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
+  // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
+  if (memory_format == MemoryFormat::Preserve) {
+    memory_format = self.suggest_memory_format();
+  }
+
+
+  // Note [Explicit nullopt MemoryFormat argument]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Some functions which we call default the OPTIONAL MemoryFormat
+  // argument to something that's not nullopt.  If we pass the
+  // MemoryFormat via TensorOptions, we must explicitly disable this
+  // defaulting process, by explicitly passing nullopt for the MemoryFormat
+  // argument.  When codegen is adjusted so we can delete this argument from
+  // the method signature, the argument will just disappear entirely.
+  //
+  // BTW, there are a few places where the optional MemoryFormat is None,
+  // but I still pass in nullopt for robustness.
+
+  // We could check if dtype is still quantized?  But then should we shift/scale
+  // the q_zero_point / q_scale or not?
+  TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
+              "It is currently not supported to specify a dtype that doesn't match "
+              "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
+              " Input tensor's dtype: ", self.dtype());
+  auto qscheme = self.qscheme();
+  if (qscheme == kPerTensorAffine) {
+    return at::_empty_affine_quantized(self.sizes(), options.memory_format(memory_format),
+                                        self.q_scale(),
+                                        self.q_zero_point(),
+                                        // See Note [Explicit nullopt MemoryFormat argument]
+                                        c10::nullopt);
+  } else if (qscheme == kPerChannelAffine) {
+    // Copy the tensors with channels to avoid accidental overrides
+    return at::_empty_per_channel_affine_quantized(
+        self.sizes(),
+        self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
+        self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
+        self.q_per_channel_axis(),
+        options.memory_format(memory_format),
+        // See Note [Explicit nullopt MemoryFormat argument]
+        c10::nullopt);
+  } else {
+    TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
+  }
 }
 
 Tensor new_empty(
@@ -421,8 +442,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      for(int64_t i = p_begin; i < p_end; i++)
-        result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+      for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
     });
   });
 
@@ -505,35 +525,30 @@ Tensor new_full(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::full(size, fill_value, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(fill_value);
+  return r;
 }
 
 namespace {
 TensorOptions linspace_logspace_infer_options(
     const Scalar& start,
     const Scalar& end,
-    const TensorOptions& options) {
-  auto result_options = options;
+    const TensorOptions& options,
+    const char* fn_name) {
   if (start.isComplex() || end.isComplex()) {
-    // Since result_options.has_dtype() returns true (dtype is default type),
-    // even if the user hasn't specified the dtype.
-    // We just check to see if either `start` or `end` is complex,
-    // and if the `result_dtype` is not complex (be it default float type or
-    // user provided), we cast it to default complex dtype with a Warning!.
-    auto result_dtype = c10::typeMetaToScalarType(options.dtype());
-    if (!at::isComplexType(result_dtype)) {
-      TORCH_WARN(
-          "As either `start` or `stop` is complex, return type will be the complex dtype corresponding to default dtype.",
-          "In future, this may throw an error when a non-complex dtype arg is passed as input along ",
-          "with complex valued start or end value.");
-      result_options = result_options.dtype(c10::get_default_complex_dtype());
+    const auto default_complex_dtype = c10::get_default_complex_dtype();
+    if (options.has_dtype()) {
+      auto dtype = c10::typeMetaToScalarType(options.dtype());
+      TORCH_CHECK(at::isComplexType(dtype),
+          fn_name, ": inferred dtype ", default_complex_dtype, " can't be safely cast to passed dtype ", dtype);
+    } else {
+      return options.dtype(default_complex_dtype);
     }
   }
 
-  return result_options;
+  return options.has_dtype() ? options : options.dtype(c10::get_default_dtype());
 }
 } // anonymous namespace
 
@@ -542,7 +557,7 @@ TensorOptions linspace_logspace_infer_options(
 Tensor linspace(
     const Scalar& start,
     const Scalar& end,
-    c10::optional<int64_t> steps,
+    int64_t steps,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -550,10 +565,9 @@ Tensor linspace(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  const auto steps_ = steps.value_or(100);
-  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  auto result_options = linspace_logspace_infer_options(start, end, options);
-  Tensor result = at::empty({steps_}, result_options);
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+  auto result_options = linspace_logspace_infer_options(start, end, options, "torch.linspace()");
+  Tensor result = at::empty({steps}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -562,7 +576,7 @@ Tensor linspace(
 Tensor logspace(
     const Scalar& start,
     const Scalar& end,
-    c10::optional<int64_t> steps,
+    int64_t steps,
     double base,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -571,10 +585,9 @@ Tensor logspace(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  const auto steps_ = steps.value_or(100);
-  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  auto result_options = linspace_logspace_infer_options(start, end, options);
-  Tensor result = at::empty({steps_}, result_options);
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+  auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
+  Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
@@ -611,11 +624,9 @@ Tensor new_ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
-
-  return at::ones(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(1.);
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -869,8 +880,9 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
 
   at::parallel_for(0, n, internal::GRAIN_SIZE,
                   [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
-    for(int64_t i = p_begin; i < p_end; i++)
+    for (const auto i : c10::irange(p_begin, p_end)) {
       r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+    }
   });
 
   for(int64_t i = 0; i < n - 1; i++)
@@ -982,7 +994,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1020,7 +1032,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1061,6 +1073,19 @@ Tensor zeros(IntArrayRef size,
   return result.zero_();
 }
 
+Tensor _efficientzerotensor(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    auto device_ = device_or_default(device);
+    auto allocator = at::native::ZeroTensorAllocator(device_);
+    auto dtype_ = dtype_or_default(dtype);
+    auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CPU) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    return out;
+}
+
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0.);
@@ -1081,13 +1106,19 @@ Tensor zeros_like(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  if (options.layout() == kSparse && self.is_sparse()) {
+  if (options.layout() == kSparse) {
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(
-        self.sizes(), self.sparse_dim(), self.dense_dim());
+
+    if (self.is_sparse()) {
+      res.sparse_resize_and_clear_(
+          self.sizes(), self.sparse_dim(), self.dense_dim());
+    } else {
+      res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
+    }
+
     return res;
   }
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -1102,10 +1133,9 @@ Tensor new_zeros(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  return at::zeros(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.zero_();
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1314,6 +1344,11 @@ Tensor kaiser_window(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("kaiser_window", options, window_length);
+  // short-circuit for `meta`.
+  if (device == kMeta) {
+    return at::empty({window_length}, options);
+  }
+
   if (window_length == 0) {
     return at::empty({0}, options);
   }
@@ -1393,13 +1428,13 @@ Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::opt
 
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
     int64_t my_size = size.value_or(0);
-    int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
+    int flags = shared.value_or(false) ? ALLOCATOR_MAPPED_SHARED : 0;
     auto my_dtype = options.dtype();
     size_t size_bytes = my_size * my_dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
         size_bytes,
-        THMapAllocator::makeDataPtr(
+        MapAllocator::makeDataPtr(
             std::string(filename), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
@@ -1414,18 +1449,23 @@ Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::opt
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
+  Tensor self;
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
-      // Copy all strides
-      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
-      self.copy_(src);
-      return self;
+      // Copy all strides, this is marginally faster than calling empty_like
+      self = at::empty_strided(src.sizes(), src.strides(), src.options());
     } else {
-      memory_format = src.suggest_memory_format();
+      self = at::empty_like(src);
     }
+  } else {
+    self = at::empty_like(src, src.options(), memory_format);
   }
-  auto self = at::empty_like(src, src.options(), memory_format);
-  self.copy_(src);
+
+  if (src._is_zerotensor()) {
+    self.zero_();
+  } else {
+    self.copy_(src);
+  }
   return self;
 }
 
@@ -1461,8 +1501,6 @@ Tensor ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   return native::full(
       size, /*fill_value=*/1., names, dtype, layout, device, pin_memory);
@@ -1529,7 +1567,6 @@ Tensor rand(
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(kaiser_window_stub);
 
 } // namespace native

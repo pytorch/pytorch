@@ -60,7 +60,6 @@ static void AddInput(
   return;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeAllAnchors) {
   ERMatXf anchors(3, 4);
   anchors << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
@@ -93,7 +92,6 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeSortedAnchors) {
   ERMatXf anchors(3, 4);
   anchors << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
@@ -144,7 +142,6 @@ TEST(GenerateProposalsTest, TestComputeSortedAnchors) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
   // Similar to TestComputeAllAnchors but for rotated boxes with angle info.
   ERMatXf anchors_xyxy(3, 4);
@@ -195,7 +192,6 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
   // Similar to TestComputeSortedAnchors but for rotated boxes with angle info.
   ERMatXf anchors_xyxy(3, 4);
@@ -256,7 +252,6 @@ TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestEmpty) {
   Workspace ws;
   OperatorDef def;
@@ -294,7 +289,6 @@ TEST(GenerateProposalsTest, TestEmpty) {
   EXPECT_EQ(rois_probs.numel(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestRealDownSampled) {
   Workspace ws;
   OperatorDef def;
@@ -423,7 +417,6 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
       1e-4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   const float angle = 0;
@@ -500,7 +493,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       1.53593004e-01f,  -8.75087008e-02f, -4.92327996e-02f, -3.32239009e-02f};
 
   // Add angle in bbox deltas
-  int num_boxes = scores.size();
+  auto num_boxes = scores.size();
   CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
@@ -596,7 +589,6 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       1e-4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   const float angle = 45.0;
@@ -674,7 +666,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
       1.53593004e-01f,  -8.75087008e-02f, -4.92327996e-02f, -3.32239009e-02f};
 
   // Add angle in bbox deltas
-  int num_boxes = scores.size();
+  auto num_boxes = scores.size();
   CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta

@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <vector>
@@ -10,9 +11,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
@@ -32,7 +31,7 @@ void compute_fused_params(
   //     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   //         + bias(c)
   // We factor out inv_sigma(c) = 1 / sqrt(var(c) + eps).
-  for (int64_t c = 0; c < channels; c++) {
+  for (const auto c : c10::irange(channels)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float inv_sigma = 1.0 / std::sqrt(var_data[c] + static_cast<float>(eps));
     float weight_v = weight_data ? weight_data[c] : 1;
@@ -145,7 +144,11 @@ Tensor q_batch_norm1d_impl(
   // Remove the fake dimension, and go back to contiguous format
   // (since there is no 4th channel). Note, this has a performance
   // cost.
-  return qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  Tensor result = qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  if (ndim == 2) {
+    result = result.squeeze(-1);
+  }
+  return result;
 }
 
 template <bool ReluFused>

@@ -131,7 +131,7 @@ class FloatToFusedNBitRowwiseQuantizedOp final : public Operator<CPUContext> {
         *output_row_scale = scale;
         *output_row_bias = Xmin;
 
-        for (int col = 0; col < input_columns; ++col) {
+        for (const auto col : c10::irange(input_columns)) {
           float X = tmp[col];
           std::uint8_t quantized = std::max(
               0,
@@ -206,7 +206,7 @@ class FusedNBitRowwiseQuantizedToFloatOp final : public Operator<CPUContext> {
       std::vector<float> tmp(output_columns);
 
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (size_t row = 0; row < input_rows; ++row) {
+      for (const auto row : c10::irange(input_rows)) {
         const std::uint8_t* input_row = input_data + row * input_columns;
         float scale = *reinterpret_cast<const at::Half*>(
             input_row +
@@ -216,7 +216,7 @@ class FusedNBitRowwiseQuantizedToFloatOp final : public Operator<CPUContext> {
             (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
             sizeof(at::Half));
 
-        for (int col = 0; col < output_columns; ++col) {
+        for (const auto col : c10::irange(output_columns)) {
           std::uint8_t quantized = input_row[col / NUM_ELEM_PER_BYTE];
           quantized >>= (col % NUM_ELEM_PER_BYTE) * BIT_RATE;
           quantized &= (1 << BIT_RATE) - 1;

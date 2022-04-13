@@ -6,23 +6,24 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
+    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
-    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, StreamObjType, FutureType, EnumType
+    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
+    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
 
 
 from textwrap import dedent
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file
 from typing import Type
 
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
 
+from torch._ops import OpOverloadPacket
 
 class Module(object):
     def __init__(self, name, members):
@@ -45,7 +46,8 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
-        'Future': Future,
+        'Union': Union,
+        'Future': Future
     }
 
     def __init__(self, rcb):
@@ -61,7 +63,10 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    signature = try_real_annotations(fn, loc)
+    if isinstance(fn, OpOverloadPacket):
+        signature = try_real_annotations(fn.op, loc)
+    else:
+        signature = try_real_annotations(fn, loc)
     if signature is not None and is_method:
         # If this is a method, then the signature will include a type for
         # `self`, but type comments do not contain a `self`. So strip it
@@ -105,6 +110,9 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
+    if isinstance(fn, OpOverloadPacket):
+        fn = fn.op
+
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
@@ -245,6 +253,9 @@ def split_type_line(type_line):
 def try_real_annotations(fn, loc):
     """Tries to use the Py3.5+ annotation syntax to get the type."""
     try:
+        # Note: anything annotated as `Optional[T]` will automatically
+        # be returned as `Union[T, None]` per
+        # https://github.com/python/typing/blob/master/src/typing.py#L850
         sig = inspect.signature(fn)
     except ValueError:
         return None
@@ -276,7 +287,6 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     return torch._C.unify_type_list(ir_types)
 
 def is_tensor(ann):
-
     if issubclass(ann, torch.Tensor):
         return True
 
@@ -326,6 +336,22 @@ def try_ann_to_type(ann, loc):
         msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
+    if is_union(ann):
+        # TODO: this is hack to recognize NumberType
+        if set(ann.__args__) == set([int, float, complex]):
+            return NumberType.get()
+        inner: List = []
+        # We need these extra checks because both `None` and invalid
+        # values will return `None`
+        # TODO: Determine if the other cases need to be fixed as well
+        for a in ann.__args__:
+            if a is None:
+                inner.append(NoneType.get())
+            maybe_type = try_ann_to_type(a, loc)
+            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+            assert maybe_type, msg.format(repr(ann), repr(maybe_type))
+            inner.append(maybe_type)
+        return UnionType(inner)    # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
@@ -390,6 +416,8 @@ __all__ = [
     'is_list',
     'Dict',
     'is_dict',
+    'is_optional',
+    'is_union',
     'TensorType',
     'TupleType',
     'FloatType',

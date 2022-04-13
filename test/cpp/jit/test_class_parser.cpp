@@ -5,7 +5,7 @@
 
 namespace torch {
 namespace jit {
-const auto testSource = R"JIT(
+constexpr c10::string_view testSource = R"JIT(
   class FooTest:
     def __init__(self, x):
       self.x = x
@@ -16,7 +16,6 @@ const auto testSource = R"JIT(
     an_attribute : Tensor
 )JIT";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassParserTest, Basic) {
   Parser p(std::make_shared<Source>(testSource));
   std::vector<Def> definitions;

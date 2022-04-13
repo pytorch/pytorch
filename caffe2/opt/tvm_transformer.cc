@@ -276,7 +276,7 @@ NetDef TvmTransformer::applyTvmTransform(
         return buildTvmOp(net, weights, shape_hints);
       };
 
-  return opt::OptimizeForBackend(*pred_net, tvm_supports, tvm_op_converter);
+  return opt::OptimizeForBackend(*pred_net, tvm_supports, tvm_op_converter).net;
 }
 
 void tvmTransform(

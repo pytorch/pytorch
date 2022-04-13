@@ -3,24 +3,33 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
+
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wignored-qualifiers"
+
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+
+static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
+  o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
+}
 
 static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i lo = _mm256_extractf128_si256(a, 0);
   __m128i hi = _mm256_extractf128_si256(a, 1);
-  o1 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(lo), 16));
-  o2 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(hi), 16));
+  cvtbf16_fp32(lo, o1);
+  cvtbf16_fp32(hi, o2);
 }
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
@@ -96,7 +105,7 @@ public:
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<BFloat16> loadu(const void* ptr, int16_t count) {
-    __at_align32__ int16_t tmp_values[size()];
+    __at_align__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
@@ -104,14 +113,14 @@ public:
     if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int16_t tmp_values[size()];
+      __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
     }
   }
   template <int64_t mask>
   static Vectorized<BFloat16> blend(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
-    __at_align32__ int16_t tmp_values[size()];
+    __at_align__ int16_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi16(b.values, 0);
@@ -197,19 +206,19 @@ public:
     }
     return b;
   }
-  Vectorized<BFloat16> map(const __m256 (*vop)(__m256)) const {
+  Vectorized<BFloat16> map(const __m256 (*const vop)(__m256)) const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto o1 = vop(lo);
-    auto o2 = vop(hi);
+    const auto o1 = vop(lo);
+    const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> abs() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto mask = _mm256_set1_ps(-0.f);
-    auto o1 = _mm256_andnot_ps(mask, lo);
-    auto o2 = _mm256_andnot_ps(mask, hi);
+    const auto mask = _mm256_set1_ps(-0.f);
+    const auto o1 = _mm256_andnot_ps(mask, lo);
+    const auto o2 = _mm256_andnot_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> angle() const {
@@ -276,7 +285,7 @@ public:
   Vectorized<BFloat16> erfinv() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
     for (int64_t i = 0; i < size() / 2; i++) {
@@ -314,7 +323,7 @@ public:
   Vectorized<BFloat16> i0() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
     for (int64_t i = 0; i < size() / 2; i++) {
@@ -328,17 +337,17 @@ public:
   Vectorized<BFloat16> i0e() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto sz = size();
-    __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
+    constexpr auto sz = size();
+    __at_align__ float tmp1[sz / 2], tmp2[sz / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
 
-    for (decltype(sz) i = 0; i < sz / 2; i++) {
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
       tmp1[i] = calc_i0e(tmp1[i]);
       tmp2[i] = calc_i0e(tmp2[i]);
     }
-    auto o1 = _mm256_loadu_ps(tmp1);
-    auto o2 = _mm256_loadu_ps(tmp2);
+    const auto o1 = _mm256_loadu_ps(tmp1);
+    const auto o2 = _mm256_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const {
@@ -346,10 +355,10 @@ public:
     __m256 xlo, xhi;
     cvtbf16_fp32(values, lo, hi);
     cvtbf16_fp32(x.values, xlo, xhi);
-    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
-    __at_align32__ float tmpx1[size() / 2], tmpx2[size() / 2];
+    __at_align__ float tmpx1[size() / 2], tmpx2[size() / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmpx1), xlo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmpx2), xhi);
     for (int64_t i = 0; i < size() / 2; ++i) {
@@ -366,10 +375,10 @@ public:
     __m256 xlo, xhi;
     cvtbf16_fp32(values, lo, hi);
     cvtbf16_fp32(x.values, xlo, xhi);
-    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
-    __at_align32__ float tmpx1[size() / 2], tmpx2[size() / 2];
+    __at_align__ float tmpx1[size() / 2], tmpx2[size() / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmpx1), xlo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmpx2), xhi);
     for (int64_t i = 0; i < size() / 2; ++i) {
@@ -574,32 +583,32 @@ Vectorized<BFloat16> inline operator^(const Vectorized<BFloat16>& a, const Vecto
   return _mm256_xor_si256(a, b);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::eq(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::eq(const Vectorized<BFloat16>& other) const {
   return (*this == other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::ne(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::ne(const Vectorized<BFloat16>& other) const {
   return (*this != other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::gt(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::gt(const Vectorized<BFloat16>& other) const {
   return (*this > other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::ge(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::ge(const Vectorized<BFloat16>& other) const {
   return (*this >= other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::lt(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::lt(const Vectorized<BFloat16>& other) const {
   return (*this < other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::le(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::le(const Vectorized<BFloat16>& other) const {
   return (*this <= other) & Vectorized<BFloat16>(1.0f);
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorized<BFloat16> Vectorized<BFloat16>::frac() const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::frac() const {
   return *this - this->trunc();
 }
 
@@ -703,6 +712,73 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
   return cvtfp32_bf16(o1, o2);
 }
 
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
+  __m256 o1, o2;
+  cvtbf16_fp32(__m256i(a), o1, o2);
+  return std::make_tuple(o1, o2);
+}
+
+inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
+ return cvtfp32_bf16(__m256(a), __m256(b));
+}
+
+
+#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
+  constexpr int64_t K = Vectorized<BFloat16>::size();
+  __at_align__ float arr[K];
+  __at_align__ BFloat16 arr2[K];
+  a.store(arr2);
+  convert(arr2, arr, K);
+  return std::make_tuple(
+      Vectorized<float>::loadu(arr),
+      Vectorized<float>::loadu(arr + Vectorized<float>::size()));
+}
+
+inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
+  constexpr int64_t K = Vectorized<BFloat16>::size();
+  __at_align__ float arr[K];
+  __at_align__ BFloat16 arr2[K];
+  a.store(arr);
+  b.store(arr + Vectorized<float>::size());
+  convert(arr, arr2, K);
+  return Vectorized<BFloat16>::loadu(arr2);
+}
+
+#endif // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+  auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
+  __m256 out_values;
+  cvtbf16_fp32(values, out_values);
+  out = out_values;
+}
+
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+  auto vec = Vectorized<c10::BFloat16>::loadu(data);
+  __m256 out1_values, out2_values;
+  cvtbf16_fp32(vec, out1_values, out2_values);
+  out1 = out1_values;
+  out2 = out2_values;
+}
+#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+  load_fp32_from_bf16(data, out1);
+  data += Vectorized<float>::size();
+  load_fp32_from_bf16(data, out2);
+}
 #endif
 
 }}}
+
+#pragma GCC diagnostic pop

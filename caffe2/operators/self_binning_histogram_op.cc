@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SelfBinningHistogram, SelfBinningHistogramOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SelfBinningHistogram)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -43,6 +41,5 @@ OPERATOR_SCHEMA(SelfBinningHistogram)
         "Apply abs() on every input value."
     );
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SelfBinningHistogram);
 } // namespace caffe2

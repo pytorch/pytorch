@@ -19,7 +19,8 @@ class DistributedSampler(Sampler[T_co]):
     original dataset that is exclusive to it.
 
     .. note::
-        Dataset is assumed to be of constant size.
+        Dataset is assumed to be of constant size and that any instance of it always
+        returns the same elements in the same order.
 
     Args:
         dataset: Dataset used for sampling.
@@ -83,8 +84,6 @@ class DistributedSampler(Sampler[T_co]):
             # This is to ensure each rank receives the same amount of data when
             # using this Sampler.
             self.num_samples = math.ceil(
-                # `type:ignore` is required because Dataset cannot provide a default __len__
-                # see NOTE in pytorch/torch/utils/data/sampler.py
                 (len(self.dataset) - self.num_replicas) / self.num_replicas  # type: ignore[arg-type]
             )
         else:

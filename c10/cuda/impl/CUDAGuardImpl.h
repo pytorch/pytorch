@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -40,7 +41,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   c10::optional<Device> uncheckedGetDevice() const noexcept {
     int device;
-    auto err = cudaGetDevice(&device);
+    const auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
       return c10::nullopt;
@@ -163,11 +164,25 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return true;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
-    const cudaError_t err = cudaEventQuery(cuda_event);
+    const cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(cuda_event));
     if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
+    } else {
+      // ignore and clear the error if not ready
+      (void)cudaGetLastError();
     }
     return (err == cudaSuccess);
+  }
+
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    CUDAStream cuda_stream{stream};
+    return cuda_stream.query();
+  }
+
+  void synchronizeStream(const Stream& stream) const override {
+    CUDAStream cuda_stream{stream};
+    cuda_stream.synchronize();
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)

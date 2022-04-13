@@ -131,14 +131,11 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AffineChannel, AffineChannelOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AffineChannelGradient,
     AffineChannelGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AffineChannel)
     .NumInputs(3)
     .NumOutputs(1)
@@ -160,7 +157,6 @@ for replacing spatial batch norm with its equivalent fixed transformation.
         "transformation for the c-th channel of the input.")
     .Output(0, "Y", "Output with the same order of Input.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AffineChannelGradient)
     .NumInputs({2, 3})
     .NumOutputs({1, 3})
@@ -192,7 +188,6 @@ class GetAffineChannelGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(AffineChannel, GetAffineChannelGradient);
 
 } // namespace caffe2

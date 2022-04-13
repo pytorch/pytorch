@@ -122,7 +122,6 @@ void fuseConvBN(nom::repr::NNModule* nn, caffe2::Workspace* ws) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_WS_OPT_PASS_FROM_FUNC(FuseConvBN, fuseConvBN);
 
 } // namespace opt

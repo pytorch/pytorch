@@ -1,9 +1,12 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <torch/library.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorShape.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <vector>
@@ -11,9 +14,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qcat_nhwc_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
 
 namespace {
@@ -36,8 +37,7 @@ bool is_valid_quantization_scheme(const Tensor& t) {
 
 bool all_inputs_sharing_qparams(TensorList qxs) {
   bool is_valid = true;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 1; i < qxs.size(); ++i) {
+  for (const auto i : c10::irange(1, qxs.size())) {
     is_valid |= qxs[0].is_quantized();
     is_valid |= qxs[i].is_quantized() == qxs[0].is_quantized();
     is_valid |= qxs[i].qscheme() == qxs[0].qscheme();
@@ -140,7 +140,8 @@ Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {
   TORCH_CHECK(
       all_inputs_sharing_qparams(qxs),
       "All inputs should share the same quantization parameters.");
-
+  check_cat_no_zero_dim(qxs);
+  dim = legacy_cat_wrap_dim(dim, qxs);
   double _scale = qxs[0].q_scale();
   int64_t _zero_point = qxs[0].q_zero_point();
   return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
@@ -151,6 +152,8 @@ Tensor& cat_out_quantized_cpu(TensorList qxs, int64_t dim, Tensor& out) {
               "Only per-tensor quantization is supported in 'cat'!")
   TORCH_CHECK(is_valid_quantization_scheme(out),
               "Only per-tensor quantization is supported in 'cat'!")
+  check_cat_no_zero_dim(qxs);
+  dim = legacy_cat_wrap_dim(dim, qxs);
   auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
                                         out.q_zero_point());
   at::native::copy_(out, out_, /*non_blocking=*/false);

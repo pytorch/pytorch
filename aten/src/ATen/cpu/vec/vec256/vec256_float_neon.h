@@ -3,8 +3,14 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
+
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#include <sleef.h>
+#endif
+
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
 // However for now opting for STL, since we are not building
@@ -12,8 +18,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 // Right now contains only aarch64 implementation.
 // Due to follow two reasons aarch32 is not currently supported.
@@ -28,6 +34,12 @@ namespace {
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
+#endif
+
+#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
+#else
+#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
 template<int index, bool mask_val>
@@ -220,8 +232,8 @@ public:
       return res;
     }
     else {
-      __at_align32__ float tmp_values[size()];
-      for (auto i = 0; i < size(); ++i) {
+      __at_align__ float tmp_values[size()];
+      for (const auto i : c10::irange(size())) {
         tmp_values[i] = 0.0;
       }
       std::memcpy(
@@ -261,19 +273,19 @@ public:
   // Once we specialize that implementation for ARM
   // this should be removed. TODO (kimishpatel)
   float operator[](int idx) const {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     return tmp[idx];
   }
   float operator[](int idx) {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     return tmp[idx];
   }
   // For boolean version where we want to if any 1/all zero
   // etc. can be done faster in a different way.
   int zero_mask() const {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     int mask = 0;
     for (int i = 0; i < size(); ++ i) {
@@ -284,10 +296,10 @@ public:
     return mask;
   }
   Vectorized<float> isnan() const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float res[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float res[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       if (_isnan(tmp[i])) {
         std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
       } else {
@@ -296,10 +308,10 @@ public:
     }
     return loadu(res);
   };
-  Vectorized<float> map(float (*f)(float)) const {
-    __at_align32__ float tmp[size()];
+  Vectorized<float> map(float (*const f)(float)) const {
+    __at_align__ float tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -308,7 +320,10 @@ public:
     return Vectorized<float>(vabsq_f32(values.val[0]), vabsq_f32(values.val[1]));
   }
   Vectorized<float> angle() const {
-    return Vectorized<float>(0.f);
+    auto zero = Vectorized<float>(0);
+    auto pi = Vectorized<float>(c10::pi<float>);
+    auto tmp = blendv(zero, pi, *this < zero);
+    return blendv(tmp, *this, isnan());
   }
   Vectorized<float> real() const {
     return *this;
@@ -320,68 +335,121 @@ public:
     return *this;
   }
   Vectorized<float> acos() const {
-    return map(std::acos);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_acosf4_u10(values.val[0]), Sleef_acosf4_u10(values.val[1])),
+      map(std::acos)
+    );
   }
   Vectorized<float> asin() const {
-    return map(std::asin);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_asinf4_u10(values.val[0]), Sleef_asinf4_u10(values.val[1])),
+      map(std::asin)
+    );
   }
   Vectorized<float> atan() const {
-    return map(std::atan);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_atanf4_u10(values.val[0]), Sleef_atanf4_u10(values.val[1])),
+      map(std::atan)
+    );
   }
   Vectorized<float> atan2(const Vectorized<float> &exp) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_exp[size()];
-    store(tmp);
-    exp.store(tmp_exp);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = std::atan2(tmp[i], tmp_exp[i]);
-    }
-    return loadu(tmp);
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_atan2f4_u10(values.val[0], exp.values.val[0]),
+                                 Sleef_atan2f4_u10(values.val[1], exp.values.val[1]));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_exp[size()];
+        store(tmp);
+        exp.store(tmp_exp);
+        for (const auto i : c10::irange(size())) {
+          tmp[i] = std::atan2(tmp[i], tmp_exp[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> copysign(const Vectorized<float> &sign) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_sign[size()];
-    store(tmp);
-    sign.store(tmp_sign);
-    for (size_type i = 0; i < size(); i++) {
-      tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
-    }
-    return loadu(tmp);
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_copysignf4(values.val[0], sign.values.val[0]),
+                                 Sleef_copysignf4(values.val[1], sign.values.val[1]));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_sign[size()];
+        store(tmp);
+        sign.store(tmp_sign);
+        for (size_type i = 0; i < size(); i++) {
+          tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> erf() const {
-    return map(std::erf);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_erff4_u10(values.val[0]), Sleef_erff4_u10(values.val[1])),
+      map(std::erf);
+    );
   }
   Vectorized<float> erfc() const {
-    return map(std::erfc);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_erfcf4_u15(values.val[0]), Sleef_erfcf4_u15(values.val[1])),
+      map(std::erfc)
+    );
   }
   Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
   Vectorized<float> exp() const {
-    return map(std::exp);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_expf4_u10(values.val[0]), Sleef_expf4_u10(values.val[1])),
+      map(std::exp)
+    );
   }
   Vectorized<float> expm1() const {
-    return map(std::expm1);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_expm1f4_u10(values.val[0]), Sleef_expm1f4_u10(values.val[1])),
+      map(std::expm1)
+    );
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_q[size()];
-    store(tmp);
-    q.store(tmp_q);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = std::fmod(tmp[i], tmp_q[i]);
-    }
-    return loadu(tmp);
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_fmodf4(values.val[0], q.values.val[0]),
+                                 Sleef_fmodf4(values.val[1], q.values.val[1]));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_q[size()];
+        store(tmp);
+        q.store(tmp_q);
+        for (const auto i : c10::irange(size())) {
+          tmp[i] = std::fmod(tmp[i], tmp_q[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> hypot(const Vectorized<float> &b) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_b[size()];
-    store(tmp);
-    b.store(tmp_b);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = std::hypot(tmp[i], tmp_b[i]);
-    }
-    return loadu(tmp);
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_hypotf4_u05(values.val[0], b.values.val[0]),
+                                 Sleef_hypotf4_u05(values.val[1], b.values.val[1]));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (const auto i : c10::irange(size())) {
+          tmp[i] = std::hypot(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> i0() const {
     return map(calc_i0);
@@ -390,59 +458,91 @@ public:
     return map(calc_i0e);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_x[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
   }
   Vectorized<float> igammac(const Vectorized<float> &x) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_x[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
   }
   Vectorized<float> log() const {
-    return map(std::log);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_logf4_u10(values.val[0]), Sleef_logf4_u10(values.val[1])),
+      map(std::log)
+    );
   }
   Vectorized<float> log10() const {
-    return map(std::log10);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_log10f4_u10(values.val[0]), Sleef_log10f4_u10(values.val[1])),
+      map(std::log10)
+    );
   }
   Vectorized<float> log1p() const {
-    return map(std::log1p);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_log1pf4_u10(values.val[0]), Sleef_log1pf4_u10(values.val[1])),
+      map(std::log1p)
+    );
   }
   Vectorized<float> log2() const {
-    return map(std::log2);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_log2f4_u10(values.val[0]), Sleef_log2f4_u10(values.val[1])),
+      map(std::log2)
+    );
   }
   Vectorized<float> nextafter(const Vectorized<float> &b) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_b[size()];
-    store(tmp);
-    b.store(tmp_b);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
-    }
-    return loadu(tmp);
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_nextafterf4(values.val[0], b.values.val[0]),
+                                 Sleef_nextafterf4(values.val[1], b.values.val[1]));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (const auto i : c10::irange(size())) {
+          tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> frac() const;
   Vectorized<float> sin() const {
-    return map(std::sin);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_sinf4_u10(values.val[0]), Sleef_sinf4_u10(values.val[1])),
+      map(std::sin)
+    );
   }
   Vectorized<float> sinh() const {
-    return map(std::sinh);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_sinhf4_u10(values.val[0]), Sleef_sinhf4_u10(values.val[1])),
+      map(std::sinh)
+    );
   }
   Vectorized<float> cos() const {
-    return map(std::cos);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_cosf4_u10(values.val[0]), Sleef_cosf4_u10(values.val[1])),
+      map(std::cos)
+    );
   }
   Vectorized<float> cosh() const {
-    return map(std::cosh);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_coshf4_u10(values.val[0]), Sleef_coshf4_u10(values.val[1])),
+      map(std::cosh)
+    );
   }
   Vectorized<float> ceil() const {
     return map(at::native::ceil_impl);
@@ -460,18 +560,27 @@ public:
     return map(at::native::round_impl);
   }
   Vectorized<float> tan() const {
-    return map(std::tan);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_tanf4_u10(values.val[0]), Sleef_tanf4_u10(values.val[1])),
+      map(std::tan)
+    );
   }
   Vectorized<float> tanh() const {
-    return map(std::tanh);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_tanhf4_u10(values.val[0]), Sleef_tanhf4_u10(values.val[1])),
+      map(std::tanh)
+    );
   }
   Vectorized<float> trunc() const {
-    float32x4_t r0 = vcvtq_f32_s32(vcvtq_s32_f32(values.val[0]));
-    float32x4_t r1 = vcvtq_f32_s32(vcvtq_s32_f32(values.val[1]));
+    float32x4_t r0 = vrndq_f32(values.val[0]);
+    float32x4_t r1 = vrndq_f32(values.val[1]);
     return Vectorized<float>(r0, r1);
   }
   Vectorized<float> lgamma() const {
-    return map(std::lgamma);
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_lgammaf4_u10(values.val[0]), Sleef_lgammaf4_u10(values.val[1])),
+      map(std::lgamma)
+    );
   }
   Vectorized<float> sqrt() const {
     return Vectorized<float>(
@@ -487,14 +596,22 @@ public:
     return this->sqrt().reciprocal();
   }
   Vectorized<float> pow(const Vectorized<float> &exp) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_exp[size()];
-    store(tmp);
-    exp.store(tmp_exp);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = std::pow(tmp[i], tmp_exp[i]);
-    }
-    return loadu(tmp);
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_powf4_u10(values.val[0], exp.values.val[0]),
+                                 Sleef_powf4_u10(values.val[1], exp.values.val[1]));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_exp[size()];
+        store(tmp);
+        exp.store(tmp_exp);
+        for (const auto i : c10::irange(size())) {
+          tmp[i] = std::pow(tmp[i], tmp_exp[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> operator==(const Vectorized<float>& other) const {
     float32x4_t r0 =
@@ -581,7 +698,7 @@ Vectorized<float> inline operator/(const Vectorized<float>& a, const Vectorized<
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorized<float> Vectorized<float>::frac() const {
+inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
@@ -651,27 +768,27 @@ Vectorized<float> inline operator^(const Vectorized<float>& a, const Vectorized<
   return Vectorized<float>(r0, r1);
 }
 
-Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
   return (*this == other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
   return (*this != other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
   return (*this > other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
   return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
   return (*this < other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 

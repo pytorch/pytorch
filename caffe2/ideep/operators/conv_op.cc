@@ -132,8 +132,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
     }
 
     if (fusion_type_ == FUSION_CONV_SUM
-        // NOLINTNEXTLINE(clang-diagnostic-tautological-overlap-compare)
-        && fusion_type_ == FUSION_CONV_SUM_RELU) {
+        || fusion_type_ == FUSION_CONV_SUM_RELU) {
       CAFFE_ENFORCE_EQ(Y,  &(Input(InputSize() - 1)),
           "Convolution fusion op: InPlace is enforced for sum fusion.");
     }
@@ -204,7 +203,6 @@ class IDEEPConvFusionOp final : public IDEEPConvOp {
   virtual ~IDEEPConvFusionOp() {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* kConvFusionDoc = R"DOC(
 Note that other parameters, such as the stride and
 kernel size, or the pads' sizes in each direction are not necessary for input
@@ -352,11 +350,8 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Conv, IDEEPConvOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ConvFusion, IDEEPConvFusionOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ConvGradient, IDEEPConvGradientOp);
 
 } // namespace

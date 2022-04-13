@@ -15,30 +15,23 @@
 #include "fbgemm_pack_op.h"
 #include "im2col_dnnlowp.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_shared_int32_buffer);
 // Thresholds to fallback to 32-bit accumulation when 16-bit accumulation
 // doesn't provide performance benefits.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_double(
     caffe2_dnnlowp_acc16_density_threshold,
     0.05,
     "If density of outlier is higher than this, fallback to 32-bit accumulation");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     caffe2_dnnlowp_acc16_m_threshold,
     0,
     "If m is smaller than this, fallback to 32-bit accumulation");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     caffe2_dnnlowp_acc16_n_threshold,
     0,
     "If n is smaller than this, fallback to 32-bit accumulation");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     caffe2_dnnlowp_acc16_k_threshold,
     0,
@@ -863,23 +856,19 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Conv,
     DNNLOWP_ACC16,
     ConvDNNLowPAcc16Op<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ConvRelu,
     DNNLOWP_ACC16,
     ConvDNNLowPAcc16Op<true>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Conv,
     DNNLOWP_ACC16,
     ConvDNNLowPAcc16Op<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvRelu,
     DNNLOWP_ACC16,

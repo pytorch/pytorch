@@ -1,11 +1,16 @@
+#include <ATen/Tensor.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+
+// ${generated_comment}
+// NOTE See [Sharded File] comment in VariableType
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
+#else
+${operator_headers}
+#endif
 
 namespace at { namespace _ops {
-
-Tensor & requires_grad_(Tensor & self, bool requires_grad) {
-  self.requires_grad_(requires_grad);
-  return self;
-}
 
 ${definitions}
 

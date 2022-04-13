@@ -218,7 +218,7 @@ void RpcAgent::rpcRetryCallback(
   } else {
     // This try succeeded, so we can make the original future as complete.
     earliestRpc->originalFuture_->markCompleted(
-        jitFuture.value(), jitFuture.dataPtrs());
+        jitFuture.value(), jitFuture.storages());
   }
 }
 
@@ -234,7 +234,10 @@ bool RpcAgent::isCurrentRpcAgentSet() {
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
   std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
-  TORCH_INTERNAL_ASSERT(agent, "Current RPC agent is not set!");
+  TORCH_CHECK(
+      agent,
+      "Current RPC agent is not set! Did you initialize the RPC "
+      "framework (e.g. by calling `rpc.init_rpc`)?");
   return agent;
 }
 

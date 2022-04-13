@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -122,10 +123,12 @@ bool test_mnist(
   torch::Device device(with_cuda ? torch::kCUDA : torch::kCPU);
   model->to(device);
 
-  for (size_t epoch = 0; epoch < number_of_epochs; epoch++) {
+  for (const auto epoch : c10::irange(number_of_epochs)) {
+    (void)epoch; // Suppress unused variable warning
     // NOLINTNEXTLINE(performance-for-range-copy)
     for (torch::data::Example<> batch : *data_loader) {
-      auto data = batch.data.to(device), targets = batch.target.to(device);
+      auto data = batch.data.to(device);
+      auto targets = batch.target.to(device);
       torch::Tensor prediction = forward_op(std::move(data));
       // NOLINTNEXTLINE(performance-move-const-arg)
       torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
@@ -149,7 +152,6 @@ bool test_mnist(
 
 struct IntegrationTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, CartPole) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
@@ -197,7 +199,7 @@ TEST_F(IntegrationTest, CartPole) {
 
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
-    for (auto i = 0U; i < saved_log_probs.size(); i++) {
+    for (const auto i : c10::irange(0U, saved_log_probs.size())) {
       auto advantage = r_t[i] - saved_values[i].item<float>();
       policy_loss.push_back(-advantage * saved_log_probs[i]);
       value_loss.push_back(
@@ -249,7 +251,6 @@ TEST_F(IntegrationTest, CartPole) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNIST_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
@@ -286,7 +287,6 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
       optimizer));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();

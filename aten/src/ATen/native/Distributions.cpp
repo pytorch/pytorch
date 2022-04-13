@@ -122,29 +122,17 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bernoulli_tensor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bernoulli_scalar_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cauchy_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exponential_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(multinomial_with_replacement_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(geometric_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_normal_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(uniform_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(normal_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_from_to_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_full_64_bits_range_stub);
 
 // ==================================================== Bernoulli =====================================================
@@ -269,37 +257,75 @@ struct NormalStub {
   }
 };
 
+template<typename RNG>
+struct NormalMeta {
+  // No-op!
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  }
+};
+
+// inplace
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
 }
 
 Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);  // TODO: dedupe
-  return self;
+  return at::native::templates::normal_impl_<NormalMeta, Generator>(self, mean, std, gen);
 }
 
+// out tensor float
 Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
+Tensor& normal_out_meta(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+}
+
+// out float tensor
 Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
+Tensor& normal_out_meta(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+
+}
+
+// out tensor tensor
 Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
+Tensor& normal_out_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+}
+
+// functional tensor float
 Tensor normal(const Tensor& mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
+Tensor normal_meta(const Tensor& mean, double std, c10::optional<Generator> gen) {
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+}
+
+// functional float tensor
 Tensor normal(double mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
+Tensor normal_meta(double mean, const Tensor& std, c10::optional<Generator> gen) {
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+}
+
+// functional tensor tensor
 Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
 // ==================================================== Random ========================================================

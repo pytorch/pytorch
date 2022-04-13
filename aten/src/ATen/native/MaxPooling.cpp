@@ -8,7 +8,6 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_pool1d_stub);
 
 namespace {
@@ -24,8 +23,7 @@ Tensor max_pool1d_impl(
 
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
-      "max_pool1d() input tensor must have 2 or 3 dimensions but got ",
-      self.dim());
+      "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
   TORCH_CHECK(
       kernel_size.size() == 1,
       "max_pool1d() kernel_size must be an int or int list of size 1 but got size ",
@@ -104,6 +102,7 @@ Tensor max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
+      self._fw_grad(/*level */ 0).defined() ||
       !self.device().is_cpu()) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(

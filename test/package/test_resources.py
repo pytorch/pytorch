@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
@@ -21,7 +23,7 @@ class TestResources(PackageTestCase):
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             # Layout looks like:
             #    package
             #    ├── one/
@@ -89,7 +91,7 @@ class TestResources(PackageTestCase):
             """
         )
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
@@ -101,7 +103,7 @@ class TestResources(PackageTestCase):
 
     def test_importer_access(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -125,7 +127,7 @@ class TestResources(PackageTestCase):
         Tests that packaged code can used importlib.resources.path.
         """
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.save_binary("string_module", "my_string", "my string".encode("utf-8"))
             src = dedent(
                 """\

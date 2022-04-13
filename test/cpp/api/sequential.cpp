@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -13,12 +14,10 @@ using namespace torch::test;
 
 struct SequentialTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CanContainThings) {
   Sequential sequential(Linear(3, 4), ReLU(), BatchNorm1d(3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -39,7 +38,6 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   ASSERT_EQ(sequential->size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ConstructsFromConcreteType) {
   static int copy_count;
 
@@ -73,7 +71,6 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   ASSERT_EQ(copy_count, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : value(value_) {}
@@ -99,7 +96,6 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   ASSERT_EQ(sequential->size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, PushBackAddsAnElement) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -159,7 +155,6 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   ASSERT_EQ(sequential_any->named_children()[1].key(), "fc");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, AccessWithAt) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -178,7 +173,7 @@ TEST_F(SequentialTest, AccessWithAt) {
   ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(&sequential->at<M>(i), modules[i].get());
   }
 
@@ -189,7 +184,6 @@ TEST_F(SequentialTest, AccessWithAt) {
       sequential->at<M>(modules.size() + 1000000), "Index out of range");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, AccessWithPtr) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -208,7 +202,7 @@ TEST_F(SequentialTest, AccessWithPtr) {
   ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(sequential->ptr(i).get(), modules[i].get());
     ASSERT_EQ(sequential[i].get(), modules[i].get());
     ASSERT_EQ(sequential->ptr<M>(i).get(), modules[i].get());
@@ -220,14 +214,12 @@ TEST_F(SequentialTest, AccessWithPtr) {
       sequential->ptr(modules.size() + 1000000), "Index out of range");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CallingForwardOnEmptySequentialIsDisallowed) {
   Sequential empty;
   ASSERT_THROWS_WITH(
       empty->forward<int>(), "Cannot call forward() on an empty Sequential");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CallingForwardChainsCorrectly) {
   struct MockModule : torch::nn::Module {
     explicit MockModule(int value) : expected(value) {}
@@ -243,7 +235,6 @@ TEST_F(SequentialTest, CallingForwardChainsCorrectly) {
   ASSERT_EQ(sequential->forward<int>(1), 4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CallingForwardWithTheWrongReturnTypeThrows) {
   struct M : public torch::nn::Module {
     int forward() {
@@ -258,7 +249,6 @@ TEST_F(SequentialTest, CallingForwardWithTheWrongReturnTypeThrows) {
       "The type of the return value is int, but you asked for type float");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, TheReturnTypeOfForwardDefaultsToTensor) {
   struct M : public torch::nn::Module {
     torch::Tensor forward(torch::Tensor v) {
@@ -271,7 +261,6 @@ TEST_F(SequentialTest, TheReturnTypeOfForwardDefaultsToTensor) {
   ASSERT_TRUE(sequential->forward(variable).equal(variable));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ForwardReturnsTheLastValue) {
   torch::manual_seed(0);
   Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
@@ -283,7 +272,6 @@ TEST_F(SequentialTest, ForwardReturnsTheLastValue) {
   ASSERT_EQ(y.size(1), 100);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, SanityCheckForHoldingStandardModules) {
   Sequential sequential(
       Linear(10, 3),
@@ -294,7 +282,6 @@ TEST_F(SequentialTest, SanityCheckForHoldingStandardModules) {
       LSTM(4, 5));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ExtendPushesModulesFromOtherSequential) {
   struct A : torch::nn::Module {
     int forward(int x) {
@@ -341,7 +328,6 @@ TEST_F(SequentialTest, ExtendPushesModulesFromOtherSequential) {
   ASSERT_TRUE(b[3]->as<A>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, HasReferenceSemantics) {
   Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
   Sequential second(first);
@@ -357,7 +343,6 @@ TEST_F(SequentialTest, HasReferenceSemantics) {
       }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, IsCloneable) {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   Sequential clone =
@@ -389,7 +374,6 @@ TEST_F(SequentialTest, IsCloneable) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
   Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
@@ -399,7 +383,6 @@ TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
   ASSERT_TRUE(modules[2]->as<Dropout2d>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CloneToDevice_CUDA) {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   torch::Device device(torch::kCUDA, 0);
@@ -413,7 +396,6 @@ TEST_F(SequentialTest, CloneToDevice_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, PrettyPrintSequential) {
   Sequential sequential(
       Linear(10, 3),
@@ -453,7 +435,6 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       ")");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   {
     Sequential sequential(Identity(), ConvTranspose1d(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false)));

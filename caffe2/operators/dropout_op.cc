@@ -15,13 +15,12 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     return true;
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-    float scale = 1. / (1. - ratio_);
+    float scale = ratio_ >= 1.0 ? 0.0:1. / (1. - ratio_);
     // mask=true means keep, and mask=false means not keep, so we will
     // generate probability depending on 1-ratio.
     at::bernoulli_distribution<double> dist(1. - ratio_);
     const float* Xdata = X.data<float>();
     float* Ydata = Y->template mutable_data<float>();
-
     auto mask = Output(1, X.sizes(), at::dtype<bool>());
     bool* mask_data = mask->template mutable_data<bool>();
     auto* gen = context_.RandGenerator();
@@ -52,7 +51,7 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
     const bool* mask_data = mask.data<bool>();
     float* dXdata = dX->template mutable_data<float>();
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-    float scale = 1. / (1. - ratio_);
+    float scale = ratio_ >= 1.0 ? 0.0:1. / (1. - ratio_);
     for (int i = 0; i < dY.numel(); ++i) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       dXdata[i] = dYdata[i] * mask_data[i] * scale;
@@ -61,14 +60,11 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     DropoutGrad,
     DropoutGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
     .NumOutputs(1, 2)
@@ -169,7 +165,6 @@ mask: [[False False False  True  True]
         "nonzero, this output is not filled.")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -193,6 +188,5 @@ class GetDropoutGradient : public GradientMakerBase {
     }
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);
 } // namespace caffe2

@@ -12,7 +12,6 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_simple_net_benchmark_run_whole_net,
     true,
@@ -323,11 +322,11 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
                   << output_dealloc_time * normalizer[i] << " " << unit[i]
                   << std::endl;
       }
+      std::cout << "Number of operators: " << operators_.size() << std::endl;
     }
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NET(simple, SimpleNet);
 
 } // namespace caffe2

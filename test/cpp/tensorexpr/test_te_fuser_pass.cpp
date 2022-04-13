@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/tensorexpr/mem_arena.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <sstream>
 
@@ -15,22 +15,17 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 struct WithCPUFuser {
-  WithCPUFuser(bool val = true)
-      : cpuFuserEnabled(canFuseOnCPU()), parallel(texprParallelCPUEnabled()) {
+  WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
     overrideCanFuseOnCPU(val);
-    setTexprParallelCPUEnabled(true);
   }
 
   ~WithCPUFuser() {
     overrideCanFuseOnCPU(cpuFuserEnabled);
-    setTexprParallelCPUEnabled(parallel);
   }
 
   bool cpuFuserEnabled;
-  bool parallel;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_1) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -57,7 +52,6 @@ TEST(TEFuserPass, FuserPass_1) {
       ->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_2) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -82,7 +76,6 @@ TEST(TEFuserPass, FuserPass_2) {
       ->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_3) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -112,14 +105,14 @@ TEST(TEFuserPass, FuserPass_3) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_0DimInput) {
+  WithCPUFuser cf;
   const auto graph_string = R"IR(
-    graph(%x : Float(device=cuda),
-          %y : Float(device=cuda)):
+    graph(%x : Float(device=cpu),
+          %y : Float(device=cpu)):
       %one : int = prim::Constant[value=1]()
-      %a : Float(device=cuda) = aten::mul(%x, %y)
-      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      %a : Float(device=cpu) = aten::mul(%x, %y)
+      %b : Float(device=cpu) = aten::add(%x, %a, %one)
       return (%b))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
@@ -127,11 +120,10 @@ TEST(TEFuserPass, FuserPass_0DimInput) {
   g->lint();
   FuseTensorExprs(g);
 
-  // We should not fuse 0-dim tensors
-  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  // We should fuse 0-dim tensors too
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
   WithCPUFuser cf(false);
   const auto graph_string = R"IR(
@@ -149,7 +141,6 @@ TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_UnknownShapes) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -168,7 +159,6 @@ TEST(TEFuserPass, FuserPass_UnknownShapes) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_Multidevice) {
   {
     WithCPUFuser cf;
@@ -289,7 +279,6 @@ TEST(TEFuserPass, FuserPass_Multidevice) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_MergeGroups) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -312,26 +301,6 @@ TEST(TEFuserPass, FuserPass_MergeGroups) {
       ->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(TEFuserPass, FuserPass_UnknownShapesIgnored) {
-  WithCPUFuser cf;
-  const auto graph_string = R"IR(
-    graph(%x : Float(device=cpu),
-          %y : Float(device=cpu)):
-      %a : Float(device=cpu) = aten::mul(%x, %y)
-      %b : Float(device=cpu) = aten::mul(%x, %a)
-      return (%b))IR";
-  auto g = std::make_shared<Graph>();
-  torch::jit::parseIR(graph_string, g.get());
-
-  g->lint();
-  FuseTensorExprs(g, /* min_group_size= */ 2, /* disable_shape_checks= */ true);
-
-  // Test that we are generating fusion groups even though shapes are not known
-  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -348,7 +317,6 @@ TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_Where) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -366,7 +334,6 @@ TEST(TEFuserPass, FuserPass_Where) {
   testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_WhereList) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -382,6 +349,53 @@ TEST(TEFuserPass, FuserPass_WhereList) {
   g->lint();
   FuseTensorExprs(g, /* min_group_size= */ 2);
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+TEST(TEFuserPass, DynamicShapeFusion) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%0 : Float(10, 5, strides=[5, 1], device=cpu),
+          %1 : Float(10, 5, strides=[5, 1], device=cpu)):
+      %2 : Float(10, 5, strides=[5, 1], device=cpu) = aten::mul(%0, %1)
+      %3 : Float(10, 5, strides=[5, 1], device=cpu) = aten::mul(%2, %1)
+      return (%3))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(
+      g,
+      /* min_group_size = */ 2,
+      /* add_composed_op = */ true,
+      /* fuse_to_dynamic_shapes = */ true);
+  Code code(g, "");
+
+  testing::FileCheck()
+      .check("prim::TensorExprDynamicGroup_")
+      ->check("prim::TensorExprDynamicGuard")
+      ->check("prim::TensorExprGroup_")
+      ->run(*g);
+
+  auto run_and_compare = [&](const std::vector<at::Tensor>& inputs) {
+    TORCH_INTERNAL_ASSERT(inputs.size() == 2);
+
+    auto ref = at::mul(at::mul(inputs[0], inputs[1]), inputs[1]);
+
+    InterpreterState interp(code);
+    Stack stack(inputs.begin(), inputs.end());
+    interp.run(stack);
+    at::Tensor out = pop(stack).toTensor();
+    ASSERT_TRUE(at::allclose(out, ref));
+  };
+
+  std::vector<at::Tensor> inputs = {at::rand({10, 5}), at::rand({10, 5})};
+  run_and_compare(inputs);
+
+  std::vector<at::Tensor> inputs2 = {at::rand({20, 5}), at::rand({20, 5})};
+  run_and_compare(inputs2);
+
+  std::vector<at::Tensor> inputs3 = {at::rand({25, 60}), at::rand({25, 60})};
+  run_and_compare(inputs3);
 }
 
 } // namespace jit

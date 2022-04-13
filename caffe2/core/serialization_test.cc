@@ -61,7 +61,6 @@ void logBlob(c10::string_view data) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorSerialization, TestUnknownDType) {
   // This code was used to generate the blob data listed above.
   constexpr size_t kTestTensorSize = 10;
@@ -70,7 +69,7 @@ TEST(TensorSerialization, TestUnknownDType) {
     auto* blobTensor = BlobGetMutableTensor(&blob, CPU);
     blobTensor->Resize(kTestTensorSize, 1);
     auto *tensorData = blobTensor->mutable_data<int32_t>();
-    for (int n = 0; n < kTestTensorSize; ++n) {
+    for (unsigned n = 0; n < kTestTensorSize; ++n) {
       tensorData[n] = n;
     }
     auto data = SerializeBlob(blob, "test_blob");
@@ -86,7 +85,7 @@ TEST(TensorSerialization, TestUnknownDType) {
   EXPECT_EQ(kTestTensorSize, tensor.numel());
   EXPECT_EQ(TypeMeta::Make<int32_t>(), tensor.dtype());
   const auto* tensor_data = tensor.template data<int32_t>();
-  for (int i = 0; i < kTestTensorSize; ++i) {
+  for (unsigned i = 0; i < kTestTensorSize; ++i) {
     EXPECT_EQ(static_cast<float>(i), tensor_data[i]);
   }
 

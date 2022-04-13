@@ -60,9 +60,7 @@ bool ArgMinReducer<CPUContext>::operator()(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ArgMax, ArgOp<CPUContext, ArgMaxReducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ArgMin, ArgOp<CPUContext, ArgMinReducer<CPUContext>>);
 
 namespace {
@@ -94,7 +92,6 @@ std::vector<TensorShape> InferTensor(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ArgMax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -171,7 +168,6 @@ Indices: [[1 0 0]
         "shape will match the input tensor shape except the `axis` dimension "
         "equals 1. Else, the `axis` dimension of the output tensor is removed.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ArgMin)
     .NumInputs(1)
     .NumOutputs(1)
@@ -244,9 +240,7 @@ Indices: [[4]
         "shape will match the input tensor shape except the `axis` dimension "
         "equals 1. Else, the `axis` dimension of the output tensor is removed.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ArgMax);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ArgMin);
 
 } // namespace caffe2

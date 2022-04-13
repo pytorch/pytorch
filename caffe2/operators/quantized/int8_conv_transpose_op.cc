@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8ConvTranspose, int8::Int8ConvTransposeOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8ConvTranspose)
     .NumInputs(2, 3)
     .NumOutputs(1)

@@ -1,26 +1,24 @@
+# Owner(s): ["oncall: distributed"]
+
 import os
 import random
 import sys
 import tempfile
 import time
-import traceback
-import unittest
 from datetime import timedelta
 from sys import platform
 
 import torch
-import torch.distributed as c10d
+import torch.distributed as dist
+import torch.distributed.rpc as rpc
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not dist.is_available():
+    print("torch.distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-import torch.distributed as dist
-import torch.multiprocessing as mp
 import torch.testing._internal.common_utils as common
 from torch._six import string_classes
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     skip_if_win32,
     create_tcp_store
 )
@@ -31,7 +29,6 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
-    IS_WINDOWS,
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -88,6 +85,11 @@ class StoreTestBase(object):
         self.assertEqual(b"value2", fs.get("key2"))
         self.assertEqual(b"21", fs.get("key3"))
 
+        fs.set("-key3", "7")
+        self.assertEqual(b"7", fs.get("-key3"))
+        fs.delete_key("-key3")
+        self.assertEqual(fs.num_keys(), self.num_keys_total)
+
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
@@ -125,7 +127,7 @@ class FileStoreTest(TestCase, StoreTestBase):
         self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def _create_store(self):
-        store = c10d.FileStore(self.file.name, 1)
+        store = dist.FileStore(self.file.name, 1)
         store.set_timeout(timedelta(seconds=300))
         return store
 
@@ -136,7 +138,7 @@ class HashStoreTest(TestCase, StoreTestBase):
         super(HashStoreTest, self).setUp()
 
     def _create_store(self):
-        store = c10d.HashStore()
+        store = dist.HashStore()
         store.set_timeout(timedelta(seconds=300))
         return store
 
@@ -145,12 +147,12 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixFileStoreTest, self).setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.filestore = c10d.FileStore(self.file.name, 1)
+        self.filestore = dist.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
         self.filestore.set_timeout(timedelta(seconds=300))
 
     def _create_store(self):
-        return c10d.PrefixStore(self.prefix, self.filestore)
+        return dist.PrefixStore(self.prefix, self.filestore)
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
@@ -160,10 +162,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        if sys.platform == "win32":
-            err_msg_reg = "Only one usage of each socket address*"
-        else:
-            err_msg_reg = "^Address already in use$"
+        err_msg_reg = "^The server socket has failed to listen on any local "
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             addr = DEFAULT_HOSTNAME
             port = common.find_free_port()
@@ -171,8 +170,50 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
-            store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
+            store1 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
+            store2 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
+
+    @retry_on_connect_failures
+    def test_multitenancy(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        # Use noqa to silence flake8.
+        # Need to store in an unused variable here to ensure the first
+        # object is not destroyed before the second object is created.
+        store1 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+        store2 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+
+    @skip_if_win32()
+    @retry_on_connect_failures
+    def test_init_pg_and_rpc_with_same_socket(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        os.environ["MASTER_ADDR"] = addr
+        os.environ["MASTER_PORT"] = str(port)
+
+        # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
+        # initialize even when using the same socket address.
+
+        dist.init_process_group(
+            backend="gloo",
+            init_method="env://",
+            rank=0,
+            world_size=1,
+        )
+
+        backend_opts = rpc.TensorPipeRpcBackendOptions(
+            init_method=f"tcp://{addr}:{port}"
+        )
+        rpc.init_rpc(
+            name="worker0",
+            rank=0,
+            world_size=1,
+            rpc_backend_options=backend_opts,
+        )
+
+        rpc.shutdown()
 
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
@@ -206,50 +247,27 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-    def _create_client(self, index, addr, port, world_size, messages):
-        try:
-            client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
-            self.assertEqual("value".encode(), client_store.get("key"))
-            client_store.set(f"new_key{index}", f"new_value{index}")
-            self.assertEqual(f"next_value{index}".encode(),
-                             client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
-        except Exception:
-            messages.put('Caught exception: \n{}exiting process with exit code: {}'
-                         .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
-            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+    def _create_client(self, index, addr, port, world_size):
+        client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+        self.assertEqual("value".encode(), client_store.get("key"))
+        client_store.set(f"new_key{index}", f"new_value{index}")
+        self.assertEqual(f"next_value{index}".encode(),
+                         client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
 
     def _multi_worker_helper(self, world_size):
         addr = DEFAULT_HOSTNAME
         server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
-        messages = mp.Queue()
-        processes = []
-        num_proccesses = random.randint(3, 5) if world_size == -1 else world_size
-        for i in range(num_proccesses):
-            p = mp.Process(target=self._create_client, args=(i, addr, port, world_size, messages))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
-        error_message = ""
-        while not messages.empty():
-            error_message += messages.get() + "\n"
-        if any([p.exitcode != 0 for p in processes]):
-            raise RuntimeError(error_message)
+        world_size = random.randint(5, 10) if world_size == -1 else world_size
+        for i in range(world_size):
+            self._create_client(i, addr, port, world_size)
 
-    @unittest.skipIf(
-        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
-    )
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
-    @unittest.skipIf(
-        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
-    )
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(-1)
-
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -259,7 +277,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
         self.tcpstore.set_timeout(timedelta(seconds=300))
 
     def _create_store(self):
-        return c10d.PrefixStore(self.prefix, self.tcpstore)
+        return dist.PrefixStore(self.prefix, self.tcpstore)
 
     # The PrefixTCPStore has 6 keys in test_set_get. It contains the 5 keys
     # added by the user and one additional key used for coordinate all the
@@ -269,7 +287,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
         return 6
 
 
-class MyPythonStore(c10d.Store):
+class MyPythonStore(dist.Store):
     def __init__(self):
         super(MyPythonStore, self).__init__()
         self.store = dict()
@@ -305,13 +323,13 @@ class PythonStoreTest(TestCase):
         # equivalent of StoreTestBase.test_set_get from C++.
         # See `torch/csrc/distributed/c10d/init.cpp` for the definition
         # of this test function.
-        c10d._test_python_store(MyPythonStore())
+        dist._test_python_store(MyPythonStore())
 
 
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
-            c10d.rendezvous("invalid://")
+            dist.rendezvous("invalid://")
 
 
 class RendezvousEnvTest(TestCase):
@@ -323,7 +341,7 @@ class RendezvousEnvTest(TestCase):
 
         # Single rank
         os.environ["RANK"] = "0"
-        gen0 = c10d.rendezvous("env://")
+        gen0 = dist.rendezvous("env://")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
         self.assertEqual(1, size0)
@@ -337,23 +355,23 @@ class RendezvousEnvTest(TestCase):
 class RendezvousFileTest(TestCase):
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, "path missing"):
-            gen = c10d.rendezvous("file://?rank=0&world_size=1")
+            gen = dist.rendezvous("file://?rank=0&world_size=1")
             next(gen)
         with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            gen = c10d.rendezvous("file:///tmp/foo?world_size=1")
+            gen = dist.rendezvous("file:///tmp/foo?world_size=1")
             next(gen)
         with self.assertRaisesRegex(ValueError, "size parameter missing"):
-            gen = c10d.rendezvous("file:///tmp/foo?rank=0")
+            gen = dist.rendezvous("file:///tmp/foo?rank=0")
             next(gen)
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
             url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
-            gen0 = c10d.rendezvous(url + "&rank=0")
+            gen0 = dist.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
             self.assertEqual(2, size0)
-            gen1 = c10d.rendezvous(url + "&rank=1")
+            gen1 = dist.rendezvous(url + "&rank=1")
             store1, rank1, size1 = next(gen1)
             self.assertEqual(1, rank1)
             self.assertEqual(2, size1)
@@ -377,19 +395,27 @@ class RendezvousTCPTest(TestCase):
 
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, "port number missing"):
-            gen = c10d.rendezvous("tcp://127.0.0.1?rank=0&world_size=1")
+            gen = dist.rendezvous("tcp://127.0.0.1?rank=0&world_size=1")
             next(gen)
         with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            gen = c10d.rendezvous("tcp://127.0.0.1:23456?world_size=1")
+            gen = dist.rendezvous("tcp://127.0.0.1:23456?world_size=1")
             next(gen)
         with self.assertRaisesRegex(ValueError, "size parameter missing"):
-            gen = c10d.rendezvous("tcp://127.0.0.1:23456?rank=0")
+            gen = dist.rendezvous("tcp://127.0.0.1:23456?rank=0")
+            next(gen)
+
+    def test_dns_timeout(self):
+        with self.assertRaisesRegex(TimeoutError, "client socket has timed out after.*dnsnotexist"):
+            gen = dist.rendezvous(
+                "tcp://dnsnotexist:23456?world_size=2&rank=0",
+                timeout=timedelta(seconds=1),
+            )
             next(gen)
 
     @retry_on_connect_failures
     def test_nominal(self):
         url = self.create_tcp_url()
-        gen0 = c10d.rendezvous(url + "&rank=0")
+        gen0 = dist.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
         self.assertEqual(1, size0)
@@ -404,7 +430,7 @@ class RendezvousTCPTest(TestCase):
     def test_tcp_store_timeout_set(self):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=10)
-        gen0 = c10d.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        gen0 = dist.rendezvous(url + "&rank=0", timeout=test_store_timeout)
         store0, rank0, size0 = next(gen0)
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.

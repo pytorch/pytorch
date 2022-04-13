@@ -18,7 +18,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, Params) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -136,7 +135,6 @@ TEST(MobileTest, SaveLoadParameters) {
 }
 */
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, SaveLoadParametersEmpty) {
   Module m("m");
   m.define(R"(
@@ -160,7 +158,139 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(MobileTest, SaveParametersDefaultsToZip) {
+  // Save some empty parameters.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+  _save_parameters(empty_parameters, ss_data);
+
+  // Verify that parameters were serialized to a ZIP container.
+  EXPECT_GE(ss_data.str().size(), 4);
+  EXPECT_EQ(ss_data.str()[0], 'P');
+  EXPECT_EQ(ss_data.str()[1], 'K');
+  EXPECT_EQ(ss_data.str()[2], '\x03');
+  EXPECT_EQ(ss_data.str()[3], '\x04');
+}
+
+#if defined(ENABLE_FLATBUFFER)
+TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
+  // Save some empty parameters using flatbuffer.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+  _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
+
+  // Verify that parameters were serialized to a flatbuffer. The flatbuffer
+  // magic bytes should be at offsets 4..7. The first four bytes contain an
+  // offset to the actual flatbuffer data.
+  EXPECT_GE(ss_data.str().size(), 8);
+  EXPECT_EQ(ss_data.str()[4], 'P');
+  EXPECT_EQ(ss_data.str()[5], 'T');
+  EXPECT_EQ(ss_data.str()[6], 'M');
+  EXPECT_EQ(ss_data.str()[7], 'F');
+}
+#else // !defined(ENABLE_FLATBUFFER)
+TEST(MobileTest, SaveParametersThrowsWithoutFlatbufferSupport) {
+  // Some empty parameters to try saving.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+
+  // Save using flatbuffers should fail when support isn't compiled in. Make
+  // sure we get the exception that explicitly mentions the lack of flatbuffer
+  // support.
+  try {
+    _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
+    FAIL() << "_save_parameters should have thrown";
+  } catch (const ::c10::Error& e) {
+    static const std::string kExpectedSubstring =
+        "build hasn't enabled flatbuffer";
+    EXPECT_TRUE(
+        std::string(e.msg()).find(kExpectedSubstring) != std::string::npos)
+        << "Exception message does not contain expected substring \""
+        << kExpectedSubstring << "\": actual message \"" << e.msg() << "\"";
+  } catch (...) {
+    FAIL() << "Unexpected exception type";
+  }
+}
+#endif // !defined(ENABLE_FLATBUFFER)
+
+#if defined(ENABLE_FLATBUFFER)
+TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
+  // Create some simple parameters to save.
+  std::map<std::string, at::Tensor> input_params;
+  input_params["four_by_ones"] = 4 * torch::ones({});
+  input_params["three_by_ones"] = 3 * torch::ones({});
+
+  // Serialize them using flatbuffers.
+  std::stringstream data;
+  _save_parameters(input_params, data, /*use_flatbuffer=*/true);
+
+  // The flatbuffer magic bytes should be at offsets 4..7.
+  EXPECT_EQ(data.str()[4], 'P');
+  EXPECT_EQ(data.str()[5], 'T');
+  EXPECT_EQ(data.str()[6], 'M');
+  EXPECT_EQ(data.str()[7], 'F');
+
+  // Read them back and check that they survived the trip.
+  auto output_params = _load_parameters(data);
+  EXPECT_EQ(output_params.size(), 2);
+  {
+    auto four_by_ones = 4 * torch::ones({});
+    EXPECT_EQ(
+        output_params["four_by_ones"].item<int>(), four_by_ones.item<int>());
+  }
+  {
+    auto three_by_ones = 3 * torch::ones({});
+    EXPECT_EQ(
+        output_params["three_by_ones"].item<int>(), three_by_ones.item<int>());
+  }
+}
+#else // !defined(ENABLE_FLATBUFFER)
+TEST(MobileTest, LoadParametersFailsWithoutFlatbufferSupport) {
+  // Create some data that looks like a flatbuffer header.
+  std::stringstream data;
+  data << "abcd"
+       << "PTMF" // Flatbuffer magic
+       << "ijkl";
+
+  // Loading the "flatbuffer" data should fail. Make sure we see the expected
+  // exception, not just any exception; since this isn't properly-formed
+  // flatbuffer data, any attempt to parse it might throw a different error type
+  // or message, but we don't expect anyone to try parsing it.
+  try {
+    _load_parameters(data);
+    FAIL() << "_load_parameters should have thrown";
+  } catch (const ::c10::Error& e) {
+    static const std::string kExpectedSubstring =
+        "build hasn't enabled flatbuffer";
+    EXPECT_TRUE(
+        std::string(e.msg()).find(kExpectedSubstring) != std::string::npos)
+        << "Exception message does not contain expected substring \""
+        << kExpectedSubstring << "\": actual message \"" << e.msg() << "\"";
+  } catch (...) {
+    FAIL() << "Unexpected exception type";
+  }
+}
+#endif // !defined(ENABLE_FLATBUFFER)
+
+TEST(MobileTest, LoadParametersUnexpectedFormatShouldThrow) {
+  // Manually create some data that doesn't look like a ZIP or Flatbuffer file.
+  // Make sure it's longer than 8 bytes, since getFileFormat() needs that much
+  // data to detect the type.
+  std::stringstream bad_data;
+  bad_data << "abcd"
+           << "efgh"
+           << "ijkl";
+
+  // Loading parameters from it should throw an exception.
+  EXPECT_ANY_THROW(_load_parameters(bad_data));
+}
+
+TEST(MobileTest, LoadParametersEmptyDataShouldThrow) {
+  // Loading parameters from an empty data stream should throw an exception.
+  std::stringstream empty;
+  EXPECT_ANY_THROW(_load_parameters(empty));
+}
+
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -235,7 +365,6 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
 };
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SequentialSampler) {
   // test that sampler can be used with dataloader
   const int kBatchSize = 10;
@@ -250,7 +379,6 @@ TEST(LiteTrainerTest, SequentialSampler) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
   mobile::RandomSampler sampler(10);
 
@@ -275,7 +403,6 @@ TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
   AT_ASSERT(sampler.next(10).has_value() == false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerReturnsLessValuesForLastBatch) {
   mobile::RandomSampler sampler(5);
   AT_ASSERT(sampler.next(3).value().size() == 3);
@@ -283,7 +410,6 @@ TEST(LiteTrainerTest, RandomSamplerReturnsLessValuesForLastBatch) {
   AT_ASSERT(sampler.next(2).has_value() == false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerResetsWell) {
   mobile::RandomSampler sampler(5);
   AT_ASSERT(sampler.next(5).value().size() == 5);
@@ -293,7 +419,6 @@ TEST(LiteTrainerTest, RandomSamplerResetsWell) {
   AT_ASSERT(sampler.next(2).has_value() == false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerResetsWithNewSizeWell) {
   mobile::RandomSampler sampler(5);
   AT_ASSERT(sampler.next(5).value().size() == 5);

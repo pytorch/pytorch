@@ -78,8 +78,8 @@ CUDA accessors
   __global__ void packed_accessor_kernel(
       torch::PackedTensorAccessor64<float, 2> foo,
       float* trace) {
-    int i=threadIdx.x
-    gpuAtomicAdd(trace, foo[i][i])
+    int i = threadIdx.x;
+    gpuAtomicAdd(trace, foo[i][i]);
   }
 
   torch::Tensor foo = torch::rand({12, 12});

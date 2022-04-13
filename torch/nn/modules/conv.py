@@ -144,8 +144,9 @@ class _ConvNd(Module):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+            if fan_in != 0:
+                bound = 1 / math.sqrt(fan_in)
+                init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -232,8 +233,8 @@ class Conv1d(_ConvNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, L_{in})`
-        - Output: :math:`(N, C_{out}, L_{out})` where
+        - Input: :math:`(N, C_{in}, L_{in})` or :math:`(C_{in}, L_{in})`
+        - Output: :math:`(N, C_{out}, L_{out})` or :math:`(C_{out}, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} + 2 \times \text{padding} - \text{dilation}
@@ -369,8 +370,8 @@ class Conv2d(_ConvNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C_{in}, H_{in}, W_{in})` or :math:`(C_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(C_{out}, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
@@ -503,8 +504,9 @@ class Conv3d(_ConvNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or :math:`(C_{out}, D_{out}, H_{out}, W_{out})`,
+          where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
@@ -653,7 +655,9 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     This module can be seen as the gradient of Conv1d with respect to its input.
     It is also known as a fractionally-strided convolution or
-    a deconvolution (although it is not an actual deconvolution operation).
+    a deconvolution (although it is not an actual deconvolution operation as it does
+    not compute a true inverse of convolution). For more information, see the visualizations
+    `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -667,7 +671,7 @@ class ConvTranspose1d(_ConvTransposeNd):
       of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
-      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+      It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
 
@@ -707,8 +711,8 @@ class ConvTranspose1d(_ConvTransposeNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, L_{in})`
-        - Output: :math:`(N, C_{out}, L_{out})` where
+        - Input: :math:`(N, C_{in}, L_{in})` or :math:`(C_{in}, L_{in})`
+        - Output: :math:`(N, C_{out}, L_{out})` or :math:`(C_{out}, L_{out})`, where
 
           .. math::
               L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation}
@@ -726,11 +730,11 @@ class ConvTranspose1d(_ConvTransposeNd):
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
 
-    .. _cross-correlation:
-        https://en.wikipedia.org/wiki/Cross-correlation
-
-    .. _link:
+    .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+
+    .. _`Deconvolutional Networks`:
+        https://www.matthewzeiler.com/mattzeiler/deconvolutionalnetworks.pdf
     """
 
     def __init__(
@@ -778,7 +782,9 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     This module can be seen as the gradient of Conv2d with respect to its input.
     It is also known as a fractionally-strided convolution or
-    a deconvolution (although it is not an actual deconvolution operation).
+    a deconvolution (although it is not an actual deconvolution operation as it does
+    not compute a true inverse of convolution). For more information, see the visualizations
+    `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -792,7 +798,7 @@ class ConvTranspose2d(_ConvTransposeNd):
       of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
-      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+      It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
 
@@ -833,8 +839,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C_{in}, H_{in}, W_{in})` or :math:`(C_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(C_{out}, H_{out}, W_{out})`, where
 
         .. math::
               H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
@@ -874,11 +880,11 @@ class ConvTranspose2d(_ConvTransposeNd):
         >>> output.size()
         torch.Size([1, 16, 12, 12])
 
-    .. _cross-correlation:
-        https://en.wikipedia.org/wiki/Cross-correlation
-
-    .. _link:
+    .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+
+    .. _`Deconvolutional Networks`:
+        https://www.matthewzeiler.com/mattzeiler/deconvolutionalnetworks.pdf
     """
 
     def __init__(
@@ -891,7 +897,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         output_padding: _size_2_t = 0,
         groups: int = 1,
         bias: bool = True,
-        dilation: int = 1,
+        dilation: _size_2_t = 1,
         padding_mode: str = 'zeros',
         device=None,
         dtype=None
@@ -929,7 +935,9 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     This module can be seen as the gradient of Conv3d with respect to its input.
     It is also known as a fractionally-strided convolution or
-    a deconvolution (although it is not an actual deconvolution operation).
+    a deconvolution (although it is not an actual deconvolution operation as it does
+    not compute a true inverse of convolution). For more information, see the visualizations
+    `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -943,7 +951,7 @@ class ConvTranspose3d(_ConvTransposeNd):
       of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
-      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+      It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
 
@@ -984,8 +992,9 @@ class ConvTranspose3d(_ConvTransposeNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or
+          :math:`(C_{out}, D_{out}, H_{out}, W_{out})`, where
 
         .. math::
               D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
@@ -1019,11 +1028,11 @@ class ConvTranspose3d(_ConvTransposeNd):
         >>> input = torch.randn(20, 16, 10, 50, 100)
         >>> output = m(input)
 
-    .. _cross-correlation:
-        https://en.wikipedia.org/wiki/Cross-correlation
-
-    .. _link:
+    .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+
+    .. _`Deconvolutional Networks`:
+        https://www.matthewzeiler.com/mattzeiler/deconvolutionalnetworks.pdf
     """
 
     def __init__(
@@ -1115,7 +1124,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         # defined by parent class but using a protocol
         if self.has_uninitialized_params():  # type: ignore[misc]
-            self.in_channels = input.shape[1]
+            self.in_channels = self._get_in_channels(input)
             if self.in_channels % self.groups != 0:
                 raise ValueError('in_channels must be divisible by groups')
             assert isinstance(self.weight, UninitializedParameter)
@@ -1129,6 +1138,22 @@ class _LazyConvXdMixin(LazyModuleMixin):
                 assert isinstance(self.bias, UninitializedParameter)
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
+
+    # Function to extract in_channels from first input.
+    def _get_in_channels(self, input: Tensor) -> int:
+        num_spatial_dims = self._get_num_spatial_dims()
+        num_dims_no_batch = num_spatial_dims + 1  # +1 for channels dim
+        num_dims_batch = num_dims_no_batch + 1
+        if input.dim() not in (num_dims_no_batch, num_dims_batch):
+            raise RuntimeError("Expected {}D (unbatched) or {}D (batched) input to {}, but "
+                               "got input of size: {}".format(num_dims_no_batch, num_dims_batch,
+                                                              self.__class__.__name__, input.shape))
+        return input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
+
+    # Function to return the number of spatial dims expected for inputs to the module.
+    # This is expected to be implemented by subclasses.
+    def _get_num_spatial_dims(self) -> int:
+        raise NotImplementedError()
 
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1196,6 +1221,9 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
+    def _get_num_spatial_dims(self) -> int:
+        return 1
+
 
 # LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
@@ -1261,6 +1289,9 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         self.out_channels = out_channels
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
+
+    def _get_num_spatial_dims(self) -> int:
+        return 2
 
 
 # LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1328,6 +1359,9 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
+    def _get_num_spatial_dims(self) -> int:
+        return 3
+
 
 # LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[misc]
@@ -1392,6 +1426,9 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
         self.out_channels = out_channels
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
+
+    def _get_num_spatial_dims(self) -> int:
+        return 1
 
 
 # LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1458,6 +1495,9 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
+    def _get_num_spatial_dims(self) -> int:
+        return 2
+
 
 # LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[misc]
@@ -1522,3 +1562,6 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
         self.out_channels = out_channels
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
+
+    def _get_num_spatial_dims(self) -> int:
+        return 3

@@ -1,12 +1,12 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 template <>
 class Vectorized<int64_t> {
@@ -148,7 +148,7 @@ class Vectorized<int64_t> {
               (vint64)vec_vsx_ld(offset16, dptr)};
     }
 
-    __at_align32__ double tmp_values[size()];
+    __at_align__ double tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -161,7 +161,7 @@ class Vectorized<int64_t> {
       vec_vsx_st((vfloat64)_vec0, offset0, dptr);
       vec_vsx_st((vfloat64)_vec1, offset16, dptr);
     } else if (count > 0) {
-      __at_align32__ double tmp_values[size()];
+      __at_align__ double tmp_values[size()];
       vec_vsx_st((vfloat64)_vec0, offset0, tmp_values);
       vec_vsx_st((vfloat64)_vec1, offset16, tmp_values);
       std::memcpy(
@@ -172,7 +172,8 @@ class Vectorized<int64_t> {
   int64_t& operator[](int idx) = delete;
 
   Vectorized<int64_t> angle() const {
-    return Vectorized<int64_t>{0};
+    return blendv(
+      Vectorized<int64_t>(0), Vectorized<int64_t>(c10::pi<int64_t>), *this < Vectorized<int64_t>(0));
   }
   Vectorized<int64_t> real() const {
     return *this;

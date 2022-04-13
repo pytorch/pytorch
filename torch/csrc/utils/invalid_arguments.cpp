@@ -298,7 +298,7 @@ std::vector<std::string> _tryMatchKwargs(const Option& option,
     const std::unordered_map<std::string, PyObject*>& kwargs) {
   std::vector<std::string> unmatched;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  int start_idx = option.arguments.size() - kwargs.size();
+  int64_t start_idx = option.arguments.size() - kwargs.size();
   if (option.has_out && kwargs.count("out") == 0)
     start_idx--;
   if (start_idx < 0)

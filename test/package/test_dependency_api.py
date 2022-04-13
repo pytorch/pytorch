@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import importlib
 from io import BytesIO
 from sys import version_info
@@ -24,7 +26,7 @@ class TestDependencyAPI(PackageTestCase):
 
     def test_extern(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.extern(["package_a.subpackage", "module_a"])
             he.save_source_string("foo", "import package_a.subpackage; import module_a")
         buffer.seek(0)
@@ -42,7 +44,7 @@ class TestDependencyAPI(PackageTestCase):
 
     def test_extern_glob(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.extern(["package_a.*", "module_*"])
             he.save_module("package_a")
             he.save_source_string(
@@ -76,7 +78,7 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
-            with PackageExporter(buffer, verbose=False) as exporter:
+            with PackageExporter(buffer) as exporter:
                 exporter.extern(include=["package_b.*"], allow_empty=False)
                 exporter.save_module("package_a.subpackage")
 
@@ -87,7 +89,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
 
         with self.assertRaisesRegex(PackagingError, "denied"):
-            with PackageExporter(buffer, verbose=False) as exporter:
+            with PackageExporter(buffer) as exporter:
                 exporter.deny(["package_a.subpackage", "module_a"])
                 exporter.save_source_string("foo", "import package_a.subpackage")
 
@@ -97,7 +99,7 @@ class TestDependencyAPI(PackageTestCase):
         """
         buffer = BytesIO()
         with self.assertRaises(PackagingError):
-            with PackageExporter(buffer, verbose=False) as exporter:
+            with PackageExporter(buffer) as exporter:
                 exporter.deny(["package_a.*", "module_*"])
                 exporter.save_source_string(
                     "test_module",
@@ -112,7 +114,7 @@ class TestDependencyAPI(PackageTestCase):
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.mock(["package_a.subpackage", "module_a"])
             # Import something that dependso n package_a.subpackage
             he.save_source_string("foo", "import package_a.subpackage")
@@ -133,7 +135,7 @@ class TestDependencyAPI(PackageTestCase):
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock_glob(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.mock(["package_a.*", "module*"])
             he.save_module("package_a")
             he.save_source_string(
@@ -168,7 +170,7 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
-            with PackageExporter(buffer, verbose=False) as exporter:
+            with PackageExporter(buffer) as exporter:
                 exporter.mock(include=["package_b.*"], allow_empty=False)
                 exporter.save_module("package_a.subpackage")
 
@@ -180,22 +182,30 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
-            he.mock(include="package_a.subpackage")
-            he.intern("**")
+        with self.assertRaises(PackagingError):
+            with PackageExporter(buffer) as he:
+                he.mock(include="package_a.subpackage")
+                he.intern("**")
+                he.save_pickle("obj", "obj.pkl", obj2)
+
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
+    def test_pickle_mocked_all(self):
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.intern(include="package_a.**")
+            he.mock("**")
             he.save_pickle("obj", "obj.pkl", obj2)
-
-        buffer.seek(0)
-
-        hi = PackageImporter(buffer)
-        with self.assertRaises(NotImplementedError):
-            hi.load_pickle("obj", "obj.pkl")
 
     def test_allow_empty_with_error(self):
         """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""
         buffer = BytesIO()
         with self.assertRaises(ModuleNotFoundError):
-            with PackageExporter(buffer, verbose=False) as pe:
+            with PackageExporter(buffer) as pe:
                 # Even though we did not extern a module that matches this
                 # pattern, we want to show the save_module error, not the allow_empty error.
 
@@ -212,7 +222,7 @@ class TestDependencyAPI(PackageTestCase):
         import package_a  # noqa: F401
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.save_module("package_a")
 
     def test_intern_error(self):
@@ -225,7 +235,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
 
         with self.assertRaises(PackagingError) as e:
-            with PackageExporter(buffer, verbose=False) as he:
+            with PackageExporter(buffer) as he:
                 he.save_pickle("obj", "obj.pkl", obj2)
 
         self.assertEqual(
@@ -240,7 +250,7 @@ class TestDependencyAPI(PackageTestCase):
         )
 
         # Interning all dependencies should work
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.intern(["package_a", "package_a.subpackage"])
             he.save_pickle("obj", "obj.pkl", obj2)
 
@@ -271,9 +281,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
 
         with self.assertRaises(PackagingError) as e:
-            with PackageExporter(
-                buffer, verbose=False, importer=BrokenImporter()
-            ) as exporter:
+            with PackageExporter(buffer, importer=BrokenImporter()) as exporter:
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
 
@@ -292,7 +300,7 @@ class TestDependencyAPI(PackageTestCase):
         """An incorrectly-formed import should raise a PackagingError."""
         buffer = BytesIO()
         with self.assertRaises(PackagingError) as e:
-            with PackageExporter(buffer, verbose=False) as exporter:
+            with PackageExporter(buffer) as exporter:
                 # This import will fail to load.
                 exporter.save_source_string("foo", "from ........ import lol")
 
@@ -306,6 +314,38 @@ class TestDependencyAPI(PackageTestCase):
                 """
             ),
         )
+
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
+    def test_repackage_mocked_module(self):
+        """Re-packaging a package that contains a mocked module should work correctly."""
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.mock("package_a")
+            exporter.save_source_string("foo", "import package_a")
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        foo = importer.import_module("foo")
+
+        # "package_a" should be mocked out.
+        with self.assertRaises(NotImplementedError):
+            foo.package_a.get_something()
+
+        # Re-package the model, but intern the previously-mocked module and mock
+        # everything else.
+        buffer2 = BytesIO()
+        with PackageExporter(buffer2, importer=importer) as exporter:
+            exporter.intern("package_a")
+            exporter.mock("**")
+            exporter.save_source_string("foo", "import package_a")
+
+        buffer2.seek(0)
+        importer2 = PackageImporter(buffer2)
+        foo2 = importer2.import_module("foo")
+
+        # "package_a" should still be mocked out.
+        with self.assertRaises(NotImplementedError):
+            foo2.package_a.get_something()
 
 
 if __name__ == "__main__":

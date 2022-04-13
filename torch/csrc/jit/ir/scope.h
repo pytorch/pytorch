@@ -1,14 +1,20 @@
 #pragma once
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
+struct ModuleInstanceInfo;
+constexpr size_t kModuleInstanceInfo = 2;
+
+namespace utils {
+std::string get_module_info(const ModuleInstanceInfo& module_instance_info);
+} // namespace utils
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a

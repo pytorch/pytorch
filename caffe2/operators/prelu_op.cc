@@ -254,15 +254,12 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PRelu, PReluOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     PReluGradient,
     PReluGradientOp<float, CPUContext>);
 
 // Input: X, Slope, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PRelu)
     .NumInputs(2)
     .NumOutputs(1)
@@ -341,7 +338,6 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(PReluGradient)
     .NumInputs(4)
     .NumOutputs(2)
@@ -363,7 +359,6 @@ class GetPReluGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PRelu, GetPReluGradient);
 
 } // namespace caffe2

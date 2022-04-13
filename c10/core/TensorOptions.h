@@ -211,7 +211,7 @@ struct C10_API TensorOptions {
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
   C10_NODISCARD TensorOptions
-  device_index(int16_t device_index) const noexcept {
+  device_index(c10::DeviceIndex device_index) const noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 
@@ -588,7 +588,8 @@ inline TensorOptions device(Device device) {
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
 inline TensorOptions device_index(int16_t device_index) {
-  return TensorOptions().device_index(device_index);
+  return TensorOptions().device_index(
+      static_cast<c10::DeviceIndex>(device_index));
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
@@ -642,6 +643,9 @@ inline DispatchKey computeDispatchKey(
           }
           return DispatchKey::CUDA;
         }
+        case DeviceType::IPU: {
+          return DispatchKey::IPU;
+        }
         case DeviceType::XPU: {
           if (isQIntType(dtype_)) {
             return DispatchKey::QuantizedXPU;
@@ -659,12 +663,16 @@ inline DispatchKey computeDispatchKey(
               ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
         case DeviceType::HIP:
           return DispatchKey::HIP;
+        case DeviceType::VE:
+          return DispatchKey::VE;
         case DeviceType::FPGA:
           return DispatchKey::FPGA;
-        case DeviceType::MSNPU:
-          return DispatchKey::MSNPU;
+        case DeviceType::ORT:
+          return DispatchKey::ORT;
         case DeviceType::XLA:
           return DispatchKey::XLA;
+        case DeviceType::Lazy:
+          return DispatchKey::Lazy;
         case DeviceType::MLC:
           return DispatchKey::MLC;
         case DeviceType::Vulkan:
@@ -690,6 +698,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCUDA;
         case DeviceType::HIP:
           return DispatchKey::SparseHIP;
+        case DeviceType::VE:
+          return DispatchKey::SparseVE;
         case DeviceType::XPU:
           return DispatchKey::SparseXPU;
         default:
@@ -729,6 +739,7 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseCPU:
     case DispatchKey::SparseCUDA:
     case DispatchKey::SparseHIP:
+    case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
@@ -757,15 +768,24 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::HIP:
     case DispatchKey::SparseHIP:
       return DeviceType::HIP;
+    case DispatchKey::VE:
+    case DispatchKey::SparseVE:
+      return DeviceType::VE;
     case DispatchKey::XLA:
     case DispatchKey::AutogradXLA:
       return DeviceType::XLA;
+    case DispatchKey::Lazy:
+    case DispatchKey::AutogradLazy:
+      return DeviceType::Lazy;
     case DispatchKey::Vulkan:
       return DeviceType::Vulkan;
     case DispatchKey::Meta:
       return DeviceType::Meta;
 
     // stuff that people are actively developing
+    case DispatchKey::IPU:
+    case DispatchKey::AutogradIPU:
+      return DeviceType::IPU;
     case DispatchKey::XPU:
     case DispatchKey::SparseXPU:
     case DispatchKey::QuantizedXPU:
@@ -777,10 +797,8 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::HPU:
     case DispatchKey::AutogradHPU:
       return DeviceType::HPU;
-
-    // stuff that isn't real
-    case DispatchKey::MSNPU:
-      return DeviceType::MSNPU;
+    case DispatchKey::ORT:
+      return DeviceType::ORT;
     default:
       TORCH_CHECK(
           false,
@@ -795,5 +813,15 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
       .layout(dispatchKeyToLayout(dispatch_key))
       .device(dispatchKeyToDeviceType(dispatch_key));
 }
+
+namespace detail {
+inline bool backend_supports_empty_operator(const TensorOptions options) {
+  // Quantized backends don't support at::empty().
+  // They have separate operators like at::empty_quantized() that take in
+  // extra information about how to quantize the tensor.
+  return !isQIntType(typeMetaToScalarType(options.dtype()));
+}
+
+} // namespace detail
 
 } // namespace c10

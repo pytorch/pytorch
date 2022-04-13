@@ -1,46 +1,44 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/init.h>
 #include <caffe2/core/operator.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, SimpleLegacy) {
   caffe2::Tensor c2_tensor(caffe2::CPU);
   c2_tensor.Resize(4, 4);
   auto data = c2_tensor.mutable_data<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
 
   auto it = at_tensor.data_ptr<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(it[i], i);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, Simple) {
   caffe2::Tensor c2_tensor = caffe2::empty({4, 4}, at::kLong);
   auto data = c2_tensor.mutable_data<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
 
   auto it = at_tensor.data_ptr<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(it[i], i);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, ExternalData) {
   caffe2::Tensor c2_tensor = caffe2::empty({4, 4}, at::kLong);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int64_t buf[16];
-  for (int64_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     buf[i] = i;
   }
   c2_tensor.ShareExternalPointer(buf, 16 * sizeof(int64_t));
@@ -51,7 +49,7 @@ TEST(Caffe2ToPytorch, ExternalData) {
   at_tensor.permute({1, 0});
   at_tensor.permute({1, 0});
   auto it = at_tensor.data_ptr<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(it[i], i);
   }
   ASSERT_FALSE(at_tensor.storage().resizable());
@@ -59,12 +57,11 @@ TEST(Caffe2ToPytorch, ExternalData) {
   ASSERT_ANY_THROW(at_tensor.resize_({7,7}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, Op) {
   caffe2::Tensor c2_tensor(caffe2::CPU);
   c2_tensor.Resize(3, 3);
   auto data = c2_tensor.mutable_data<int64_t>();
-  for (int64_t i = 0; i < 9; i++) {
+  for (const auto i : c10::irange(9)) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
@@ -81,7 +78,6 @@ TEST(Caffe2ToPytorch, Op) {
 //   ASSERT_ANY_THROW(at::sum(at_tensor));
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, PartiallyInitialized) {
   // These APIs for partially initialized tensors should go away soon, in the
   // meantime ensure they are caught
@@ -109,11 +105,10 @@ TEST(Caffe2ToPytorch, PartiallyInitialized) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, MutualResizes) {
   caffe2::Tensor c2_tensor = caffe2::empty({5, 5}, at::kFloat);
   auto data = c2_tensor.mutable_data<float>();
-  for (int64_t i = 0; i < 25; i++) {
+  for (const auto i : c10::irange(25)) {
     data[i] = 0;
   }
 
@@ -144,7 +139,6 @@ TEST(Caffe2ToPytorch, MutualResizes) {
   ASSERT_EQ(at_tensor.sizes()[1], 7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, Op) {
   caffe2::Workspace workspace;
   caffe2::NetDef net;
@@ -178,14 +172,13 @@ TEST(PytorchToCaffe2, Op) {
   auto result = XBlobGetMutableTensor(workspace.CreateBlob("d"), {5, 5}, at::kCPU);
 
   auto it = result.data<float>();
-  for (int64_t i = 0; i < 25; i++) {
+  for (const auto i : c10::irange(25)) {
     ASSERT_EQ(it[i], 3.0);
   }
   at::Tensor at_result(result);
   ASSERT_EQ(at::sum(at_result).item<float>(), 75);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, SharedStorageRead) {
   caffe2::Workspace workspace;
   caffe2::NetDef net;
@@ -210,14 +203,13 @@ TEST(PytorchToCaffe2, SharedStorageRead) {
 
   auto result = XBlobGetMutableTensor(workspace.CreateBlob("c"), {5, 5}, at::kCPU);
   auto it = result.data<float>();
-  for (int64_t i = 0; i < 25; i++) {
+  for (const auto i : c10::irange(25)) {
     ASSERT_EQ(it[i], 2.0);
   }
   at::Tensor at_result(result);
   ASSERT_EQ(at::sum(at_result).item<float>(), 50);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, SharedStorageWrite) {
   auto at_tensor_a = at::ones({5, 5}, at::dtype(at::kFloat));
   auto at_tensor_b = at_tensor_a.view({25});
@@ -232,7 +224,6 @@ TEST(PytorchToCaffe2, SharedStorageWrite) {
   ASSERT_EQ(at_tensor_b[1].item().to<float>(), 123);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, MutualResizes) {
   auto at_tensor = at::ones({5, 5}, at::dtype(at::kFloat));
 
@@ -263,19 +254,17 @@ TEST(PytorchToCaffe2, MutualResizes) {
   ASSERT_EQ(at_tensor.sizes()[1], 7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, Strided) {
   auto at_tensor = at::ones({5, 5}, at::dtype(at::kFloat)).t();
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(caffe2::Tensor c2_tensor(at_tensor));
   // but calling contiguous is fine
   caffe2::Tensor c2_tensor(at_tensor.contiguous());
-  for (int64_t i = 0; i < 25; i++) {
+  for (const auto i : c10::irange(25)) {
     ASSERT_EQ(c2_tensor.data<float>()[i], 1.0);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, InplaceStrided) {
   auto at_tensor = at::zeros({2, 5}, at::dtype(at::kFloat));
   caffe2::Tensor c2_tensor(at_tensor);
@@ -294,7 +283,6 @@ TEST(PytorchToCaffe2, InplaceStrided) {
   ASSERT_EQ(c2_tensor.data<float>()[1], 234);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, NonRegularTensor) {
   at::Tensor at_tensor =
       at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
@@ -303,7 +291,6 @@ TEST(PytorchToCaffe2, NonRegularTensor) {
   ASSERT_ANY_THROW(caffe2::Tensor c2_tensor(at_tensor));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, NonPOD) {
   caffe2::Tensor c2_tensor = caffe2::empty({1}, at::dtype<std::string>());
   auto data = c2_tensor.mutable_data<std::string>();
@@ -312,7 +299,6 @@ TEST(Caffe2ToPytorch, NonPOD) {
   ASSERT_ANY_THROW(at::Tensor at_tensor(c2_tensor));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Caffe2ToPytorch, Nullptr) {
   caffe2::Tensor c2_tensor;
   ASSERT_FALSE(c2_tensor.defined());
@@ -320,7 +306,6 @@ TEST(Caffe2ToPytorch, Nullptr) {
   ASSERT_FALSE(at_tensor.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchToCaffe2, Nullptr) {
   at::Tensor at_tensor;
   ASSERT_FALSE(at_tensor.defined());

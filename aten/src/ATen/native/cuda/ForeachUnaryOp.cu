@@ -1,6 +1,43 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_foreach_abs_native.h>
+#include <ATen/ops/_foreach_acos_native.h>
+#include <ATen/ops/_foreach_asin_native.h>
+#include <ATen/ops/_foreach_atan_native.h>
+#include <ATen/ops/_foreach_ceil_native.h>
+#include <ATen/ops/_foreach_cos_native.h>
+#include <ATen/ops/_foreach_cosh_native.h>
+#include <ATen/ops/_foreach_erf_native.h>
+#include <ATen/ops/_foreach_erfc_native.h>
+#include <ATen/ops/_foreach_exp_native.h>
+#include <ATen/ops/_foreach_expm1_native.h>
+#include <ATen/ops/_foreach_floor_native.h>
+#include <ATen/ops/_foreach_frac_native.h>
+#include <ATen/ops/_foreach_lgamma_native.h>
+#include <ATen/ops/_foreach_log10_native.h>
+#include <ATen/ops/_foreach_log1p_native.h>
+#include <ATen/ops/_foreach_log2_native.h>
+#include <ATen/ops/_foreach_log_native.h>
+#include <ATen/ops/_foreach_neg_native.h>
+#include <ATen/ops/_foreach_reciprocal_native.h>
+#include <ATen/ops/_foreach_round_native.h>
+#include <ATen/ops/_foreach_sigmoid_native.h>
+#include <ATen/ops/_foreach_sin_native.h>
+#include <ATen/ops/_foreach_sinh_native.h>
+#include <ATen/ops/_foreach_sqrt_native.h>
+#include <ATen/ops/_foreach_tan_native.h>
+#include <ATen/ops/_foreach_tanh_native.h>
+#include <ATen/ops/_foreach_trunc_native.h>
+#include <ATen/ops/_foreach_zero_native.h>
+
+#include <ATen/ops/empty_like_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -15,7 +52,7 @@ template <typename scalar_t, template<class> class Op> std::vector<Tensor> forea
     tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
-    using opmath_t = typename get_opmath_t<scalar_t>::opmath_t;
+    using opmath_t = typename at::opmath_type<scalar_t>;
     multi_tensor_apply<2>(tensor_lists,
                           UnaryOpFunctor<scalar_t,
                                          /* depth */ 2,
@@ -29,7 +66,7 @@ template <typename scalar_t, template<class> class Op> std::vector<Tensor> forea
 template <typename scalar_t, template<class> class Op> void foreach_unary_op_(TensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
-    using opmath_t = typename get_opmath_t<scalar_t>::opmath_t;
+    using opmath_t = typename at::opmath_type<scalar_t>;
     multi_tensor_apply<1>(tensor_lists,
                           UnaryOpFunctor<scalar_t,
                                          /* depth */ 1,
@@ -209,31 +246,32 @@ OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 
+// note(mkozuki): tensor dtype checks of `neg` kernels.
+// Since `check_foreach_api_restrictions` don't require all the tensors to have the same dtype,
+// I think it safer to check every single tensor's dtype inside negation kernels.
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    TORCH_CHECK(tensors[0].scalar_type() != kBool,
-                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
-                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
-                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow(tensors);
     }
 
+    TORCH_CHECK(tensors[0].scalar_type() != kBool,
+                "Negation, the `-` operator, on a bool tensor is not supported. "
+                "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
     return all_types_half_complex_bfloat16<std::negate>(tensors);
 }
 
 void foreach_tensor_neg_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    TORCH_CHECK(tensors[0].scalar_type() != kBool,
-                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
-                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
-                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow_(tensors);
     }
 
+    TORCH_CHECK(tensors[0].scalar_type() != kBool,
+                "Negation, the `-` operator, on a bool tensor is not supported. "
+                "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
     all_types_half_complex_bfloat16_<std::negate>(tensors);
 }
 

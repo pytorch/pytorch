@@ -3,6 +3,10 @@
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/irange.h>
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
+#endif
+
 using namespace c10;
 using namespace c10::impl;
 
@@ -36,21 +40,18 @@ static void checkData(
   EXPECT_EQ(sz.strides_arrayref(), strides);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, DefaultConstructor) {
   SizesAndStrides sz;
   checkData(sz, {0}, {1});
   // Can't test size_at() out of bounds because it just asserts for now.
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetSizes) {
   SizesAndStrides sz;
   sz.set_sizes({5, 6, 7, 8});
   checkData(sz, {5, 6, 7, 8}, {1, 0, 0, 0});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, Resize) {
   SizesAndStrides sz;
 
@@ -132,7 +133,6 @@ TEST(SizesAndStridesTest, Resize) {
   checkData(sz, {-1, 0, 1, 2, 3}, {-2, 0, 2, 4, 6});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetAtIndex) {
   SizesAndStrides sz;
 
@@ -149,7 +149,6 @@ TEST(SizesAndStridesTest, SetAtIndex) {
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetAtIterator) {
   SizesAndStrides sz;
 
@@ -166,7 +165,6 @@ TEST(SizesAndStridesTest, SetAtIterator) {
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetViaData) {
   SizesAndStrides sz;
 
@@ -207,7 +205,7 @@ static SizesAndStrides makeBig(int offset = 0) {
 
 static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
   std::vector<int64_t> sizes(3), strides(3);
-  for (int ii = 0; ii < 3; ++ii) {
+  for (const auto ii : c10::irange(3)) {
     sizes[ii] = ii + 1 + offset;
     strides[ii] = 2 * (ii + 1 + offset);
   }
@@ -216,14 +214,13 @@ static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
 
 static void checkBig(const SizesAndStrides& big, int offset = 0) {
   std::vector<int64_t> sizes(8), strides(8);
-  for (int ii = 0; ii < 8; ++ii) {
+  for (const auto ii : c10::irange(8)) {
     sizes[ii] = ii - 1 + offset;
     strides[ii] = 2 * (ii - 1 + offset);
   }
   checkData(big, sizes, strides);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveConstructor) {
   SizesAndStrides empty;
 
@@ -251,7 +248,6 @@ TEST(SizesAndStridesTest, MoveConstructor) {
   EXPECT_EQ(big.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyConstructor) {
   SizesAndStrides empty;
 
@@ -280,7 +276,6 @@ TEST(SizesAndStridesTest, CopyConstructor) {
   checkBig(copiedBig);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentSmallToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides smallCopyFrom = makeSmall(1);
@@ -294,7 +289,6 @@ TEST(SizesAndStridesTest, CopyAssignmentSmallToSmall) {
   checkSmall(smallCopyFrom, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentSmallToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides smallMoveFrom = makeSmall(1);
@@ -309,7 +303,6 @@ TEST(SizesAndStridesTest, MoveAssignmentSmallToSmall) {
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentSmallToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides smallCopyFrom = makeSmall();
@@ -323,7 +316,6 @@ TEST(SizesAndStridesTest, CopyAssignmentSmallToBig) {
   checkSmall(smallCopyFrom);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentSmallToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides smallMoveFrom = makeSmall();
@@ -338,7 +330,6 @@ TEST(SizesAndStridesTest, MoveAssignmentSmallToBig) {
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentBigToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides bigCopyFrom = makeBig(1);
@@ -352,7 +343,6 @@ TEST(SizesAndStridesTest, CopyAssignmentBigToBig) {
   checkBig(bigCopyFrom, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentBigToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides bigMoveFrom = makeBig(1);
@@ -367,7 +357,6 @@ TEST(SizesAndStridesTest, MoveAssignmentBigToBig) {
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentBigToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides bigCopyFrom = makeBig();
@@ -381,7 +370,6 @@ TEST(SizesAndStridesTest, CopyAssignmentBigToSmall) {
   checkBig(bigCopyFrom);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentBigToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides bigMoveFrom = makeBig();
@@ -396,7 +384,6 @@ TEST(SizesAndStridesTest, MoveAssignmentBigToSmall) {
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentSelf) {
   SizesAndStrides small = makeSmall();
   SizesAndStrides big = makeBig();
@@ -418,7 +405,6 @@ static void selfMove(SizesAndStrides& x, SizesAndStrides& y) {
   x = std::move(y);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentSelf) {
   SizesAndStrides small = makeSmall();
   SizesAndStrides big = makeBig();

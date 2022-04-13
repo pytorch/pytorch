@@ -20,7 +20,6 @@ void torch_warn() {
   TORCH_WARN("warn multiple times");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsTest, WarnOnce) {
   {
     WarningCapture warnings;
@@ -47,7 +46,6 @@ TEST(UtilsTest, WarnOnce) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NoGradTest, SetsGradModeCorrectly) {
   torch::manual_seed(0);
   torch::NoGradGuard guard;
@@ -70,29 +68,36 @@ struct AutogradTest : torch::test::SeedingFixture {
   torch::Tensor x, y, z;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AutogradTest, CanTakeDerivatives) {
   z.backward(torch::ones_like(z));
   ASSERT_TRUE(x.grad().allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AutogradTest, CanTakeDerivativesOfZeroDimTensors) {
   z.sum().backward();
   ASSERT_TRUE(x.grad().allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsTest, AmbiguousOperatorDefaults) {
   auto tmp = at::empty({}, at::kCPU);
   at::_test_ambiguous_defaults(tmp);
   at::_test_ambiguous_defaults(tmp, 1);
   at::_test_ambiguous_defaults(tmp, 1, 1);
   at::_test_ambiguous_defaults(tmp, 2, "2");
+}
+
+int64_t get_first_element(c10::OptionalIntArrayRef arr) {
+  return arr.value()[0];
+}
+
+TEST(OptionalArrayRefTest, DanglingPointerFix) {
+  // Ensure that the converting constructor of `OptionalArrayRef` does not
+  // create a dangling pointer when given a single value
+  ASSERT_TRUE(get_first_element(300) == 300);
+  ASSERT_TRUE(get_first_element({400}) == 400);
 }

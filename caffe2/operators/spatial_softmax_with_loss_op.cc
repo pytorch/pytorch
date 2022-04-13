@@ -2,17 +2,14 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SpatialSoftmaxWithLoss,
     SpatialSoftmaxWithLossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SpatialSoftmaxWithLossGradient,
     SpatialSoftmaxWithLossGradientOp<float, CPUContext>);
 
 // Input: X (logits), T (labels); Output: P (probs), Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialSoftmaxWithLoss)
     .NumInputs(2, 3)
     .NumOutputs(2)
@@ -59,7 +56,6 @@ For spatial softmax, weighting is by x,y position of the input.
     .Output(1, "loss", "Average loss");
 
 // Input: X, T, P, dY; Output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialSoftmaxWithLossGradient).NumOutputs(1);
 
 #define DONT_CARE (-1)
@@ -265,7 +261,6 @@ class GetSoftmaxWithLossGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SpatialSoftmaxWithLoss, GetSoftmaxWithLossGradient);
 }
 } // namespace caffe2

@@ -4,6 +4,7 @@
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
 #include <ATen/test/test_assert.h>
+#include <c10/util/irange.h>
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -84,7 +85,8 @@ void TestAdd(DeprecatedTypeProperties& type) {
 void TestZeros(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor a = zeros({1024, 1024}, type);
-  for (int i = 1; i < 1000; ++i) {
+  for (const auto i : c10::irange(1, 1000)) {
+    (void)i; // Suppress unused variable warning
     a = zeros({128, 128}, type);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -102,7 +104,8 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (auto i = 0; i < 100000; i++) {
+  for (const auto i : c10::irange(100000)) {
+    (void)i; // Suppress unused variable warning
     add_out(r, r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -119,7 +122,8 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (auto i = 0; i < 100000; i++) {
+  for (const auto i : c10::irange(100000)) {
+    (void)i; // Suppress unused variable warning
     r = add(r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -176,7 +180,7 @@ void TestCopyBroadcasting(DeprecatedTypeProperties& type) {
   Tensor a = zeros({4, 3}, type);
   Tensor e = rand({3}, type);
   a.copy_(e);
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     ASSERT_TRUE(a[i].equal(e));
   }
 }
@@ -247,13 +251,13 @@ void TestToString() {
 void TestIndexingByScalar() {
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
-  for (int64_t i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   for (size_t i = 0; i < static_cast<uint64_t>(tensor.numel()); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * static_cast<int64_t>(i)));
   }
-  for (int i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
@@ -272,7 +276,7 @@ void TestIndexingByScalar() {
 void TestIndexingByZerodimTensor() {
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
-  for (int i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[one * i].equal(one * i));
   }
   // Throw StartsWith(
@@ -360,21 +364,18 @@ void test(DeprecatedTypeProperties& type) {
   TestIntArrayRefExpansion(type);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCPU) {
   manual_seed(123);
 
   test(CPU(kFloat));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestHalfCPU) {
   manual_seed(234);
 
   test(CPU(kHalf));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCUDA) {
   manual_seed(123);
 
@@ -383,7 +384,6 @@ TEST(BasicTest, BasicTestCUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, FactoryMethodsTest) {
   // Test default values
   at::Tensor tensor0 = at::empty({4});
@@ -423,7 +423,7 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(tensor1.is_pinned());
+  ASSERT_FALSE(tensor1.is_pinned());
 #endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
@@ -454,11 +454,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
-
-    // This will cause an exception
-    // Issue https://github.com/pytorch/pytorch/issues/30405
-    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_ANY_THROW(tensor1.is_pinned());
+    ASSERT_FALSE(tensor1.is_pinned());
   }
 
   // Test _like variants

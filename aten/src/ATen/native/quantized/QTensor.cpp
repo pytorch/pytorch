@@ -11,12 +11,62 @@
 namespace at {
 namespace native {
 
+Tensor quantize_per_tensor_dynamic(
+    const Tensor& self,
+    ScalarType dtype,
+    bool reduce_range) {
+  TORCH_CHECK( (dtype == ScalarType::QInt8 || dtype == ScalarType::QUInt8 || dtype == ScalarType::Half), "dtype ", dtype, "not supported");
+  auto input_contig = self.contiguous();
+  if (dtype == ScalarType::Half) {
+    return input_contig.to(ScalarType::Half);
+  }
+  float x_min = input_contig.min().item<float>();
+  float x_max = input_contig.max().item<float>();
+
+  if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    reduce_range = false;
+  }
+
+  int qmin;
+  int qmax;
+
+  if (dtype == ScalarType::QInt8) {
+    qmin = -128;
+    qmax = 127;
+  } else {
+    // for now, this branch executes for dtype == ScalarType::QUInt8
+    // additional cases will be added when quantization support for other dtypes becomes available
+    qmin = 0;
+    qmax = 255;
+  }
+
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/qmin,
+      /*qmax=*/qmax,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+
+  return at::native::quantize_per_tensor(self, q_params.scale, q_params.zero_point, dtype);
+}
+
 Tensor quantize_per_tensor(
     const Tensor& self,
     double scale,
     int64_t zero_point,
     ScalarType dtype) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
+  return quantizer->quantize(self);
+}
+
+Tensor quantize_per_tensor_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
   return quantizer->quantize(self);
 }
 
@@ -36,7 +86,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
   return quantized_tensors;
 }
 
-Tensor quantize_per_channel_cpu(
+Tensor quantize_per_channel(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -45,19 +95,19 @@ Tensor quantize_per_channel_cpu(
   auto quantizer = make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
-Tensor dequantize_cpu(const Tensor& self) {
-  TORCH_CHECK(!self.is_quantized());
+
+Tensor dequantize_cpu_or_cuda(const Tensor& self) {
   return self.to(at::kFloat);
 }
 
-Tensor dequantize_quantized_cpu(const Tensor& self) {
+Tensor dequantize_quantized(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (const auto i : c10::irange(tensors.size())) {
-    dequantized_tensors.push_back(tensors[i].dequantize());
+  for (const auto & tensor : tensors) {
+    dequantized_tensors.push_back(tensor.dequantize());
   }
   return dequantized_tensors;
 }

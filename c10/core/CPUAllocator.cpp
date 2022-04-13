@@ -1,112 +1,20 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/alignment.h>
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 
-// TODO: rename flags to C10
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+// TODO: rename flag to C10
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_bool(
-    caffe2_cpu_allocator_do_zero_fill,
-    false,
-    "If set, do memory zerofilling when allocating on CPU");
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_bool(
-    caffe2_cpu_allocator_do_junk_fill,
-    false,
-    "If set, fill memory with deterministic junk when allocating on CPU");
-
 namespace c10 {
 
-void memset_junk(void* data, size_t num) {
-  // This garbage pattern is NaN when interpreted as floating point values,
-  // or as very large integer values.
-  static constexpr int32_t kJunkPattern = 0x7fedbeef;
-  static constexpr int64_t kJunkPattern64 =
-      static_cast<int64_t>(kJunkPattern) << 32 | kJunkPattern;
-  int32_t int64_count = num / sizeof(kJunkPattern64);
-  int32_t remaining_bytes = num % sizeof(kJunkPattern64);
-  int64_t* data_i64 = reinterpret_cast<int64_t*>(data);
-  for (int i = 0; i < int64_count; i++) {
-    data_i64[i] = kJunkPattern64;
-  }
-  if (remaining_bytes > 0) {
-    memcpy(data_i64 + int64_count, &kJunkPattern64, remaining_bytes);
-  }
-}
-
-void* alloc_cpu(size_t nbytes) {
-  if (nbytes == 0) {
-    return nullptr;
-  }
-  // We might have clowny upstream code that tries to alloc a negative number
-  // of bytes. Let's catch it early.
-  CAFFE_ENFORCE(
-      ((ptrdiff_t)nbytes) >= 0,
-      "alloc_cpu() seems to have been called with negative number: ",
-      nbytes);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  void* data;
-#ifdef __ANDROID__
-  data = memalign(gAlignment, nbytes);
-#elif defined(_MSC_VER)
-  data = _aligned_malloc(nbytes, gAlignment);
-#else
-  int err = posix_memalign(&data, gAlignment, nbytes);
-  if (err != 0) {
-    CAFFE_THROW(
-        "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
-        nbytes,
-        " bytes. Error code ",
-        err,
-        " (",
-        strerror(err),
-        ")");
-  }
-#endif
-
-  CAFFE_ENFORCE(
-      data,
-      "DefaultCPUAllocator: not enough memory: you tried to allocate ",
-      nbytes,
-      " bytes.");
-
-  // move data to a thread's NUMA node
-  NUMAMove(data, nbytes, GetCurrentNUMANode());
-  CHECK(
-      !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
-      !FLAGS_caffe2_cpu_allocator_do_junk_fill)
-      << "Cannot request both zero-fill and junk-fill at the same time";
-  if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
-    memset(data, 0, nbytes);
-  } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
-    memset_junk(data, nbytes);
-  }
-
-  return data;
-}
-
-void free_cpu(void* data) {
-#ifdef _MSC_VER
-  _aligned_free(data);
-#else
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  free(data);
-#endif
-}
-
 struct C10_API DefaultCPUAllocator final : at::Allocator {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  DefaultCPUAllocator() {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ~DefaultCPUAllocator() override {}
+  DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
     profiledCPUMemoryReporter().New(data, nbytes);
@@ -157,7 +65,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   DefaultMobileCPUAllocator() = default;
   // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~DefaultMobileCPUAllocator() override = default;
+  ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
@@ -184,8 +92,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) const override {
     if (C10_UNLIKELY(0u == nbytes)) {
       return {
           nullptr,
@@ -220,8 +127,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     };
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual DeleterFnPtr raw_deleter() const override {
+  DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
 };
@@ -262,14 +168,12 @@ REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
 #else
 
 // Global default CPU Allocator
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static DefaultCPUAllocator g_cpu_alloc;
 
 at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
 
 #endif /* C10_Mobile */
@@ -291,7 +195,8 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
               << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, nbytes, c10::Device(c10::DeviceType::CPU));
+    reportMemoryUsageToProfiler(
+        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -326,13 +231,11 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_API at::Allocator* cpu_caching_alloc = nullptr;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_API uint8_t cpu_caching_alloc_priority = 0;
 
 void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {

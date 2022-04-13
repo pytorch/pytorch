@@ -9,7 +9,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
+class API_AVAILABLE(ios(11.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
   ~MPSImageWrapper();
@@ -30,10 +30,10 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
 
  private:
   std::vector<int64_t> _imageSizes;
-  MPSImage* _image = nullptr;
+  MPSImage* _image = nil;
   id<MTLBuffer> _buffer = nil;
-  MetalCommandBuffer* _commandBuffer;
-  id<PTMetalCommandBuffer> _delegate;
+  MetalCommandBuffer* _commandBuffer = nil;
+  id<PTMetalCommandBuffer> _delegate = nil;
 };
 
 } // namespace metal

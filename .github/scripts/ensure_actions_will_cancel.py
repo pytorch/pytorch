@@ -9,14 +9,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+EXPECTED_GROUP = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}" \
+    "-${{ github.event_name == 'workflow_dispatch' }}"
 
 
-def concurrency_key(filename):
-    workflow_name = filename.with_suffix("").name.replace("_", "-")
-    return f"{workflow_name}-${{{{ github.event.pull_request.number || github.sha }}}}"
-
-
-def should_check(filename):
+def should_check(filename: Path) -> bool:
     with open(filename, "r") as f:
         content = f.read()
 
@@ -31,21 +28,37 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    files = WORKFLOWS.glob("*.yml")
+    files = list(WORKFLOWS.glob("*.yml"))
 
     errors_found = False
     files = [f for f in files if should_check(f)]
+    names = set()
     for filename in files:
         with open(filename, "r") as f:
             data = yaml.safe_load(f)
 
+        name = data.get("name")
+        if name is not None and name in names:
+            print("ERROR: duplicate workflow name:", name, file=sys.stderr)
+            errors_found = True
+        names.add(name)
+
         expected = {
-            "group": concurrency_key(filename),
+            "group": EXPECTED_GROUP,
             "cancel-in-progress": True,
         }
-        if data.get("concurrency", None) != expected:
+        actual = data.get("concurrency", None)
+        if actual != expected:
             print(
                 f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                file=sys.stderr,
+            )
+            print(
+                f"expected: {expected}",
+                file=sys.stderr,
+            )
+            print(
+                f"actual:   {actual}",
                 file=sys.stderr,
             )
             errors_found = True

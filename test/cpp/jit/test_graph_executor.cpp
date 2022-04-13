@@ -9,7 +9,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphExecutorTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -33,7 +32,6 @@ TEST(GraphExecutorTest, Basic_CUDA) {
   ASSERT_TRUE(almostEqual(stack[1].toTensor(), r1));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphExecutorTest, runAsync_executor) {
   /*
   TODO: there are some problem with C++ parsing script program involving

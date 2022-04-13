@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 project(c10 CXX)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -49,6 +49,9 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+endif()
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+  target_compile_options(c10 PRIVATE "-Werror=sign-compare")
 endif()
 
 # ---[ Dependency of c10

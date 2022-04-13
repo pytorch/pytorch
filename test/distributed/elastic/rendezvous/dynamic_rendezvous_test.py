@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: r2p"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -423,9 +425,9 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
             self.assertEqual(self._mock_backend.set_state.call_count, 0)
 
     def test_sync_sanitizes_state(self) -> None:
-        expected_state = self._create_state()
+        state = self._create_state()
 
-        state = copy.deepcopy(expected_state)
+        expected_state = copy.deepcopy(state)
 
         dead_node1 = _NodeDesc("dead1", 1, 1)
         dead_node2 = _NodeDesc("dead2", 1, 1)
@@ -445,6 +447,28 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
         state.wait_list.add(dead_node4)
         state.wait_list.add(dead_node5)
+
+        self._backend.set_state_internal(state)
+
+        state_holder = self._create_state_holder()
+
+        state_holder.sync()
+
+        self.assert_state_equal(state_holder.state, expected_state)
+
+    def test_sync_sanitizes_state_if_no_participants_is_left(self) -> None:
+        state = self._create_state()
+
+        expected_state = copy.deepcopy(state)
+
+        for node in state.last_heartbeats:
+            state.last_heartbeats[node] = self._now - timedelta(seconds=100)
+
+        expected_state.complete = False
+        expected_state.round = 1000
+        expected_state.participants = {}
+        expected_state.wait_list = set()
+        expected_state.last_heartbeats = {}
 
         self._backend.set_state_internal(state)
 
@@ -1147,6 +1171,14 @@ class DynamicRendezvousHandlerTest(TestCase):
 
                 self._mock_sync.reset_mock()
 
+    @patch("torch.distributed.elastic.events.record_rdzv_event")
+    def test_is_closed_records_and_raises_exceptions(self, record_mock) -> None:
+        self._mock_sync.side_effect = RendezvousError("test error")
+        handler = self._create_handler()
+        with self.assertRaises(RendezvousError):
+            handler.is_closed()
+            record_mock.assert_called_once()
+
     def test_set_closed_closes_rendezvous(self) -> None:
         handler = self._create_handler()
 
@@ -1172,6 +1204,15 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         self.assertTrue(self._state.closed)
 
+    @patch("torch.distributed.elastic.events.record_rdzv_event")
+    def test_set_closed_records_and_raises_exceptions(self, record_mock) -> None:
+        with patch.object(DynamicRendezvousHandler, "_close") as close_mock:
+            close_mock.side_effect = RendezvousError("test error")
+            handler = self._create_handler()
+            with self.assertRaises(RendezvousError):
+                handler.set_closed()
+                record_mock.assert_called_once()
+
     def test_num_nodes_waiting_returns_expected_value(self) -> None:
         self._state.wait_list.add(_NodeDesc("dummy1", 1, 1))
         self._state.wait_list.add(_NodeDesc("dummy2", 1, 1))
@@ -1181,6 +1222,14 @@ class DynamicRendezvousHandlerTest(TestCase):
         self.assertEqual(handler.num_nodes_waiting(), 2)
 
         self._mock_sync.assert_called_once()
+
+    @patch("torch.distributed.elastic.events.record_rdzv_event")
+    def test_num_nodes_waiting_records_and_raises_exceptions(self, record_mock) -> None:
+        self._mock_sync.side_effect = RendezvousError("test error")
+        handler = self._create_handler()
+        with self.assertRaises(RendezvousError):
+            handler.num_nodes_waiting()
+            record_mock.assert_called_once()
 
     def test_shutdown_closes_rendezvous_and_returns_true(self) -> None:
         handler = self._create_handler()
@@ -1207,6 +1256,15 @@ class DynamicRendezvousHandlerTest(TestCase):
         handler.shutdown()
 
         self.assertTrue(self._state.closed)
+
+    @patch("torch.distributed.elastic.events.record_rdzv_event")
+    def test_shutdown_records_and_raises_exceptions(self, record_mock) -> None:
+        with patch.object(DynamicRendezvousHandler, "_close") as close_mock:
+            close_mock.side_effect = RuntimeError("test error")
+            handler = self._create_handler()
+            with self.assertRaises(RuntimeError):
+                handler.shutdown()
+                record_mock.assert_called_once()
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.datetime")
     def test_keep_alive_updates_last_heartbeat(self, mock_datetime) -> None:
@@ -1404,3 +1462,11 @@ class CreateHandlerTest(TestCase):
         self._expected_timeout = RendezvousTimeout()
 
         self.test_create_handler_returns_handler()
+
+    @patch("torch.distributed.elastic.events.record_rdzv_event")
+    def test_create_handler_records_and_raises_exceptions(self, record_mock) -> None:
+        with patch.object(DynamicRendezvousHandler, "from_backend") as from_mock:
+            from_mock.side_effect = RendezvousError("test error")
+            with self.assertRaises(RendezvousError):
+                create_handler(self._store, self._backend, self._params)
+                record_mock.assert_called_once()

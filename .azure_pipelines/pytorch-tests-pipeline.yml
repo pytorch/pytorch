@@ -22,7 +22,7 @@ stages:
   - template: job_templates/wheel-wait-template.yml
   variables:
     _TARGET_BRANCH_TO_CHECK: ${{parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
-    _NUMBER_BUILD_PR: ${{parameters.GitHubPyTorchPRTrigger.PR_NUMBER}}
+    _TARGET_PR_NUMBER: ${{parameters.GitHubPyTorchPRTrigger.PR_NUMBER}}
     _TARGET_COMMIT: ${{parameters.GitHubPyTorchPRTrigger.TARGET_COMMIT}}
 
 - stage: 'PRCustomTests'
@@ -40,7 +40,23 @@ stages:
           _CUDA_BUILD_VERSION: $(CUDA_BUILD_VERSION_PR)
           _TARGET_CIRCLECI_BUILD: $(TARGET_CIRCLECI_BUILD_PR)
           _TARGET_BRANCH_TO_CHECK: ${{parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
-          _NUMBER_BUILD_PR: ${{parameters.GitHubPyTorchPRTrigger.PR_NUMBER}}
+          _TARGET_PR_NUMBER: ${{parameters.GitHubPyTorchPRTrigger.PR_NUMBER}}
           _TARGET_COMMIT: ${{parameters.GitHubPyTorchPRTrigger.TARGET_COMMIT}}
           _DOCKER_IMAGE: $(DOCKER_IMAGE_PR)
           _RUN_TESTS: $(RUN_TESTS_PR)
+
+- stage: 'NotifyWebapp'
+  displayName: 'Notify Webapp that pipeline is finished'
+  dependsOn: PRCustomTests
+  condition: succeededOrFailed()
+  jobs:
+  - template: job_templates/notify-webapp-template.yml
+    parameters:
+      name: ubuntu_1804_CPU
+      pool: $(BUILD_POOL_LIN_1)
+      customMatrixes:
+        PR_Notify_WebApp:
+          _TARGET_CIRCLECI_BUILD: $(TARGET_CIRCLECI_BUILD_PR)
+          _TARGET_BRANCH_TO_CHECK: ${{parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
+          _TARGET_PR_NUMBER: ${{parameters.GitHubPyTorchPRTrigger.PR_NUMBER}}
+          _TARGET_COMMIT: ${{parameters.GitHubPyTorchPRTrigger.TARGET_COMMIT}}

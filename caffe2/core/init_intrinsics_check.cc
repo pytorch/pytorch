@@ -4,7 +4,6 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/cpuid.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_quit_on_unsupported_cpu_feature,
     false,
@@ -73,7 +72,6 @@ bool Caffe2CheckIntrinsicsFeatures(int*, char***) {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_INIT_FUNCTION(
     Caffe2CheckIntrinsicsFeatures,
     &Caffe2CheckIntrinsicsFeatures,

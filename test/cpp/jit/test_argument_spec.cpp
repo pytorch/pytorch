@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/jit.h>
+
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {
@@ -45,7 +47,6 @@ autograd::Variable undef() {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
   auto const CF = at::CPU(at::kFloat);
   auto const CD = at::CPU(at::kDouble);
@@ -131,18 +132,17 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
 //   ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ArgumentSpecTest, Basic_CUDA) {
   auto& CF = at::CPU(at::kFloat);
   auto& CD = at::CPU(at::kDouble);
   auto& GF = at::CUDA(at::kFloat);
   auto& GD = at::CUDA(at::kDouble);
 
-  auto graph = jit::compile(R"JIT(
+  auto graph = toGraphFunction(jit::compile(R"JIT(
    def fn(a, b, c, d, e):
       return a, b, c, d, e
    )JIT")
-                   ->get_function("fn")
+                                   ->get_function("fn"))
                    .graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);

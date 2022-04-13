@@ -10,17 +10,11 @@
 #include <tensorpipe/tensorpipe.h>
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <c10/core/StreamGuard.h>
-
-#if TENSORPIPE_HAS_SHM_TRANSPORT
-// Needed for ::getpid(), which is used to create a unique address.
-#include <sys/types.h>
-#include <unistd.h>
-#endif
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace distributed {
@@ -135,9 +129,9 @@ std::vector<c10::Device> getDevicesOfTensors(
   }
   std::vector<c10::Device> devices;
   devices.reserve(deviceCount);
-  for (c10::DeviceIndex idx = 0; idx < indexBitset.size(); idx++) {
+  for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
-      devices.emplace_back(impl->type(), idx);
+      devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
   return devices;
@@ -157,11 +151,13 @@ void makeStreamsWaitOnOthers(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeTransportRegistry,
+    TransportRegistration);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeChannelRegistry,
+    ChannelRegistration);
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
@@ -194,36 +190,6 @@ const std::string& TensorPipeAgent::guessAddress() {
 
 namespace {
 
-// These priorities instruct TensorPipe on which transport/channel to pick
-// during handshake. Higher priorities will take precedence over lower ones.
-// The transport with lowest priority will be the one used to bootstrap pipes.
-
-constexpr int64_t kShmTransportPriority = 200;
-constexpr int64_t kIbvTransportPriority = 100;
-// The UV transport just uses TCP and should work everywhere, thus keep it last.
-constexpr int64_t kUvTransportPriority = 0;
-
-constexpr int64_t kCmaChannelPriority = 1200;
-constexpr int64_t kMultiplexedUvChannelPriority = 1100;
-// The basic channel reuses a transport as a channel, and is thus our fallback.
-constexpr int64_t kBasicChannelPriority = 1000;
-
-// CPU channel have higher priority than CUDA channels, since the latter might
-// handle CPU-to-CPU transfers, but will always be less efficient than their
-// CPU-only counterparts.
-#if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
-#endif
-
-#if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
-#endif
-
-#ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 0;
-#endif
-
 std::unique_ptr<TransportRegistration> makeUvTransport() {
   auto context = tensorpipe::transport::uv::create();
   std::string address = TensorPipeAgent::guessAddress();
@@ -233,34 +199,20 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
 
 // The UV transport is implemented using standard TCP connections. It leverages
 // libuv (https://github.com/libuv/libuv) in order to be cross-platform.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 
-std::string createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = tensorpipe::transport::shm::create();
-  std::string address = createUniqueShmAddr();
-  return std::make_unique<TransportRegistration>(TransportRegistration{
-      std::move(context), kShmTransportPriority, std::move(address)});
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), kShmTransportPriority, ""});
 }
 
 // The SHM implements connections using ringbuffers residing in anonymous shared
 // memory (plus UNIX domain sockets to bootstrap the connection and exchange
 // file descriptors). It is Linux-only due to some advanced features (O_TMPFILE,
 // eventfd, ...).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #endif // TENSORPIPE_HAS_SHM_TRANSPORT
@@ -279,7 +231,6 @@ std::unique_ptr<TransportRegistration> makeIbvTransport() {
 // issuing a RDMA write for transferring data across machines (plus a send for
 // acknowledging it). It bootstraps using a standard TCP connection to exchange
 // setup information. It is Linux-only.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
 
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
@@ -292,7 +243,6 @@ std::unique_ptr<ChannelRegistration> makeBasicChannel() {
 
 // The basic channel is just a straightforward adapter wrapper that allows any
 // transport to be used as a channel.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
 
 #if TENSORPIPE_HAS_CMA_CHANNEL
@@ -308,7 +258,6 @@ std::unique_ptr<ChannelRegistration> makeCmaChannel() {
 // process (as long as they belong to the same user and other security
 // constraints are satisfied). It does, more or less, what GDB does when it's
 // attached to a running process.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
 
 #endif // TENSORPIPE_HAS_CMA_CHANNEL
@@ -318,7 +267,7 @@ constexpr static int kNumUvThreads = 16;
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
-  for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
+  for (const auto laneIdx C10_UNUSED : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
@@ -336,74 +285,10 @@ std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
 // is split in equal chunks and each chunks is sent on a different connection
 // and thus driven by a different thread. This is needed to reach very high
 // bandwidths.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     mpt_uv,
     makeMultiplexedUvChannel);
-
-#if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-
-std::unique_ptr<ChannelRegistration> makeCudaIpcChannel() {
-  auto context = tensorpipe::channel::cuda_ipc::create();
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaIpcChannelPriority});
-}
-
-// The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel);
-
-#endif
-
-#if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-
-std::unique_ptr<ChannelRegistration> makeCudaGdrChannel() {
-  auto context = tensorpipe::channel::cuda_gdr::create();
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaGdrChannelPriority});
-}
-
-// The cuda_gdr channel sends CUDA memory over InfiniBand using GPUDirect RDMA.
-// It directly registers the user-provided tensor with libibverbs, an operation
-// which is expensive the first time, but it then caches the registration in
-// order to amortize the cost and get low latency for subsequent transfers. A
-// ready-to-send/ready-to-receive handshake is still needed before the transfer
-// in order to ensure readiness and to agree on the device indices and thus the
-// queue pair to use. It automatically pairs each GPU to the "closest" NIC if
-// there are multiple of them (closest = longest prefix match in PCI tree).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel);
-
-#endif
-
-#ifdef USE_CUDA_NOT_ROCM
-
-std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
-  auto context = tensorpipe::channel::cuda_xth::create();
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaXthChannelPriority});
-}
-
-// The cuda_xth channel supports same-process GPU-to-GPU comm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel);
-
-std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
-  auto context = tensorpipe::channel::cuda_basic::create(
-      tensorpipe::channel::basic::create());
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaBasicChannelPriority});
-}
-
-// The cuda_basic is the fallback channel for GPU-to-GPU comm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(
-    TensorPipeChannelRegistry,
-    cuda_basic,
-    makeCudaBasicChannel);
-
-#endif
 
 } // namespace
 
@@ -457,9 +342,15 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::prepareNames() {
-  auto nameToId = collectNames(
-      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+void TensorPipeAgent::prepareNames(bool isStaticGroup) {
+  std::unordered_map<std::string, worker_id_t> nameToId;
+  if (isStaticGroup) {
+    nameToId = collectNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+  } else {
+    nameToId = collectCurrentNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
+  }
 
   for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
@@ -469,12 +360,35 @@ void TensorPipeAgent::prepareNames() {
   }
 }
 
+void TensorPipeAgent::checkAndSetStaticGroup(
+    const c10::intrusive_ptr<::c10d::Store>& store) {
+  std::string isStaticGroupKey("rpcIsStaticGroup");
+
+  std::string isStaticGroupStr = isStaticGroup_ ? "true" : "false";
+  std::vector<uint8_t> isStaticGroupVec(
+      (uint8_t*)isStaticGroupStr.c_str(),
+      (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
+  std::vector<uint8_t> returnedVec;
+  returnedVec = store->compareSet(
+      isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
+  std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
+  // In both cases, the returned value should be the value of isStaticGroupStr,
+  // otherwise there is a discrepency with initialization among one of the
+  // members
+  TORCH_CHECK(
+      returnedVal == isStaticGroupStr,
+      fmt::format(
+          "RPC group mixes statically and dynamically initialized members which is not supported. ",
+          "Static group property is initialized as {} and is trying to be set as {} ",
+          isStaticGroup_,
+          returnedVal));
+}
+
 TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    int worldSize,
-    c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
+    optional<int> worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -492,10 +406,17 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      worldSize_(worldSize),
-      processGroup_(std::move(processGroup)) {
+      shutdownStore_("shutdown", store),
+      isStaticGroup_(worldSize.has_value()) {
+  if (isStaticGroup_) {
+    worldSize_ = worldSize.value();
+  }
+
+  // check the static group attribute against store
+  checkAndSetStaticGroup(store);
+
   // collect worker names
-  prepareNames();
+  prepareNames(isStaticGroup_);
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
@@ -513,6 +434,7 @@ void TensorPipeAgent::startImpl() {
   int lowestPriority = std::numeric_limits<int>::max();
   std::string lowestPriorityTransport;
 
+  // Register transports
   for (auto& key : TensorPipeTransportRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.transports.has_value()) {
@@ -543,6 +465,7 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->transport));
   }
 
+  // Register channels
   for (auto& key : TensorPipeChannelRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.channels.has_value()) {
@@ -874,7 +797,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
         "tried to send() a message of type ",
         requestMessage->type(),
         " but RPC is no longer running on this node.");
-    throw std::runtime_error(err);
+    TORCH_CHECK(false, err);
   }
 
   const auto& url = findWorkerURL(toWorkerInfo);
@@ -1125,11 +1048,6 @@ void TensorPipeAgent::pollTimeoutRpcs() {
   }
 }
 
-// TODO: Remove sync()
-void TensorPipeAgent::sync() {
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is syncing (no-op)";
-}
-
 // TODO: Remove join()
 void TensorPipeAgent::join(bool shutdown) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
@@ -1155,7 +1073,7 @@ void TensorPipeAgent::join(bool shutdown) {
     }
     VLOG(1) << "RPC agent for " << workerInfo_.name_
             << " completed all client calls and is entering a barrier";
-    processGroup_->barrier()->wait();
+    syncCallCount(shutdownStore_, worldSize_);
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
       // At this point, the count may have become non-zero again. We can't wait
@@ -1166,18 +1084,16 @@ void TensorPipeAgent::join(bool shutdown) {
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " exited the barrier and found " << clientActiveCalls_
               << " active client calls";
-      std::vector<at::Tensor> totalClientActiveCalls = {
-          at::zeros({}, at::kLong)};
-      *totalClientActiveCalls[0].data_ptr<int64_t>() = clientActiveCalls_;
-      processGroup_->allreduce(totalClientActiveCalls)->wait();
+      int totalClientActiveCalls =
+          syncCallCount(shutdownStore_, worldSize_, clientActiveCalls_);
       VLOG(1) << "RPC agent for " << workerInfo_.name_
-              << " completed the allreduce and got a total of "
-              << (*totalClientActiveCalls[0].data_ptr<int64_t>())
+              << " completed sync call counts and got a total of "
+              << totalClientActiveCalls
               << " active client calls across all workers";
-      if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+      if (totalClientActiveCalls == 0) {
         if (shutdown) {
           shuttingDown_ = true;
-          processGroup_->barrier()->wait();
+          syncCallCount(shutdownStore_, worldSize_);
         }
         break;
       }
@@ -1338,10 +1254,10 @@ void TensorPipeAgent::markFutureAsComplete(
                      message{std::move(message)},
                      streams{std::move(streams)}]() mutable {
       c10::MultiStreamGuard guard(streams);
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs =
-          message->getDataPtrs();
+      std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages =
+          message->getStorages();
       atomicFuture->jitFuture->markCompleted(
-          std::move(message), std::move(data_ptrs));
+          std::move(message), std::move(storages));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.

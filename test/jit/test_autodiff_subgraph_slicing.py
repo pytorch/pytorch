@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import unittest
@@ -12,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
 
-from typing import Optional
+from typing import List, Tuple, Optional
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -50,8 +52,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with disable_autodiff_subgraph_inlining():
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
-                self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
-
+                FileCheck().check_not("prim::DifferentiableGraph").run(func.graph_for(input))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
     def test_diff_graph_inline_threshold(self):
@@ -77,7 +78,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 bar(input)
                 bar(input)
 
-                print(foo.graph_for(input))
                 self.assertGraphContainsExactly(foo.graph_for(input), 'prim::DifferentiableGraph', 1)
                 self.assertGraphContainsExactly(bar.graph_for(input), 'prim::DifferentiableGraph', 0)
 
@@ -137,6 +137,91 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             scripted = self.checkScript(method1, (x, weight, bias))
             # check_types requires last_graph on scripted to be set, so we just skip it
             check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+
+    def test_requires_grad_for_tensor_list(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+
+            # output & var_list[0] should have requires_grad set to True
+            def func(input0: torch.Tensor, input1: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+                var_list = [input0, input1]
+                var = torch.cat(var_list)
+                output = var + 1.0
+                return output, var_list
+            jit_f = torch.jit.script(func)
+            input0 = torch.randn((2,), requires_grad=True)
+            input1 = torch.randn((2,))
+            output_ref = func(input0, input1)
+            for i in range(2):
+                output = jit_f(input0, input1)
+                assert(output_ref[0].requires_grad == output[0].requires_grad)
+                assert(output_ref[1][0].requires_grad == output[1][0].requires_grad)
+                assert(output_ref[1][1].requires_grad == output[1][1].requires_grad)
+
+    @unittest.skip("disable until we property handle tensor lists with undefined gradients")
+    def test_differentiable_graph_ops_requires_grad(self):
+        x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
+        y = torch.randn(8, 2, dtype=torch.float)
+
+        def t(x : torch.Tensor, y : torch.Tensor, flag : bool):
+            o = x + 1.0
+            o1 = torch.relu(o)
+            o = y + 1.5
+            o2 = torch.relu(o)
+            o3 = o1 + o2
+
+            if flag:
+                o = o1 + 1.0
+                oo1 = torch.relu(o)
+                o = o2 + 2.5
+                oo2 = torch.relu(o)
+                oo3 = oo1 + oo2
+            else:
+                o = o1 * 1.0
+                oo1 = torch.relu(o)
+                o = o2 * 2.0
+                oo2 = torch.relu(o)
+                oo3 = oo1 + oo2
+
+            return o1, o2, o3, oo1, oo2, oo3
+
+        with enable_profiling_mode_for_profiling_tests():
+
+            t_jit = torch.jit.script(t)
+            jit_o = t_jit(x, y, False)
+            jit_o = t_jit(x, y, False)
+            o = t(x, y, False)
+
+            FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y, False))
+            # validate the differentiableGraphOps are marking proper requires_grad
+            for oo, jit_oo in zip(o, jit_o):
+                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
+                self.assertEqual(oo, jit_oo)
+            # one more runs to trigger fusion
+            jit_o = t_jit(x, y, False)
+            for oo, jit_oo in zip(o, jit_o):
+                self.assertEqual(oo.dtype, jit_oo.dtype)
+                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
+                self.assertEqual(oo, jit_oo)
+
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
+    def test_prune_grad(self):
+        @torch.jit.script
+        def t(input, bias):
+            return torch.nn.functional.relu(input + bias)
+        input = torch.randn(2, 8, requires_grad=True)
+        bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
+        NUM_PROFILED_RUNS = 1
+        with num_profiled_runs(NUM_PROFILED_RUNS):
+            WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
+            for x in range(WARMUP):
+                o = t(input, bias)
+                o.sum().backward()
+
+            fwd_plan = list(t.get_debug_state().execution_plans.values())[0]
+            bwd_graph = list(fwd_plan.code.grad_executor_states()[0].execution_plans.values())[0].graph
+            tup = next(bwd_graph.outputs())
+            self.assertEqual(len(list(tup.node().inputs())), 1)
 
     def test_simple_merge(self):
         # o --> o
@@ -286,3 +371,115 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
             .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_aliased_outputs(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+
+
+            # Case 1: aliasing between relu and t
+            # is within a DifferentiableGraph. It should be valid
+            # to merge both split_with_sizes in relu in one graph
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %2 : Tensor = aten::t(%b)
+        return (%2)
+    """
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu").check("aten::t") \
+                .run(graph)
+
+            # Case 2: aliasing between relu and split_with_sizes
+            # are both outputs of a Diff graph. It should be invalid
+            # to merge both split_with_sizes in relu in one graph
+            # i.e. relu and split_with_sizes should be in different
+            # differentiable graphs
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        %3 : (Tensor[], Tensor[]) = prim::TupleConstruct(%b, %2)
+        return (%3)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::split_with_sizes") \
+                .run(graph)
+
+            # Case 3: two aliased nodes in a graph.
+            # Both `split_with_sizes` should be unfused
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %s1 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %s2 : int[] = prim::Constant[value=[3, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %s1, %1)
+        %3 : Tensor[] = aten::split_with_sizes(%b, %s2, %1)
+        %4 : (Tensor, Tensor[]) = prim::TupleConstruct(%b, %2, %3)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::split_with_sizes") \
+                .run(graph)
+
+            # Case 4: the aliased output has a descendant
+            # Both should be unfused. Note, %3 comes before %2
+            # to test that we unfuse in the reverse topo order
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor = aten::t(%b)
+        %3 : Tensor = aten::relu(%2)
+        %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %3, %2)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::t") \
+                .run(graph)
+
+            # Case 5: multiple aliased groups
+            # Both should be unfused. Note, %3 comes before %2
+            # to test that we unfuse in the reverse topo order
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %c : Tensor = aten::abs(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %d : Tensor = aten::t(%c)
+        %2 : Tensor = aten::t(%b)
+        %3 : Tensor = aten::relu(%2)
+        %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%3, %2, %d, %b, %c, %b)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::t") \
+                .run(graph)

@@ -23,12 +23,9 @@ class SleepOp final : public OperatorBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SleepOp, SleepOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(SleepOp, SleepOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SleepOp)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -55,7 +52,6 @@ unique_ptr<NetBase> CreateNetTestHelper(Workspace* ws) {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TimeObserverTest, Test3Seconds) {
   Workspace ws;
   ws.CreateBlob("in");

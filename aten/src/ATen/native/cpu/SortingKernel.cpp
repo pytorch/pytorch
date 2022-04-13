@@ -1,32 +1,24 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/Sorting.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
-#include <ATen/native/Sorting.h>
-#include <ATen/native/SortingUtils.h>
+#include <ATen/native/TopKImpl.h>
+#include <c10/core/WrapDimMinimal.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
 namespace {
 
-void _fill_indices(Tensor& indices, int64_t dim) {
-  auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
-  auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
-  auto idx_dim_strides = std::vector<int64_t>(indices.dim(), 0);
-  idx_dim_sizes[dim] = dim_size;
-  idx_dim_strides[dim] = 1;
-  auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
-  indices.copy_(idx_dim_restrided);
-}
-
 template <typename func_t>
 void _dim_apply(
-    Tensor& values,
-    Tensor& indices,
+    const TensorBase &values,
+    const TensorBase &indices,
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
@@ -55,7 +47,12 @@ void _dim_apply(
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
 
-        for (int64_t i = 0; i < n; ++i) {
+        if(values_data_bytes==nullptr || indices_data_bytes==nullptr){
+          return;
+        }
+
+        for (const auto i : c10::irange(n)) {
+          (void)i; //Suppress unused variable warning
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,
@@ -93,8 +90,8 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    Tensor& values,
-    Tensor& indices,
+    const TensorBase &values,
+    const TensorBase &indices,
     int64_t dim,
     bool descending,
     bool stable) {
@@ -141,9 +138,9 @@ static void sort_kernel(
 }
 
 static void topk_kernel(
-    const Tensor& values,
-    const Tensor& indices,
-    const Tensor& self,
+    const TensorBase &values,
+    const TensorBase &indices,
+    const TensorBase &self,
     int64_t k,
     int64_t dim,
     bool largest,
@@ -162,11 +159,17 @@ static void topk_kernel(
   auto mode_indices_stride = indices.strides()[dim];
   auto tmp_values_stride = self.strides()[dim];
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "topk_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      return topk_impl_loop<scalar_t>(
-          mode_values_stride, mode_indices_stride, tmp_values_stride,
-          k, sizes[dim], largest, sorted, data, strides, n);
+      if (self.scalar_type() == ScalarType::BFloat16) {
+        return topk_impl_loop<scalar_t, float>(
+            mode_values_stride, mode_indices_stride, tmp_values_stride,
+            k, sizes[dim], largest, sorted, data, strides, n);
+      } else {
+        return topk_impl_loop<scalar_t, scalar_t>(
+            mode_values_stride, mode_indices_stride, tmp_values_stride,
+            k, sizes[dim], largest, sorted, data, strides, n);
+      }
     };
 
     int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
@@ -176,9 +179,7 @@ static void topk_kernel(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
 }} //at::native

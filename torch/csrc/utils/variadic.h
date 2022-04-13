@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <torch/csrc/autograd/variable.h>
 #include <ATen/core/Variadic.h>
 

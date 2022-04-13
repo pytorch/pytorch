@@ -9,7 +9,6 @@ using namespace at;
 
 // An operation with a CUDA tensor and CPU scalar should keep the scalar
 // on the CPU (and lift it to a parameter).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, CPUScalar) {
   if (!at::hasCUDA()) return;
   Tensor out;
@@ -22,7 +21,6 @@ TEST(TensorIteratorTest, CPUScalar) {
 }
 
 // Verifies multiple zero-dim CPU inputs are not coerced to CUDA
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, CPUScalarInputs) {
   if (!at::hasCUDA()) return;
   Tensor out = at::empty({5, 5}, kCUDA);
@@ -33,7 +31,6 @@ TEST(TensorIteratorTest, CPUScalarInputs) {
 }
 
 // Mixing CPU and CUDA tensors should raise an exception (if the CPU tensor isn't zero-dim)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, MixedDevices) {
   if (!at::hasCUDA()) return;
   Tensor out;
@@ -156,16 +153,11 @@ AT_FORALL_SCALAR_TYPES(UNARY_TEST_ITER_FOR_TYPE)
 AT_FORALL_SCALAR_TYPES(BINARY_TEST_ITER_FOR_TYPE)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 AT_FORALL_SCALAR_TYPES(POINTWISE_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(NO_OUTPUT_UNARY_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(NO_OUTPUT_BINARY_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(NO_OUTPUT_POINTWISE_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES_AND(Bool, COMPARISON_TEST_ITER_FOR_TYPE)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
   Tensor out;
@@ -178,7 +170,6 @@ TEST(TensorIteratorTest, SerialLoopSingleThread) {
   });
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, InputDType) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -191,7 +182,6 @@ TEST(TensorIteratorTest, InputDType) {
   EXPECT_TRUE(iter.input_dtype(1) == at::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
       .add_owned_output(at::ones({1, 1}, at::dtype(at::kBool)))
@@ -205,7 +195,6 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.common_dtype() == at::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -218,7 +207,6 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   Tensor out;
   at::TensorIteratorConfig config;
@@ -251,5 +239,4 @@ TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                     
   EXPECT_TRUE(out1.equal(expected1));                                                               \
   EXPECT_TRUE(out2.equal(expected2));                                                               \
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE)

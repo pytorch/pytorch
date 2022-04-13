@@ -1,11 +1,9 @@
 #include "variable_length_sequence_padding.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     VariableLengthSequencePadding,
     VariableLengthSequencePaddingOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(VariableLengthSequencePadding)
     .NumInputs(2)
     .NumOutputs(1)
@@ -21,7 +19,7 @@ N = maximum sequence length
 B = batch size
 M = hidden size
 
-set each element of INPUT to zero if it is is past the end of the
+set each element of INPUT to zero if it is past the end of the
 corresponding sequence (i.e. if LENS[j] > i for an index (i,j,k)).
 
 )DOC");

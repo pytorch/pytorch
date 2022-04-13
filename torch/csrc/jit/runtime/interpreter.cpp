@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -25,6 +26,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <string>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -32,7 +34,6 @@ using torch::distributed::autograd::DistAutogradContainer;
 #endif
 
 #include <exception>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <ostream>
@@ -42,6 +43,11 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+C10_DEFINE_bool(
+    torch_jit_enable_rethrow_caught_exception,
+    false,
+    "enable rethrowing caught exception");
 
 namespace torch {
 namespace jit {
@@ -88,7 +94,6 @@ inline int64_t getDistAutogradContextId() {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state) {
@@ -167,6 +172,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     frames.pop_back();
   }
 
+  void callFunction(
+      Function& f,
+      Stack& stack,
+      c10::optional<size_t> bailOut = c10::nullopt,
+      bool next = true) {
+    bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
+      enterFrame(code, stack.size() - code.num_inputs());
+      checkAndStartRecordFunction(frames.back(), stack);
+    });
+    if (next) {
+      (frames.rbegin() + (newFrame ? 1 : 0))->pc++;
+    }
+  }
+
   // relative to the end of the register list so that when we call
   // functions we are referring to the registers of the currenly executing
   // function.
@@ -182,31 +201,36 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
-  void runBuiltinFunction(Stack& stack, Function* fn) {
-    // BuiltinOpFunction directly invokes a void(Stack&) to implement
-    // custom C++ classes. Call run() here with the stack, and we will
-    // get the results from that C++ method back in the stack. Advance
-    // the PC by 1 without adding any new frame.
-    fn->run(stack);
-    ++frames.back().pc;
+#if defined(__GNUC__) || defined(__clang__)
+#define JIT_USE_COMPUTED_GOTO
+#endif
+// Primitives for making interpreter internal state transitions.
+// We maintain two local variables as the internal interpreter state:
+// `frame` will be the current frame that the interpreter operatos on.
+// `inst` will the current instruction pointed to by program counter.
+//
+// Instruction blocks should be always declared through `INST` macro and
+// the instruction body should always start with a `INST_GUARD` declaration.
+// Also blocks should be ended properly with either `INST_NEXT` (for going
+// to the next instruction), or `INST_DISPATCH` (for jumping to a computed
+// position using `INST_FETCH`).
+#define INST_FETCH(X) (frame.function->instructions_[frame.pc += (X)])
+#define INST_GUARD                                   \
+  profiling::InstructionSpan span {                  \
+    *frame.function->instructions_source()[frame.pc] \
   }
-
-  void runGraphFunction(Stack& stack, Function* fn) {
-    const Code& code =
-        // consider passing
-        // `frames.back().function->remaining_bailout_depth_` into
-        // `get_executor().getPlanFor()` to propagate caller's depth
-        // restrictions onto children while this strategy has a
-        // potential to reduce the number of compilations for too
-        // dynamic callers we might miss opportunities where a caller is
-        // dynamic but a callee gets stable arguments
-        fn->get_executor()
-            .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-            .code;
-    ++frames.back().pc;
-    enterFrame(code, stack.size() - code.num_inputs());
-    checkAndStartRecordFunction(frames.back(), stack);
-  }
+#if defined(JIT_USE_COMPUTED_GOTO)
+#define INST(NAME) \
+  NAME:            \
+  label_##NAME
+#define INST_DISPATCH goto* dispatch_table[inst.op]
+#else
+#define INST(NAME) NAME
+#define INST_DISPATCH break
+#endif
+#define INST_NEXT       \
+  inst = INST_FETCH(1); \
+  INST_DISPATCH
 
   bool runImpl(Stack& stack) {
     // if we have never run before, then we might have to return the
@@ -225,22 +249,30 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (frames.back().pc == 0 && stack_start_ == 0) {
       checkAndStartRecordFunction(frames.back(), stack);
     }
+
+#if defined(JIT_USE_COMPUTED_GOTO)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    static void* dispatch_table[] = {
+#define DISPATCH_TABLE_ENTRY(op, _) &&label_##op,
+        FORALL_OPCODES(DISPATCH_TABLE_ENTRY)
+#undef DISPATCH_TABLE_ENTRY
+    };
+#endif
+
     try {
       while (true) {
         Frame& frame = frames.back();
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, frame.pc);
-        Instruction inst = frame.function->instructions_[frame.pc];
-        profiling::InstructionSpan instSpan{
-            *frame.function->instructions_source()[frame.pc]};
+        Instruction inst = INST_FETCH(0);
         switch (inst.op) {
-          case ENTER: {
+          case INST(ENTER): {
+            INST_GUARD;
             const auto& obj = peek(stack, 0, 1);
             TORCH_INTERNAL_ASSERT(obj.isObject());
             entered_objects.push_back(obj);
-            ++frame.pc;
-          } break;
-          case EXIT: {
+          }
+            INST_NEXT;
+          case INST(EXIT): {
+            INST_GUARD;
             auto obj = entered_objects.back().toObject();
             auto& f = obj->type()->getMethod("__exit__");
             push(stack, std::move(obj));
@@ -248,66 +280,99 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             push(stack, IValue());
             push(stack, IValue());
             push(stack, IValue());
-            runGraphFunction(stack, &f);
-          } break;
-          case OP:
-            frame.function->operator_table_[inst.X](&stack);
-            ++frame.pc;
-            break;
-          case OPN:
+            callFunction(f, stack);
+            continue;
+          }
+          case INST(OP): {
+            INST_GUARD;
+#ifndef NDEBUG
+            size_t init_size = stack.size();
+#endif
+            frame.function->operator_table_[inst.X](stack);
+#ifndef NDEBUG
+            frame.function->assert_stack_size(inst.X, init_size, stack.size());
+#endif
+          }
+            INST_NEXT;
+          case INST(OPN): {
+            INST_GUARD;
             stack.push_back(inst.N);
-            frame.function->operator_table_[inst.X](&stack);
-            ++frame.pc;
-            break;
-          case LOAD:
+#ifndef NDEBUG
+            size_t init_size = stack.size();
+#endif
+            frame.function->operator_table_[inst.X](stack);
+#ifndef NDEBUG
+            frame.function->assert_stack_size(inst.X, init_size, stack.size());
+#endif
+          }
+            INST_NEXT;
+          case INST(LOAD): {
+            INST_GUARD;
             stack.emplace_back(reg(inst.X));
-            ++frame.pc;
-            break;
-          case MOVE:
+          }
+            INST_NEXT;
+          case INST(MOVE): {
+            INST_GUARD;
             stack.emplace_back(std::move(reg(inst.X)));
-            ++frame.pc;
-            break;
-          case STORE:
+          }
+            INST_NEXT;
+          case INST(STORE): {
+            INST_GUARD;
             reg(inst.X) = pop(stack);
-            ++frame.pc;
-            break;
-          case STOREN:
+          }
+            INST_NEXT;
+          case INST(STOREN): {
+            INST_GUARD;
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
-            ++frame.pc;
-            break;
-          case DROP:
-            pop(stack);
-            ++frame.pc;
-            break;
-          case DROPR:
+          }
+            INST_NEXT;
+          case INST(DROP): {
+            INST_GUARD;
+            stack.pop_back();
+          }
+            INST_NEXT;
+          case INST(DROPR): {
+            INST_GUARD;
             reg(inst.X) = IValue();
-            ++frame.pc;
-            break;
-          case LOADC:
+          }
+            INST_NEXT;
+          case INST(LOADC): {
+            INST_GUARD;
             stack.emplace_back(frame.function->constant_table_[inst.X]);
-            ++frame.pc;
-            break;
-          case GET_ATTR: {
-            auto userObj = pop(stack).toObject();
-            auto value = userObj->getSlot(inst.X);
-            push(stack, std::move(value));
-            ++frame.pc;
-          } break;
-          case SET_ATTR: {
+          }
+            INST_NEXT;
+          case INST(GET_ATTR): {
+            INST_GUARD;
+            const auto& userObj = stack.back().toObjectRef();
+            stack.back() = userObj.getSlot(inst.X);
+          }
+            INST_NEXT;
+          case INST(SET_ATTR): {
+            INST_GUARD;
             auto v = pop(stack);
-            auto userObj = pop(stack).toObject();
-            userObj->setSlot(inst.X, std::move(v));
-            ++frame.pc;
-          } break;
-          case JF:
-            frame.pc += (pop(stack).toBool()) ? 1 : inst.X;
-            break;
-          case JMP:
-            frame.pc += inst.X;
-            break;
-          case LOOP: {
+            auto& userObj = stack.back().toObjectRef();
+            userObj.setSlot(inst.X, std::move(v));
+            stack.pop_back();
+          }
+            INST_NEXT;
+          case INST(JF): {
+            INST_GUARD;
+            if (pop(stack).toBool()) {
+              inst = INST_FETCH(1);
+            } else {
+              inst = INST_FETCH(inst.X);
+            }
+          }
+            INST_DISPATCH;
+          case INST(JMP): {
+            INST_GUARD;
+            inst = INST_FETCH(inst.X);
+          }
+            INST_DISPATCH;
+          case INST(LOOP): {
+            INST_GUARD;
             // stack: iteration_count, max_iter, cond, loop_carried_deps...
             auto fr = stack.end() - (inst.N + 1);
             int64_t trip_count = fr[0].toInt();
@@ -316,25 +381,25 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (trip_count < max_trip_count && cond) {
               fr[2] = trip_count;
               fr[0] = trip_count + 1;
-              ++frame.pc;
+              inst = INST_FETCH(1);
             } else {
               size_t n_loop_carried = inst.N - 2;
-              for (size_t i = 0; i < n_loop_carried; ++i) {
+              for (const auto i : c10::irange(n_loop_carried)) {
                 fr[i] = std::move(fr[i + 3]);
               }
               drop(stack, 3); // iteration_count, max_iter, cond
-              frame.pc += inst.X;
+              inst = INST_FETCH(inst.X);
             }
-          } break;
-          case CALL: {
+          }
+            INST_DISPATCH;
+          case INST(CALL): {
+            INST_GUARD;
             Function* fn = frame.function->function_table_[inst.X];
-            if (!fn->isGraphFunction()) {
-              runBuiltinFunction(stack, fn);
-            } else {
-              runGraphFunction(stack, fn);
-            }
-          } break;
-          case INTERFACE_CALL: {
+            callFunction(*fn, stack);
+            continue;
+          }
+          case INST(INTERFACE_CALL): {
+            INST_GUARD;
             // note the hash table lookup to find the function
             // this can be more optimized if necessary, caching parts
             // of the hashing computation or storing the offset when
@@ -353,30 +418,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     ->type()
                     ->getMethod(
                         frame.function->constant_table_[inst.X].toStringRef());
-            if (!function.isGraphFunction()) {
-              runBuiltinFunction(stack, &function);
-            } else {
-              runGraphFunction(stack, &function);
-            }
-          } break;
-          case RET:
+            callFunction(function, stack);
+            continue;
+          }
+          case INST(RET): {
             if (frames.size() > 1) {
               leaveFrame();
-              break;
+              continue;
             }
             if (future_) {
               auto num_outputs = frames.back().function->n_outputs;
               if (num_outputs == 1) {
                 future_->markCompleted(stack.back());
               } else {
-                future_->markCompleted(c10::ivalue::Tuple::create(
-                    jit::last(stack, num_outputs).vec()));
+                future_->markCompleted(
+                    c10::ivalue::Tuple::create(jit::last(stack, num_outputs)));
               }
             }
             // destroy the last frame and call RecordFunction's end callbacks
             leaveFrame();
             return false;
-          case WAIT: {
+          }
+          case INST(WAIT): {
+            INST_GUARD;
             auto future = stack.back().toFuture();
             if (!future->completed()) {
               getOrCreateFuture();
@@ -431,9 +495,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
             stack.pop_back();
             stack.emplace_back(future->value());
-            ++frame.pc;
-          } break;
-          case PROFILE_OP: {
+          }
+            INST_NEXT;
+          case INST(PROFILE_OP): {
+            INST_GUARD;
             auto& frame_id_ref = frame.id;
             if (!frame_id_ref.has_value()) {
               frame_id_ref = Frame::genId();
@@ -442,19 +507,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 frame.function->profile_function_table_[inst.X];
             push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
             callback(stack);
-            ++frame.pc;
-            break;
           }
-          case FAIL_GUARD: {
+            INST_NEXT;
+          case INST(FAIL_GUARD): {
+            INST_GUARD;
             // patch FAIL_GUARD back to GUARD
             GRAPH_DEBUG(
                 "Bailout ", inst.X, " triggered via bailout_requests_!");
             frame.function->instructions_[frame.pc].op = GUARD;
             push(stack, false);
-            ++frame.pc;
-            break;
           }
-          case TYPECHECK: {
+            INST_NEXT;
+          case INST(TYPECHECK): {
+            INST_GUARD;
             int num_inputs = inst.N, i = 0;
             // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
@@ -472,10 +537,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (i == num_inputs) {
               push(stack, true);
             }
-            ++frame.pc;
-            break;
           }
-          case GUARD: {
+            INST_NEXT;
+          case INST(GUARD): {
+            INST_GUARD;
             if (!stack.back().isTensor()) {
               // stack.back() is an Uninitialized IValue and this is a guard
               // on a block output. Uninitialized IValues are never used
@@ -493,84 +558,165 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 push(stack, expected_type->matchTensor(t));
               }
             }
-            ++frame.pc;
-          } break;
-          case TAIL_CALL: {
+          }
+            INST_NEXT;
+          case INST(TAIL_CALL): {
+            INST_GUARD;
             GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
             frame.function->function_table_[inst.X]->ensure_defined();
             size_t remaining_bailout_depth =
                 frame.function->remaining_bailout_depth_ > 0
                 ? frame.function->remaining_bailout_depth_ - 1
                 : 0;
-            const Code& code = frame.function->function_table_[inst.X]
-                                   ->get_executor()
-                                   .getPlanFor(stack, remaining_bailout_depth)
-                                   .code;
-            size_t num_inputs = code.num_inputs();
+            auto& f = *frame.function->function_table_[inst.X];
+            size_t num_inputs = f.num_inputs();
             size_t base_pointer = frame.base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
             size_t inputs_start = stack.size() - num_inputs;
-            for (size_t i = 0; i < num_inputs; ++i) {
+            for (const auto i : c10::irange(num_inputs)) {
               stack.at(base_pointer + i) =
                   std::move(stack.at(inputs_start + i));
             }
             stack.resize(base_pointer + num_inputs);
             leaveFrame();
-            enterFrame(code, base_pointer);
-            checkAndStartRecordFunction(frames.back(), stack);
-          } break;
-          case LIST_UNPACK: {
+
+            callFunction(f, stack, remaining_bailout_depth, false);
+            continue;
+          }
+          case INST(LIST_UNPACK): {
+            INST_GUARD;
             listUnpack(stack, inst.X);
-            ++frame.pc;
-          } break;
-          case TUPLE_CONSTRUCT: {
+          }
+            INST_NEXT;
+          case INST(TUPLE_CONSTRUCT): {
+            INST_GUARD;
             tupleConstruct(stack, inst.X);
-            ++frame.pc;
-          } break;
-          case TUPLE_SLICE: {
+          }
+            INST_NEXT;
+          case INST(TUPLE_SLICE): {
+            INST_GUARD;
             tupleSlice(stack, inst.X, inst.X + inst.N);
-            ++frame.pc;
-          } break;
-          case NAMED_TUPLE_CONSTRUCT: {
+          }
+            INST_NEXT;
+          case INST(NAMED_TUPLE_CONSTRUCT): {
+            INST_GUARD;
             namedTupleConstruct(
                 stack,
                 frame.function->type_table_[inst.X]->expect<TupleType>(),
                 inst.N);
-            ++frame.pc;
-          } break;
-          case LIST_CONSTRUCT: {
+          }
+            INST_NEXT;
+          case INST(LIST_CONSTRUCT): {
+            INST_GUARD;
             const auto& type =
                 frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
-            ++frame.pc;
-          } break;
-          case DICT_CONSTRUCT: {
+          }
+            INST_NEXT;
+          case INST(DICT_CONSTRUCT): {
+            INST_GUARD;
             const auto& type =
                 frame.function->type_table_[inst.X]->expectRef<DictType>();
             dictConstruct(stack, type, inst.N);
-            ++frame.pc;
-          } break;
-          case CREATE_OBJECT: {
+          }
+            INST_NEXT;
+          case INST(CREATE_OBJECT): {
+            INST_GUARD;
             auto type =
                 frame.function->type_table_[inst.X]->expect<ClassType>();
             createObject(stack, type);
-            ++frame.pc;
-          } break;
-          case ISINSTANCE: {
+          }
+            INST_NEXT;
+          case INST(ISINSTANCE): {
+            INST_GUARD;
             at::ArrayRef<TypePtr> types(
-                &(frame.function->type_table_[inst.X]),
-                &(frame.function->type_table_[inst.X + inst.N]));
+                &frame.function->type_table_[inst.X],
+                &frame.function->type_table_[inst.X] + inst.N);
             isinstance(stack, types);
-            ++frame.pc;
-          } break;
-          case FORK: {
+          }
+            INST_NEXT;
+          case INST(TUPLE_INDEX): {
+            INST_GUARD;
+            tupleIndex(stack);
+          }
+            INST_NEXT;
+          case INST(RAISE_EXCEPTION): {
+            INST_GUARD;
+            raiseExceptionWithMessage(stack);
+          }
+            INST_NEXT;
+          case INST(UNCHECKED_CAST): {
+            INST_GUARD;
+            noop(stack);
+          }
+            INST_NEXT;
+          case INST(__IS__): {
+            INST_GUARD;
+            is(stack);
+          }
+            INST_NEXT;
+          case INST(UN_INITIALIZED): {
+            INST_GUARD;
+            unInitialized(stack);
+          }
+            INST_NEXT;
+          case INST(__ISNOT__): {
+            INST_GUARD;
+            isNot(stack);
+          }
+            INST_NEXT;
+          case INST(FORMAT): {
+            INST_GUARD;
+            format(stack, inst.X);
+          }
+            INST_NEXT;
+          case INST(DEVICE): {
+            INST_GUARD;
+            device(stack);
+          }
+            INST_NEXT;
+          case INST(DTYPE): {
+            INST_GUARD;
+            dtype(stack);
+          }
+            INST_NEXT;
+          case INST(DIM): {
+            INST_GUARD;
+            dim(stack);
+          }
+            INST_NEXT;
+          case INST(__NOT__): {
+            INST_GUARD;
+            _not(stack);
+          }
+            INST_NEXT;
+          case INST(DICT_INDEX): {
+            INST_GUARD;
+            dictIndex(stack);
+          }
+            INST_NEXT;
+          case INST(TO_LIST): {
+            INST_GUARD;
+            toList(stack);
+          }
+            INST_NEXT;
+          case INST(NUM_TO_TENSOR): {
+            INST_GUARD;
+            numToTensorScalar(stack);
+          }
+            INST_NEXT;
+          case INST(IS_CUDA): {
+            INST_GUARD;
+            isCuda(stack);
+          }
+            INST_NEXT;
+          case INST(FORK): {
+            INST_GUARD;
             // Move inputs to a separate stack
-            Function* forked_fn = frame.function->function_table_[inst.X];
+            auto& forked_fn =
+                toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn->get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
+                forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -578,9 +724,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
-            ++frame.pc;
-          } break;
-          case WARN: {
+          }
+            INST_NEXT;
+          case INST(WARN): {
+            INST_GUARD;
             // Keeps track of which WARN instruction has been executed before,
             // we only want to execute each WARN once to match default Python
             // warning behavior.
@@ -613,8 +760,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               stack.pop_back();
             }
-            ++frame.pc;
-          } break;
+          }
+            INST_NEXT;
         }
       }
     } catch (std::exception& e) {
@@ -629,20 +776,40 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         push(stack, IValue());
         try {
           f.run(stack);
-        } catch (std::exception& e) {
-          std::ostringstream ss;
-          ss << "The following operation failed in the TorchScript interpreter.\n";
-          formatStackTrace(ss);
-          ss << "RuntimeError: " << ExceptionMessage(e) << "\n";
+        } catch (std::exception& _) {
+          // TODO(T98048876): Handle `_` correctly.
         }
       }
-      bool is_jit_exception = dynamic_cast<JITException*>(&e);
+      if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
+        if (future_) {
+          future_->setError(std::current_exception());
+          return false;
+        }
+        throw;
+      }
+      auto* jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
       auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
-      handleError(ExceptionMessage(e), is_jit_exception, not_implemented_error);
+
+      c10::optional<std::string> python_class_name;
+      if (jit_exception) {
+        python_class_name = jit_exception->getPythonClassName();
+      }
+      handleError(
+          ExceptionMessage(e),
+          (bool)jit_exception,
+          not_implemented_error,
+          python_class_name);
       return false;
     }
   }
+
+#undef INST_NEXT
+#undef INST_DISPATCH
+#undef INST
+#undef INST_GUARD
+#undef INST_FETCH
+#undef JIT_USE_COMPUTED_GOTO
 
   void formatStackTrace(std::ostream& out) {
     format_stack_trace(out, callstack());
@@ -651,15 +818,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void handleError(
       const ExceptionMessage& msg,
       bool is_jit_exception,
-      c10::NotImplementedError* not_implemented_error) {
+      c10::NotImplementedError* not_implemented_error,
+      c10::optional<std::string> python_class_name) {
     std::ostringstream ss;
+    std::string class_name =
+        python_class_name ? *python_class_name : "RuntimeError";
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
-    ss << "RuntimeError: " << msg << "\n";
+    ss << class_name << ": " << msg << "\n";
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      throw JITException(ss.str());
+      throw JITException(ss.str(), python_class_name);
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
@@ -690,9 +860,108 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
  public:
+  // One way to avoid overhead of forming string would be to return
+  // a vector of frame.function, i.e. CodeImpl*
+  // This is not exactly clean as it will expose, internal details of
+  // interpreter. But this way we hold onto graph/node and Function and
+  // we can create module hierarchy string for each event in autograd
+  // profiler at the end, when consolidating events.
+  // At the moment overhead does not seem exhorbitantly large.
+  // Another option would be return vector of (string, InlinedCallstackPtrs)
+  // string would contain function name and typename of self
+  // Format of the returned vector of strings:
+  // For each frame, the corresponding module name, type and function name
+  // are in following format:
+  // <module-instance-name>(module type)::<function-name>
+  // Special keys for module-instance-name:
+  //   - TOP: for top level module
+  //   - SELF: When method/function of the frame is associated with
+  //           previous frame's module instance
+  //   - INSTANCE_NAME_UNKNOWN: instance name cannot be figured out
+  //   - CALL_FUNCTION: call to free function
+  std::vector<std::string> moduleHierarchy() const {
+    std::vector<std::string> module_function_list;
+    std::string module_hierarchy("TOP");
+    for (size_t i = 0; i < frames.size(); ++i) {
+      const Frame& frame = frames[i];
+      std::string fn_name = frame.function->function_name_;
+      // For each frame, type of the class with which the function is
+      // associated, is queried here. And the type name is added to
+      // module hierarchy.
+      const auto& g = frame.function->graph_;
+      std::string g_self_type;
+      if (g && g->inputs().size() > 0) {
+        const auto& g_self_type_ptr =
+            g->inputs()[0]->type()->cast<c10::ClassType>();
+        if (g_self_type_ptr) {
+          g_self_type = g_self_type_ptr->name()->qualifiedName();
+          g_self_type = g_self_type.substr(g_self_type.find_last_of('.') + 1);
+        }
+      }
+      module_hierarchy.append("(")
+          .append(g_self_type)
+          .append(")::")
+          .append(fn_name);
+      module_function_list.emplace_back(std::move(module_hierarchy));
+
+      size_t pc = frame.pc;
+      // CALL nodes have already advanced the pc, so
+      // undo that to report the call node
+      if (i + 1 < frames.size()) {
+        --pc;
+      }
+
+      Node* node = frame.function->instructions_source_[pc];
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          fn_name = std::get<0>(p)->name();
+          const auto& opt_module_info = std::get<2>(p);
+          if (opt_module_info.has_value()) {
+            const auto& module_instance_info = opt_module_info.value();
+            module_hierarchy = utils::get_module_info(module_instance_info);
+            module_hierarchy.append("::").append(fn_name);
+          } else {
+            // This is likely a call to free function, not associated with
+            // any class
+            module_hierarchy = "::";
+            module_hierarchy.append(fn_name);
+          }
+          module_function_list.emplace_back(std::move(module_hierarchy));
+        }
+      }
+
+      module_hierarchy = std::string();
+      // If this node is of type callMethod then the following frame
+      // will contain the op being executed.
+      // For such callMethod node, we add the object instance name
+      // associated with it, since the following frame will not have it.
+      if (node->kind() == prim::CallMethod) {
+        std::string class_instance_name;
+        if (node->input(0)->node()->kind() == prim::GetAttr) {
+          class_instance_name = node->input(0)->node()->s(attr::name);
+        } else if (
+            node->owningGraph()->inputs().size() > 0 &&
+            node->input(0) == node->owningGraph()->inputs()[0]) {
+          class_instance_name = "SELF";
+        } else {
+          class_instance_name = "INSTANCE_NAME_UNKNOWN";
+        }
+        module_hierarchy = std::move(class_instance_name);
+      } else if (node->kind() == prim::CallFunction) {
+        auto function_constant = node->input(0)->node();
+        auto fun_type =
+            function_constant->output()->type()->expect<FunctionType>();
+        auto fun_name = fun_type->function()->name();
+        module_hierarchy = "CALL_FUNCTION::";
+        module_hierarchy.append(fun_name);
+      }
+    }
+    return module_function_list;
+  }
+
   std::vector<StackEntry> callstack() const {
     std::vector<StackEntry> entries;
-    for (size_t i = 0; i < frames.size(); ++i) {
+    for (const auto i : c10::irange(frames.size())) {
       const Frame& frame = frames[i];
       std::string previous_fn_name = frame.function->function_name_;
       size_t pc = frame.pc;
@@ -729,10 +998,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void run(Stack& stack) {
+    // By the time the continuation completes the frame will be gone, so this
+    // must be done before calling runImpl().
+    TORCH_INTERNAL_ASSERT(!frames.empty());
+    const auto num_outputs = frames.front().function->n_outputs;
     if (runImpl(stack)) {
       future_->wait();
 
-      auto num_outputs = frames.front().function->n_outputs;
       if (num_outputs == 1) {
         push(stack, future_->value());
       } else {
@@ -752,6 +1024,13 @@ std::vector<StackEntry> currentCallstack() {
     return cs;
   }
   return std::vector<StackEntry>();
+}
+
+std::vector<std::string> currentModuleHierarchy() {
+  if (tls_int_state_ptr_) {
+    return tls_int_state_ptr_->moduleHierarchy();
+  }
+  return std::vector<std::string>();
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
@@ -776,11 +1055,15 @@ MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
     std::string function_name,
     bool emit_default_input_instructions,
+    bool support_default_args_before_out,
+    bool emit_promoted_ops,
     size_t remaining_bailout_depth)
     : Code(new interpreter::MobileCodeImpl(
           graph,
           std::move(function_name),
           emit_default_input_instructions,
+          support_default_args_before_out,
+          emit_promoted_ops,
           remaining_bailout_depth)) {}
 
 MobileCode::~MobileCode() = default;

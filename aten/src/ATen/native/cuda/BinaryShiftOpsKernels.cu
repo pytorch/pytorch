@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -10,7 +11,7 @@
 namespace at { namespace native {
 
 
-void lshift_kernel_cuda(TensorIterator& iter) {
+void lshift_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float ||
       iter.dtype() == ScalarType::Double ||
       iter.dtype() == ScalarType::Half ||
@@ -32,7 +33,7 @@ void lshift_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void rshift_kernel_cuda(TensorIterator& iter) {
+void rshift_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float ||
       iter.dtype() == ScalarType::Double ||
       iter.dtype() == ScalarType::Half ||

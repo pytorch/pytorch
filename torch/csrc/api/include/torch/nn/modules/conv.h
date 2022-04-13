@@ -1,5 +1,7 @@
 #pragma once
 
+
+#include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
 
 #include <torch/expanding_array.h>
@@ -11,7 +13,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <cstddef>
 #include <vector>
@@ -43,13 +45,13 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
           std::fill_n(_reversed_padding_repeated_twice.begin(), 2 * D, 0);
         },
         [&](enumtype::kSame) {
-          for (size_t i = 0; i < D; ++i) {
+          for (const auto i : c10::irange(D)) {
             const auto stride = (*options.stride())[i];
             TORCH_CHECK(stride == 1, "padding='same' is not supported for strided convolutions");
           }
 
           _reversed_padding_repeated_twice.resize(2 * D);
-          for (size_t i = 0; i < D; ++i) {
+          for (const auto i : c10::irange(D)) {
             const auto dilation = (*options.dilation())[i];
             const auto kernel_size = (*options.kernel_size())[i];
             const auto total_padding = dilation * (kernel_size - 1);

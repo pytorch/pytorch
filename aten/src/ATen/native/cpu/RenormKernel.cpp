@@ -1,5 +1,6 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/Normalization.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 #include <ATen/cpu/vec/vec.h>
@@ -26,7 +27,7 @@ void renorm_scale_factor_impl(TensorIteratorBase& iter, double maxnorm) {
       },
       [maxnorm_v, eps_v, one_v](vec_t norm) -> vec_t {
         auto fct = maxnorm_v / (norm + eps_v);
-        return vec_t::blendv(fct, one_v, norm > maxnorm_v);
+        return vec_t::blendv(one_v, fct, norm > maxnorm_v);
       });
   });
 }

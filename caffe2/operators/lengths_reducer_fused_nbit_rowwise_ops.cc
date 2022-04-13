@@ -4,11 +4,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumFused4BitRowwise,
     SparseLengthsFusedNBitRowwiseOp<4, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSumFused4BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
@@ -37,14 +35,11 @@ stores quantized values, and then 2-byte fp16 scale and bias).
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSumFused4BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSumFused4BitRowwise,
     SparseLengthsFusedNBitRowwiseOp<4, CPUContext, /*with_weights=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSumFused4BitRowwise)
     .NumInputs(4)
     .NumOutputs(1)
@@ -77,10 +72,8 @@ but operating on 4-bit rowwise quantized matrices with fused storage
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSumFused4BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMeanFused4BitRowwise,
     SparseLengthsFusedNBitRowwiseOp<
@@ -88,7 +81,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         /*with_weights=*/false,
         /*is_mean=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMeanFused4BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
@@ -116,14 +108,11 @@ operating on 4-bit rowwise quantized matrices with fused storage
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMeanFused4BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumFused2BitRowwise,
     SparseLengthsFusedNBitRowwiseOp<2, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSumFused2BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
@@ -152,14 +141,11 @@ stores quantized values, and then 2-byte fp16 scale and bias).
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSumFused2BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSumFused2BitRowwise,
     SparseLengthsFusedNBitRowwiseOp<2, CPUContext, /*with_weights=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSumFused2BitRowwise)
     .NumInputs(4)
     .NumOutputs(1)
@@ -192,10 +178,8 @@ but operating on 2-bit rowwise quantized matrices with fused storage
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSumFused2BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMeanFused2BitRowwise,
     SparseLengthsFusedNBitRowwiseOp<
@@ -203,7 +187,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         /*with_weights=*/false,
         /*is_mean=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMeanFused2BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
@@ -231,14 +214,11 @@ operating on 2-bit rowwise quantized matrices with fused storage
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMeanFused2BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumSparseLookup,
     SparseLengthsSumSparseLookupOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSumSparseLookup)
     .NumInputs(3, 4)
     .NumOutputs(2, 3)
@@ -269,14 +249,11 @@ Therefore we will remove this indices and adjust the lengths.
     .Output(1, "output_lengths", "Adjusted lengths")
     .Output(2, "output_weights", "Adjusted weights")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSumSparseLookup);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSum4BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<4>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSum4BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
@@ -309,16 +286,13 @@ fp16 scale and 2-byte fp16 bias), and where rows are pruned.
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSum4BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSum4BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<
         4,
         /*with_weights=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum4BitRowwiseSparse)
     .NumInputs(5)
     .NumOutputs(1)
@@ -355,17 +329,14 @@ matrices with fused storage (where each row stores quantized values, and then
         "COMPRESSED_INDICES_MAPPING",
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSum4BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMean4BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<
         4,
         /*with_weights=*/false,
         /*is_mean=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMean4BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
@@ -398,14 +369,11 @@ fp16 scale and bias), and where rows are pruned.
         "COMPRESSED_INDICES_MAPPING",
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMean4BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSum8BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<8>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSum8BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
@@ -438,16 +406,13 @@ fp32 scale and 4-byte fp32 bias), and where rows are pruned.
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSum8BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSum8BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<
         8,
         /*with_weights=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitRowwiseSparse)
     .NumInputs(5)
     .NumOutputs(1)
@@ -484,17 +449,14 @@ matrices with fused storage (where each row stores quantized values, and then
         "COMPRESSED_INDICES_MAPPING",
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSum8BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMean8BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<
         8,
         /*with_weights=*/false,
         /*is_mean=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMean8BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
@@ -527,14 +489,11 @@ fp32 scale and bias), and where rows are pruned.
         "COMPRESSED_INDICES_MAPPING",
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMean8BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSum2BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<2>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSum2BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
@@ -567,16 +526,13 @@ fp16 scale and 2-byte fp16 bias), and where rows are pruned.
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSum2BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSum2BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<
         2,
         /*with_weights=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum2BitRowwiseSparse)
     .NumInputs(5)
     .NumOutputs(1)
@@ -613,17 +569,14 @@ matrices with fused storage (where each row stores quantized values, and then
         "COMPRESSED_INDICES_MAPPING",
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSum2BitRowwiseSparse);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMean2BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<
         2,
         /*with_weights=*/false,
         /*is_mean=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMean2BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
@@ -656,7 +609,6 @@ fp16 scale and bias), and where rows are pruned.
         "COMPRESSED_INDICES_MAPPING",
         "Integer vector mapping uncompressed indices to compressed indices")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMean2BitRowwiseSparse);
 
 } // namespace caffe2

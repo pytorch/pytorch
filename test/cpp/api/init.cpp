@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/init_baseline.h>
@@ -14,11 +15,11 @@ void check_exact_values(
     const std::vector<std::vector<torch::Tensor>>& expected_parameters) {
   ASSERT_EQ(parameters.size(), expected_parameters.size());
 
-  for (size_t i = 0; i < parameters.size(); i++) {
+  for (const auto i : c10::irange(parameters.size())) {
     auto layerParameters = parameters[i];
     auto expectedLayerParameters = expected_parameters[i];
 
-    if (layerParameters.size(0) != expectedLayerParameters.size()) {
+    if (static_cast<size_t>(layerParameters.size(0)) != expectedLayerParameters.size()) {
       std::cout << "layer #" << i
                 << " layerParameters size: " << layerParameters.size(0)
                 << " != "
@@ -27,7 +28,7 @@ void check_exact_values(
       ASSERT_TRUE(false);
     }
 
-    for (size_t p = 0; p < layerParameters.size(0); p++) {
+    for (const auto p : c10::irange(layerParameters.size(0))) {
       // Always compare using double dtype, regardless of the original dtype of the tensors
       auto tensor = layerParameters[p].to(torch::kFloat64);
       auto expectedTensor = expectedLayerParameters[p].to(torch::kFloat64);
@@ -67,7 +68,6 @@ void check_initializer_against_baseline(
   check_exact_values(parameters, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_XavierUniform) {
   auto expected = expected_parameters::Xavier_Uniform();
   auto initializer = [](torch::Tensor tensor) {
@@ -76,7 +76,6 @@ TEST(InitTest, ProducesPyTorchValues_XavierUniform) {
   check_initializer_against_baseline(initializer, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
   auto expected = expected_parameters::Xavier_Normal();
   auto initializer = [](torch::Tensor tensor) {
@@ -85,7 +84,6 @@ TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
   check_initializer_against_baseline(initializer, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
   auto expected = expected_parameters::Kaiming_Normal();
   auto initializer = [](torch::Tensor tensor) {
@@ -94,7 +92,6 @@ TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
   check_initializer_against_baseline(initializer, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_KaimingUniform) {
   auto expected = expected_parameters::Kaiming_Uniform();
   auto initializer = [](torch::Tensor tensor) {
@@ -103,7 +100,6 @@ TEST(InitTest, ProducesPyTorchValues_KaimingUniform) {
   check_initializer_against_baseline(initializer, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
   auto tensor = torch::empty({3, 4}, torch::requires_grad());
   ASSERT_THROWS_WITH(
@@ -113,28 +109,24 @@ TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
   ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CalculateGainWithTanh) {
   double gain =
       torch::nn::init::calculate_gain(torch::kTanh);
   ASSERT_DOUBLE_EQ(gain, 5.0 / 3.0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CalculateGainWithRelu) {
   double gain =
       torch::nn::init::calculate_gain(torch::kReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CalculateGainWithLeakyRelu) {
   double gain =
       torch::nn::init::calculate_gain(torch::kLeakyReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CanInitializeCnnWithOrthogonal) {
   torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(3, 2, 3).stride(2));
   torch::nn::init::orthogonal_(conv_layer->named_parameters()["weight"]);

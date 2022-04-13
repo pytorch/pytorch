@@ -1,8 +1,10 @@
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -12,6 +14,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -25,34 +28,15 @@ std::string getInputDebugName(const Node& n, const int idx) {
   return n.inputs().at(idx)->debugName();
 }
 
-std::vector<Node*> findAllNodes(
-    c10::ArrayRef<torch::jit::Block*> blocks,
-    Symbol kind,
-    bool recurse) {
-  std::vector<Node*> ret;
-  for (Block* block : blocks) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == kind) {
-        ret.push_back(n);
-      }
-      if (recurse) {
-        auto nodes = findAllNodes(n->blocks(), kind, recurse);
-        ret.insert(ret.end(), nodes.begin(), nodes.end());
-      }
-    }
-  }
-  return ret;
-}
-
 void assert_ignored_methods_not_called(
-    torch::jit::Function* fn,
+    torch::jit::Function& fn,
     const std::unordered_set<std::string>& ignored_methods) {
   if (ignored_methods.empty()) {
     return;
   }
   const bool recurse = true;
-  std::vector<Node*> all_nodes =
-      findAllNodes({fn->graph()->block()}, c10::prim::CallMethod, recurse);
+  std::vector<Node*> all_nodes = findAllNodes(
+      *toGraphFunction(fn).graph(), c10::prim::CallMethod, recurse);
 
   // Extract method names from these nodes.
   std::unordered_set<std::string> encountered_ignored_methods;
@@ -74,14 +58,14 @@ void assert_ignored_methods_not_called(
   TORCH_CHECK(
       false,
       "Preserved method '",
-      fn->name(),
+      fn.name(),
       "' references ignored method(s) '",
       encountered_ignored_methods_str,
       "'. This is not permitted.");
 }
 
 void assert_ignored_attributes_not_referenced(
-    torch::jit::Function* fn,
+    torch::jit::Function& fn,
     const std::unordered_set<std::string>& ignored_attributes) {
   if (ignored_attributes.empty()) {
     return;
@@ -89,7 +73,7 @@ void assert_ignored_attributes_not_referenced(
 
   const bool recurse = true;
   std::vector<Node*> all_nodes =
-      findAllNodes({fn->graph()->block()}, c10::prim::GetAttr, recurse);
+      findAllNodes(*toGraphFunction(fn).graph(), c10::prim::GetAttr, recurse);
 
   // Extract attribute names from these nodes.
   std::unordered_set<std::string> encountered_ignored_attributes;
@@ -111,7 +95,7 @@ void assert_ignored_attributes_not_referenced(
   TORCH_CHECK(
       false,
       "Preserved method '",
-      fn->name(),
+      fn.name(),
       "' references ignored attribute(s) '",
       encountered_ignored_attributes_str,
       "'. This is not permitted.");
@@ -163,7 +147,6 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
@@ -219,7 +202,8 @@ void Method::run(Stack& stack) {
   function_->run(stack);
 }
 
-IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs)
+    const {
   stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
@@ -236,6 +220,19 @@ c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
   return function_->runAsync(stack, std::move(taskLauncher));
 }
 
+void Method::setArgumentNames(
+    std::vector<std::string>& argumentNamesOut) const {
+  TORCH_INTERNAL_ASSERT(function_);
+  auto& arguments = function_->getSchema().arguments();
+  argumentNamesOut.reserve(arguments.size());
+  for (auto& argument : arguments) {
+    if (argument.name() == "self") {
+      continue;
+    }
+    argumentNamesOut.push_back(argument.name());
+  }
+}
+
 IValue Module::operator()(std::vector<IValue> inputs) {
   const auto& pre_forward_hooks = type()->getForwardPreHooks();
   const auto& forward_hooks = type()->getForwardHooks();
@@ -246,7 +243,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
     IValue result = Method(_ivalue(), pre_hook)({tuple_input});
     if (!result.isNone()) {
       if (result.isTuple()) {
-        inputs = result.toTuple()->elements();
+        inputs = result.toTupleRef().elements().vec();
       } else {
         inputs = {result};
       }
@@ -287,7 +284,7 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  auto graph = method.graph()->copy();
+  auto graph = toGraphFunction(method).graph()->copy();
   graph->remapTypes(type_remap_fn);
   auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(method.name());
@@ -365,7 +362,7 @@ Module Module::clone_impl(
 
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     IValue s = _ivalue()->getSlot(i);
     std::string attr_name = type()->getAttributeName(i);
 
@@ -416,8 +413,8 @@ Module Module::clone_impl(
     for (auto& fn : type()->methods()) {
       // If this method is not in the list of ignored methods, clone it.
       if (ignored_methods.count(fn->name()) == 0) {
-        assert_ignored_methods_not_called(fn, ignored_methods);
-        assert_ignored_attributes_not_referenced(fn, ignored_attributes);
+        assert_ignored_methods_not_called(*fn, ignored_methods);
+        assert_ignored_attributes_not_referenced(*fn, ignored_attributes);
         r.clone_method(*this, *fn, type_remap);
       }
     }
@@ -438,7 +435,9 @@ void Module::train(bool on) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       m._ivalue()->setSlot(*slot, on);
     } else {
-      TORCH_INTERNAL_ASSERT("'training' attribute not found");
+      // FIXME[T110620981]: This assert was broken (never asserted), and once
+      // fixed it triggers test failures.  Fix me!
+      /* TORCH_INTERNAL_ASSERT(false, "'training' attribute not found"); */
     }
   }
 }
@@ -476,26 +475,41 @@ Module freeze(
     c10::optional<std::vector<std::string>> preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
-      module.is_training(),
+      !module.hasattr("training") || !module.is_training(),
       "Freezing is currently only implemented for modules in eval mode. Please call .eval() before freezing");
 
   Module out_mod = freeze_module(
       module, preserved_attrs.value_or(std::vector<std::string>({})));
-  auto graph = module.get_method("forward").graph();
+  auto graph = out_mod.get_method("forward").graph();
   OptimizeFrozenGraph(graph, optimize_numerics);
   return out_mod;
 }
 
-Module optimize_for_inference(Module& module) {
-  // not frozen yet
-  if (module._ivalue()->type()->hasAttribute("training")) {
-    auto mod = freeze(module, {}, true);
-  }
-
-  auto graph = module.get_method("forward").graph();
+namespace {
+void optimize_for_inference(std::shared_ptr<Graph> graph) {
   FuseFrozenConvAddRelu(graph);
   ConvertFrozenOpsToMKLDNN(graph);
-  return module;
+  FrozenLinearTranspose(graph);
+}
+} // namespace
+
+Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods) {
+  // if not frozen yet
+  Module frozen_mod;
+  if (module._ivalue()->type()->hasAttribute("training")) {
+    frozen_mod = freeze(module, {}, true);
+  } else {
+    frozen_mod = module;
+  }
+
+  optimize_for_inference(frozen_mod.get_method("forward").graph());
+
+  for (const auto& method : other_methods) {
+    optimize_for_inference(frozen_mod.get_method(method).graph());
+  }
+  return frozen_mod;
 }
 
 buffer_list Module::buffers(bool recurse) const {

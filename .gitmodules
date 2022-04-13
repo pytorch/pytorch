@@ -9,7 +9,7 @@
 [submodule "third_party/eigen"]
     ignore = dirty
     path = third_party/eigen
-    url = https://github.com/eigenteam/eigen-git-mirror.git
+    url = https://gitlab.com/libeigen/eigen.git
 [submodule "third_party/googletest"]
     ignore = dirty
     path = third_party/googletest
@@ -136,3 +136,12 @@
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
+[submodule "third_party/pocketfft"]
+	path = third_party/pocketfft
+	url = https://github.com/mreineck/pocketfft
+[submodule "third_party/breakpad"]
+	path = third_party/breakpad
+	url = https://github.com/driazati/breakpad.git
+[submodule "third_party/flatbuffers"]
+	path = third_party/flatbuffers
+	url = https://github.com/google/flatbuffers.git

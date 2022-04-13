@@ -13,7 +13,6 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
   auto* norm = Output(0, {1}, at::dtype<float>());
   const float* X_data = X.data<float>();
   const float size = average_ ? (float)X.numel() : 1.0f;
-  CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
     *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.numel()).array()).abs().sum() /
@@ -63,12 +62,9 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 // LpNorm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LpNorm, LpNormOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LpNormGradient, LpNormGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LpNorm)
     .NumInputs(1)
     .NumOutputs(1)
@@ -141,7 +137,6 @@ Y:
           CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LpNormGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -172,7 +167,6 @@ class GetLpNormGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LpNorm, GetLpNormGradient);
 
 } // namespace caffe2

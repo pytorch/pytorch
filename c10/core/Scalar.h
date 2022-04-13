@@ -7,10 +7,17 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
 
 namespace c10 {
 
@@ -60,7 +67,7 @@ class C10_API Scalar {
   }
 
   // TODO: Support ComplexHalf accessor
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ACCESSOR)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ACCESSOR)
 
   // also support scalar.to<int64_t>();
   // Deleted for unsupported types, but specialized below for supported types
@@ -186,13 +193,17 @@ class C10_API Scalar {
   } v;
 };
 
+using OptionalScalarRef = c10::OptionalRef<Scalar>;
+
 // define the scalar.to<int64_t>() specializations
 #define DEFINE_TO(T, name)         \
   template <>                      \
   inline T Scalar::to<T>() const { \
     return to##name();             \
   }
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_TO)
 #undef DEFINE_TO
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
