@@ -125,18 +125,27 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
 # Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
 # (1) the C++ code necessary to unbox the argument
 # (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
-def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False, structured_type_override: bool) -> Tuple[str, CType, List[str], List[str]]:
-    ctype = cpp.argumenttype_type(t=t, mutable=mutable, binds=arg_name, structured_type_override=structured_type_override).type
+def argumenttype_ivalue_convert(
+        t: Type,
+        arg_name: str,
+        *,
+        mutable: bool = False,
+        structured_type_override: bool
+) -> Tuple[str, CType, List[str], List[str]]:
+    ctype = cpp.argumenttype_type(
+        t=t, mutable=mutable, binds=arg_name, structured_type_override=structured_type_override).type
 
     if isinstance(t, BaseType):
         out_name = f"{arg_name}_base"
         code, decl = _gen_code_base_type(arg_name=arg_name, out_name=out_name, ctype=ctype)
     elif isinstance(t, OptionalType):
         out_name = f"{arg_name}_opt_out"
-        code, decl = _gen_code_optional_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype, structured_type_override=structured_type_override)
+        code, decl = _gen_code_optional_type(
+            arg_name=arg_name, out_name=out_name, t=t, ctype=ctype, structured_type_override=structured_type_override)
     elif isinstance(t, ListType):
         out_name = f"{arg_name}_list_out"
-        code, decl = _gen_code_list_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype, structured_type_override=structured_type_override)
+        code, decl = _gen_code_list_type(
+            arg_name=arg_name, out_name=out_name, t=t, ctype=ctype, structured_type_override=structured_type_override)
     else:
         raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
     return out_name, ctype, code, decl
@@ -146,9 +155,16 @@ def _gen_code_base_type(arg_name: str, out_name: str, ctype: CType) -> Tuple[Lis
     return [f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"], []
 
 
-def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: CType, structured_type_override: bool) -> Tuple[List[str], List[str]]:
+def _gen_code_optional_type(
+        arg_name: str,
+        out_name: str,
+        t: OptionalType,
+        ctype: CType,
+        structured_type_override: bool
+) -> Tuple[List[str], List[str]]:
     in_name = f"{arg_name}_opt_in"
-    res_name, _, res_code, decl = argumenttype_ivalue_convert(t.elem, in_name, structured_type_override=structured_type_override)
+    res_name, _, res_code, decl = argumenttype_ivalue_convert(
+        t.elem, in_name, structured_type_override=structured_type_override)
     return f"""
 c10::optional<c10::IValue> {arg_name}_opt = {arg_name}.toOptional<c10::IValue>();
 {ctype.cpp_type(strip_ref=True)} {out_name};
@@ -162,11 +178,18 @@ if ({arg_name}_opt.has_value()) {{
         """.split("\n"), decl
 
 
-def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType, structured_type_override: bool) -> Tuple[List[str], List[str]]:
+def _gen_code_list_type(
+        arg_name: str,
+        out_name: str,
+        t: ListType,
+        ctype: CType,
+        structured_type_override: bool
+) -> Tuple[List[str], List[str]]:
     in_name = f"{arg_name}_list_in"
     elem_name = f"{arg_name}_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
-    res_name, res_ctype, res_code, decl = argumenttype_ivalue_convert(t.elem, elem_name, structured_type_override=structured_type_override)
+    res_name, res_ctype, res_code, decl = argumenttype_ivalue_convert(
+        t.elem, elem_name, structured_type_override=structured_type_override)
     # handle list type with size, e.g., bool[4]
     if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
         code.extend(
