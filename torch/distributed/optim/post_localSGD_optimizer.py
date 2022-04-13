@@ -26,8 +26,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  )
         >>>
         >>>  # Register a post-localSGD communication hook.
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>>  # Create a post-localSGD optimizer that wraps a local optimizer.
@@ -76,11 +75,13 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         Performs a single optimization step (parameter update).
         """
         self.optim.step()
-        for param_group in self.param_groups:
-            for params in param_group["params"]:
-                if params.grad is None:
-                    continue
-                self.averager.average_parameters(iter(params))
+        params = [
+            param
+            for param_group in self.param_groups
+            for param in param_group["params"]
+            if param.grad is not None
+        ]
+        self.averager.average_parameters(iter(params))
 
     def zero_grad(self):
         self.optim.zero_grad()

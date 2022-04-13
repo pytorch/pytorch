@@ -235,12 +235,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
   te::BufHandle AP("A", {M}, te::kFloat);
   te::Tensor BT = te::Reduce(
       "reduce_full",
-      {{1, "N"}},
+      {1},
       te::Sum(),
       [&](const te::ExprHandle& n, const te::ExprHandle& m) {
         return AP.load(m);
       },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   loop.prepareForCodegen();
@@ -266,12 +266,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
   te::BufHandle AP("A", {M}, te::kFloat);
   te::Tensor BT = te::Reduce(
       "reduce_full",
-      {{1, "N"}},
+      {1},
       te::Sum(),
       [&](const te::ExprHandle& n, const te::ExprHandle& m) {
         return AP.load(m);
       },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   const int kChunkSize = 8;
@@ -305,12 +305,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
   te::BufHandle AP("A", {M}, te::kFloat);
   te::Tensor BT = te::Reduce(
       "reduce_full",
-      {{1, "N"}},
+      {1},
       te::Sum(),
       [&](const te::ExprHandle& n, const te::ExprHandle& m) {
         return AP.load(m);
       },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   const int kChunkSize = 8;
@@ -349,7 +349,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
       {},
       te::Sum(),
       [&](const te::ExprHandle& m) { return AP.load(m); },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   te::BufPtr rfac_buf;

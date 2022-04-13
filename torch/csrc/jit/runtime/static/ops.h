@@ -23,11 +23,10 @@ at::Tensor& to_copy_out(
 namespace torch {
 namespace jit {
 
-using SROperator = std::function<void(ProcessedNode*)>;
 using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
   virtual SROperator Generate(Node*) {
-    std::function<void(ProcessedNode*)> out;
+    SROperator out;
     return out;
   }
   virtual ~SROperatorFunctor() = default;
@@ -154,8 +153,8 @@ bool isOptimizableContainerType(
     Node* n,
     const FastMap<Node*, bool>& node_has_out_variant);
 
-std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
-std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
+SROperator getOutOfPlaceOperation(Node* n);
+SROperator getNativeOperation(Node* n);
 
 bool hasVarArgs(Node* n);
 
