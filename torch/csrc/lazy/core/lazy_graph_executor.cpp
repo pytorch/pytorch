@@ -872,12 +872,9 @@ void LazyGraphExecutor::BuildInputOutputAliases(
       auto it = output_tensor_id_map.find(data_info->tensor_id);
       if (it != output_tensor_id_map.end()) {
         size_t output_index = it->second;
-        const Shape& root_shape = lowering_ctx->GetResultShape(output_index);
-        if (Shape(parameters_data[i]->shape()) == root_shape &&
+        if (lowering_ctx->CheckResultShape(parameters_data[i], output_index) &&
             alias_map[output_index] < 0) {
-          // TODO(whc) deleted this interface until we see a need (no TS impl)
-          // lowering_ctx->SetUpAlias({static_cast<int64_t>(output_index)}, i,
-          // {});
+          lowering_ctx->SetUpAlias({static_cast<int64_t>(output_index)}, i, {});
           alias_map[output_index] = i;
 
           VLOG(6) << "Aliased parameter " << i << " with output "

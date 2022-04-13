@@ -81,13 +81,6 @@ class TORCH_API TSLoweringContext : public LoweringContext {
       c10::ArrayRef<Node*> post_order,
       Util::EmissionMap emit_status);
 
-  // TODO(whc) replace these when real impl lands;
-  // I am just landing the interface in this diff, but MSVC won't allow
-  // undefined virtual funcs
-  Shape GetResultShape(size_t index) const override {
-    TORCH_INTERNAL_ASSERT(false, "not implemented");
-  }
-
   size_t AddResult(const Output& output) override {
     return AddResult(GetOutputOp(output));
   }

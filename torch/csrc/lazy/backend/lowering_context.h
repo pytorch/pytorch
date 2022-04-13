@@ -54,8 +54,22 @@ class TORCH_API LoweringContext {
   const std::vector<BackendDataPtr>&
   GetParametersData() const;
 
-  // Get the shape of the result tuple component, given by index.
-  virtual Shape GetResultShape(size_t index) const = 0;
+  // Adds a new input/output alias.
+  virtual void SetUpAlias(
+      const std::vector<int64_t>& output_index,
+      int64_t param_number,
+      const std::vector<int64_t>& param_index,
+      bool must_alias = false) {
+    // Dummy default implementation to do nothing.
+  }
+
+  // Check if parameter shape matches result at index.
+  virtual bool CheckResultShape(
+      const BackendDataPtr& parameter_data,
+      size_t result_idx) {
+    // Dummy default implementation to do nothing.
+    return false;
+  }
 
   // Adds the given output as a component of the result tuple and returns its
   // assigned position within the tuple.
