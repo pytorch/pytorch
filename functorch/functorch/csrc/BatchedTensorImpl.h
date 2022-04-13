@@ -12,6 +12,7 @@
 #include <ATen/SmallVector.h>
 #include <ATen/Tensor.h>
 
+#include <functorch/csrc/Macros.h>
 #include <functorch/csrc/Constants.h>
 
 namespace at {
@@ -121,10 +122,10 @@ inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(int64_t level) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
+FUNCTORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
+FUNCTORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
 
 constexpr DispatchKeySet kKeysToPropagateToWrapper({
   DispatchKey::Negative,
