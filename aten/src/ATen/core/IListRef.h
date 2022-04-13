@@ -355,12 +355,7 @@ using MaterializedIListRef = std::vector<_MaterializedIListRefElem<IListRefConst
  *     than 0.
  */
 template <typename T>
-class IListRefIterator : public std::iterator<
-          std::bidirectional_iterator_tag,
-          detail::IListRefConstRef<T>,
-          ptrdiff_t,
-          std::add_pointer<detail::IListRefConstRef<T>>,
-          std::add_lvalue_reference<detail::IListRefConstRef<T>>> {
+class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...)                        \
   friend class detail::IListRefTagImpl<IListRefTag::TAG, T>; \
