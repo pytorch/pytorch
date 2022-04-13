@@ -1,3 +1,4 @@
+#include <pybind11/pytypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -89,6 +90,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <ATen/core/SymbolicIntNode.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -109,13 +111,34 @@
 #include <tuple>
 #include <utility>
 
+
 namespace torch {
 namespace jit {
+
+
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
+
+
+class PythonSymbolicIntNode: public c10::SymbolicIntNode {
+public:
+  PythonSymbolicIntNode(py::object pyobj): 
+    c10::SymbolicIntNode(), 
+    pyobj_(std::move(pyobj)) {};
+
+  virtual SymbolicIntNode* add(SymbolicIntNode* other) override {
+    auto pother = dynamic_cast<PythonSymbolicIntNode*>(other);
+    py::gil_scoped_acquire acquire;
+    auto r = pyobj_.attr("__add__")(pother->pyobj_);
+    return new PythonSymbolicIntNode(r);
+  }
+
+  py::object getPyObj() { return pyobj_; }
+  py::object pyobj_;
+};
 
 namespace {
 
@@ -1015,6 +1038,13 @@ void initJITBindings(PyObject* module) {
           }
         }
       });
+
+  py::class_<PythonSymbolicIntNode, std::shared_ptr<PythonSymbolicIntNode>>(m, "PythonSymbolicIntNode")
+    .def(py::init<py::object>())
+    .def("pyobj", &PythonSymbolicIntNode::getPyObj)
+    .def("__add__", [](PythonSymbolicIntNode* a, PythonSymbolicIntNode* b) {
+      return a->add(b);
+    });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

@@ -3,7 +3,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+
 namespace c10 {
+
+class SymbolicIntNode;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
@@ -35,9 +38,7 @@ class TORCH_API SymInt {
             return data_;
         }
 
-        bool is_symbolic() const {
-            return false;
-        }
+        bool is_symbolic() const;
 
         bool operator==(const SymInt& p2) const
         {
@@ -47,6 +48,8 @@ class TORCH_API SymInt {
         SymInt operator+(SymInt sci) const {
             return data_ + sci.data_;
         }
+
+        c10::SymbolicIntNode* toSymbolicIntNode();
 
         int64_t data() const {
             return data_;

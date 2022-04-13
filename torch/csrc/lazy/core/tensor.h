@@ -6,9 +6,18 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
+#include <ATen/core/SymbolicIntNode.h>
+
 
 namespace torch {
 namespace lazy {
+
+class TORCH_API SymbolicIntNode: public c10::SymbolicIntNode {
+public:
+  SymbolicIntNode(NodePtr ptr): node_(std::move(ptr)) {};
+  virtual c10::SymbolicIntNode* add(c10::SymbolicIntNode* other);
+  NodePtr node_;
+};
 
 class LazyTensor;
 using LazyTensorPtr = c10::intrusive_ptr<LazyTensor>;

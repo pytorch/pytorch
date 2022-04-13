@@ -2,6 +2,7 @@
 #include <torch/csrc/lazy/core/tensor.h>
 
 #include <torch/csrc/lazy/core/config.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
@@ -12,9 +13,16 @@
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 
-
 namespace torch {
 namespace lazy {
+
+c10::SymbolicIntNode* SymbolicIntNode::add(c10::SymbolicIntNode* other) {
+  // auto lother = dynamic_cast<SymbolicIntNode*>(other);
+  // auto irn = MakeNode<SizeAdd>(node_, lother->node_);
+  // return SymbolicIntNode(irn);
+  TORCH_CHECK(false, "NYI");
+}
+
 namespace {
 LazyTensorPtr GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const BackendDevice& device) {

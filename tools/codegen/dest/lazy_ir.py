@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
-from tools.codegen.api.types import (BaseCType, OptionalCType,
+from tools.codegen.api.types import (BaseCType, BaseCppType, OptionalCType, SymIntT,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, LazyArgument, isValueType, tensorListValueT
@@ -23,6 +23,8 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                 return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
             elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
+            elif arg.is_symint_or_list:
+                return f"Value(dynamic_cast<torch::lazy::SymbolicIntNode*>({arg.name}.toSymbolicIntNode())->node_, 0)"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
@@ -103,7 +105,7 @@ class LazyIR(ABC):
         all_args = schema.filtered_args()
         value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
-
+        valueT = BaseCppType('torch::lazy', 'Value')
         node_ctor_args = ", ".join([f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args])
         scalar_initializers = ",\n        ".join([f"{a.name}({a.name})" for a in scalar_args])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
@@ -186,6 +188,8 @@ def lazy_tensor_decls(value_args: List[LazyArgument], tensor_class: str) -> str:
             if arg.lazy_type.type is tensorListValueT:
                 lazy_tensor_decls.append(
                     f"auto lazy_{arg.name}_tensorlist = torch::lazy::GetTensorList({arg.name});")
+            elif arg.is_symint_or_list:
+                continue # values are extracted in isValueType
             else:
                 lazy_tensor_decls.append(
                     f"{tensor_class}Ptr lazy_{arg.name} = "
