@@ -2394,3 +2394,20 @@ Returns:
 
 Examples::
 """)
+
+
+orthogonalize_ = _add_docstr(_linalg.linalg_orthogonalize_, r"""
+orthogonalize(A, epsilon=1e-8, *, out=None) -> (Tensor, Tensor)
+
+Orthogonalize a matrix
+
+Args:
+    
+
+Keyword args:
+
+Returns:
+    
+
+Examples::
+""")
