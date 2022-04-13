@@ -4,7 +4,7 @@ from typing import Optional, Sequence, Set, List, Tuple, Match
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding, NamedCType
-from tools.codegen.model import NativeFunction, Type, SchemaKind
+from tools.codegen.model import NativeFunction, Type, SchemaKind, NativeFunctionsViewGroup
 from tools.codegen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.
@@ -148,6 +148,39 @@ class DifferentiabilityInfo:
     @property
     def has_derivatives(self) -> bool:
         return len(self.args_with_derivatives) > 0
+
+    # Generates a new DifferentiabilityInfo using the exact same set of derivative information,
+    # but with a new operator name.
+    # This is used when generating "copy" variants of view ops,
+    # which are able to use the exact same derivative formula as the original view op
+    # See Note [Codegen'd {view}_copy Operators]
+    def create_view_copy_from_view_derivative(self, g: NativeFunctionsViewGroup) -> Optional['DifferentiabilityInfo']:
+        if g.view_copy is None:
+            return None
+        f = g.view_copy
+
+        name_split_by_period = self.name.split('.', maxsplit=2)
+        # Append a "_copy" to the base name of the operator (but keep the overload name the same)
+        view_copy_name = f'{name_split_by_period[0]}_copy.' + '.'.join(name_split_by_period[1:])
+        view_copy_op_name = None if self.op is None else f'{self.op}_copy'
+
+        return DifferentiabilityInfo(
+            # Use the "_copy" version of name/func/op
+            name=view_copy_name,
+            func=f,
+            op=view_copy_op_name,
+            # But keep all derivative info the same
+            derivatives=self.derivatives,
+            forward_derivatives=self.forward_derivatives,
+            all_saved_inputs=self.all_saved_inputs,
+            all_saved_outputs=self.all_saved_outputs,
+            available_named_gradients=self.available_named_gradients,
+            used_named_gradients=self.used_named_gradients,
+            args_with_derivatives=self.args_with_derivatives,
+            non_differentiable_arg_names=self.non_differentiable_arg_names,
+            output_differentiability=self.output_differentiability,
+            output_differentiability_conditions=self.output_differentiability_conditions,
+        )
 
 def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
     if info is None:
