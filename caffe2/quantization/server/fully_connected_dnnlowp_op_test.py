@@ -34,6 +34,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         fuse_relu=st.booleans(),
         output_packed_bias=st.booleans(),
         use_input_qparam=st.booleans(),
+        use_output_qparam=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_fully_connected_int(
@@ -50,6 +51,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         fuse_relu,
         output_packed_bias,
         use_input_qparam,
+        use_output_qparam,
         gc,
         dc,
     ):
@@ -98,22 +100,26 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []
 
-        op_engine_list = [("FC", "")]
+        op_engine_list = [("FC", "", False, False)]
         if fuse_relu:
-            op_engine_list += [("Int8FCRelu", "DNNLOWP")]
+            op_engine_list += [("Int8FCRelu", "DNNLOWP", False, False)]
         else:
             op_engine_list += [
-                ("FC", "DNNLOWP"),
-                ("FC", "DNNLOWP_16"),
-                ("Int8FC", "DNNLOWP"),
+                # type, engine, do_fuse, skip_requantization
+                ("FC", "DNNLOWP", False, False),
+                ("FC", "DNNLOWP_16", False, False),
+                ("Int8FC", "DNNLOWP", False, False),
+                ("Int8FC", "DNNLOWP", True, False),
+                ("Int8FC", "DNNLOWP", False, True),
+                ("Int8FC", "DNNLOWP", True, True),
             ]
 
-        for op_type, engine in op_engine_list:
+        for op_type, engine, do_fuse, skip_requantization in op_engine_list:
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
-            do_quantize = "DNNLOWP" in engine and in_quantized
-            do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_quantize = "DNNLOWP" in engine and in_quantized and not do_fuse
+            do_dequantize = "DNNLOWP" in engine and out_quantized and not skip_requantization
             do_quantize_weight = (
                 engine == "DNNLOWP" and weight_quantized and len(outputs) > 0
             )
@@ -167,41 +173,29 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 init_net.Proto().op.extend([pack])
 
-            if use_input_qparam and do_dequantize and op_type != "FC":
-                fc = core.CreateOperator(
-                    op_type,
-                    [
-                        "X_q" if do_quantize else "X",
-                        "W_packed"
-                        if do_prepack_weight
-                        else ("W_q" if do_quantize_weight else "W"),
-                        "b_q" if do_quantize_weight else "b",
-                        "quant_param",
-                    ],
-                    ["Y_q" if do_dequantize else "Y"],
-                    dequantize_output=not do_dequantize,
-                    preserve_activation_sparsity=preserve_activation_sparsity,
-                    preserve_weight_sparsity=preserve_weight_sparsity,
-                    engine=engine,
-                    device_option=gc,
-                )
-            else:
-                fc = core.CreateOperator(
-                    op_type,
-                    [
-                        "X_q" if do_quantize else "X",
-                        "W_packed"
-                        if do_prepack_weight
-                        else ("W_q" if do_quantize_weight else "W"),
-                        "b_q" if do_quantize_weight else "b",
-                    ],
-                    ["Y_q" if do_dequantize else "Y"],
-                    dequantize_output=not do_dequantize,
-                    preserve_activation_sparsity=preserve_activation_sparsity,
-                    preserve_weight_sparsity=preserve_weight_sparsity,
-                    engine=engine,
-                    device_option=gc,
-                )
+            fc = core.CreateOperator(
+                op_type,
+                [
+                    "X_q" if do_quantize else "X",
+                    "W_packed"
+                    if do_prepack_weight
+                    else ("W_q" if do_quantize_weight else "W"),
+                    "b_q" if do_quantize_weight else "b",
+                    # "quant_param",
+                ],
+                ["Y_q" if do_dequantize else "Y"],
+                dequantize_output=not do_dequantize,
+                preserve_activation_sparsity=preserve_activation_sparsity,
+                preserve_weight_sparsity=preserve_weight_sparsity,
+                engine=engine,
+                device_option=gc,
+            )
+            if op_type != "FC":
+                if (do_dequantize and use_output_qparam) or (use_input_qparam and op_type == "Int8_FC"):
+                    fc.input.extend(["quant_param"])
+                if (use_input_qparam and op_type == "Int8_FC"):
+                    fc.input.extend(["X_quant_param"])
+
             if do_quantize_weight or do_prepack_weight:
                 # When quantized weight is provided, we can't rescale the
                 # output dynamically by looking at the range of output of each
@@ -221,7 +215,9 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            if use_input_qparam and do_dequantize and op_type != "FC":
+
+
+            if use_output_qparam and do_dequantize and op_type != "FC":
                 ref_output = outputs[0][0]
                 ref_output_min = 0 if ref_output.size == 0 else ref_output.min()
                 ref_output_max = 0 if ref_output.size == 0 else ref_output.max()
@@ -229,25 +225,37 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 q_param = dnnlowp_utils.choose_quantization_params(
                     ref_output_min, ref_output_max, preserve_activation_sparsity
                 )
-                run_conv_or_fc(
-                    self,
-                    init_net,
-                    net,
-                    X,
-                    W,
-                    b,
-                    op_type,
-                    engine,
-                    None,
-                    gc,
-                    outputs,
-                    q_param.scale,
-                    q_param.zero_point,
-                )
+                q_param_scale = q_param.scale
+                q_param_zero_point = q_param.zero_point
             else:
-                run_conv_or_fc(
-                    self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
-                )
+                q_param_scale = None
+                q_param_zero_point = None
+
+            if not (use_input_qparam and op_type == "Int8FC"):
+                x_q_param_scale = None
+                x_q_param_zero_point = None
+            else:
+                x_q_param_scale = x_q_param.scale
+                x_q_param_zero_point = x_q_param.zero_point
+
+            run_conv_or_fc(
+                self,
+                init_net,
+                net,
+                X,
+                W,
+                b,
+                op_type,
+                engine,
+                None,
+                gc,
+                outputs,
+                q_param_scale,
+                q_param_zero_point,
+                x_q_param_scale,
+                x_q_param_zero_point,
+            )
+
 
             if output_packed_bias and do_prepack_weight and do_dequantize:
                 bias_int32 = self.ws.blobs["B_q32"].fetch()
@@ -264,12 +272,14 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     "W": [output_channels, input_channels],
                     "b": [output_channels],
                     "quant_param": [1],
+                    "X_quant_param": [1],
                 },
                 blob_types={
                     "X": core.DataType.FLOAT,
                     "W": core.DataType.FLOAT,
                     "b": core.DataType.FLOAT,
                     "quant_param": core.DataType.FLOAT,
+                    "X_quant_param": core.DataType.FLOAT,
                 },
             )
             assert (
