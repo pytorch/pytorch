@@ -80,8 +80,7 @@ def with_native_function_and_index(func: Callable[[F, BackendIndex], T]) -> Call
             return func(f, backend_index)
     return wrapper
 
-# Convenience decorator for functions that explicitly take in a BackendIndex,
-# instead of indirectly taking one in as a closure
+# Convenience decorator for functions that explicitly take in a Dict of BackendIndices
 def with_native_function_and_indices(
         func: Callable[[F, Dict[DispatchKey, BackendIndex]], T]
 ) -> Callable[[F, Dict[DispatchKey, BackendIndex]], T]:

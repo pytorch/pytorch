@@ -439,7 +439,7 @@ def needs_functionalization(
     # if there is one, so we decompose before hitting the functionalization pass.
     # (We don't generate a definition though).
     # If/when we separate "decomposition" into a separate dispatch key, we won't need to do this.
-    f = g if isinstance(g, NativeFunction) else g.view
+    f = g.view if isinstance(g, NativeFunctionsViewGroup) else g
     return f.has_composite_implicit_autograd_kernel and target == Target.REGISTRATION
 
 
