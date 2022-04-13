@@ -45,7 +45,6 @@ from .flatten_params_wrapper import (
     FlattenParamsWrapper,
 )
 from .optim_utils import (
-    OPTIM_TARGET_RANK,
     _flatten_optim_state,
     _get_flat_param_to_fsdp_module,
     _get_param_id_to_param,
@@ -2367,6 +2366,7 @@ class FullyShardedDataParallel(nn.Module):
         optim_input: Optional[Union[
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
+        rank0_only: bool = True,
     ) -> Dict[str, Any]:
         """
         Consolidates the full optimizer state on rank 0 and returns it
@@ -2376,8 +2376,9 @@ class FullyShardedDataParallel(nn.Module):
         contained in ``model`` are mapped back to their unflattened parameters.
 
         .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used. However, the state dict is only populated on
-            rank 0. All other ranks return an empty :class:`dict`.
+            primitives are used. However, if ``rank0_only=True``, then the
+            state dict is only populated on rank 0, and all other ranks return
+            an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -2403,13 +2404,16 @@ class FullyShardedDataParallel(nn.Module):
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
                 ``model.parameters()``. (Default: ``None``)
+            rank0_only (bool): If ``True``, saves the populated :class:`dict`
+                only on rank 0; if ``False``, saves it on all ranks. (Default:
+                ``True``)
 
         Returns:
-            full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
-                state for ``model`` 's original unflattened parameters and
-                including keys "state" and "param_groups" following the
-                convention of :meth:`torch.optim.Optimizer.state_dict` if on
-                rank 0, and an empty :class:`dict` otherwise.
+            Dict[str, Any]: A :class:`dict` containing the optimizer state for
+            ``model`` 's original unflattened parameters and including keys
+            "state" and "param_groups" following the convention of
+            :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
+            then nonzero ranks return an empty :class:`dict`.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2417,7 +2421,7 @@ class FullyShardedDataParallel(nn.Module):
         group = model.process_group if hasattr(model, "process_group") \
             else None  # not all `torch.nn.Module`s have `process_group`
         rank = dist.get_rank(group)
-        to_save = rank == OPTIM_TARGET_RANK
+        to_save = not rank0_only or rank == 0
         full_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
         full_osd_state = full_osd["state"] if to_save else None  # alias
 
@@ -2440,7 +2444,7 @@ class FullyShardedDataParallel(nn.Module):
                     f"param: {param}"
                 unflat_state = _unflatten_optim_state(
                     flat_param_to_fsdp_module[param], param,
-                    osd_state[flat_param_id],
+                    osd_state[flat_param_id], to_save,
                 )
                 if to_save:
                     assert len(unflat_state) == len(unflat_param_names) and \
@@ -2535,10 +2539,9 @@ class FullyShardedDataParallel(nn.Module):
                 ``model.parameters()``. (Default: ``None``)
 
         Returns:
-            sharded_optim_state_dict (Dict[str, Any]): The full optimizer
-                state dict remapped to flattened parameters instead of
-                unflattened parameters and restricted to only include this
-                rank's part of the optimizer state.
+            Dict[str, Any]: The full optimizer state dict remapped to flattened
+            parameters instead of unflattened parameters and restricted to only
+            include this rank's part of the optimizer state.
         """
         full_osd = full_optim_state_dict  # alias
         if "state" not in full_osd or "param_groups" not in full_osd:
@@ -2637,8 +2640,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> wrapped_optim.load_state_dict(sharded_osd)
 
         Returns:
-            rekeyed_osd (Dict[str, Any]): The optimizer state dict re-keyed
-                using the parameter keys specified by ``optim_state_key_type``.
+            Dict[str, Any]: The optimizer state dict re-keyed using the
+            parameter keys specified by ``optim_state_key_type``.
         """
         assert optim_state_key_type in \
             (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)
@@ -2780,6 +2783,9 @@ def _get_param_to_unflat_param_names(
     parameters, these mapped-to lists always contain a single element. The
     unflattened parameter names should match the keys of the model state dict.
 
+    For shared parameters, only the first parameter name is included (following
+    the ``torch.nn.Module.parameters()`` order).
+
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
@@ -2801,15 +2807,15 @@ def _get_param_to_unflat_param_names(
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
-                assert param not in param_to_unflat_param_names, \
-                    f"Incorrect recursion; already visited {param_name}"
-                if isinstance(param, FlatParameter):
-                    param_to_unflat_param_names[param] = [
-                        clean_param_name(prefix, param_info)
-                        for param_info in param._param_infos
-                    ]
-                else:
-                    param_to_unflat_param_names[param] = [prefix + param_name]
+                prefixed_param_names = [
+                    clean_param_name(prefix, param_info)
+                    for param_info in param._param_infos
+                ] if isinstance(param, FlatParameter) else [prefix + param_name]
+                # If this parameter has already been visited, then it is a
+                # shared parameter; then, only take the first parameter name
+                is_shared_param = param in param_to_unflat_param_names
+                if not is_shared_param:
+                    param_to_unflat_param_names[param] = prefixed_param_names
 
         for submodule_name, submodule in module.named_children():
             if submodule is not None:
