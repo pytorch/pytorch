@@ -2737,14 +2737,14 @@ void qmean_inner_dim_kernel(
   ScalarType dtype = self.scalar_type();
   auto in_dims = self.sizes().vec();
   auto out_dims = in_dims;
-  int64_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
+  size_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take average of in each group
   bool output_is_zero_dim = false;
-  for (int i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
     M *= in_dims[i];
   }
-  for (int i = 0; i < num_dims_to_squeeze; ++i) {
+  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -2779,22 +2779,22 @@ void qmean_inner_dim_kernel(
 
 void qstd_inner_dim_kernel(
     const Tensor& self,
-    optional<IntArrayRef> dim,
+    OptionalIntArrayRef dim,
     optional<int64_t> unbiased,
     bool keepdim,
     Tensor& result) {
   ScalarType dtype = self.scalar_type();
   auto in_dims = self.sizes().vec();
   auto out_dims = in_dims;
-  int64_t num_dims_to_squeeze = dim.has_value() && !dim.value().empty() ?
-                                dim.value().size() :
-                                self.dim();
+  size_t num_dims_to_squeeze = dim.has_value() && !dim.value().empty() ?
+                               dim.value().size() :
+                               self.dim();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take std of in each group
-  for (int i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
     M *= in_dims[i];
   }
-  for (int i = 0; i < num_dims_to_squeeze; ++i) {
+  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;

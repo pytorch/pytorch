@@ -172,7 +172,7 @@ using qmean_inner_dim_fn = void (*)(
 
 using qstd_inner_dim_fn = void (*)(
     const Tensor& /* X */,
-    optional<IntArrayRef> /* dim */,
+    OptionalIntArrayRef /* dim */,
     optional<int64_t> /* unbiased */,
     bool /* keepdim */,
     Tensor& /* Y */);
