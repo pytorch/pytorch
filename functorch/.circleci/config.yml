@@ -123,11 +123,11 @@ workflows:
           name: unittest_linux_<< matrix.cu_version >>_py<< matrix.python_version >>
           matrix:
             parameters:
-              python_version: ["3.7", "3.8", "3.9"]
+              python_version: ["3.7", "3.8", "3.9", "3.10"]
               cu_version: ["cpu"]
       - unittest_linux_gpu:
           name: unittest_linux_<< matrix.cu_version >>_py<< matrix.python_version >>
           matrix:
             parameters:
-              python_version: ["3.7", "3.8", "3.9"]
+              python_version: ["3.7", "3.8", "3.9", "3.10"]
               cu_version: ["cu102"]
