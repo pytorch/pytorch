@@ -401,7 +401,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
   at::functorch::initCompileCacheBindings(m.ptr());
+
+  // Windows doesn't like this
+#ifndef _WIN32
   initDispatchBindings(m.ptr());
+#endif
 }
 
 }}
