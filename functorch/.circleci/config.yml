@@ -116,6 +116,37 @@ jobs:
       - store_test_results:
           path: test-reports
 
+  unittest_macos_cpu:
+    <<: *binary_common
+    macos:
+      xcode: "12.0"
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Install wget
+          command: HOMEBREW_NO_AUTO_UPDATE=1 brew install wget
+          # Disable brew auto update which is very slow
+      - run:
+          name: Setup
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/setup_env.sh
+      - run:
+          name: Install functorch
+          command: .circleci/unittest/linux/scripts/install.sh
+      - run:
+          name: Run tests
+          command: .circleci/unittest/linux/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/linux/scripts/post_process.sh
+      - store_test_results:
+          path: test-results
+
 workflows:
   unittest:
     jobs:
@@ -131,3 +162,10 @@ workflows:
             parameters:
               python_version: ["3.7", "3.8", "3.9", "3.10"]
               cu_version: ["cu102"]
+
+      - unittest_macos_cpu:
+          name: unittest_macos_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.10"]
+              cu_version: ["cpu"]
