@@ -6,12 +6,13 @@
 
 #pragma once
 
+#include <functorch/csrc/Macros.h>
 #include <ATen/Tensor.h>
 
 namespace at {
 namespace functorch {
 
-struct TORCH_API TensorWrapper : public c10::TensorImpl {
+struct FUNCTORCH_API TensorWrapper : public c10::TensorImpl {
   explicit TensorWrapper(
       c10::DispatchKeySet key_set,
       Tensor value,
@@ -58,10 +59,10 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   std::shared_ptr<bool> is_alive_;
 };
 
-TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level);
-TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
-TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
-TORCH_API void dumpTensorCout(const Tensor& tensor);
+FUNCTORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level);
+FUNCTORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
+FUNCTORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
+FUNCTORCH_API void dumpTensorCout(const Tensor& tensor);
 
 }
 } // namespace at
