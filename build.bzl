@@ -2,20 +2,20 @@ def define_targets(rules):
     rules.genrule(
         name = "generate-code",
         srcs = [
+            ":DispatchKeyNativeFunctions.cpp",
+            ":DispatchKeyNativeFunctions.h",
+            ":LazyIr.h",
+            ":RegisterDispatchKey.cpp",
+            ":native_functions.yaml",
             ":shape_inference.h",
             ":ts_native_functions.cpp",
-            "//aten:DispatchKeyNativeFunctions.cpp",
-            "//aten:DispatchKeyNativeFunctions.h",
-            "//aten:LazyIr.h",
-            "//aten:RegisterDispatchKey.cpp",
-            "//aten:native_functions.yaml",
-            "//aten:ts_native_functions.yaml",
+            ":ts_native_functions.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = _GENERATED_CPP + GENERATED_AUTOGRAD_H + GENERATED_LAZY_H + GENERATED_TESTING_PY,
         cmd = "$(location //tools/setup_helpers:generate_code) " +
               "--install_dir $OUT " +
-              "--native-functions-path $(location //aten:native_functions.yaml) " +
+              "--native-functions-path $(location :native_functions.yaml) " +
               "--gen_lazy_ts_backend",
     )
 

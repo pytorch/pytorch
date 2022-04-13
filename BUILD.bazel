@@ -1905,3 +1905,19 @@ test_suite(
         "//c10/test:tests",
     ],
 )
+
+[
+    alias(
+        name = paths.basename(path),
+        actual = path,
+    ) for path in [
+        "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/ts_native_functions.yaml",
+        "torch/csrc/lazy/core/shape_inference.h",
+        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/templates/LazyIr.h",
+    ]
+]
