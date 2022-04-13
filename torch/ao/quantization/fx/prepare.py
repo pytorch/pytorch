@@ -974,6 +974,9 @@ def maybe_make_input_output_share_observers(
                 continue
             iteration_guard = 0
             while not is_activation_post_process_node(input_arg, modules):
+                # failed to trace back since no input arg for the current node
+                if len(input_arg.args) < 1:
+                    return False
                 input_arg = input_arg.args[0]
                 iteration_guard += 1
                 if iteration_guard > 10000:
