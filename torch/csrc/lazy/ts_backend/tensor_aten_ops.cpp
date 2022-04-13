@@ -6,6 +6,7 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
+#include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <torch/csrc/lazy/core/ir_util.h>
@@ -14,7 +15,6 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
-#include <torch/csrc/lazy/core/view_ops/expand.h>
 #include <torch/csrc/lazy/core/view_ops/permute.h>
 #include <torch/csrc/lazy/core/view_ops/squeeze.h>
 #include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
@@ -112,6 +112,16 @@ void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
     input->SetSubView(CreateAsStridedViewInfo(
         input_shape, std::move(size), std::move(stride), storage_offset));
   }
+}
+
+torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size) {
+  auto input_shape = input->shape();
+  auto output = torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<torch::lazy::Expand>(
+      input->GetIrValue(),
+      GetExpandDimensions(input_shape.Get(), std::move(size)),
+      /*is_scalar_expand=*/false), input->GetDevice());
+  output->SetStorage(input->Storage());
+  return output;
 }
 
 void fill_(torch::lazy::LazyTensorPtr& input, const at::Scalar& value) {

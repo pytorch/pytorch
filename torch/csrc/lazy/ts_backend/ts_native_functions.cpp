@@ -262,7 +262,7 @@ at::Tensor LazyNativeFunctions::diagonal(const at::Tensor& self, int64_t offset,
   dim1 = at::maybe_wrap_dim(dim1, self);
   dim2 = at::maybe_wrap_dim(dim2, self);
   auto diagonal_info = DiagonalInfo {offset, dim1, dim2};
-  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, std::move(diagonal_info));
+  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, diagonal_info);
 
   return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
 }
@@ -295,11 +295,8 @@ at::Tensor LazyNativeFunctions::empty_strided(
 at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
                                        at::IntArrayRef size, bool implicit) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-
-  auto input = GetLtcTensor(self);
-  auto view_info = ViewInfo(ViewInfo::Type::kExpand, Shape(input->dtype(), size), input->shape());
-
-  return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
+  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::expand(
+      torch::lazy::TryGetLtcTensor(self), size.vec()));
 }
 
 at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,
