@@ -638,16 +638,9 @@ def main() -> None:
     parser.add_argument('--out', metavar='OUT',
                         default='.',
                         help='path to output directory')
-    parser.add_argument('--print-files',
-                        action="store_true",
-                        help='if try, prints written files to stdout')
-
     args = parser.parse_args()
     fm = FileManager(install_dir=args.out, template_dir='.', dry_run=False)
     gen_pyi(args.native_functions_path, args.deprecated_functions_path, fm)
-    if args.print_files:
-        for file in fm.filenames:
-            print(file)
 
 
 if __name__ == '__main__':

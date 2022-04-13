@@ -34,13 +34,9 @@ jobs:
 
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
-            --deprecated-functions-path "tools/autograd/deprecated.yaml" \
-            --print-files \
-            >> lint_paths.txt
-
-          git grep -Il . >> lint_paths.txt
+            --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run lintrunner
-        run: lintrunner --paths-from lint_paths.txt --force-color
+        run: lintrunner --paths-cmd='git grep -Il .' --force-color
       - name: Store annotations
         if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository}}
         run: |
