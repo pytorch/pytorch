@@ -4470,6 +4470,18 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
 
+    @unittest.skipIf(RUN_CUDA, "Testing on CPU only")
+    def test_register_fuser_cpu(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCM test only")
+    def test_register_fuser_rocm(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
 
 class TestCudaFuserOpInfo(JitCommonTestCase):
     def setUp(self):
