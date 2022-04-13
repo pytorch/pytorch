@@ -597,6 +597,7 @@ VMAP_EXEMPTIONS = {
 }
 
 JVP_EXEMPTIONS = {
+    'nn.functional.dropout',  # not actually problem, randomness testing artifact
     'nn.functional.dropout2d',  # not actually problem, randomness testing artifact
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
     # 'normal',
@@ -808,10 +809,10 @@ result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
 
 print("=" * 30 + " Top 60 Summary " + "=" * 30)
 opset = OperatorSet.from_top_ops_threshold(35, 25)
-result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
-pprint.pprint(result)
-result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
-pprint.pprint(result)
+# result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+# result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
 # kresult = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
 # kpprint.pprint(result)
 # result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
@@ -823,12 +824,14 @@ print(opset.summary())
 
 print("=" * 30 + " Top 125 Summary " + "=" * 30)
 opset = OperatorSet.from_top125()
-result = opset.query(Operator.supports_vmap, (Support.NO, Support.UNKNOWN))
-pprint.pprint(result)
-# kresult = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
-# kpprint.pprint(result)
-# result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+# result = opset.query(Operator.supports_vmap, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
+# result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
+result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
 # result = opset.query(Operator.supports_fast_vmapjvp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
 # pprint.pprint(result)

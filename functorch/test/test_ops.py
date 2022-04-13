@@ -381,8 +381,6 @@ class TestOperators(TestCase):
         xfail('std_mean'),
         # https://gist.github.com/zou3519/f62a167fb46cda01d7f238f61dd9ccf9
         xfail('linalg.eigvalsh'),
-        # https://gist.github.com/zou3519/b86616d01ca375a4bd17403277f49225
-        xfail('nn.functional.dropout', device_type='cuda'),
 
         # =============================================
         # NB: The above failures also fail using PyTorch core's

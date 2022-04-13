@@ -2,14 +2,14 @@ from tools.codegen.api.types import (
     DispatcherSignature,
 )
 from tools.codegen.model import (
-    BaseTy, Variant, OptionalType, BaseType, ListType, NativeFunction, Type,
+    BaseTy, OptionalType, BaseType, ListType, NativeFunction, Type,
     Argument, Return, SchemaKind, Tag
 )
 from tools.codegen.api.translate import translate
 from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import mapMaybe
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple, Set, Any, Union, Sequence, TypeVar
+from typing import List, Optional, Tuple
 import textwrap
 
 
