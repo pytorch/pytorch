@@ -120,11 +120,10 @@ Tensor& linalg_orthogonalize_out(const Tensor& self, const double epsilon, Tenso
     TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
     TORCH_CHECK(self.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
         
-    Tensor vs = at::zeros_like(self);
     Tensor R = self.clone();
     R.diagonal().add_(epsilon);
 
-    householder_orthogonalization_stub(self.device().type(), R, out, vs);
+    householder_orthogonalization_stub(self.device().type(), R, out);
 
     return out;
 }
@@ -139,10 +138,9 @@ Tensor& linalg_orthogonalize_(Tensor& self, const double epsilon){
     TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
     TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
 
-    Tensor vs = at::zeros_like(self);
     self.diagonal().add_(epsilon);
 
-    householder_orthogonalization_stub(self.device().type(), self, self, vs);
+    householder_orthogonalization_stub(self.device().type(), self, self);
     return self;
 }
 

@@ -8,6 +8,8 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #include <c10/core/Scalar.h>
 
 namespace at { namespace native {
@@ -108,17 +110,19 @@ __global__ void q_loop(scalar_t *Q, scalar_t *vs, const uint n, const uint m){
 }
 
 template <int BLOCK_THREADS, typename scalar_t> 
-void householder_main(const Tensor& R, Tensor& Q, Tensor& vs, const uint m, const uint n){
+void householder_main(Tensor& R, Tensor& Q, const uint m, const uint n){
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    int barriers[m];
+    auto options = at::TensorOptions().dtype(at::kInt).device(R.device());
+    Tensor barriers = at::zeros({m}, options);
+    Tensor vs = at::zeros_like(R);
     
     reflections<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(
         R.data_ptr<scalar_t>(), 
         vs.data_ptr<scalar_t>(), 
         m, 
         n, 
-        barriers
+        barriers.data_ptr<int>()
     );
 
     Q.fill_(0);
@@ -131,18 +135,18 @@ void householder_main(const Tensor& R, Tensor& Q, Tensor& vs, const uint m, cons
     );
 }
 
-void householder_orthogonalization_cuda_impl(Tensor& R, Tensor& out, Tensor& vs){
+void householder_orthogonalization_cuda_impl(Tensor& R, Tensor& out){
     const uint m = R.size(0);
     const uint n = R.size(1);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
     R.scalar_type(), "qr_orthogonalization", ([&] {
       if (n < 512)
-          householder_main<256, scalar_t>(R, out, vs, m, n);
+          householder_main<256, scalar_t>(R, out, m, n);
       else if (n < 1024)
-          householder_main<512, scalar_t>(R, out, vs, m, n);
+          householder_main<512, scalar_t>(R, out, m, n);
       else
-          householder_main<1024, scalar_t>(R, out, vs, m, n);
+          householder_main<1024, scalar_t>(R, out, m, n);
     })
     );
     

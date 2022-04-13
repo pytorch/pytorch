@@ -165,7 +165,7 @@ void unpack_pivots_cpu_kernel(
   iter.for_each(loop);
 }
 
-void householder_orthogonalization_cpu(Tensor& R, Tensor& out, Tensor& vs){  
+void householder_orthogonalization_cpu(Tensor& R, Tensor& out){  
   //TODO
 }
 

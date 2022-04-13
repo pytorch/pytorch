@@ -14,7 +14,7 @@ struct Tensor;
 
 namespace at { namespace native {
 
-using householder_orthogonalization_fn = void(*)(Tensor&, Tensor&, Tensor&);
+using householder_orthogonalization_fn = void(*)(Tensor&, Tensor&);
 DECLARE_DISPATCH(householder_orthogonalization_fn, householder_orthogonalization_stub);
 
 using addr_fn = void (*)(TensorIterator &, const Scalar& beta, const Scalar& alpha);
