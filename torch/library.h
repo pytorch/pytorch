@@ -355,6 +355,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CPU;
       case c10::DeviceType::CUDA:
         return c10::DispatchKey::CUDA;
+      case c10::DeviceType::IPU:
+        return c10::DispatchKey::IPU;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
       case c10::DeviceType::Lazy:
@@ -686,7 +688,7 @@ class TORCH_API Library final {
   }
 
   template <typename Name, typename Func>
-  Library& impl_UNBOXED(Name name, Func* raw_f) & {
+  Library& impl_UNBOXED(Name /*name*/, Func* /*raw_f*/) & {
     static_assert(
         c10::guts::false_t<Func>(),
         ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
@@ -703,7 +705,7 @@ class TORCH_API Library final {
     return def(raw_schema.operator const char*());
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& raw_f) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Func>
@@ -713,15 +715,15 @@ class TORCH_API Library final {
   }
 
   template <typename Func>
-  Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & {
+  Library& impl(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Dispatch, typename Func>
-  Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & {
+  Library& impl(detail::SelectiveStr<false>, Dispatch&& /*key*/, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
+  Library& impl_UNBOXED(detail::SelectiveStr<false> /*name*/, Func* /*raw_f*/) & {
     static_assert(
         c10::guts::false_t<Func>(),
         ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
@@ -743,7 +745,7 @@ class TORCH_API Library final {
         std::forward<Func>(raw_f));
   }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
+  Library& impl_UNBOXED(detail::SelectiveStr<true> /*name*/, Func* /*raw_f*/) & {
     static_assert(
         c10::guts::false_t<Func>(),
         ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");

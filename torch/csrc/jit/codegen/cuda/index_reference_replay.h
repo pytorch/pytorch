@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
@@ -33,10 +33,6 @@ class IndexReferenceReplay : public OptInDispatch {
 
   // Make a new id for the reference replay based on the provided id
   IterDomain* idCopy(IterDomain* id);
-
-  // Use the compute at map to get the fusion IterDomain from the
-  // kir::IterDomain
-  IterDomain* toFusionID(kir::IterDomain* kir_id);
 
   // Return the concrete entry of the non-reference id
   IterDomain* toConcrete(IterDomain* id);
@@ -87,16 +83,17 @@ class IndexReferenceReplay : public OptInDispatch {
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_domain,
-    std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
-    std::unordered_set<kir::IterDomain*> zero_domains,
+    std::unordered_map<IterDomain*, Val*> index_map,
+    std::unordered_set<IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_path,
-    std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map = {});
+    std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
 // Short cut for global TVs. Index into the reference based on all loop indicies
 // in the loop structure.
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
-    TensorDomain* reference_domain);
+    TensorDomain* reference_domain,
+    kir::ForLoop* double_buffer_loop = nullptr);
 
 // When indexing there are sometimes an option to propagate an index down
 // multiple paths. This will return the IterDomains in the history of the
