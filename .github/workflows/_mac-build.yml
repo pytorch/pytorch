@@ -1,0 +1,102 @@
+name: mac-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      runner-type:
+        required: true
+        type: string
+        description: Name of the GitHub-managed runner type to use for the build.
+      build-generates-artifacts:
+        required: true
+        type: boolean
+        description: If set, upload generated build artifacts.
+      xcode-version:
+        required: false
+        type: string
+        default: ""
+        description: What xcode version to build with.
+
+    secrets:
+      MACOS_SCCACHE_S3_ACCESS_KEY_ID:
+        required: true
+        description: Access key for S3 bucket for macOS sccache.
+      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY:
+        required: true
+        description: Secret for S3 bucket for macOS sccache.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+
+# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+defaults:
+  run:
+    shell: bash -e -l {0}
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ inputs.runner-type }}
+    env:
+      JOB_BASE_NAME: ${{ inputs.build-environment }}
+      # For sccache access (only on non-forked PRs)
+      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+      COMPACT_JOB_NAME: ${{ inputs.build-environment }}
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Set xcode version
+        env:
+          XCODE_VERSION: ${{ inputs.xcode-version }}
+        run: |
+          if [ -n "${XCODE_VERSION}" ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: 3.8
+          activate-environment: build
+
+      - name: Install macOS homebrew dependencies
+        run: |
+          # Install dependencies
+          brew install libomp
+
+      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+          sudo chmod +x /usr/local/bin/sccache
+          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+
+      - name: Build
+        run: |
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+          .jenkins/pytorch/macos-build.sh
+
+      - name: Archive artifacts into zip
+        if: inputs.build-generates-artifacts
+        run: |
+          zip -1 -r artifacts.zip dist/
+
+      - name: Store PyTorch Build Artifacts on GHA
+        uses: actions/upload-artifact@v2
+        if: inputs.build-generates-artifacts
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip

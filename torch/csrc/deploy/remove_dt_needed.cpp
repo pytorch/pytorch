@@ -10,6 +10,7 @@
 #include <iostream>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <fmt/format.h>
 
 #define ERROR(msg_fmt, ...) \
@@ -47,7 +48,7 @@ int main(int argc, const char** argv) {
   auto program_headers = (Elf64_Phdr*)(data + header->e_phoff);
   auto n_program_headers = header->e_phnum;
   Elf64_Dyn* dynamic = nullptr;
-  for (size_t i = 0; i < n_program_headers; ++i) {
+  for (const auto i : c10::irange(n_program_headers)) {
     const Elf64_Phdr* phdr = &program_headers[i];
     if (phdr->p_type == PT_DYNAMIC) {
       dynamic = reinterpret_cast<Elf64_Dyn*>(data + phdr->p_offset);

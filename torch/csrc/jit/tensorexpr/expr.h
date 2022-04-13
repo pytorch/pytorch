@@ -191,11 +191,16 @@ std::vector<ExprPtr> make_channels_last_strides(
 
 class TORCH_API Buf : public ExprNode<Buf> {
  public:
-  static ExprHandle make(
+  static BufHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  static BufHandle make(
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
-      Dtype dtype);
-  static ExprHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+      Dtype dtype,
+      c10::optional<ExprHandle> initializer = c10::nullopt,
+      c10::optional<std::vector<ExprHandle>> strides = c10::nullopt,
+      c10::optional<ExprHandle> qscale = c10::nullopt,
+      c10::optional<ExprHandle> qzero = c10::nullopt);
 
   // TODO: unique_name
   VarPtr base_handle() const {
