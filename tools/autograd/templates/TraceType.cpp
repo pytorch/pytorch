@@ -1,6 +1,6 @@
-#include "torch/csrc/autograd/VariableTypeUtils.h"
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include "torch/csrc/jit/frontend/tracer.h"
 
-#include <ATen/TypeDefault.h>
 #include <torch/library.h>
 
 #include "torch/csrc/autograd/function.h"
@@ -11,6 +11,12 @@
 
 // See the `Tracer` section in `torch/csrc/jit/OVERVIEW.md`.
 // NOTE See [Sharded File] comment in VariableType
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Operators.h>
+#else
+$ops_headers
+#endif
 
 using namespace at;
 

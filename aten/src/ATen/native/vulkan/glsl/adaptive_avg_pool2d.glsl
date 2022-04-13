@@ -1,42 +1,42 @@
 #version 450 core
 #define PRECISION $precision
-layout(std430) buffer;
-layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform constBlock {
-  int IW;
-  int IH;
-  int OW;
-  int OH;
-}
-uConstBlock;
+#define FORMAT    $format
 
-layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(std430) buffer;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION restrict           Block {
+  ivec4 size;
+  vec2 kernel;
+  vec2 stride;
+} uBlock;
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  int ow = uConstBlock.OW;
-  int oh = uConstBlock.OH;
-  if (pos.x < ow && pos.y < oh) {
-    int iw = uConstBlock.IW;
-    int ih = uConstBlock.IH;
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-    int sx = int(floor(float(pos.x * iw) / ow));
-    int sy = int(floor(float(pos.y * ih) / oh));
-    int ex = int(ceil(float((pos.x + 1) * iw) / ow));
-    int ey = int(ceil(float((pos.y + 1) * ih) / oh));
+  if (all(lessThan(pos, uBlock.size.xyz))) {
+    const vec2 ipos = pos.xy * uBlock.stride;
 
-    vec4 r = vec4(1.0) / float(ex - sx) / float(ey - sy);
-    vec4 acc = vec4(0);
+    const ivec2 start = ivec2(ipos);
+    const ivec2 end = ivec2(ceil(ipos + uBlock.kernel));
+    const ivec2 range = end - start;
 
-    int xi, yi;
-    for (xi = sx; xi < ex; ++xi) {
-      for (yi = sy; yi < ey; ++yi) {
-        acc += texelFetch(uInput, ivec3(xi, yi, pos.z), 0);
+    vec4 sum = vec4(0);
+
+    for (int y = start.y; y < end.y; ++y) {
+      for (int x = start.x; x < end.x; ++x) {
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
       }
     }
 
-    imageStore(uOutput, pos, r * acc);
+    imageStore(
+        uOutput,
+        pos,
+        sum / (range.x * range.y));
   }
 }

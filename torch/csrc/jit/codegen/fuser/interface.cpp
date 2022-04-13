@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
+#include <c10/util/Flags.h>
 #include <stdexcept>
 
 namespace torch {
@@ -12,8 +13,11 @@ namespace jit {
 
 namespace detail {
 
-// Note: CPU fusion is currently disabled due to test flakiness
+#ifdef TORCH_ENABLE_LLVM
+bool cpu_fuser_enabled = true;
+#else
 bool cpu_fuser_enabled = false;
+#endif
 
 bool gpu_fuser_enabled = true;
 

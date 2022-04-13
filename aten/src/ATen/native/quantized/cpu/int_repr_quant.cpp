@@ -1,5 +1,9 @@
+#include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/DispatchStub.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -10,17 +14,30 @@ namespace native {
 // format of the output the same as input
 Tensor int_repr_quantized_cpu(const Tensor& self) {
   Tensor dst;
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
-    dst = at::empty(
-        self.sizes(),
-        self.options().dtype(UNDERLYING_TYPE),
-        self.suggest_memory_format());
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(dst)
-      .add_input(self)
-      .build();
-    cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self.scalar_type(), "int_repr", [&]() {
+    if (bit_width == 4 || bit_width == 2) {
+      int64_t out_size = at::ceil_div(self.numel() * bit_width, (int64_t)8);
+      dst = at::empty(
+          {out_size},
+          self.options().dtype(UNDERLYING_TYPE),
+          self.suggest_memory_format());
+      const underlying_t* qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
+      for (const auto i : c10::irange(dst.numel())) {
+        dst[i] = static_cast<underlying_t>(qdata[i]);
+      }
+    } else {
+      dst = at::empty(
+          self.sizes(),
+          self.options().dtype(UNDERLYING_TYPE),
+          self.suggest_memory_format());
+      auto iter = TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .add_output(dst)
+        .add_input(self)
+        .build();
+      cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
+      }
   });
   return dst;
 }

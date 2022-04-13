@@ -1,17 +1,27 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
+
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+
+#include <ATen/ScalarOps.h>
 
 namespace torch {
 namespace jit {
 
-static void EraseNumberTypesOnBlock(Block* block) {
+void SetNumTypeToTensorType(Value* v) {
+  if (v->type()->isSubtypeOf(*NumberType::get())) {
+    v->setType(TensorType::fromNumberType(*v->type()));
+  } else if (v->type()->isSubtypeOf(*BoolType::get())) {
+    v->setType(TensorType::fromBoolType());
+  }
+}
+
+void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto inp : it->inputs()) {
-      if (inp->type()->isSubtypeOf(NumberType::get())) {
-        inp->setType(TensorType::get());
-      }
+      SetNumTypeToTensorType(inp);
     }
     for (auto sub : it->blocks()) {
       EraseNumberTypesOnBlock(sub);
@@ -20,11 +30,11 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
         // ONNX does not support non-tensor constants
-        if (it->output()->type()->isSubtypeOf(NumberType::get()) ||
-            it->output()->type()->isSubtypeOf(BoolType::get())) {
+        if (it->output()->type()->isSubtypeOf(*NumberType::get()) ||
+            it->output()->type()->isSubtypeOf(*BoolType::get())) {
           at::Scalar s;
-          if (it->output()->type()->isSubtypeOf(BoolType::get())) {
-            s = static_cast<int64_t>(*constant_as<bool>(it->output()));
+          if (it->output()->type()->isSubtypeOf(*BoolType::get())) {
+            s = *constant_as<bool>(it->output());
           } else {
             s = *constant_as<at::Scalar>(it->output());
           }
@@ -32,6 +42,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
               scalar_to_tensor(s), c10::nullopt, it->scope());
+          r->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(r);
           it.destroyCurrent();
         }
@@ -48,11 +59,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
       } break;
       default: {
         for (auto o : it->outputs()) {
-          if (o->type()->isSubtypeOf(NumberType::get())) {
-            o->setType(TensorType::fromNumberType(o->type()));
-          } else if (o->type()->isSubtypeOf(BoolType::get())) {
-            o->setType(TensorType::fromBoolType());
-          }
+          SetNumTypeToTensorType(o);
         }
       } break;
     }
@@ -60,7 +67,11 @@ static void EraseNumberTypesOnBlock(Block* block) {
 }
 
 void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
+  for (auto inp : graph->inputs()) {
+    SetNumTypeToTensorType(inp);
+  }
   EraseNumberTypesOnBlock(graph->block());
+  GRAPH_DUMP("After EraseNumberTypes: ", graph);
 }
 } // namespace jit
 } // namespace torch

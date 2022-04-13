@@ -1,7 +1,7 @@
 r"""
 Weight Normalization from https://arxiv.org/abs/1602.07868
 """
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 from torch import _weight_norm, norm_except_dim
 from typing import Any, TypeVar
 from ..modules import Module
@@ -36,7 +36,10 @@ class WeightNorm(object):
         fn = WeightNorm(name, dim)
 
         weight = getattr(module, name)
-
+        if isinstance(weight, UninitializedParameter):
+            raise ValueError(
+                'The module passed to `WeightNorm` can\'t have uninitialized parameters. '
+                'Make sure to run the dummy forward before applying weight normalization')
         # remove w from parameter list
         del module._parameters[name]
 

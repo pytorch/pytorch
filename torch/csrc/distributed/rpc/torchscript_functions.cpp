@@ -1,4 +1,3 @@
-#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <ATen/ThreadLocalState.h>
 #include <fmt/format.h>
 #include <torch/csrc/autograd/record_function_ops.h>
@@ -8,23 +7,21 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
+c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
-  // This dummy tensor holds an at::RecordFunction when profiling is enabled.
-  // This is because at::RecordFunction is not yet registered as a TorchScript
-  // custom class (https://github.com/pytorch/pytorch/issues/35026)
-  at::Tensor handle = at::zeros(1);
+  c10::intrusive_ptr<torch::autograd::profiler::PythonRecordFunction> record;
   auto shouldProfile = torch::autograd::profiler::profilerEnabled() &&
       !torch::distributed::rpc::RemoteProfilerManager::getInstance()
            .isCurrentKeySet();
@@ -35,7 +32,8 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
             .qualifiedName(), /* name of torchscript function being run */
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
         dstWorkerName);
-    handle = torch::autograd::profiler::record_function_enter(rpcAsyncJitKey);
+    record =
+        torch::autograd::profiler::record_function_enter_new(rpcAsyncJitKey);
     auto& remoteProfilerManager =
         torch::distributed::rpc::RemoteProfilerManager::getInstance();
     remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
@@ -43,14 +41,14 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   auto scriptCall = std::make_unique<ScriptCall>(
       qualifiedName, std::move(stack), isAsyncExecution);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
-  auto futMessage = autograd::sendMessageWithAutograd(
+  auto jitFuture = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 
-  // Get function return type to construct c10::ivalue::Future.
+  // Get function return type to construct JitFuture.
   auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
@@ -62,20 +60,21 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
 
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
-  auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  std::weak_ptr<FutureMessage> wp = futMessage;
-  futMessage->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
-    auto futMessage = wp.lock();
-    if (futMessage->hasError()) {
-      c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
-      futPtr->setError(std::make_exception_ptr(jitFutErr));
+  auto futPtr = jitFuture->createInstance(returnType);
+  jitFuture->addCallback(at::wrapPropagateTLSState([futPtr](JitFuture& future) {
+    if (future.hasError()) {
+      futPtr->setError(future.exception_ptr());
     } else {
-      futPtr->markCompleted(deserializeRespToIValue(futMessage->constValue()));
+      futPtr->markCompleted(
+          deserializeRespToIValue(
+              *future.constValue().toCustomClass<Message>()),
+          future.storages());
     }
   }));
   if (shouldProfile) {
     auto profiledFutPtr =
-        torch::autograd::profiler::_call_end_callbacks_on_fut(handle, futPtr);
+        torch::autograd::profiler::_call_end_callbacks_on_fut_new(
+            record, futPtr);
     return profiledFutPtr;
   }
   return futPtr;
@@ -112,21 +111,18 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         userRRefPtr->forkId(),
         isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
-    userRRefPtr->registerOwnerCreationFuture(fm);
-
+    userRRefPtr->registerOwnerCreationFuture(jitFuture);
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(
-        at::wrapPropagateTLSState<void>([wp, forkId{userRRefPtr->forkId()}]() {
-          auto fm = wp.lock();
-          callback::confirmPendingUser(*fm, forkId);
+    jitFuture->addCallback(at::wrapPropagateTLSState(
+        [forkId{userRRefPtr->forkId()}](JitFuture& future) {
+          callback::confirmPendingUser(future, forkId);
         }));
 
     return userRRefPtr;
@@ -142,19 +138,17 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         ownerRRefPtr->rrefId(),
         isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
-    ownerRRefPtr->registerOwnerCreationFuture(fm);
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(at::wrapPropagateTLSState<void>(
-        [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
-          auto fm = wp.lock();
-          callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
+    ownerRRefPtr->registerOwnerCreationFuture(jitFuture);
+    jitFuture->addCallback(at::wrapPropagateTLSState(
+        [ownerRRefId = ownerRRefPtr->rrefId()](JitFuture& future) {
+          callback::finishCreatingOwnerRRef(future, ownerRRefId);
         }));
     return ownerRRefPtr;
   }

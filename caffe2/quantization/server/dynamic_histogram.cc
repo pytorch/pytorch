@@ -11,6 +11,7 @@ using namespace std;
 
 void Histogram::Add(float f, uint64_t cnt) {
   int nbins = histogram_.size();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float bin_width = (max_ - min_) / nbins;
   int bin = bin_width == 0
       ? 0
@@ -22,6 +23,7 @@ void Histogram::Add(float f, uint64_t cnt) {
 
 void Histogram::Add(const float* f, int len) {
   int nbins = histogram_.size();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float bin_width = (max_ - min_) / nbins;
 
   if (bin_width > 0.0) {
@@ -44,10 +46,12 @@ void RemapHistograms(Histogram& src_hist, Histogram& dst_hist) {
   float src_bin_width = (src_hist.Max() - src_hist.Min()) / src_bins.size();
   float dst_bin_width =
       (dst_hist.Max() - dst_hist.Min()) / dst_hist.GetHistogram()->size();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < src_bins.size(); ++i) {
     if (src_bins[i] == 0) {
       continue;
     }
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float src_bin_begin = src_hist.Min() + src_bin_width * i;
     float src_bin_end = src_bin_begin + src_bin_width;
 
@@ -55,13 +59,17 @@ void RemapHistograms(Histogram& src_hist, Histogram& dst_hist) {
     // dst_bin2 corresponds to the end of the src_bin
     int dst_bin = dst_bin_width == 0
         ? 0
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         : (src_bin_begin - dst_hist.Min()) / dst_bin_width;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float dst_bin_begin = dst_hist.Min() + dst_bin_width * dst_bin;
     float dst_bin_end = dst_bin_begin + dst_bin_width;
     int dst_bin2 =
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         dst_bin_width == 0 ? 0 : (src_bin_end - dst_hist.Min()) / dst_bin_width;
     // 1 src_bin is mapped to at most 2 dst bin
     assert(dst_bin2 <= dst_bin + 2);
+    (void)dst_bin2;
 
     // dst_bin_cnt is the count from src_bin that should go to dst_bin
     // The remainder should go to dst_bin2
@@ -121,6 +129,7 @@ void DynamicHistogram::Add(float f) {
     }
     new_min = std::max(numeric_limits<float>::lowest(), new_min);
     new_max = std::min(numeric_limits<float>::max(), new_max);
+    // NOLINTNEXTLINE(modernize-make-unique)
     histogram_.reset(
         new Histogram(curr_hist.GetHistogram()->size(), new_min, new_max));
     RemapHistograms(curr_hist, *histogram_);
@@ -166,6 +175,7 @@ void DynamicHistogram::Add(const float* f, int len) {
     }
     new_min = std::max(numeric_limits<float>::lowest(), new_min);
     new_max = std::min(numeric_limits<float>::max(), new_max);
+    // NOLINTNEXTLINE(modernize-make-unique)
     histogram_.reset(
         new Histogram(curr_hist.GetHistogram()->size(), new_min, new_max));
     RemapHistograms(curr_hist, *histogram_);
@@ -179,6 +189,7 @@ const Histogram* DynamicHistogram::Finalize() {
     return final_histogram_.get();
   }
 
+  // NOLINTNEXTLINE(modernize-make-unique)
   final_histogram_.reset(new Histogram(nbins_, min_, max_));
   if (histogram_.get()) {
     RemapHistograms(*histogram_, *final_histogram_);

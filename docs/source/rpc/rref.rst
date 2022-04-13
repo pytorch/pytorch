@@ -13,7 +13,7 @@ Background
 ^^^^^^^^^^
 
 RRef stands for Remote REFerence. It is a reference of an object which is
-located on the local or a remote worker, and transparently handles reference
+located on the local or remote worker, and transparently handles reference
 counting under the hood. Conceptually, it can be considered as a distributed
 shared pointer. Applications can create an RRef by calling
 :meth:`~torch.distributed.rpc.remote`. Each RRef is owned by the callee worker
@@ -42,9 +42,9 @@ Assumptions
 RRef protocol is designed with the following assumptions.
 
 - **Transient Network Failures**: The RRef design handles transient
-  network failures by retrying messages. Node crashes or permanent network
-  partition is beyond the scope. When those incidents occur, the application
-  may take down all workers, revert to the previous checkpoint, and resume
+  network failures by retrying messages. It cannot handle node crashes or
+  permanent network partitions. When those incidents occur, the application
+  should take down all workers, revert to the previous checkpoint, and resume
   training.
 - **Non-idempotent UDFs**: We assume the user functions (UDF) provided to
   :meth:`~torch.distributed.rpc.rpc_sync`,
@@ -87,12 +87,12 @@ The only requirement is that any
 ``UserRRef`` must notify the owner upon destruction. Hence, we need the first
 guarantee:
 
-**G1. The owner will be notified when any ``UserRRef`` is deleted.**
+**G1. The owner will be notified when any UserRRef is deleted.**
 
 As messages might come delayed or out-of-order, we need one more guarantee to
 make sure the delete message is not processed too soon. If A sends a message to
-B that involves an RRef, we call the RRef on A the parent RRef and the RRef on B
-the child RRef.
+B that involves an RRef, we call the RRef on A (the parent RRef) and the RRef on B
+(the child RRef).
 
 **G2. Parent RRef will NOT be deleted until the child RRef is confirmed by the
 owner.**
@@ -125,19 +125,19 @@ possible that the child ``UserRRef`` may be deleted before the owner knows its
 parent ``UserRRef``.
 
 Consider the following example, where the ``OwnerRRef`` forks to A, then A forks
-to Y, and Y forks to Z.:
+to Y, and Y forks to Z:
 
 .. code::
 
   OwnerRRef -> A -> Y -> Z
 
 If all of Z's messages, including the delete message, are processed by the
-owner before all messages from Y, the owner will learn Z's deletion before
-knowing Y. Nevertheless, this does not cause any problem. Because, at least
-one of Y's ancestors will be alive (in this case, A) and it will
+owner before Y's messages. the owner will learn of Z's deletion befores
+knowing Y exists. Nevertheless, this does not cause any problem. Because, at least
+one of Y's ancestors will be alive (A) and it will
 prevent the owner from deleting the ``OwnerRRef``. More specifically, if the
 owner does not know Y, A cannot be deleted due to **G2**, and the owner knows A
-as the owner is A's parent.
+since it is A's parent.
 
 Things get a little trickier if the RRef is created on a user:
 

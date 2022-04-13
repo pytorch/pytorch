@@ -1,43 +1,41 @@
 #include <gtest/gtest.h>
 
-#include <torch/csrc/jit/passes/canonicalize.h>
-#include "ATen/core/interned_strings.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/lower_grad_of.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/requires_grad_analysis.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/serialization/import.h"
-
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/autograd/variable.h"
-
-#include <torch/csrc/jit/testing/file_check.h>
-#include "ATen/core/ivalue.h"
-#include "torch/csrc/jit/api/module.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
-#include "torch/csrc/jit/runtime/graph_executor.h"
-
-#include "onnx/onnx_pb.h"
-
 #include <ATen/ATen.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
+
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/testing/file_check.h>
+
+#include <onnx/onnx_pb.h>
 
 #include <c10/util/Exception.h>
 
@@ -57,6 +55,9 @@ namespace torch {
 namespace jit {
 
 TEST(FuserTest, TestSimple_CUDA) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
   const auto graph_string = R"IR(
       graph(%0 : Tensor,
             %1 : Tensor):
@@ -77,6 +78,9 @@ TEST(FuserTest, TestSimple_CUDA) {
 }
 
 TEST(FuserTest, TestOne_CUDA) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
   auto testOne = [&](int ti, int tj) {
     const auto graph_string = R"IR(
       graph(%0 : Tensor,
@@ -105,7 +109,7 @@ TEST(FuserTest, TestOne_CUDA) {
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an
     // appropriately sized view.
-    for (size_t i = 0; i < graph.inputs().size(); i++) {
+    for (const auto i : c10::irange(graph.inputs().size())) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti], dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
@@ -134,6 +138,9 @@ TEST(FuserTest, TestOne_CUDA) {
 }
 
 TEST(FuserTest, FusedConcat_CUDA) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
   const auto graph_string0 = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -159,8 +166,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
 
   std::vector<std::string> graph_strings{
       graph_string0, graph_string1, graph_string2};
-  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size();
-       ++i) {
+  for (const auto i : c10::irange(graph_strings.size())) {
     Graph g;
     torch::jit::parseIR(graph_strings[i], &g);
 
@@ -177,6 +183,9 @@ TEST(FuserTest, FusedConcat_CUDA) {
 }
 
 TEST(FuserTest, FusionAliasing) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
   const auto graph_string = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -202,6 +211,10 @@ TEST(FuserTest, FusionAliasing) {
 }
 
 TEST(FuserTest, KernelCaching) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
   // Constructs two functionally equivalent graphs
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, 3, 4),

@@ -2,6 +2,28 @@
 
 set -ex
 
+install_ubuntu() {
+  echo "Preparing to build sccache from source"
+  apt-get update
+  apt-get install -y cargo pkg-config libssl-dev
+  echo "Checking out sccache repo"
+  git clone https://github.com/pytorch/sccache
+  cd sccache
+  echo "Building sccache"
+  cargo build --release
+  cp target/release/sccache /opt/cache/bin
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache
+  apt-get remove -y cargo rustc
+  apt-get autoclean && apt-get clean
+}
+
+install_binary() {
+  echo "Downloading sccache binary from S3 repo"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
+}
+
 mkdir -p /opt/cache/bin
 mkdir -p /opt/cache/lib
 sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
@@ -11,12 +33,20 @@ export PATH="/opt/cache/bin:$PATH"
 if [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
-  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
+  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+  case "$ID" in
+    ubuntu)
+      install_ubuntu
+      ;;
+    *)
+      install_binary
+      ;;
+  esac
 fi
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
-  printf "#!/bin/sh\nexec sccache $(which $1) \$*" > "/opt/cache/bin/$1"
+  printf "#!/bin/sh\nif [ \$(ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
   chmod a+x "/opt/cache/bin/$1"
 }
 
@@ -38,8 +68,8 @@ if [ -n "$CUDA_VERSION" ]; then
   # where CUDA is installed.  Instead, we install an nvcc symlink outside
   # of the PATH, and set CUDA_NVCC_EXECUTABLE so that we make use of it.
 
-  printf "#!/bin/sh\nexec sccache $(which nvcc) \"\$@\"" > /opt/cache/lib/nvcc
-  chmod a+x /opt/cache/lib/nvcc
+  write_sccache_stub nvcc
+  mv /opt/cache/bin/nvcc /opt/cache/lib/
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
@@ -57,8 +87,8 @@ if [ -n "$ROCM_VERSION" ]; then
     TOPDIR=$(dirname $OLDCOMP)
     WRAPPED="$TOPDIR/original/$COMPNAME"
     mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \$*" > "$OLDCOMP"
-    chmod a+x "$1"
+    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" > "$OLDCOMP"
+    chmod a+x "$OLDCOMP"
   }
 
   if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then

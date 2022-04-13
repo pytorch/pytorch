@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <cstdint>
@@ -31,6 +31,9 @@ TORCH_API bool canFuseOnGPU();
 // Sets whether fusion on the CPU is allowed (disabled by default due to
 // flakiness)
 TORCH_API void overrideCanFuseOnCPU(bool value);
+
+// Sets whether fusion on CPU must use LLVM Codegen and not SimplieIREval
+TORCH_API void overrideMustUseLLVMOnCPU(bool value);
 
 // Sets whether fusion on the GPU is allowed (enabled by default)
 TORCH_API void overrideCanFuseOnGPU(bool value);

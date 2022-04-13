@@ -3,8 +3,10 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 
@@ -44,6 +46,8 @@ class SubgraphSlicer {
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then recursively cleanup & unmerge the small subgraphs
     buildupSubgraphs();
+    GRAPH_DUMP("before unfuseAliasedOutputs", graph_);
+    unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
     // Run CSE globally onceto eliminate duplicates that may have occurred
     // while inlining subgraphs.
@@ -100,6 +104,7 @@ class SubgraphSlicer {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           bool changed;
           std::tie(it, changed) = scanNode(*it);
           any_changed |= changed;
@@ -118,6 +123,37 @@ class SubgraphSlicer {
   }
 
  private:
+  void unfuseAliasedOutputs(Block* b) {
+    bool any_changed = true;
+    while (any_changed) {
+      any_changed = false;
+      // we walk in the reverse order, so we can skip
+      // nodes that might get unfused after the current
+      // prim::DifferentiableGraph
+      for (auto n : b->nodes().reverse()) {
+        if (n->kind() == prim::DifferentiableGraph) {
+          // aliased outputs in DifferentiableGraphs must be unfused
+          // since autodiff doesn't know how to handle them correctly
+          // N.B. Note, |= since we don't want `unfuseAliasedOutputs`
+          // to short-circuit
+          any_changed |= SubgraphUtils::unmergeAliasedOutputs(n);
+          any_changed |= SubgraphUtils::unmergeOutputsAlisingInputs(n);
+          GRAPH_DEBUG(
+              "any_changed on ",
+              any_changed,
+              " ",
+              n->g(attr::Subgraph)->toString(false));
+        }
+      }
+    }
+
+    for (Node* n : b->nodes()) {
+      for (Block* ib : n->blocks()) {
+        unfuseAliasedOutputs(ib);
+      }
+    }
+  }
+
   std::vector<WorkBlock> buildWorkBlocks() {
     // [workblocks]
     // the IR has many nodes which can never be reordered around, such as a
@@ -214,11 +250,13 @@ class SubgraphSlicer {
     if (node->kind() == prim::Constant) {
       return false;
     }
+
     // view ops as outputs of differentiable subgraphs can cause incorrect
     // differentiation for now, do not include them in the subgraph
     if (isViewOp(node)) {
       return false;
     }
+
     return isDifferentiable(node);
   }
 
@@ -270,7 +308,10 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   AliasDb db(graph);
+  GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
+  GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
+  GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
 } // namespace jit

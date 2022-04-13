@@ -1,6 +1,15 @@
+import abc
 import torch
-from torch._six import container_abcs
 from itertools import repeat
+import collections
+from torch.nn.modules.module import _addindent
+
+class WeightedQuantizedModule(torch.nn.Module, metaclass=abc.ABCMeta):
+    """Wrapper for quantized modules than can be lowered from reference modules."""
+    @classmethod
+    @abc.abstractmethod
+    def from_reference(cls, ref_module, output_scale, output_zero_point):
+        raise NotImplementedError
 
 def _quantize_weight(float_wt, observer):
     wt_scale, wt_zp = observer.calculate_qparams()
@@ -16,7 +25,7 @@ def _quantize_weight(float_wt, observer):
     elif observer.qscheme in [torch.per_channel_affine_float_qparams]:
         qweight = torch.quantize_per_channel(
             float_wt,
-            wt_scale.to(torch.float), wt_zp.to(torch.float), observer.ch_axis, torch.quint8)
+            wt_scale.to(torch.float), wt_zp.to(torch.float), observer.ch_axis, observer.dtype)
     else:
         raise ValueError("Unexpected qscheme " + observer.qscheme)
     return qweight
@@ -25,7 +34,7 @@ def _ntuple_from_first(n):
     """Converts the argument to a tuple of size n
     with the first element repeated."""
     def parse(x):
-        while isinstance(x, container_abcs.Iterable):
+        while isinstance(x, collections.abc.Sequence):
             if len(x) == n:
                 break
             x = x[0]

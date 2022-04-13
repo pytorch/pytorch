@@ -1,31 +1,48 @@
 .. role:: hidden
     :class: hidden-section
 
-.. _torch-fft-module:
-
 torch.fft
 =========
 
 Discrete Fourier transforms and related functions.
 
-To use these functions the torch.fft module must be imported since its name
-conflicts with the :func:`torch.fft` function.
-
 .. automodule:: torch.fft
-    :noindex:
-
 .. currentmodule:: torch.fft
 
-Functions
----------
+Fast Fourier Transforms
+-----------------------
 
-.. autofunction:: fft
-.. autofunction:: ifft
-.. autofunction:: fftn
-.. autofunction:: ifftn
-.. autofunction:: rfft
-.. autofunction:: irfft
-.. autofunction:: rfftn
-.. autofunction:: irfftn
-.. autofunction:: hfft
-.. autofunction:: ihfft
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fft
+    ifft
+    fft2
+    ifft2
+    fftn
+    ifftn
+    rfft
+    irfft
+    rfft2
+    irfft2
+    rfftn
+    irfftn
+    hfft
+    ihfft
+    hfft2
+    ihfft2
+    hfftn
+    ihfftn
+
+Helper Functions
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fftfreq
+    rfftfreq
+    fftshift
+    ifftshift

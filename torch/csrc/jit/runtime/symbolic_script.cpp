@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/symbolic_script.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -87,11 +88,9 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, unbiased: bool):
-            b = AD_bool_to_int(unbiased)
-
+        def AD_var_backward_0(grad, self, correction: int):
             # FIXME: torchscript: div(float, float)
-            return  grad * (self - self.mean()) * 2.0 / (self.numel() - b)
+            return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
         def AD_safe_size(sizes: List[int],
                          dims: List[int]):
@@ -108,23 +107,35 @@ const std::vector<std::string> functions = {
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              unbiased: bool,
+                              correction: int,
                               keepdim: bool):
             if self.dim() == 0:
-                return AD_var_backward_0(grad, self, unbiased)
+                return AD_var_backward_0(grad, self, correction)
             self_size = self.size()
-            b = AD_bool_to_int(unbiased)
             if not keepdim and self.dim() > 1:
                 grad = AD_unsqueeze_multiple(grad, dim, len(self_size))
 
             # FIXME: torchscript: div(float, float)
-            return grad * (self - self.mean(dim, True)) * 2.0 / (AD_safe_size(self_size, dim) - b)
+            return grad * (self - self.mean(dim, True)) * 2.0 / (AD_safe_size(self_size, dim) - correction)
+
+        def AD_var_backward_2(grad,
+                              self,
+                              dim: Optional[List[int]],
+                              correction: Optional[int],
+                              keepdim: bool):
+            if correction is None:
+                correction = 1
+            if self.dim() == 0 or dim is None:
+              return AD_var_backward_0(grad, self, correction)
+
+            return AD_var_backward_1(grad, self, dim, correction, keepdim)
 
         def std_0(self,
                   unbiased: bool=True):
             std_out = torch.std(self, unbiased)
             def backward(grad_output):
-                grad_self = AD_var_backward_0(grad_output / (std_out * 2), self, unbiased)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_0(grad_output / (std_out * 2), self, correction)
                 return grad_self, None
 
             return std_out, backward
@@ -135,7 +146,20 @@ const std::vector<std::string> functions = {
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                return grad_self, None, None, None
+
+            return std_out, backward
+
+        def std_2(self,
+                  dim: Optional[List[int]],
+                  *,
+                  correction: Optional[int],
+                  keepdim: bool):
+            std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
+            def backward(grad_output):
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -143,7 +167,8 @@ const std::vector<std::string> functions = {
         def var_0(self,
                   unbiased: bool=True):
             def backward(grad_output):
-                grad_self = AD_var_backward_0(grad_output, self, unbiased)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_0(grad_output, self, correction)
                 return grad_self, None
 
             return torch.var(self, unbiased), backward
@@ -153,10 +178,22 @@ const std::vector<std::string> functions = {
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
-                grad_self = AD_var_backward_1(grad_output, self, dim, unbiased, keepdim)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
+
+        def var_2(self,
+                  dim: Optional[List[int]],
+                  *,
+                  correction: Optional[int],
+                  keepdim: bool):
+            def backward(grad_output):
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
+                return grad_self, None, None, None
+
+            return torch.var(self, dim, correction=correction, keepdim=keepdim), backward
 
         def tanh(self):
             output = torch.tanh(self)
@@ -341,7 +378,8 @@ const std::vector<std::string> functions = {
                 grad_mat2 = AD_bmm_backward_mat2(grad_output, self)
                 return grad_self, grad_mat2
             return torch.bmm(self, mat2), backward
-
+    )",
+    R"(
         def AD_mat_transpose(mat):
             dim = mat.dim()
             if dim == 1:
@@ -402,6 +440,27 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return torch.matmul(self, other), backward
+
+        def linear(input : Tensor,
+                   weight : Tensor,
+                   bias : Optional[Tensor]):
+            result = torch.linear(input, weight, bias)
+
+            def backward(grad_output):
+                if bias is not None:
+                   grad_bias = grad_output._grad_sum_to_size(bias.size())
+                else:
+                   grad_bias = None
+
+                weight_size = weight.size()
+                grad_input = torch.matmul(grad_output, weight)
+                grad_weight = torch.matmul(grad_output.reshape(-1, weight_size[0]).t(), input.reshape(-1, weight_size[1]))
+                # Note: calling unchecked_unwrap_optional is only safe, when we
+                #       directly return grad_bias directly back to bias.
+                #       Because in the case where `bias is None`, unwrapped
+                #       grad_bias would just be pruned away.
+                return grad_input, grad_weight, grad_bias.unchecked_unwrap_optional
+            return result, backward
     )",
     R"(
         def addcmul(self,
@@ -419,6 +478,24 @@ const std::vector<std::string> functions = {
                 grad_tensor2 = (grad * tensor1)._grad_sum_to_size(tensor2_size)
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
+
+        def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None
+
+            return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
+
+        def _autocast_to_reduced_precision(self,
+                                          cuda_enabled : bool,
+                                          cpu_enabled : bool,
+                                          cuda_dtype : int,
+                                          cpu_dtype : int):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None, None, None
+
+            return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
 
         def _dim_arange(like,
                         dim: int):
@@ -494,11 +571,14 @@ const std::vector<std::string> functions = {
             result = torch.lerp(self, end, weight)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             end_size = torch._size_if_not_equal(end.size(), result.size())
+            weight_size = torch._size_if_not_equal(weight.size(), result.size())
 
             def backward(grad_output):
                 grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self_size)
                 grad_end = (grad_output * weight)._grad_sum_to_size(end_size)
-                return grad_self, grad_end, None
+                grad_weight = (grad_output * (end - self))._grad_sum_to_size(weight_size)
+                return grad_self, grad_end, grad_weight
+
             return result, backward
 
         def reshape(self,
@@ -550,7 +630,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
@@ -761,6 +841,31 @@ const std::vector<std::string> functions = {
                 return grad_output / other, None
             return self / other, backward
 
+        def div_2(self, other, *, rounding_mode: Optional[str]):
+            result = torch.div(self, other, rounding_mode=rounding_mode)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
+            def backward(grad_output):
+                if rounding_mode is None:
+                    grad_self = (grad_output / other)._grad_sum_to_size(self_size)
+                    grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
+                else:
+                    grad_self = torch.zeros_like(self)
+                    grad_other = torch.zeros_like(other)
+
+                return grad_self, grad_other, None
+
+            return result, backward
+
+        def div_3(self, other: number, *, rounding_mode: Optional[str]):
+            result = torch.div(self, other, rounding_mode=rounding_mode)
+            def backward(grad_output):
+                if rounding_mode is None:
+                    grad_self = (grad_output / other)
+                else:
+                    grad_self = torch.zeros_like(self, memory_format=1)
+                return grad_self, None, None
+            return result, backward
+
         def max(self, other):
             result = torch.max(self, other)
             self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
@@ -793,6 +898,41 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return grad_output * (result > 0).type_as(result)
 
+            return result, backward
+
+        def relu6(self):
+            result = torch.relu6(self)
+            def backward(grad_output):
+                return grad_output * ((result > 0) & (result < 6.0))
+
+            return result, backward
+
+        def leaky_relu(self, negative_slope: number):
+            result = torch.leaky_relu(self, negative_slope)
+            def backward(grad_output):
+                return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
+            return result, backward
+
+        def gelu(self : Tensor, *, approximate : str):
+            result = torch.gelu(self, approximate=approximate)
+            def backward(grad_output):
+                return torch.gelu_backward(grad_output, self, approximate=approximate), None
+            return result, backward
+
+        def hardswish(self):
+            result = torch.hardswish(self)
+            def backward(grad_output):
+                m = (self > 3.).type_as(result)
+                m = torch.where((self >= -3.) & (self <= 3.),  self / 3. + .5, m)
+                return grad_output * m
+            return result, backward
+
+        def hardsigmoid(self):
+            result = torch.hardsigmoid(self)
+            def backward(grad_output):
+                m = (self > -3.) & (self < 3.)
+                lhs = grad_output * (1.0 / 6.0)
+                return torch.where(m, lhs, m.type_as(self))
             return result, backward
 
         def erfc(self):
@@ -989,7 +1129,7 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
-        def batch_norm_disabled(input : Tensor,
+        def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        running_mean : Optional[Tensor],
@@ -1013,100 +1153,31 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
-        def layer_norm_disabled(input : Tensor,
+        def layer_norm(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        eps : float,
                        cudnn_enable : bool):
 
-            input_ndim = input.dim()
-            normalized_ndim = len(normalized_shape)
-            n = 1
-            for i in range(input_ndim - normalized_ndim):
-                n *= input.size(i)
-
-            input_reshape = input.contiguous().view(1, n, -1)
-
-            bn_out, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
-                input_reshape, None, None, None, None, True,
-                0.0, eps, cudnn_enable)
-
-            bn_out = bn_out.view(input.size())
-            if weight is not None and bias is not None:
-                output = bias.addcmul(bn_out, weight, value=1)
-            elif weight is not None:
-                output = bn_out.mul(weight)
-            elif bias is not None:
-                output = bn_out.add(bias)
-            else:
-                output = bn_out
+            output, mean, rstd = torch.native_layer_norm(input, normalized_shape, weight, bias, eps)
 
             def backward(grad_output):
-                if weight is not None and bias is not None:
-                    grad_bn_out = grad_output * weight
-                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                elif weight is not None:
-                    grad_bn_out = grad_output * weight
-                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
-                    grad_bias = None
-                elif bias is not None:
-                    grad_bn_out = grad_output
-                    grad_weight= None
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                else:
-                    grad_bn_out = grad_output
-                    grad_weight= None
-                    grad_bias = None
-
-
-                grad_bn_out = grad_bn_out.contiguous().view(1, n, -1)
-
-                grad_input, _, _ = torch._batch_norm_impl_index_backward(
-                    impl_idx, input_reshape, grad_bn_out, None, None, None,
-                    save1, save2, True, eps, [True, False, False], reserve)
-
-                grad_input = grad_input.view(input.size())
+                output_mask = [True, weight is not None, bias is not None]
+                grad_input, grad_weight, grad_bias = torch.native_layer_norm_backward(grad_output, input, normalized_shape, mean, rstd, weight, bias, output_mask)
                 return grad_input, None, grad_weight, grad_bias, None, None
-
             return output, backward
-
-        def AD_fused_dropout_backward(grad,
-                                      mask,
-                                      p1m: float):
-            p1r = 1. / p1m
-            grad_input = grad * (mask.type_as(grad) * p1r)
-            return grad_input
 
         def dropout(input,
                     p: float,
                     train: bool):
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
-            p1m = 1. - p
-            if train:
-                if use_cuda:
-                    mask = torch.rand_like(input, memory_format=1) < p1m
-                    res = mask.type_as(input) * input * (1./p1m)
-                else:
-                    mask = torch.empty_like(input, memory_format=1)
-                    mask.bernoulli_(p1m)
-                    res = mask * input / p1m
-            else:
-                p1m = 1.
-                res = input
-                mask = torch.empty_like(input, memory_format=1)
+            # if `train == false` we need to set `p1m` to 0 so `scale == 1`
+            p1m = (1. - p) * float(train)
+            scale = 1. / (float(p1m == 0.) + p1m)
+            res,mask = torch.native_dropout(input, p, train)
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
-                else:
-                    grad_input = grad_output * mask / p1m
+                grad_input = torch.native_dropout_backward(grad_output, mask, scale)
                 return grad_input, None, None
             return res, backward
 
@@ -1125,7 +1196,7 @@ const std::vector<std::string> functions = {
         def log_softmax(self, dim: int, dtype: Optional[int]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1139,12 +1210,23 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
     )",
     R"(
+        def AD_adaptive_avg_pool3d_backward(grad,
+                                            self,
+                                            output_size: List[int]):
+            if output_size[0] == 1 and output_size[1] == 1 and output_size[2] == 1:
+                self_size = self.size()
+                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2] * self_size[-3])
+            else:
+                grad_self = torch._adaptive_avg_pool3d_backward(grad, self)
+
+            return grad_self
+
         def AD_adaptive_avg_pool2d_backward(grad,
                                             self,
                                             output_size: List[int]):
@@ -1182,7 +1264,7 @@ const std::vector<std::string> functions = {
         def adaptive_avg_pool3d(self,
                                 output_size: List[int]):
             def backward(grad_output):
-                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
+                grad_self = AD_adaptive_avg_pool3d_backward(grad_output, self, output_size)
                 return grad_self, None
 
             return torch.adaptive_avg_pool3d(self, output_size), backward
@@ -1274,6 +1356,15 @@ const std::vector<std::string> functions = {
                 return grad_output * mask, None, None
             return torch.threshold(self, threshold, value), backward
 
+        def softplus(self,
+                      beta: number,
+                      threshold: number):
+            result = torch.softplus(self, beta, threshold)
+            def backward(grad_output):
+                z = torch.exp(result * beta)
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+            return result, backward
+
         def fmod(self,
                  other: number):
             def backward(grad_output):
@@ -1332,9 +1423,21 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
-        def clamp(self,
-                  min: Optional[number],
-                  max: Optional[number]):
+        def hardshrink(self, lambd: number):
+          def backward(grad_output):
+            mask = ((self > lambd) | (self < -lambd))
+            return grad_output * mask, None
+          return torch.hardshrink(self, lambd=lambd), backward
+
+        def hardtanh(self, min_val: number, max_val: number):
+          def backward(grad_output):
+            mask = ((self >= min_val) * (self <= max_val))
+            return grad_output * mask, None, None
+          return torch.hardtanh(self, min_val=min_val, max_val=max_val), backward
+
+        def clamp_1(self,
+                    min: Optional[number],
+                    max: Optional[number]):
           def backward(grad_output):
             if min is not None and max is not None:
                 mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
@@ -1344,6 +1447,23 @@ const std::vector<std::string> functions = {
                 return grad_output * mask, None, None
             elif max is not None:
                 mask = (self <= float(max)).type_as(self)
+                return grad_output * mask, None, None
+            else: #min is None and max is None
+                return grad_output, None, None
+          return torch.clamp(self, min=min, max=max), backward
+
+        def clamp_2(self,
+                    min: Optional[Tensor],
+                    max: Optional[Tensor]):
+          def backward(grad_output):
+            if min is not None and max is not None:
+                mask = ((self >= min) * (self <= max)).type_as(self)
+                return grad_output * mask, None, None
+            elif min is not None:
+                mask = (self >= min).type_as(self)
+                return grad_output * mask, None, None
+            elif max is not None:
+                mask = (self <= max).type_as(self)
                 return grad_output * mask, None, None
             else: #min is None and max is None
                 return grad_output, None, None
@@ -1369,8 +1489,8 @@ std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
   Value* context = closure->node()->inputs().at(1);
 
   TORCH_CHECK(
-      fn->node()->kind() == prim::Function,
-      "closure tuple must contain a prim::Function");
+      fn->node()->kind() == prim::Closure,
+      "closure tuple must contain a prim::Closure");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
@@ -1414,7 +1534,7 @@ void loadModule(const CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
@@ -1424,6 +1544,7 @@ void loadModule(const CompilationUnit& module) {
           << "gradient must return literal a tuple";
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
@@ -1479,7 +1600,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto schema_str = canonicalSchemaString(schema);
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {

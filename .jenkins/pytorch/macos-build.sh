@@ -1,55 +1,70 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034
+# shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-git submodule sync --recursive
-git submodule update --init --recursive
-export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
-
 # Build PyTorch
-if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
-  export CUDA_VERSION=9.2
-  export TORCH_CUDA_ARCH_LIST=5.2
-  export PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/bin${PATH:+:${PATH}}
-  export DYLD_LIBRARY_PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}
-  export CUDA_HOME=/Developer/NVIDIA/CUDA-${CUDA_VERSION}
-  export USE_CUDA=1
-
-  if [ -z "${IN_CIRCLECI}" ]; then
-    # Eigen gives "explicit specialization of class must precede its first use" error
-    # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
-    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-  fi
-else
-  if [ -z "${IN_CIRCLECI}" ]; then
-    export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
-  fi
+if [ -z "${IN_CI}" ]; then
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
+
+# This helper function wraps calls to binaries with sccache, but only if they're not already wrapped with sccache.
+# For example, `clang` will be `sccache clang`, but `sccache clang` will not become `sccache sccache clang`.
+# The way this is done is by detecting the command of the parent pid of the current process and checking whether
+# that is sccache, and wrapping sccache around the process if its parent were not already sccache.
+function write_sccache_stub() {
+  output=$1
+  binary=$(basename "${output}")
+
+  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which "${binary}")" "$(which "${binary}")" > "${output}"
+  chmod a+x "${output}"
+}
 
 if which sccache > /dev/null; then
-  printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${WORKSPACE_DIR}/clang++"
-  chmod a+x "${WORKSPACE_DIR}/clang++"
+  # Create temp directory for sccache shims
+  tmp_dir=$(mktemp -d)
+  trap 'rm -rfv ${tmp_dir}' EXIT
+  write_sccache_stub "${tmp_dir}/clang++"
+  write_sccache_stub "${tmp_dir}/clang"
 
-  printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${WORKSPACE_DIR}/clang"
-  chmod a+x "${WORKSPACE_DIR}/clang"
-
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    printf "#!/bin/sh\nexec sccache $(which nvcc) \$*" > "${WORKSPACE_DIR}/nvcc"
-    chmod a+x "${WORKSPACE_DIR}/nvcc"
-    export CUDA_NVCC_EXECUTABLE="${WORKSPACE_DIR}/nvcc"
-  fi
-
-  export PATH="${WORKSPACE_DIR}:$PATH"
+  export PATH="${tmp_dir}:$PATH"
 fi
 
-# If we run too many parallel jobs, we will OOM
-MAX_JOBS=2 USE_DISTRIBUTED=1 python setup.py install
+cross_compile_arm64() {
+  # Cross compilation for arm64
+  USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 MACOSX_DEPLOYMENT_TARGET=11.0 USE_MKLDNN=OFF USE_NNPACK=OFF USE_QNNPACK=OFF BUILD_TEST=OFF python setup.py bdist_wheel
+}
+
+compile_x86_64() {
+  USE_DISTRIBUTED=1 python setup.py bdist_wheel
+}
+
+build_lite_interpreter() {
+    echo "Testing libtorch (lite interpreter)."
+
+    CPP_BUILD="$(pwd)/../cpp_build"
+    # Ensure the removal of the tmp directory
+    trap 'rm -rfv ${CPP_BUILD}' EXIT
+    rm -rf "${CPP_BUILD}"
+    mkdir -p "${CPP_BUILD}/caffe2"
+
+    # It looks libtorch need to be built in "${CPP_BUILD}/caffe2 folder.
+    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+    pushd "${CPP_BUILD}/caffe2" || exit
+    VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
+    popd || exit
+
+    "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
+}
+
+if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
+  cross_compile_arm64
+elif [[ ${BUILD_ENVIRONMENT} = *lite-interpreter* ]]; then
+  export BUILD_LITE_INTERPRETER=1
+  build_lite_interpreter
+else
+  compile_x86_64
+fi
 
 assert_git_not_dirty
-
-# Upload torch binaries when the build job is finished
-if [ -z "${IN_CIRCLECI}" ]; then
-  7z a ${IMAGE_COMMIT_TAG}.7z ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp ${IMAGE_COMMIT_TAG}.7z s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z --acl public-read
-fi

@@ -8,6 +8,7 @@ py_binary(
     data = [
         "onnx/onnx.in.proto",
         "onnx/onnx-operators.in.proto",
+        "onnx/onnx-data.in.proto",
     ],
 )
 
@@ -31,6 +32,16 @@ genrule(
     tools = [":gen_proto"],
 )
 
+genrule(
+    name = "generate_onnx_data_proto",
+    outs = [
+        "onnx/onnx-data_onnx_torch.proto",
+        "onnx/onnx-data.pb.h",
+    ],
+    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx-data -m >/dev/null && sed -i 's/onnx-data_onnx_torch.pb.h/onnx\\/onnx-data_onnx_torch.pb.h/g' $(@D)/onnx/onnx-data.pb.h",
+    tools = [":gen_proto"],
+)
+
 cc_library(
     name = "onnx",
     srcs = glob(
@@ -45,6 +56,7 @@ cc_library(
             "onnx/defs/math/*.cc",
             "onnx/defs/nn/*.cc",
             "onnx/defs/object_detection/*.cc",
+            "onnx/defs/optional/*.cc",
             "onnx/defs/quantization/*.cc",
             "onnx/defs/reduction/*.cc",
             "onnx/defs/rnn/*.cc",
@@ -52,7 +64,6 @@ cc_library(
             "onnx/defs/tensor/*.cc",
             "onnx/defs/traditionalml/*.cc",
             "onnx/defs/training/defs.cc",
-            "onnx/optimizer/*.cc",
             "onnx/shape_inference/*.cc",
             "onnx/version_converter/*.cc",
         ],
@@ -67,12 +78,11 @@ cc_library(
         "onnx/defs/*.h",
         "onnx/defs/tensor/*.h",
         "onnx/shape_inference/*.h",
-        "onnx/optimizer/*.h",
-        "onnx/optimizer/passes/*.h",
         "onnx/version_converter/adapters/*.h",
     ]) + [
         "onnx/onnx-ml.pb.h",
         "onnx/onnx-operators-ml.pb.h",
+        "onnx/onnx-data.pb.h",
     ],
     defines = [
         "ONNX_ML=1",
@@ -104,6 +114,7 @@ proto_library(
     srcs = [
         "onnx/onnx-operators_onnx_torch-ml.proto",
         "onnx/onnx_onnx_torch-ml.proto",
+        "onnx/onnx-data_onnx_torch.proto",
     ],
 )
 

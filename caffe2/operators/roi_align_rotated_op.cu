@@ -20,8 +20,7 @@ __device__ T bilinear_interpolate(
     const int height,
     const int width,
     T y,
-    T x,
-    const int index /* index for debug only*/) {
+    T x) {
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
     // empty
@@ -145,7 +144,7 @@ __global__ void RoIAlignRotatedForward(
         T y = yy * cosTheta - xx * sinTheta + roi_center_h;
 
         T val = bilinear_interpolate(
-            offset_bottom_data, height, width, y, x, index);
+            offset_bottom_data, height, width, y, x);
         output_val += val;
       }
     }
@@ -158,7 +157,7 @@ __global__ void RoIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
 
@@ -201,6 +200,8 @@ bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
           R.data<float>(),
           Y->mutable_data<float>(),
           aligned_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

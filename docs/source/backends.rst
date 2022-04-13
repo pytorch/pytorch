@@ -3,6 +3,7 @@
 
 torch.backends
 ==============
+.. automodule:: torch.backends
 
 `torch.backends` controls the behavior of various backends that PyTorch supports.
 
@@ -17,6 +18,7 @@ These backends include:
 
 torch.backends.cuda
 ^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cuda
 
 .. autofunction::  torch.backends.cuda.is_built
 
@@ -24,6 +26,10 @@ torch.backends.cuda
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
     multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+
+.. attribute::  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+
+    A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
 
 .. attribute::  torch.backends.cuda.cufft_plan_cache
 
@@ -40,10 +46,13 @@ torch.backends.cuda
     .. method::  clear()
 
         Clears the cuFFT plan cache.
-    
+
+.. autofunction:: torch.backends.cuda.preferred_linalg_library
+
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cudnn
 
 .. autofunction:: torch.backends.cudnn.version
 
@@ -61,7 +70,8 @@ torch.backends.cudnn
 .. attribute::  torch.backends.cudnn.deterministic
 
     A :class:`bool` that, if True, causes cuDNN to only use deterministic convolution algorithms.
-    See also :func:`torch.is_deterministic` and :func:`torch.set_deterministic`.
+    See also :func:`torch.are_deterministic_algorithms_enabled` and
+    :func:`torch.use_deterministic_algorithms`.
 
 .. attribute::  torch.backends.cudnn.benchmark
 
@@ -71,17 +81,26 @@ torch.backends.cudnn
 
 torch.backends.mkl
 ^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mkl
 
 .. autofunction::  torch.backends.mkl.is_available
 
 
 torch.backends.mkldnn
 ^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mkldnn
 
 .. autofunction::  torch.backends.mkldnn.is_available
 
 
 torch.backends.openmp
 ^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.openmp
 
 .. autofunction::  torch.backends.openmp.is_available
+
+.. Docs for other backends need to be added here.
+.. Automodules are just here to ensure checks run but they don't actually
+.. add anything to the rendered page for now.
+.. py:module:: torch.backends.quantized
+.. py:module:: torch.backends.xnnpack

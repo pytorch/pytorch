@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -10,11 +11,12 @@
 namespace at { namespace native {
 
 
-void lshift_kernel_cuda(TensorIterator& iter) {
+void lshift_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float ||
       iter.dtype() == ScalarType::Double ||
-      iter.dtype() == ScalarType::Half) {
-    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "lshift_cuda", [&]() {
+      iter.dtype() == ScalarType::Half ||
+      iter.dtype() == ScalarType::BFloat16) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "lshift_cuda", [&]() {
       gpu_kernel_with_scalars(
         iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -31,11 +33,12 @@ void lshift_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void rshift_kernel_cuda(TensorIterator& iter) {
+void rshift_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float ||
       iter.dtype() == ScalarType::Double ||
-      iter.dtype() == ScalarType::Half) {
-    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "rshift_cuda", [&]() {
+      iter.dtype() == ScalarType::Half ||
+      iter.dtype() == ScalarType::BFloat16) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "rshift_cuda", [&]() {
       gpu_kernel_with_scalars(
         iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {

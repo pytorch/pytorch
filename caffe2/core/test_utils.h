@@ -6,6 +6,7 @@
 #include "caffe2/utils/proto_utils.h"
 
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <string>
@@ -18,13 +19,13 @@ namespace caffe2 {
 namespace testing {
 
 // Asserts that the values of two tensors are the same.
-CAFFE2_API void assertTensorEquals(
+TORCH_API void assertTensorEquals(
     const TensorCPU& tensor1,
     const TensorCPU& tensor2,
     float eps = 1e-6);
 
 // Asserts that two float values are close within epsilon.
-CAFFE2_API void assertNear(float value1, float value2, float epsilon);
+TORCH_API void assertNear(float value1, float value2, float epsilon);
 
 // Asserts that the numeric values of a tensor is equal to a data vector.
 template <typename T>
@@ -34,7 +35,7 @@ void assertTensorEquals(
     float epsilon = 0.1f) {
   CAFFE_ENFORCE(tensor.IsType<T>());
   CAFFE_ENFORCE_EQ(tensor.numel(), data.size());
-  for (auto idx = 0; idx < tensor.numel(); ++idx) {
+  for (const auto idx : c10::irange(tensor.numel())) {
     if (tensor.IsType<float>()) {
       assertNear(tensor.data<T>()[idx], data[idx], epsilon);
     } else {
@@ -55,23 +56,23 @@ void assertTensor(
 }
 
 // Asserts a list of tensors presented in two workspaces are equal.
-CAFFE2_API void assertTensorListEquals(
+TORCH_API void assertTensorListEquals(
     const std::vector<std::string>& tensorNames,
     const Workspace& workspace1,
     const Workspace& workspace2);
 
 // Read a tensor from the workspace.
-CAFFE2_API const caffe2::Tensor& getTensor(
+TORCH_API const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
     const std::string& name);
 
 // Create a new tensor in the workspace.
-CAFFE2_API caffe2::Tensor* createTensor(
+TORCH_API caffe2::Tensor* createTensor(
     const std::string& name,
     caffe2::Workspace* workspace);
 
 // Create a new operator in the net.
-CAFFE2_API caffe2::OperatorDef* createOperator(
+TORCH_API caffe2::OperatorDef* createOperator(
     const std::string& type,
     const std::vector<std::string>& inputs,
     const std::vector<std::string>& outputs,
@@ -88,7 +89,7 @@ void randomFill(
   std::mt19937 gen(42);
   std::uniform_real_distribution<RealType> dis(
       static_cast<RealType>(min), static_cast<RealType>(max));
-  for (size_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     data[i] = dis(gen);
   }
 }
@@ -154,8 +155,9 @@ caffe2::Tensor* createTensorAndConstantFill(
 }
 
 // Concise util class to mutate a net in a chaining fashion.
-class CAFFE2_API NetMutator {
+class TORCH_API NetMutator {
  public:
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   explicit NetMutator(caffe2::NetDef* net) : net_(net) {}
 
   NetMutator& newOp(
@@ -184,7 +186,7 @@ class CAFFE2_API NetMutator {
 };
 
 // Concise util class to mutate a workspace in a chaining fashion.
-class CAFFE2_API WorkspaceMutator {
+class TORCH_API WorkspaceMutator {
  public:
   explicit WorkspaceMutator(caffe2::Workspace* workspace)
       : workspace_(workspace) {}

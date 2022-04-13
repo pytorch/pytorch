@@ -1,6 +1,6 @@
 #pragma once
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
@@ -15,7 +15,7 @@ namespace jit {
  */
 class TORCH_API ScriptTypeParser {
  public:
-  explicit ScriptTypeParser() {}
+  explicit ScriptTypeParser() = default;
   explicit ScriptTypeParser(ResolverPtr resolver)
       : resolver_(std::move(resolver)) {}
 
@@ -46,6 +46,10 @@ class TORCH_API ScriptTypeParser {
   std::vector<Argument> parseReturnFromDecl(const Decl& decl);
 
   ResolverPtr resolver_ = nullptr;
+
+  // Need to use `evaluateDefaults` in serialization
+  friend struct ConstantTableValue;
+  friend struct SourceImporterImpl;
 };
 } // namespace jit
 } // namespace torch

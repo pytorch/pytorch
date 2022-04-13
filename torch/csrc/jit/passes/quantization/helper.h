@@ -173,10 +173,6 @@ bool is_relu_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
-bool is_functional_linear(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap);
-
 bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
@@ -191,6 +187,14 @@ bool is_conv2d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv_transpose1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv_transpose2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

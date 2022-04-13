@@ -19,7 +19,7 @@ namespace at {
 
 template <typename T,
           typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
+inline C10_HOST_DEVICE bool _isnan(T /*val*/) {
   return false;
 }
 
@@ -42,12 +42,48 @@ inline bool _isnan(T val) {
 template <typename T,
          typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
 }
 
 
+template <typename T,
+         typename std::enable_if<std::is_same<T, at::BFloat16>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
+}
+
+inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
+  return at::_isnan(static_cast<float>(val));
+}
+
+
+// std::isinf isn't performant to use on integral types; it will
+// (uselessly) convert to floating point and then do the test.
+// This function is.
+
+template <typename T,
+          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+inline C10_HOST_DEVICE bool _isinf(T /*val*/) {
+  return false;
+}
+
+template <typename T,
+          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+inline C10_HOST_DEVICE bool _isinf(T val) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return ::isinf(val);
+#else
+  return std::isinf(val);
+#endif
+}
+
+inline C10_HOST_DEVICE bool _isinf(at::Half val) {
+  return at::_isinf(static_cast<float>(val));
+}
+
+
+inline C10_HOST_DEVICE bool _isinf(at::BFloat16 val) {
+  return at::_isinf(static_cast<float>(val));
 }
 
 template <typename T>
@@ -99,4 +135,3 @@ C10_HOST_DEVICE inline double tan<double>(double x) {
 }
 
 } // namespace at
-

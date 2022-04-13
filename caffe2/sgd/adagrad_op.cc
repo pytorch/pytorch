@@ -1,4 +1,5 @@
 #include "adagrad_op.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -20,24 +21,33 @@ static OpSchema::Cost CostInferenceForAdagrad(
   // +3: updading moments
   // +3: updating effective lr (including 1 sqrt)
   // +2: updating params
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c.flops = grad_size * 10;
 
+  auto const& moment_element_size_byte =
+      DataTypeToTypeMeta(moment.data_type()).itemsize();
+  auto const& param_element_size_byte =
+      DataTypeToTypeMeta(param.data_type()).itemsize();
+  auto const& grad_element_size_byte =
+      DataTypeToTypeMeta(grad.data_type()).itemsize();
+  auto const& lr_element_size_byte =
+      DataTypeToTypeMeta(lr.data_type()).itemsize();
   uint64_t bytes_written =
-      grad_size * (sizeof(param.data_type()) + sizeof(moment.data_type()));
+      grad_size * param_element_size_byte + moment_element_size_byte;
 
   if (output_size == 3) {
     // also need to output effective learning rate in this case
     // assume it's the same data type as lr
-    bytes_written += grad_size * sizeof(lr.data_type());
+    bytes_written += grad_size * lr_element_size_byte;
   } else if (output_size == 4) {
     // also need to output effective learning rate and updates in this case
     // assume update is the same data type as param
     bytes_written +=
-        grad_size * (sizeof(lr.data_type()) + sizeof(param.data_type()));
+        grad_size * (lr_element_size_byte + param_element_size_byte);
   }
   c.bytes_written = bytes_written;
   c.bytes_read = c.bytes_written +
-      grad_size * (sizeof(grad.data_type()) + sizeof(lr.data_type()));
+      grad_size * (grad_element_size_byte + lr_element_size_byte);
 
   return c;
 }
@@ -99,11 +109,20 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
   // See adagrad_op.h (note that decay is 1 for SparseAdagrad).
   // 2 multiplications, 3 additions, 1 division, and 1 sqrt
   // (optimistically count sqrt as one flop).
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c.flops = grad_size * 7;
+  auto const& param_element_size_byte =
+      DataTypeToTypeMeta(param.data_type()).itemsize();
+  auto const& moment_element_size_byte =
+      DataTypeToTypeMeta(moment.data_type()).itemsize();
   c.bytes_written =
-      grad_size * (sizeof(param.data_type()) + sizeof(moment.data_type()));
-  c.bytes_read = c.bytes_written + grad_size * sizeof(grad.data_type()) +
-      n * sizeof(indices.data_type());
+      grad_size * (param_element_size_byte + moment_element_size_byte);
+  auto const& grad_element_size_byte =
+      DataTypeToTypeMeta(grad.data_type()).itemsize();
+  auto const& indices_element_size_byte =
+      DataTypeToTypeMeta(indices.data_type()).itemsize();
+  c.bytes_read = c.bytes_written + grad_size * grad_element_size_byte +
+      n * indices_element_size_byte;
 
   return c;
 }
@@ -112,6 +131,7 @@ REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp);
 // For backward compatibility
 REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp);
 OPERATOR_SCHEMA(SparseAdagrad)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -150,28 +170,40 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
   OpSchema::Cost c;
 
   if (n > 0) {
+    auto const& param_element_size_byte =
+        DataTypeToTypeMeta(param.data_type()).itemsize();
+    auto const& moment_element_size_byte =
+        DataTypeToTypeMeta(moment.data_type()).itemsize();
+    auto const& grad_element_size_byte =
+        DataTypeToTypeMeta(grad.data_type()).itemsize();
+    auto const& indices_element_size_byte =
+        DataTypeToTypeMeta(indices.data_type()).itemsize();
+    auto const& lr_element_size_byte =
+        DataTypeToTypeMeta(lr.data_type()).itemsize();
     auto block_size = grad_size / n;
     if (block_size == 1) {
       // +2: applying weight decay and add to grads
       // +2: updading moments
       // +5: updating params
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c.flops = n * 9;
       c.bytes_written =
-          n * (sizeof(param.data_type()) + sizeof(moment.data_type()));
+          n * (param_element_size_byte + moment_element_size_byte);
       c.bytes_read = c.bytes_written +
           n *
-              (sizeof(grad.data_type()) + sizeof(indices.data_type()) +
-               sizeof(lr.data_type()));
+              (grad_element_size_byte + indices_element_size_byte +
+               lr_element_size_byte);
     } else {
       // 5 per block (not counting index transforms)
       // 8 for each value of a block
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c.flops = n * (5 + (block_size * 8));
-      c.bytes_written =
-          n * sizeof(moment.data_type()) + n * block_size * (param.data_type());
+      c.bytes_written = n * moment_element_size_byte +
+          n * block_size * param_element_size_byte;
 
-      c.bytes_read = c.bytes_written + n * (sizeof(lr.data_type())) +
+      c.bytes_read = c.bytes_written + n * lr_element_size_byte +
           2 * n * block_size *
-              (sizeof(grad.data_type()) + sizeof(param.data_type()));
+              (grad_element_size_byte + param_element_size_byte);
     }
   }
   return c;
@@ -184,7 +216,8 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     SIMD,
     RowWiseSparseAdagradOp<CPUContext>);
 OPERATOR_SCHEMA(RowWiseSparseAdagrad)
-    .NumInputs(5)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    .NumInputs(5, 6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -203,11 +236,20 @@ also be a 1D tensor indexing into the rows of param.
     .Input(2, "indices", "Sparse indices")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
     .Arg("epsilon", "Default 1e-5")
-    .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForRowWiseSparseAdagrad));
+    .Arg("weight_decay", "Default 0")
+    .Arg(
+        "counter_halflife",
+        "Optional arg when weight_decay is adjusted by frequency (default -1)")
+    .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        CostInferenceForRowWiseSparseAdagrad));
 
 SHOULD_NOT_DO_GRADIENT(Adagrad);
 SHOULD_NOT_DO_GRADIENT(SparseAdagrad);

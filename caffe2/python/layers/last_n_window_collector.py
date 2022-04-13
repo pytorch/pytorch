@@ -1,10 +1,6 @@
 ## @package last_n_window_collector
 # Module caffe2.python.layers.last_n_window_collector
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 

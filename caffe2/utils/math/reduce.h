@@ -11,11 +11,11 @@ class Tensor;
 namespace math {
 
 template <typename T, class Context>
-CAFFE2_API void
+TORCH_API void
 ReduceMin(const int N, const T* X, T* y, Tensor* scratch_ptr, Context* context);
 
 template <typename T, class Context>
-CAFFE2_API void
+TORCH_API void
 ReduceMax(const int N, const T* X, T* y, Tensor* scratch_ptr, Context* context);
 
 // In all of the reduce functions, X_dims and Y_dims should have ndim elements.
@@ -25,80 +25,87 @@ ReduceMax(const int N, const T* X, T* y, Tensor* scratch_ptr, Context* context);
 
 // Y = alpha * ReduceMin(X)
 template <typename T, class Context>
-CAFFE2_API void ReduceMin(
+TORCH_API void ReduceMin(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceMax(X)
 template <typename T, class Context>
-CAFFE2_API void ReduceMax(
+TORCH_API void ReduceMax(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceSum(X)
 template <typename T, class Context>
-CAFFE2_API void ReduceSum(
+TORCH_API void ReduceSum(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceMean(X)
 template <typename T, class Context>
-CAFFE2_API void ReduceMean(
+TORCH_API void ReduceMean(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceL1(X)
 template <typename T, class Context>
-CAFFE2_API void ReduceL1(
+TORCH_API void ReduceL1(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceL2(X)
 template <typename T, class Context>
-CAFFE2_API void ReduceL2(
+TORCH_API void ReduceL2(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Computes mean and variance over axes.
 template <typename T, class Context>
-CAFFE2_API void Moments(
+TORCH_API void Moments(
     const int ndims,
     const int* X_dims,
     const int* Y_dims,
     const T* X,
     T* mean,
     T* var,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 } // namespace math
 

@@ -1,17 +1,10 @@
 #pragma once
 
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
-
 #include <ATen/core/Array.h>
 #include <ATen/core/TransformationHelper.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/Optional.h>
 #include <c10/macros/Macros.h>
 
@@ -165,7 +158,7 @@ template <typename RNG, typename ret_type,                                      
             !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                  \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
           ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
+C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type* /*ret*/) {  \
   return false;                                                                                     \
 }                                                                                                   \
                                                                                                     \
@@ -181,7 +174,7 @@ template <typename RNG, typename ret_type,                                      
           typename std::enable_if_t<(                                                               \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
           ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
+C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type /*cache*/) { \
 }
 
 DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
@@ -197,7 +190,7 @@ template <typename T>
 struct normal_distribution {
 
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
+    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
     mean = mean_in;
     stdv = stdv_in;
   }
@@ -220,7 +213,7 @@ struct normal_distribution {
     const dist_acctype<T> u1 = uniform(generator);
     const dist_acctype<T> u2 = uniform(generator);
     const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
-    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+    const dist_acctype<T> theta = static_cast<T>(2.0) * c10::pi<T> * u1;
     if (std::is_same<T, double>::value) {
       maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
     } else {

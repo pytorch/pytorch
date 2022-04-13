@@ -1,5 +1,5 @@
+#include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
@@ -18,12 +18,12 @@ def one(self, x: Tensor, y: Tensor) -> Tensor:
 def forward(self, x: Tensor) -> Tensor:
     return x
 )JIT"};
-static const auto parentForward = R"JIT(
+static const std::string parentForward = R"JIT(
 def forward(self, x: Tensor) -> Tensor:
     return self.subMod.forward(x)
 )JIT";
 
-static const auto moduleInterfaceSrc = R"JIT(
+static constexpr c10::string_view moduleInterfaceSrc = R"JIT(
 class OneForward(ModuleInterface):
     def one(self, x: Tensor, y: Tensor) -> Tensor:
         pass
@@ -44,7 +44,7 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-void testModuleInterfaceSerialization() {
+TEST(InterfaceTest, ModuleInterfaceSerialization) {
   auto cu = std::make_shared<CompilationUnit>();
   Module parentMod("parentMod", cu);
   Module subMod("subMod", cu);
@@ -63,6 +63,7 @@ void testModuleInterfaceSerialization() {
       "subMod",
       cu->get_interface("__torch__.OneForward"),
       subMod._ivalue(),
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*is_parameter=*/false);
   parentMod.define(parentForward, nativeResolver());
   ASSERT_TRUE(parentMod.hasattr("subMod"));

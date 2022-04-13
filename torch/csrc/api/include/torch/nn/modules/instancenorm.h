@@ -8,15 +8,40 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) instance norm modules
 template <size_t D, typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
+ private:
+  inline Tensor apply_instance_norm(const Tensor& input) {
+    return torch::nn::functional::detail::instance_norm(
+        input,
+        this->running_mean,
+        this->running_var,
+        this->weight,
+        this->bias,
+        this->is_training() || !this->options.track_running_stats(),
+        this->options.momentum(),
+        this->options.eps());
+  }
+
+  inline Tensor handle_no_batch_input(const Tensor& input) {
+    return this->apply_instance_norm(input.unsqueeze(0)).squeeze(0);
+  }
+
  public:
   using torch::nn::NormImplBase<D, Derived, InstanceNormOptions>::NormImplBase;
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
-    return torch::nn::functional::detail::instance_norm(
-      input, this->running_mean, this->running_var, this->weight, this->bias,
-      this->is_training() || !this->options.track_running_stats(), this->options.momentum(), this->options.eps());
+
+    // For InstanceNorm1D, 2D is unbatched and 3D is batched
+    // For InstanceNorm2D, 3D is unbatched and 4D is batched
+    // For InstanceNorm3D, 4D is unbatched and 5D is batched
+    // check if input does not have a batch-dim
+    if (input.dim() == D + 1) {
+      return this->handle_no_batch_input(input);
+    }
+
+    return this->apply_instance_norm(input);
   }
 
   /// Pretty prints the `InstanceNorm{1,2,3}d` module into the given `stream`.
@@ -36,9 +61,10 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 /// ```
 /// InstanceNorm1d model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<1, InstanceNorm1dImpl>::InstanceNormImpl;
@@ -64,9 +90,10 @@ TORCH_MODULE(InstanceNorm1d);
 /// ```
 /// InstanceNorm2d model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<2, InstanceNorm2dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<2, InstanceNorm2dImpl>::InstanceNormImpl;
@@ -92,9 +119,10 @@ TORCH_MODULE(InstanceNorm2d);
 /// ```
 /// InstanceNorm3d model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<3, InstanceNorm3dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<3, InstanceNorm3dImpl>::InstanceNormImpl;

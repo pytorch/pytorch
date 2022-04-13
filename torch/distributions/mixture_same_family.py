@@ -2,6 +2,7 @@ import torch
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from torch.distributions import constraints
+from typing import Dict
 
 
 class MixtureSameFamily(Distribution):
@@ -45,7 +46,7 @@ class MixtureSameFamily(Distribution):
         component_distribution: `torch.distributions.Distribution`-like
             instance. Right-most batch dimension indexes component.
     """
-    arg_constraints = {}
+    arg_constraints: Dict[str, constraints.Constraint] = {}
     has_rsample = False
 
     def __init__(self,
@@ -106,7 +107,7 @@ class MixtureSameFamily(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        # FIXME this may have the wrong shape when support contains batched 
+        # FIXME this may have the wrong shape when support contains batched
         # parameters
         return self._component_distribution.support
 
@@ -143,6 +144,8 @@ class MixtureSameFamily(Distribution):
         return torch.sum(cdf_x * mix_prob, dim=-1)
 
     def log_prob(self, x):
+        if self._validate_args:
+            self._validate_sample(x)
         x = self._pad(x)
         log_prob_x = self.component_distribution.log_prob(x)  # [S, B, k]
         log_mix_prob = torch.log_softmax(self.mixture_distribution.logits,

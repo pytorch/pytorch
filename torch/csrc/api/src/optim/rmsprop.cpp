@@ -5,6 +5,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 
@@ -38,6 +39,14 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, momentum);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, centered);
+}
+
+double RMSpropOptions::get_lr() const {
+  return lr();
+}
+
+void RMSpropOptions::set_lr(const double lr) {
+  this->lr(lr);
 }
 
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
@@ -151,7 +160,7 @@ void RMSprop::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "grad_average_buffers", grad_average_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < square_average_buffers.size(); idx++) {
+    for(const auto idx : c10::irange(square_average_buffers.size())) {
       auto state = std::make_unique<RMSpropParamState>();
       state->square_avg(square_average_buffers[idx]);
       if(idx < momentum_buffers.size()) {

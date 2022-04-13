@@ -6,6 +6,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <functional>
@@ -38,6 +39,14 @@ void AdamWOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, amsgrad);
+}
+
+double AdamWOptions::get_lr() const {
+  return lr();
+}
+
+void AdamWOptions::set_lr(const double lr) {
+  this->lr(lr);
 }
 
 bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs) {
@@ -73,7 +82,7 @@ Tensor AdamW::step(LossClosure closure)  {
       if (!p.grad().defined()) {
         continue;
       }
-      auto grad = p.grad();
+      const auto& grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "AdamW does not support sparse gradients"/*, please consider SparseAdamW instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<AdamWOptions&>(group.options());
@@ -154,7 +163,7 @@ void AdamW::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < step_buffers.size(); idx++) {
+    for(const auto idx : c10::irange(step_buffers.size())) {
       auto state = std::make_unique<AdamWParamState>();
       state->step(step_buffers.at(idx));
       state->exp_avg(exp_average_buffers.at(idx));

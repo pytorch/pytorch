@@ -1,14 +1,15 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 const int DTYPE_NAME_LEN = 64;
 
 struct TORCH_API THPDtype {
   PyObject_HEAD
   at::ScalarType scalar_type;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[DTYPE_NAME_LEN + 1];
 };
 

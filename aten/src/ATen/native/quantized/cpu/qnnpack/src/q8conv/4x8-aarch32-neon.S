@@ -28,7 +28,7 @@
 #  |out ch indx| 16
 #  |params     | 20
 #  |-----------|
-#  
+#
 
 #  After loading w pointer in ip reg.
 #  And after pushing r4-r8 and d8-d15 on stack
@@ -42,7 +42,7 @@
 #  |out ch indx| 112
 #  |params     | 116
 #  |-----------|
-#  
+#
 
 # void pytorch_q8conv_ukernel_4x8__aarch32_neon(
 #     size_t mr,

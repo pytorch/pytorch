@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-static const auto classSrcs1 = R"JIT(
+static constexpr c10::string_view classSrcs1 = R"JIT(
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -26,7 +26,7 @@ class FooTest:
         self.x = self.class_attr.y + self.class_attr2.y
 )JIT";
 
-static const auto classSrcs2 = R"JIT(
+static constexpr c10::string_view classSrcs2 = R"JIT(
 class FooTest:
     def __init__(self, x):
       self.dx = x
@@ -97,6 +97,7 @@ TEST(ClassImportTest, ScriptObject) {
 
   // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
@@ -133,7 +134,7 @@ TEST(ClassImportTest, ClassDerive) {
   ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
-static const auto torchbindSrc = R"JIT(
+static constexpr c10::string_view torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
   f : __torch__.torch.classes._TorchScriptTesting._StackString

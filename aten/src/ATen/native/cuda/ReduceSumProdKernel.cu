@@ -1,9 +1,11 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/jit_macros.h>
 
 namespace at { namespace native {
 
@@ -25,12 +27,37 @@ struct nansum_functor {
   }
 };
 
+const char op_name[] = "prod";
+
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
+  #if AT_USE_JITERATOR()
+  void operator()(TensorIterator& iter) {
+    std::string func = jiterator_stringify(
+    arg_t combine(arg_t a, arg_t b) {
+      return a * b;
+    }
+    );
+    jitted_gpu_reduce_kernel<op_name, scalar_t, out_t>(
+        iter, func, 1.);
+  }
+  #else
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<scalar_t, out_t>(
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a * b;
+        }), 1.);
+  }
+  #endif
+};
+
+// Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+template <>
+struct prod_functor<bool> {
+  void operator()(TensorIterator& iter) {
+    gpu_reduce_kernel<bool, bool>(
+        iter, func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
+          return a && b;
         }), 1);
   }
 };
@@ -88,7 +115,7 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
 
 static void prod_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "prod_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "prod_cuda", [&]() {
       prod_functor<scalar_t>{}(iter);
     });
   };

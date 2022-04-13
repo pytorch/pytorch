@@ -1,10 +1,16 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#endif
 
 namespace at { namespace native {
 
@@ -24,7 +30,7 @@ namespace {
 // grad_in does not mean that it is a gradient wrt to input,
 // grad_in/grad_out is just an input/output of unfold_backward kernel.
 
-static TensorIterator _make_unfold_backward_iter_over_grad_out(
+static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
   Tensor& grad_out,
   const Tensor& grad_in,
   int64_t dim,
@@ -33,7 +39,6 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
 ) {
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds
-  auto last_dim = maybe_wrap_dim(-1, grad_in.dim());
 
   auto grad_out_dim_size = ensure_nonempty_size(grad_out, dim);
   auto grad_in_dim_size = ensure_nonempty_size(grad_in, dim);
@@ -95,20 +100,20 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(grad_out_restrided)
-    .add_input(grad_in_restrided)
-    .add_input(idx_dim_restrided)
+    .add_owned_output(grad_out_restrided)
+    .add_owned_input(grad_in_restrided)
+    .add_owned_input(idx_dim_restrided)
     .build();
 
   return iter;
 }
 
-static TensorIterator _make_unfold_backward_iter_over_grad_in(
+static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_in(
   Tensor& grad_out,
   const Tensor& grad_in,
   int64_t dim,
-  int64_t size,
-  int64_t step
+  int64_t /*size*/,
+  int64_t /*step*/
 ) {
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds
@@ -167,10 +172,10 @@ static TensorIterator _make_unfold_backward_iter_over_grad_in(
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(grad_out_restrided)
-    .add_input(grad_in)
-    .add_input(idx_dim_restrided)
-    .add_input(idx_last_dim_restrided)
+    .add_owned_output(grad_out_restrided)
+    .add_owned_input(grad_in)
+    .add_owned_input(idx_dim_restrided)
+    .add_owned_input(idx_last_dim_restrided)
     .build();
 
   return iter;

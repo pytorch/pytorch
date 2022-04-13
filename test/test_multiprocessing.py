@@ -1,9 +1,10 @@
+# Owner(s): ["module: multiprocessing"]
+
 import contextlib
 import gc
 import os
 import sys
 import time
-import subprocess
 import unittest
 import copy
 from sys import platform
@@ -257,7 +258,7 @@ class TestMultiprocessing(TestCase):
             self.assertTrue(e.is_set())
             self.assertTrue(data[0].eq(4).all())
             self.assertTrue(data[1].eq(4).all())
-            p.join(1)
+            p.join(100)
             self.assertFalse(p.is_alive())
 
         def test_receive():
@@ -270,12 +271,16 @@ class TestMultiprocessing(TestCase):
             t1 = q.get()
             t2 = q.get()
             self.assertTrue(t1.eq(1).all())
-            self.assertTrue(id(t1.storage()) == id(t2.storage()))
+            s1 = t1.storage()
+            s2 = t2.storage()
+            self.assertEqual(type(s1), type(s2))
+            self.assertEqual(s1.data_ptr(), s1.data_ptr())
+            self.assertEqual(s1, s2)
             # We need to delete this tensors to allow producer (child process)
             # collect them properly
             del t1, t2
             e.set()
-            p.join(1)
+            p.join(100)
             self.assertFalse(p.is_alive())
 
         with leak_checker(self) as lc:
@@ -368,14 +373,22 @@ class TestMultiprocessing(TestCase):
         t = torch.zeros(5, 5)
         p = SubProcess(t.share_memory_())
         p.start()
-        p.join(1)
-        self.assertEqual(t, torch.ones(5, 5) * 3, atol=0, rtol=0)
+        p.join(2)
+        if p.exitcode is None:
+            print("test_inherit_tensor: SubProcess too slow")
+        else:
+            self.assertEqual(t, torch.ones(5, 5) * 3, atol=0, rtol=0)
 
     @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):
         ctx = mp.get_context('fork')
         simple_autograd_function()
-        with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+        # Autograd only uses thread when GPUs are involved
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+                with ctx.Pool(3) as pool:
+                    pool.map(simple_autograd_function, [1, 2, 3])
+        else:
             with ctx.Pool(3) as pool:
                 pool.map(simple_autograd_function, [1, 2, 3])
 
@@ -522,7 +535,7 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_wrong_cuda_fork(self):
-        results = self.run_process_no_exception("""\
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 import torch
 from torch.multiprocessing import Process
 def run(rank):
@@ -539,7 +552,7 @@ if __name__ == "__main__":
     for p in processes:
         p.join()
 """)
-        self.assertRegex(results[1].decode('ascii'), "Cannot re-initialize CUDA in forked subprocess.")
+        self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -740,7 +753,7 @@ if __name__ == "__main__":
 
         self.assertEqual(var.data, torch.ones(5, 5, device=device))
         self.assertEqual(var.grad.data, torch.ones(5, 5, device=device) * 4)
-        p.join(1)
+        p.join(100)
         self.assertFalse(p.is_alive())
 
     # Check sharing a cudaMalloc allocation with different types of storage.
@@ -828,27 +841,35 @@ if __name__ == "__main__":
         param = Parameter(torch.arange(1., 26, device='cuda').view(5, 5))
         self._test_autograd_sharing(param, mp.get_context('spawn'), is_parameter=True)
 
-    @staticmethod
-    def run_process_no_exception(code):
-        popen = subprocess.Popen(
-            [sys.executable, '-c', code],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        pipes = popen.communicate()
-        return pipes
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    def test_integer_parameter_serialization_cpu(self):
+        self._test_integer_parameter_serialization(device='cpu')
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    def test_integer_parameter_serialization(self):
-        iparam = torch.nn.Parameter(torch.tensor(0, dtype=torch.int64), requires_grad=False)
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_integer_parameter_serialization_cuda(self):
+        self._test_integer_parameter_serialization(device='cuda')
+
+    def _test_integer_parameter_serialization(self, device):
+        param = torch.nn.Parameter(
+            torch.tensor(0, dtype=torch.int64, device=device),
+            requires_grad=False
+        )
 
         ctx = mp.get_context('spawn')
-        p = ctx.Process(target=integer_parameter_serialization, args=(iparam,))
+        p = ctx.Process(target=integer_parameter_serialization, args=(param,))
         p.start()
         p.join()
 
+        self.assertEqual(
+            0, p.exitcode,
+            msg=f'Failed to serialize successfully for "{device}" device!'
+        )
+
     def test_empty_shared(self):
-        t = torch.Tensor()
+        t = torch.tensor([])
         t.share_memory_()
 
     def _test_is_shared(self):

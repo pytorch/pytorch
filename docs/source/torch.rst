@@ -1,13 +1,6 @@
 torch
 =====
-The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
-Additionally, it provides many utilities for efficient serializing of
-Tensors and arbitrary types, and other useful utilities.
-
-It has a CUDA counterpart, that enables you to run your tensor computations
-on an NVIDIA GPU with compute capability >= 3.0
-
+.. automodule:: torch
 .. currentmodule:: torch
 
 Tensors
@@ -19,6 +12,7 @@ Tensors
     is_tensor
     is_storage
     is_complex
+    is_conj
     is_floating_point
     is_nonzero
     set_default_dtype
@@ -31,7 +25,7 @@ Tensors
 .. _tensor-creation-ops:
 
 Creation Ops
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
 
 .. note::
     Random sampling creation ops are listed under :ref:`random-sampling` and
@@ -53,9 +47,12 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    asarray
     as_tensor
     as_strided
     from_numpy
+    from_dlpack
+    frombuffer
     zeros
     zeros_like
     ones
@@ -77,31 +74,58 @@ Creation Ops
     polar
     heaviside
 
+.. _indexing-slicing-joining:
+
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
+    adjoint
+    argwhere
     cat
+    concat
+    conj
     chunk
+    dsplit
+    column_stack
     dstack
     gather
+    hsplit
     hstack
+    index_add
+    index_copy
     index_select
     masked_select
     movedim
+    moveaxis
     narrow
     nonzero
+    permute
     reshape
+    row_stack
+    select
+    scatter
+    diagonal_scatter
+    select_scatter
+    slice_scatter
+    scatter_add
+    scatter_reduce
     split
     squeeze
     stack
+    swapaxes
+    swapdims
     t
     take
+    take_along_dim
+    tensor_split
+    tile
     transpose
     unbind
     unsqueeze
+    vsplit
     vstack
     where
 
@@ -238,6 +262,9 @@ Examples::
     no_grad
     enable_grad
     set_grad_enabled
+    is_grad_enabled
+    inference_mode
+    is_inference_mode_enabled
 
 Math operations
 ---------------
@@ -268,14 +295,18 @@ Pointwise Ops
     atanh
     arctanh
     atan2
+    arctan2
     bitwise_not
     bitwise_and
     bitwise_or
     bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
     ceil
     clamp
     clip
-    conj
+    conj_physical
+    copysign
     cos
     cosh
     deg2rad
@@ -288,12 +319,18 @@ Pointwise Ops
     exp
     exp2
     expm1
+    fake_quantize_per_channel_affine
+    fake_quantize_per_tensor_affine
     fix
+    float_power
     floor
     floor_divide
     fmod
     frac
+    frexp
+    gradient
     imag
+    ldexp
     lerp
     lgamma
     log
@@ -309,14 +346,21 @@ Pointwise Ops
     logit
     hypot
     i0
+    igamma
+    igammac
     mul
     multiply
     mvlgamma
+    nan_to_num
     neg
     negative
     nextafter
     polygamma
+    positive
     pow
+    quantized_batch_norm
+    quantized_max_pool1d
+    quantized_max_pool2d
     rad2deg
     real
     reciprocal
@@ -325,8 +369,10 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    sgn
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
@@ -336,6 +382,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -347,12 +394,17 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
+    all
+    any
     max
     min
     dist
     logsumexp
     mean
+    nanmean
     median
+    nanmedian
     mode
     norm
     nansum
@@ -384,6 +436,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -396,10 +449,13 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
     topk
+    msort
 
 
 Spectral Ops
@@ -408,10 +464,6 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    fft
-    ifft
-    rfft
-    irfft
     stft
     istft
     bartlett_window
@@ -434,11 +486,15 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
+    broadcast_shapes
     bucketize
     cartesian_prod
     cdist
     clone
     combinations
+    corrcoef
+    cov
     cross
     cummax
     cummin
@@ -448,17 +504,22 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    diff
     einsum
     flatten
     flip
     fliplr
     flipud
+    kron
     rot90
     gcd
     histc
+    histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp
+    ravel
     renorm
     repeat_interleave
     roll
@@ -472,6 +533,8 @@ Other Operations
     vander
     view_as_real
     view_as_complex
+    resolve_conj
+    resolve_neg
 
 
 BLAS and LAPACK Operations
@@ -494,6 +557,7 @@ BLAS and LAPACK Operations
     eig
     geqrf
     ger
+    inner
     inverse
     det
     logdet
@@ -520,6 +584,8 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
+    cumulative_trapezoid
     triangular_solve
     vdot
 
@@ -533,6 +599,27 @@ Utilities
     result_type
     can_cast
     promote_types
-    set_deterministic
-    is_deterministic
+    use_deterministic_algorithms
+    are_deterministic_algorithms_enabled
+    is_deterministic_algorithms_warn_only_enabled
+    set_deterministic_debug_mode
+    get_deterministic_debug_mode
+    set_warn_always
+    is_warn_always_enabled
     vmap
+    _assert
+
+
+.. Empty submodules added only for tracking.
+.. py:module:: torch.contrib
+.. py:module:: torch.utils.backcompat
+
+.. This submodule is split manually without a top level page.
+.. py:module:: torch.utils
+
+.. This module is only used internally for ROCm builds.
+.. py:module:: torch.utils.hipify
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.utils.model_dump

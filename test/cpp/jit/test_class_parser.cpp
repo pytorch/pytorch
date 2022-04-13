@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_base.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {
-const auto testSource = R"JIT(
+constexpr c10::string_view testSource = R"JIT(
   class FooTest:
     def __init__(self, x):
       self.x = x

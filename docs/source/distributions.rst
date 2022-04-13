@@ -167,6 +167,24 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`Kumaraswamy`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.kumaraswamy
+.. autoclass:: Kumaraswamy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`LKJCholesky`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lkj_cholesky
+.. autoclass:: LKJCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -328,12 +346,21 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
-    
+
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.weibull
 .. autoclass:: Weibull
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`Wishart`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.wishart
+.. autoclass:: Wishart
     :members:
     :undoc-members:
     :show-inheritance:

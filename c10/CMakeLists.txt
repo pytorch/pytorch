@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 project(c10 CXX)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -17,12 +17,13 @@ set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 set(C10_USE_NUMA ${USE_NUMA})
+set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
 
 # Note: if you want to add ANY dependency to the c10 library, make sure you
-# check with the core PyTorch developers as the dependendency will be
+# check with the core PyTorch developers as the dependency will be
 # transitively passed on to all libraries dependent on PyTorch.
 file(GLOB C10_SRCS
         *.cpp
@@ -32,6 +33,7 @@ file(GLOB C10_SRCS
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
+        mobile/*.cpp
         macros/*.cpp
         util/*.cpp
         )
@@ -48,6 +50,9 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+  target_compile_options(c10 PRIVATE "-Werror=sign-compare")
+endif()
 
 # ---[ Dependency of c10
 if(${USE_GFLAGS})
@@ -57,6 +62,7 @@ endif()
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
+target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
 find_package(Backtrace)
 if(Backtrace_FOUND)

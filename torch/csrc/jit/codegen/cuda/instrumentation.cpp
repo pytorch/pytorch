@@ -1,10 +1,9 @@
-
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -13,10 +12,11 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace inst {
 
 Trace::Trace() {
-  const char* trace_filename = getenv("PYTORCH_CUDA_FUSER_TRACE");
+  const char* trace_filename = getenv("PYTORCH_NVFUSER_TRACE");
   if (trace_filename != nullptr) {
     log_file_ = fopen(trace_filename, "w");
     TORCH_CHECK(log_file_ != nullptr, "Can't open trace file");
@@ -30,6 +30,10 @@ Trace::Trace() {
     fprintf(log_file_, "{\n\"traceEvents\": [\n");
     start_timestamp_ = Clock::now();
     logEvent('I', "TRACE_START");
+  }
+
+  if (getenv("PYTORCH_NVFUSER_DISABLE_NVTX")) {
+    record_nvtx_range_ = false;
   }
 }
 
@@ -51,7 +55,7 @@ void Trace::logEvent(char ph, const char* name, char sep) {
   const unsigned int tid = GetCurrentThreadId();
 #else
   const unsigned int pid = getpid();
-  const unsigned int tid = pthread_self();
+  const unsigned int tid = std::hash<pthread_t>{}(pthread_self());
 #endif // _WIN32
 
   fprintf(
@@ -66,6 +70,7 @@ void Trace::logEvent(char ph, const char* name, char sep) {
 }
 
 } // namespace inst
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

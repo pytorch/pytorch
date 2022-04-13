@@ -3,7 +3,6 @@
 
 
 
-from future.utils import bytes_to_native_str
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
@@ -270,7 +269,7 @@ class TestGradientCalculation(test_util.TestCase):
         in -> out, with UseInput
         in -> in
 
-        Since we overwrite in in op#1, but in will be needed by the gradient
+        Since we overwrite in op#1, but in will be needed by the gradient
         calculation of op#0, the gradient registry should raise an error.
         """
         operators = [
