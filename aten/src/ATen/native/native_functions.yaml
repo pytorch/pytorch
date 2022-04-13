@@ -7166,6 +7166,12 @@
   dispatch:
     CPU, CUDA: qr_orthogonalization_out
 
+- func: qr_orthogonalization_(Tensor(a!) self, float epsilon=1e-8) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: qr_orthogonalization_
+
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
     CPU, CUDA: geqrf_out
