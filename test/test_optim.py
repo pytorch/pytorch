@@ -193,6 +193,22 @@ class TestOptim(TestCase):
             optimizer.load_state_dict(state_dict)
             # Make sure we can still step
             optimizer.step()
+        # Make sure that optimizers that support foreach can load older models
+        state_dict = optimizer.state_dict()
+        if 'foreach' in state_dict['param_groups'][0]:
+            for group in state_dict['param_groups']:
+                del group['foreach']
+            optimizer.load_state_dict(state_dict)
+            # Make sure we can still step
+            optimizer.step()
+
+        # Make sure that loading optimizers with step not wrapped in tensor can work
+        state_dict = optimizer.state_dict()
+        if 'step' in state_dict['state'][0] and torch.is_tensor(state_dict['state'][0]['step']):
+            for state in state_dict['state'].values():
+                state['step'] = state['step'].item()
+            optimizer.load_state_dict(state_dict)
+            optimizer.step()
 
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
@@ -211,6 +227,12 @@ class TestOptim(TestCase):
 
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+
+        # Make sure that device of state['step'] is still CPU
+        new_state_dict = optimizer_cuda.state_dict()
+        if 'step' in state_dict['state'][0] and torch.is_tensor(state_dict['state'][0]['step']):
+            for state in new_state_dict['state'].values():
+                self.assertEqual(state['step'].device.type, 'cpu')
 
         for _i in range(20):
             optimizer.step(fn)
@@ -442,33 +464,20 @@ class TestOptim(TestCase):
             ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
-        kIterations = 11
+        kIterations = 4
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
             res = []
             for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
-                                      dtype=torch.float64, device=device, requires_grad=True)
-                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
-                                       dtype=torch.float64, device=device, requires_grad=True)
-                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
+                torch.manual_seed(1)
                 model = torch.nn.Sequential(torch.nn.Linear(2, 3),
                                             torch.nn.Sigmoid(),
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
-                model.to(torch.float64).to(device)
-
-                pretrained_dict = model.state_dict()
-                pretrained_dict['0.weight'] = weight
-                pretrained_dict['0.bias'] = bias
-                pretrained_dict['2.weight'] = weight2
-                pretrained_dict['2.bias'] = bias2
-                model.load_state_dict(pretrained_dict)
-
+                model.to(dtype=torch.float64, device=device)
                 optimizer = opt(model.parameters(), **params)
 
                 for _ in range(kIterations):
@@ -477,8 +486,9 @@ class TestOptim(TestCase):
                     loss = output.sum()
                     loss.backward()
 
+                    # Test that step behaves as expected (a no-op) when grads are set to None
                     if iter == 0:
-                        model.parameters().__next__().grad = None
+                        optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
 
@@ -616,20 +626,24 @@ class TestOptim(TestCase):
         self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias])
+                lambda weight, bias, maximize: optimizer([weight, bias], maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95))
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95)),
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
+                lambda weight, bias, maximize: optimizer([weight, bias], weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)

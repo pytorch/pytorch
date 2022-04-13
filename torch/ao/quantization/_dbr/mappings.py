@@ -6,6 +6,7 @@ toq = torch.ops.quantized
 from torch.ao.quantization.quantization_mappings import (
     DEFAULT_STATIC_QUANT_MODULE_MAPPINGS,
     DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
+    DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS,
 )
 
 import operator
@@ -23,7 +24,9 @@ fp32_to_int8_fun_mapping = {
     torch.mul: torch.ops.quantized.mul,
     operator.mul: torch.ops.quantized.mul,
     torch.cat: torch.ops.quantized.cat,
+    F.conv1d: torch.ops.quantized.conv1d,
     F.conv2d: torch.ops.quantized.conv2d,
+    F.conv3d: torch.ops.quantized.conv3d,
     F.linear: toq.linear,
 }
 
@@ -43,8 +46,12 @@ functions_supported_by_quantization = set([
     toq.add,
     toq.mul,
     toq.cat,
+    F.conv1d,
     F.conv2d,
+    F.conv3d,
+    toq.conv1d,
     toq.conv2d,
+    toq.conv3d,
     F.dropout,
     torch.relu,
     F.relu,
@@ -61,6 +68,10 @@ module_types_supported_by_quantization |= \
     set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
 module_types_supported_by_quantization |= \
     set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.values())
+module_types_supported_by_quantization |= \
+    set(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.keys())
+module_types_supported_by_quantization |= \
+    set(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.values())
 module_types_supported_by_quantization |= set([
     # these are quantizeable modules which do not need swaps
     nn.ReLU,
@@ -115,6 +126,18 @@ binary_related_ops = (
     (torch.Tensor.mul, torch.Tensor.mul_),
 )
 
+conv_ops = set([
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
+])
+
+conv_prepack_fns = {
+    F.conv1d: toq.conv1d_prepack,
+    F.conv2d: toq.conv2d_prepack,
+    F.conv3d: toq.conv3d_prepack,
+}
+
 # TODO(future PR): reuse global mapping
 a_related_to_b = set()
 for a, b in binary_related_ops:
@@ -124,6 +147,9 @@ for a, b in DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.items():
     a_related_to_b.add((a, b))
     a_related_to_b.add((b, a))
 for a, b in DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.items():
+    a_related_to_b.add((a, b))
+    a_related_to_b.add((b, a))
+for a, b in DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.items():
     a_related_to_b.add((a, b))
     a_related_to_b.add((b, a))
 for a, b in fp32_to_int8_fun_mapping.items():
