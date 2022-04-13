@@ -252,6 +252,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
+    "torch/csrc/jit/passes/cuda_graph_fuser.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
@@ -419,6 +420,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/debug_util.cpp",
+    "torch/csrc/lazy/core/dynamic_ir.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -440,7 +442,6 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/diagonal.cpp",
     "torch/csrc/lazy/core/view_ops/diagonal_view_update.cpp",
-    "torch/csrc/lazy/core/view_ops/expand.cpp",
     "torch/csrc/lazy/core/view_ops/narrow.cpp",
     "torch/csrc/lazy/core/view_ops/narrow_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/permute.cpp",
@@ -457,6 +458,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/cast.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
+    "torch/csrc/lazy/ts_backend/ops/expand.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
@@ -661,7 +663,18 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 ]
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
-    return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+    enable_flatbuffer = bool(native.read_config("fbcode", "caffe2_enable_flatbuffer", None))
+    flatbuffer_serializer_sources = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
+    ]
+    if enable_flatbuffer:
+        return (
+            libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources +
+            flatbuffer_serializer_sources
+        )
+    else:
+        return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
@@ -1022,6 +1035,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/ParallelNativeTBB.cpp",
     "aten/src/ATen/ParallelOpenMP.cpp",
     "aten/src/ATen/ParallelThreadPoolNative.cpp",
+    "aten/src/ATen/PythonTorchFunctionTLS.cpp",
     "aten/src/ATen/ScalarOps.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
     "aten/src/ATen/SparseTensorImpl.cpp",
