@@ -4033,19 +4033,6 @@ class TestQuantizeFx(QuantizationTestCase):
     def _assertFixedQParamsFakeQuantizeEqual(self, fq1, fq2):
         self.assertEqual(fq1()._observer_ctr, fq2()._observer_ctr)
 
-    def test_fixed_qparams_patterns(self):
-        hard_sigmoid_keys = [torch.nn.Hardsigmoid, torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
-        sigmoid_keys = [torch.nn.Sigmoid, torch.sigmoid, "sigmoid", "sigmoid_"]
-        tanh_keys = [torch.nn.Tanh, torch.tanh, "tanh", "tanh_"]
-        for k in hard_sigmoid_keys + sigmoid_keys:
-            self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP[k], default_affine_fixed_qparams_observer)
-            self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[k],
-                                                      default_affine_fixed_qparams_fake_quant)
-        for k in tanh_keys:
-            self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP[k], default_symmetric_fixed_qparams_observer)
-            self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[k],
-                                                      default_symmetric_fixed_qparams_fake_quant)
-
     def test_register_patterns(self):
         @register_fusion_pattern("dummy_fusion")
         class DummyFusion():
@@ -4266,6 +4253,28 @@ class TestQuantizeFx(QuantizationTestCase):
                         else:
                             self.assertEqual(mod.quant_min, 0)
                             self.assertEqual(mod.quant_max, 255)
+
+    def test_prepare_mode(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def _test(prepare_fn, qconfig_dict):
+            m = LinearModel()
+            m1 = copy.deepcopy(m)
+            m1.train()
+            prepare_fn(m1, qconfig_dict)
+            m2 = copy.deepcopy(m)
+            m2.eval()
+            prepare_fn(m2, qconfig_dict)
+
+        # Ensure prepare_fx and prepare_qat_fx work in both training and eval modes
+        _test(prepare_fx, get_default_qconfig_dict())
+        _test(prepare_qat_fx, get_default_qat_qconfig_dict())
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -4855,10 +4864,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_binary_op_float16_impl(
             operator.add, operator.iadd)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_sub(self):
         self._test_binary_op_float16_impl(operator.sub, operator.isub)
         self._test_binary_op_float16_impl(torch.sub, None)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_div(self):
         self._test_binary_op_float16_impl(operator.truediv, operator.itruediv)
         self._test_binary_op_float16_impl(torch.div, None)
@@ -4869,6 +4880,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.mul, operator.imul, torch.ops.quantized.mul)
         self._test_binary_op_float16_impl(operator.mul, operator.imul)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_sum(self):
         class Sum(torch.nn.Module):
             def forward(self, x):
@@ -4892,6 +4904,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=node_occurrence,
             custom_qconfig_dict=custom_qconfig_dict)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
             def __init__(self):
@@ -4998,7 +5011,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 6,
+            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 5,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -5014,14 +5027,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = torch.mul(x, 1.0)
                 x = self.conv1(x)
                 x = torch.mul(x, 1.0)
-                # TODO: add support for add + torch.relu?
                 x = torch.relu(x)
                 x = self.conv2(x)
                 return x
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 6,
+            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 5,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -5441,6 +5453,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_gelu_reference(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -5465,6 +5478,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_softmax_reference(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -5488,6 +5502,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_silu_reference(self):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
@@ -5519,6 +5534,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_mish_reference(self):
         module = torch.nn.Mish
         functional = torch.nn.functional.mish
@@ -6474,6 +6490,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence)
 
+    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_qmatmul(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -6872,15 +6889,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             model = EmbeddingBagLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
-            convert_custom_config_dict = {
-                "additional_object_mapping": {
-                    "static": {
-                        torch.nn.qat.EmbeddingBag: nn.quantized.EmbeddingBag,
-                    }
-                }
-            }
             quant_model = convert_fx(prepared_fx_model,
-                                     convert_custom_config_dict=convert_custom_config_dict,
                                      qconfig_dict=qconfig_dict)
 
             def checkQuantized(model):

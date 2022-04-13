@@ -599,6 +599,16 @@ void addInputs(Node* n, const char* name, int64_t value) {
   }
 }
 
+void addInputs(Node* n, const char* name, c10::SymInt value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
+
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
