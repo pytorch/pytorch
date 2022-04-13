@@ -146,14 +146,18 @@ class C10_API intrusive_ptr_target {
   // intrusive_ptr_target supports copy and move: but refcount and weakcount
   // don't participate (since they are intrinsic properties of the memory
   // location)
-  intrusive_ptr_target(intrusive_ptr_target&& other) noexcept
+  intrusive_ptr_target(intrusive_ptr_target&& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(intrusive_ptr_target&& other) noexcept {
+
+  intrusive_ptr_target& operator=(intrusive_ptr_target&& /*other*/) noexcept {
     return *this;
   }
-  intrusive_ptr_target(const intrusive_ptr_target& other) noexcept
+
+  intrusive_ptr_target(const intrusive_ptr_target& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(const intrusive_ptr_target& other) noexcept {
+
+  intrusive_ptr_target& operator=(
+      const intrusive_ptr_target& /*other*/) noexcept {
     return *this;
   }
 
@@ -624,7 +628,7 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

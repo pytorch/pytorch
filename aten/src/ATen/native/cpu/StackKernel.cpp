@@ -1,6 +1,6 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
-
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/cpu/StackKernel.h>

@@ -7,7 +7,6 @@ import collections
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
 
-
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
 
@@ -573,7 +572,6 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
     else:
         return tensor_name in parametrizations
 
-
 def remove_parametrizations(
     module: Module, tensor_name: str, leave_parametrized: bool = True
 ) -> Module:
@@ -644,3 +642,75 @@ def remove_parametrizations(
         orig_cls = module.__class__.__bases__[0]
         module.__class__ = orig_cls
     return module
+
+def type_before_parametrizations(module: Module) -> type:
+    r"""Returns the module type before parametrizations were applied and if not,
+    then it returns the module type.
+
+    Args:
+        module (nn.Module): module to get type of
+    """
+    if is_parametrized(module):
+        return module.__class__.__bases__[0]
+    else:
+        return type(module)
+
+def transfer_parametrizations_and_params(
+    from_module: Module, to_module: Module, tensor_name: Optional[str] = None
+) -> Module:
+    r"""Transfers parametrizations and the parameters they parametrize from from_module
+    to to_module. If tensor_name is specified, only transfers the specified parameter, otherwise
+    transfers all parametrized parameters. If those parameters do not exist in to_module, it will create them.
+    Does nothing if from_module is not parametrized.
+
+    Args:
+        from_module (nn.Module): module to transfer from
+        to_module (nn.Module): module to transfer to
+        tensor_name (str, optional): parameter to transfer
+
+    Returns:
+        Module: to_module
+    """
+    if is_parametrized(from_module):
+        assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
+
+        # get list of all params or the single param to transfer
+        parameters_to_transfer: Union[list, ModuleDict] = (
+            from_module.parametrizations if tensor_name is None else [tensor_name]
+        )
+
+        assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
+        for parameter_name in parameters_to_transfer:
+
+            # initialize the to-be-transfered param in to_module if it doesn't exist already
+            if not hasattr(to_module, parameter_name):
+                setattr(
+                    to_module,
+                    parameter_name,
+                    Parameter(getattr(from_module, parameter_name)),
+                )
+
+            # apply the params's parametrizations to to_module
+            for param_func in from_module.parametrizations[parameter_name]:
+                register_parametrization(to_module, parameter_name, param_func)
+            assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
+
+            # make values match, original values can be stored in either original or
+            # original0, original1..., need to check both cases
+            if hasattr(from_module.parametrizations[parameter_name], "original"):
+                to_module.parametrizations[parameter_name].original = \
+                    from_module.parametrizations[parameter_name].original
+            else:
+                num = 0
+                orig_num = "original" + str(num)
+                # loop through each original# until all values have been set
+                while hasattr(from_module.parametrizations[parameter_name], orig_num):
+                    setattr(
+                        to_module.parametrizations[parameter_name],
+                        orig_num,
+                        getattr(from_module.parametrizations[parameter_name], orig_num),
+                    )
+                    num = num + 1
+                    orig_num = "original" + str(num)
+
+    return to_module
