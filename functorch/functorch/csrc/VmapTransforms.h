@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <functorch/csrc/Macros.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 
 namespace at {
@@ -54,11 +55,11 @@ using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
 // argument.
 
 // VmapTransform for operators that take tensors with multiple batch dims.
-// Given one or more logical views on Tensors, `logicalToPhysical` 
+// Given one or more logical views on Tensors, `logicalToPhysical`
 // permutes all of the batch dims to the front of the tensor, aligns
 // and expands the batch dims to match each other (according to their `level`),
 // and returns a VmapPhysicalView on the tensor(s).
-struct TORCH_API MultiBatchVmapTransform {
+struct FUNCTORCH_API MultiBatchVmapTransform {
   static VmapPhysicalView logicalToPhysical(const Tensor& logical_tensor);
   static VmapPhysicalViewVec logicalToPhysical(TensorList logical_tensors);
 };
@@ -82,7 +83,7 @@ struct TORCH_API MultiBatchVmapTransform {
 // actually *need* to return a tensor of size (1, 2) for the second tensor
 // because the broadcasting operation takes care of that for us, but we do
 // it anyways to keep things simple.
-struct TORCH_API BroadcastingVmapTransform {
+struct FUNCTORCH_API BroadcastingVmapTransform {
   static VmapPhysicalViewVec logicalToPhysical(TensorList logical_tensors);
 };
 
@@ -114,7 +115,7 @@ struct VmapPhysicalToLogicalMap;
 //              ^
 //              |
 //   levels: 012345
-struct TORCH_API VmapPhysicalView {
+struct FUNCTORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {
     // TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
@@ -156,7 +157,7 @@ struct TORCH_API VmapPhysicalView {
 // to a logical one (BatchedTensor). It holds some levels that are used to do the
 // mapping and assumes that the batch dimensions in the physical tensor all
 // occur at the front of the tensor.
-struct TORCH_API VmapPhysicalToLogicalMap {
+struct FUNCTORCH_API VmapPhysicalToLogicalMap {
   VmapPhysicalToLogicalMap(std::bitset<kVmapNumLevels> levels): levels_(levels) {}
 
   // Maps a physical tensor to a new logical tensor (BatchedTensor).

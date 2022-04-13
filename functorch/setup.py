@@ -71,7 +71,8 @@ class clean(distutils.command.clean.clean):
 def get_extensions():
     extension = CppExtension
 
-    define_macros = []
+    # See functorch/csrc/Macros.h
+    define_macros = [('FUNCTORCH_BUILD_MAIN_LIB', None)]
 
     extra_link_args = []
     extra_compile_args = {"cxx": [

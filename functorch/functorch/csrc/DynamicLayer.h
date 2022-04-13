@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #pragma once
+#include <functorch/csrc/Macros.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/function_schema.h>
 #include <c10/util/Optional.h>
@@ -25,7 +26,7 @@ enum RandomnessType {
     END
 };
 
-struct TORCH_API DynamicLayer {
+struct FUNCTORCH_API DynamicLayer {
   explicit DynamicLayer(
       DispatchKey key,
       int64_t layerId,
@@ -65,24 +66,24 @@ struct TORCH_API DynamicLayer {
   optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
 };
 
-TORCH_API int64_t initAndPushDynamicLayer(
+FUNCTORCH_API int64_t initAndPushDynamicLayer(
     DispatchKey key,
     optional<int64_t> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
     optional<bool> prev_grad_mode = nullopt,
     optional<bool> prev_fwd_grad_mode = nullopt);
-TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
-TORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
-TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
-TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
-TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
+FUNCTORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
+FUNCTORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
+FUNCTORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
+FUNCTORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
+FUNCTORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
 
 // NB: Not lock safe, you should only call this from Python where the GIL will
 // prevent race conditions.
-TORCH_API bool areTransformsActive();
+FUNCTORCH_API bool areTransformsActive();
 
 // NB: not lock safe. TODO: does it need a lock?
-TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
+FUNCTORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 
 // Returns if an operator is in-place. An operator is inplace if:
 // 1. The first argument is a Tensor and it is being written to
