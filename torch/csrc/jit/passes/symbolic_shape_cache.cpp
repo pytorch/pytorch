@@ -194,7 +194,7 @@ c10::SymbolicShape CanonicalizedSymbolicShape::toSymbolicShape(
 
 size_t CanonicalizedSymbolicShape::hash() const {
   if (!values_.has_value()) {
-    return 98024139491283; // random value to prevent hash collisions
+    return 0x8cc80c80; // random value to prevent hash collisions
   }
   return c10::hash<std::vector<int64_t>>()(values_.value());
 }
