@@ -9,6 +9,7 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 _reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding
 
+# TODO: factor out the common parts to ConvNd
 class ConvReLU1d(nnq.Conv1d):
     r"""
     A ConvReLU1d module is a fused module of Conv1d and ReLU
@@ -23,11 +24,11 @@ class ConvReLU1d(nnq.Conv1d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', device=None, dtype=None):
         super(ConvReLU1d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -53,6 +54,12 @@ class ConvReLU1d(nnq.Conv1d):
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
         return super(ConvReLU1d, cls).from_float(mod)
 
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU1d, \
+            "BatchNorm1d should be fused into Conv1d before converting to reference module"
+        return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
+
 class ConvReLU2d(nnq.Conv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU
@@ -67,11 +74,11 @@ class ConvReLU2d(nnq.Conv2d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', device=None, dtype=None):
         super(ConvReLU2d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -96,6 +103,12 @@ class ConvReLU2d(nnq.Conv2d):
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
         return super(ConvReLU2d, cls).from_float(mod)
 
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU2d, \
+            "BatchNorm2d should be fused into Conv2d before converting to reference module"
+        return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
+
 
 class ConvReLU3d(nnq.Conv3d):
     r"""
@@ -110,12 +123,12 @@ class ConvReLU3d(nnq.Conv3d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', device=None, dtype=None):
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
         super(ConvReLU3d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -145,3 +158,9 @@ class ConvReLU3d(nnq.Conv3d):
                 mod.bn.bias,
             )
         return super(ConvReLU3d, cls).from_float(mod)
+
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU3d, \
+            "BatchNorm3d should be fused into Conv3d before converting to reference module"
+        return super().from_reference(ref_qconv[0], output_scale, output_zero_point)

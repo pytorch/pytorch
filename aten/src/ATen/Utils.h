@@ -91,29 +91,6 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
-/**
- * Utility function to static cast input Generator* to
- * the backend generator type (CPU/CUDAGeneratorImpl etc.)
- */
-template <typename T>
-static inline T * check_generator(c10::optional<Generator> gen) {
-  TORCH_CHECK(gen.has_value(), "Expected Generator but received nullopt");
-  TORCH_CHECK(gen->defined(), "Generator with undefined implementation is not allowed");
-  TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
-  return gen->get<T>();
-}
-
-/**
- * Utility function used in tensor implementations, which
- * supplies the default generator to tensors, if an input generator
- * is not supplied. The input Generator* is also static casted to
- * the backend generator type (CPU/CUDAGeneratorImpl etc.)
- */
-template <typename T>
-static inline T* get_generator_or_default(const c10::optional<Generator>& gen, const Generator& default_gen) {
-  return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
-}
-
 using at::detail::check_size_nonnegative;
 
 namespace detail {

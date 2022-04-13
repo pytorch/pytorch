@@ -147,7 +147,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
-    axes.reserve(inputTensorValues[3].sizes()[0]);
+    axes.resize(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
     for (const auto i : c10::irange(inputTensorValues[3].sizes()[0])) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
@@ -329,9 +329,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (
-        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
-        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+    } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       if (!node->hasAttributeS("axes")) {
         return c10::nullopt;
@@ -375,9 +373,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         }
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (
-        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
-        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+    } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       updated_val = inputTensorValues[0];
       if (node->hasAttributeS("axes")) {
