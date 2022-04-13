@@ -14,22 +14,22 @@ def define_targets(rules):
         tools = ["//tools/setup_helpers:generate_code"],
         outs = _GENERATED_CPP + GENERATED_AUTOGRAD_H + GENERATED_LAZY_H + GENERATED_TESTING_PY,
         cmd = "$(location //tools/setup_helpers:generate_code) " +
-        "--install_dir $OUT " +
-        "--native-functions-path $(location //aten:native_functions.yaml) " +
-        "--gen_lazy_ts_backend",
+              "--install_dir $OUT " +
+              "--native-functions-path $(location //aten:native_functions.yaml) " +
+              "--gen_lazy_ts_backend",
     )
 
     rules.genrule(
         name = "version_h",
         srcs = [
             ":torch/csrc/api/include/torch/version.h.in",
-            ":version.txt"
+            ":version.txt",
         ],
         outs = ["torch/csrc/api/include/torch/version.h"],
         cmd = "$(location //tools/setup_helpers:gen_version_header) " +
               "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
               "--version-path $(location :version.txt) --output-path $@ ",
-        tools = ['//tools/setup_helpers:gen_version_header'],
+        tools = ["//tools/setup_helpers:gen_version_header"],
     )
 
 # In the open-source build, these are generated into
