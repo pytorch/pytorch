@@ -127,7 +127,11 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  0x9L: Change serialization format from pickle to format This version is to
 //  serve migration. v8 pickle and v9 flatbuffer are the same. Refer to the
 //  summary of https://github.com/pytorch/pytorch/pull/75201 for more details.
+#if defined(ENABLE_FLATBUFFER)
+constexpr uint64_t kProducedBytecodeVersion = 0x9L;
+#else
 constexpr uint64_t kProducedBytecodeVersion = 0x8L;
+#endif
 
 // static_assert(
 //     kProducedBytecodeVersion >= kProducedFileFormatVersion,

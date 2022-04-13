@@ -224,13 +224,23 @@ struct TORCH_API Module : public Object {
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
       bool save_mobile_debug_info = false,
-      bool use_flatbuffer = false) const;
+#if defined(ENABLE_FLATBUFFER)
+      bool use_flatbuffer = true
+#else
+      bool use_flatbuffer = false
+#endif
+  ) const;
 
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
       bool save_mobile_debug_info = false,
-      bool use_flatbuffer = false) const;
+#if defined(ENABLE_FLATBUFFER)
+      bool use_flatbuffer = true
+#else
+      bool use_flatbuffer = false
+#endif
+  ) const;
 
   Module copy() const;
 
