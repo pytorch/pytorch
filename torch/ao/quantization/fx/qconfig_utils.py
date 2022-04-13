@@ -1,6 +1,7 @@
 import torch
 from collections import defaultdict
-from typing import Callable, Any, Dict, Tuple, Set, Optional
+from typing import Callable, Any, Dict, Tuple, Set, Optional, List
+from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
@@ -13,7 +14,10 @@ from torch.fx.graph import (
 )
 from torch.nn.intrinsic import _FusedModule
 
-from ..utils import _parent_name
+from ..utils import (
+    _parent_name,
+    get_qconfig_dtypes,
+)
 from ..qconfig_dict_utils import (
     get_object_type_qconfig,
     maybe_adjust_qconfig_for_module_type_or_name,
@@ -215,7 +219,6 @@ def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Option
                                                "non_traceable_module_class",
                                                "additional_fuser_method_mapping",
                                                "additional_qat__module_mapping",
-                                               "additional_fusion_pattern",
                                                "additional_quant_pattern",
                                                "input_quantized_idxs",
                                                "output_quantized_idxs",
@@ -283,6 +286,34 @@ def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[An
                     Updated qconfig {} to {} for key {} {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k, name)
         else:
             assert "Unsupported key in convert_qconfig_dict {}".format(k)
+
+
+def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[Dict[str, Any]]):
+    for dtype_config in dtype_configs:
+        is_dynamic = dtype_config.get("is_dynamic", False)
+        input_dtype = dtype_config.get("input_dtype", torch.float)
+        weight_dtype = dtype_config.get("weight_dtype", torch.float)
+        bias_dtype = dtype_config.get("bias_dtype", torch.float)
+        output_dtype = dtype_config.get("output_dtype", torch.float)
+        qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
+            get_qconfig_dtypes(qconfig)
+        qconfig_bias_dtype = torch.float16 \
+            if qconfig_activation_dtype == torch.float16 and \
+            qconfig_weight_dtype == torch.float16 \
+            else torch.float
+
+        if is_dynamic:
+            is_match = input_dtype == qconfig_compute_dtype and \
+                output_dtype == torch.float and \
+                weight_dtype == qconfig_weight_dtype
+        else:
+            is_match = input_dtype == qconfig_activation_dtype and \
+                output_dtype == qconfig_activation_dtype and \
+                weight_dtype == qconfig_weight_dtype and \
+                bias_dtype == qconfig_bias_dtype
+        if is_match:
+            return True
+    return False
 
 # TODO: rename this file to config_utils
 def get_standalone_module_configs(
