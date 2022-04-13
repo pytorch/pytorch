@@ -187,7 +187,6 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-
     lint_messages = check_files(list(filenames), args.config, args.binary, args.retries)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
