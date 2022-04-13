@@ -550,6 +550,7 @@ def _sparse_coo_scatter_reduction_helper(op,
     # Reduce dense dimensions
     if len(reduced_dense_dims) > 0:
         if reduce == "sum":
+            new_values = values
             new_values = op(new_values, dim=reduced_dense_dims, keepdim=bool(keepdim))
         else:
             # FIXME: Implement reductions for dense dimensions for ops with non-zero reduction identities
@@ -835,7 +836,6 @@ def prod(input: Tensor,
         return _sparse_coo_scatter_reduction_helper(torch.prod, mask_input, dim_, bool(keepdim), dtype)
     elif input.layout == torch.sparse_csr:
         if mask is None:
-            # [Note: Handling None masks]
             # mask is None corresponds to all-True mask. The
             # unspecified elements in the CSR tensor correspond to
             # zero values. Hence, the prod reduction result is
@@ -988,7 +988,6 @@ elements, have ``nan`` values.
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
-
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
