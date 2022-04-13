@@ -79,6 +79,8 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -124,6 +126,8 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install requirements
         id: requirements
         run: |
@@ -131,9 +135,6 @@ jobs:
       - name: Install Jinja2
         run: |
           pip3 install Jinja2==3.0.1 --user
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -209,6 +210,8 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -235,6 +238,242 @@ jobs:
             false
           fi
 
+<<<<<<< HEAD
+  flake8-py3:
+    name: flake8-py3
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      # [see note: pytorch repo ref]
+      # fetch-depth 2 required to allow us to use github.event.pull_request.head.sha
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+      - name: Prepare output dir with HEAD commit SHA
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir flake8-output
+          cd flake8-output
+          echo "$HEAD_SHA" > commit-sha.txt
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip3 install typing-extensions==3.10 --user # for tools/linter/translate_annotations.py
+          pip3 install -r requirements-flake8.txt --user
+          flake8 --version
+      - name: Run flake8
+        run: |
+          set -eux
+          flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+      - name: Translate annotations
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          tools/linter/translate_annotations.py \
+            --file="${GITHUB_WORKSPACE}"/flake8-output.txt \
+            --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
+            --commit="$HEAD_SHA" \
+            > flake8-output/annotations.json
+      - name: Fail if there were any warnings
+        run: |
+          set -eu
+          # Re-output flake8 status so GitHub logs show it on the step that actually failed
+          cat "${GITHUB_WORKSPACE}"/flake8-output.txt
+          if [ -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]; then
+            echo 'Please fix the above Flake8 warnings.'
+            false
+          fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: flake8-output/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: [self-hosted, linux.2xlarge]
+    container:
+      # ubuntu20.04-cuda11.2-py3.8-tidy11
+      image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
+    steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) to allow tools/linter/clang_tidy.py to do its thing
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          no-sudo: true
+          submodules: false
+      - name: Prepare output dir with HEAD commit SHA
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          mkdir clang-tidy-output
+          cd clang-tidy-output
+          echo "$HEAD_SHA" > commit-sha.txt
+      - name: Fetch PR diff
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+      - name: Generate build files
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          python3 -m tools.linter.clang_tidy.generate_build_files
+      - name: Run PR clang-tidy
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+
+          # The Docker image has our custom build, so we don't need to install it
+          python3 -m tools.linter.clang_tidy \
+            --clang-tidy-exe "$(which clang-tidy)" \
+            --diff-file pr.diff \
+            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+
+      # Run clang-tidy on a smaller subset of the codebase on master until we
+      # make the repository clang-tidy clean
+      - name: Run master clang-tidy
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+
+          python3 -m tools.linter.clang_tidy \
+            --paths \
+              torch/csrc/cuda \
+              torch/csrc/fx \
+              torch/csrc/utils \
+              torch/csrc/generic \
+              torch/csrc/deploy \
+              torch/csrc/onnx \
+              torch/csrc/tensor \
+            --clang-tidy-exe "$(which clang-tidy)" \
+            --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+
+      - name: Annotate output
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          sed --in-place 's/^\.\.\///g' clang-tidy-output.txt
+          tools/linter/translate_annotations.py \
+            --file=clang-tidy-output.txt \
+            --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
+            --commit="$HEAD_SHA" \
+            > clang-tidy-output/annotations.json
+      - name: Check for warnings
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          set -eu
+          cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+          if grep -Fq "Warnings detected!" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
+            echo 'Please fix the above clang-tidy warnings.'
+            false
+          fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'clang-tidy'
+          linter_output_path: clang-tidy/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
+
+  cmakelint:
+    name: cmakelint
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip3 install cmakelint==1.4.1 --user
+          cmakelint --version
+      - name: Run cmakelint
+        run: |
+          set -eux
+          git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
+          grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/|cmake/Caffe2Config.cmake.in|aten/src/ATen/ATenConfig.cmake.in|cmake/Caffe2ConfigVersion.cmake.in|cmake/TorchConfig.cmake.in|cmake/TorchConfigVersion.cmake.in|cmake/cmake_uninstall.cmake.in)' | \
+          xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+
+  mypy:
+    name: mypy
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+      - name: Install dependencies
+        run: |
+          set -eux
+          python3 -mpip install -r requirements.txt --user
+          python3 -mpip install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
+          python3 -mpip install expecttest==0.1.3 mypy==0.812 --user
+          # Needed to check tools/render_junit.py
+          python3 -mpip install junitparser==2.1.1 rich==10.9.0 --user
+      - name: Run autogen
+        run: |
+          set -eux
+          time python3 -mtools.generate_torch_version --is_debug=false
+          time python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+      - name: Run mypy
+        env:
+          MYPY_FORCE_COLOR: 1
+          TERM: xterm-color
+        run: |
+          set -eux
+          STATUS=
+          for CONFIG in mypy*.ini; do
+            if ! python3 -mmypy --config="$CONFIG"; then
+              STATUS=fail
+            fi
+          done
+          if [ -n "$STATUS" ]; then
+            echo 'Please fix the above mypy warnings.'
+            false
+          fi
+
+=======
+>>>>>>> dcdfedf154 ([ci] use lintrunner in CI)
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
@@ -249,6 +488,8 @@ jobs:
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
@@ -283,6 +524,8 @@ jobs:
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install torch
         if: matrix.with_torch == 'with_torch'
         run: |

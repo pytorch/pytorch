@@ -132,45 +132,6 @@ if sys.version_info >= (3, 8):
             self.assertIn("SC2148: Tips depend on target shell", f.getvalue())
             self.assertIn("SC2283: Remove spaces around = to assign", f.getvalue())
 
-        async def test_mypy(self):
-            self.maxDiff = None
-            f = io.StringIO()
-            with contextlib.redirect_stdout(f):
-                # Quicklint assumes this has been run already and doesn't work
-                # without it
-                _, _, _ = await actions_local_runner.shell_cmd(
-                    [
-                        f"{sys.executable}",
-                        "tools/actions_local_runner.py",
-                        "--job",
-                        "mypy",
-                        "--file",
-                        ".github/workflows/lint.yml",
-                        "--step",
-                        "Run autogen",
-                    ],
-                    redirect=True,
-                )
-
-                await actions_local_runner.Mypy(self.test_py_files, True).run()
-
-            # Should exclude the aten/ file; also, apparently mypy
-            # typechecks files in reverse order
-            expected = textwrap.dedent(
-                """
-                x mypy (skipped typestub generation)
-                torch/some_stubs.pyi:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
-                torch/some_stubs.pyi:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
-                torch/some_cool_file.py:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
-                torch/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
-                caffe2/some_cool_file.py:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
-                caffe2/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
-            """  # noqa: B950
-            ).lstrip(
-                "\n"
-            )
-            self.assertEqual(expected, f.getvalue())
-
 
 if __name__ == "__main__":
     unittest.main()
