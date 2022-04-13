@@ -228,6 +228,91 @@ class TestMisc(JitTestCase):
         self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
+    def test_math_inf(self):
+        from math import inf
+
+        def foo():
+            return inf
+
+        self.checkScript(foo, ())
+
+    def test_list_literal_infer(self):
+        def expects_intlist(x: List[int]):
+            x.append(3)
+            return x
+
+        def foo():
+            return expects_intlist([])
+
+        self.checkScript(foo, ())
+
+        def annotated_list_fail():
+            return expects_intlist(torch.jit.annotate([], List[Tensor]))
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(annotated_list_fail)
+
+        def non_temporary_fail():
+            a = []
+            return expects_intlist(a)
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(non_temporary_fail)
+
+
+        @torch.jit.script
+        def test_return():
+            return []
+
+        FileCheck().check("Tensor[] = prim::ListConstruct").run(test_return.graph)
+
+    def test_legacy_tensor_constructor(self):
+        # testing PyObject overload
+        def test_all_dtypes():
+            return (
+                torch.BoolTensor([2]),
+                torch.LongTensor([3]),
+                torch.ByteTensor([4]),
+                torch.CharTensor([5]),
+                torch.DoubleTensor([6]),
+                torch.FloatTensor([7]),
+                torch.IntTensor([8]),
+                torch.ShortTensor([1]),
+                torch.HalfTensor([1]),
+            )
+
+        self.checkScript(test_all_dtypes, ())
+
+        # now test empty overload
+        def empty_overload():
+            return torch.LongTensor(2, 3, 4)
+
+        eager = empty_overload()
+        jit = torch.jit.script(empty_overload)()
+        eager[:] = 1
+        jit[:] = 1
+        self.assertEqual(eager, jit)
+
+        def no_inputs():
+            return torch.DoubleTensor()
+
+        self.checkScript(no_inputs, ())
+
+        # bad schema
+        def multiple_args():
+            return torch.LongTensor(1, [2])
+
+        with self.assertRaisesRegex(RuntimeError, "multiple positional arguments that were not all integers"):
+            torch.jit.script(multiple_args)
+
+        # kwarg bad schema
+        def bad_kwarg():
+            return torch.LongTensor(hello="1")
+
+        with self.assertRaisesRegex(RuntimeError, "hello"):
+            torch.jit.script(bad_kwarg)
+
+
     def test_broadcasting_list(self):
         """
         Test BroadcastingList and torch.nn._size_N_t alias
