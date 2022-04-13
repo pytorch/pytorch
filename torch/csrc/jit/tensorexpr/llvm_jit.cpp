@@ -120,6 +120,8 @@ static void registerIntrinsics(
   }
   assertSuccess(JD.define(
       absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
+  assertSuccess(
+      JD.define(absoluteSymbols({entry("nnc_aten_free", nnc_aten_free)})));
 }
 
 namespace llvm {

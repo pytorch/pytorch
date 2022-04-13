@@ -503,8 +503,8 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   Tensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, commonDtype, "mul_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+    at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),
             I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),

@@ -69,6 +69,11 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 
 namespace tensorexpr {
 
+OperatorSet& getCustomOperatorSet() {
+  static OperatorSet _g_custom_operator_set{};
+  return _g_custom_operator_set;
+}
+
 static const OperatorSet& supported_non_eltwise_set() {
   // clang-format off
   static const OperatorSet supported_non_eltwise_set{
@@ -101,6 +106,7 @@ bool isSupported(Node* node) {
   if (get_tensorexpr_elementwise_set().contains(node) ||
       node->isMemberOf(supported_non_eltwise_set()) ||
       node->isMemberOf(supported_misc_set) ||
+      node->isMemberOf(getCustomOperatorSet()) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -140,7 +146,6 @@ bool isSupported(Node* node) {
 
   return false;
 }
-
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
@@ -185,6 +190,24 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       it->output()->replaceAllUsesWith(it->input());
       auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
 
+      TensorTypePtr input_tensor_type = nullptr;
+      bool input_is_optional = false;
+      if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
+        input_tensor_type = it->input()->type()->expect<TensorType>();
+      } else {
+        input_tensor_type = it->input()
+                                ->type()
+                                ->expectRef<OptionalType>()
+                                .getElementType()
+                                ->expect<TensorType>();
+        input_is_optional = true;
+      }
+
+      if (input_is_optional) {
+        it.destroyCurrent();
+        continue;
+      }
+
       // A value can be profiled with differently typed uses.
       // This can occur from:
       // - having a use which is not executed, so the type will be
@@ -204,18 +227,18 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       if (profiled_type == TensorType::get()) {
         continue;
       }
+
       // If we encounter non-identical profiled types for the same value, merge
       // them.  This situation can happen if, e.g., loop unrolling duplicates
       // profiled types in a loop body in a manner that isn't logically
       // consistent (see TestTEFuser.test_unrolled_cat).
-      auto input_type = it->input()->type()->expect<TensorType>();
-      if (input_type == TensorType::get()) {
+      if (input_tensor_type == TensorType::get()) {
         it->input()->setType(profiled_type);
       } else {
-        it->input()->setType(input_type->merge(*profiled_type));
+        it->input()->setType(input_tensor_type->merge(*profiled_type));
       }
-      it.destroyCurrent();
 
+      it.destroyCurrent();
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);
@@ -230,9 +253,9 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
-void removeTensorTypeSpecialization(Value* v) {
+bool hasTensorTypeSpecialization(Value* v) {
   if (!v->type()->cast<TensorType>()) {
-    return;
+    return false;
   }
   // Constants & TensorExprGroup will always produce specialized tensor type,
   // TypeCheck are inserted by this pass and only used by fusion groups that
@@ -240,9 +263,18 @@ void removeTensorTypeSpecialization(Value* v) {
   if (v->node()->kind() == prim::Constant ||
       v->node()->kind() == prim::TypeCheck ||
       v->node()->kind() == prim::TensorExprGroup) {
-    return;
+    return false;
   }
-  v->setType(TensorType::get());
+  if (v->type() == TensorType::get()) {
+    return false;
+  }
+  return true;
+}
+
+void removeTensorTypeSpecialization(Value* v) {
+  if (hasTensorTypeSpecialization(v)) {
+    v->setType(TensorType::get());
+  }
 }
 
 void removeTensorTypeSpecializations(Block* block) {
@@ -359,6 +391,21 @@ void insertTypeGuard(
     true_block->registerOutput(output);
   }
 }
+
+namespace {
+bool has_unsupported_pin_memory(const Node* node) {
+  // cant support non-constant pin_memory or pin_memory = True
+  if (auto maybe_index = node->schema().argumentIndexWithName("pin_memory")) {
+    int index = *maybe_index;
+    auto inp = node->input(index);
+    if (inp->type() != NoneType::get() &&
+        constant_as<bool>(inp).value_or(true)) {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
 
 class TensorExprFuser {
  public:
@@ -516,8 +563,6 @@ class TensorExprFuser {
     } else {
       prepareFusionGroupAndGuardOutputs(graph_->block());
       GRAPH_DUMP("After guarding fusion groups: ", graph_);
-      removeTensorTypeSpecializations(graph_->block());
-      GRAPH_DUMP("After removing tensor type specializations: ", graph_);
     }
   }
 
@@ -586,7 +631,9 @@ class TensorExprFuser {
   // No Ops in eager shouldn't be outputs of Fusion Groups because it
   // will degrade perf and change aliasing relationships
   static bool unexecutedEagerOp(Node* n) {
-    if (n->kind() != aten::to) {
+    if (n->kind() != aten::to &&
+        n->kind() != aten::_autocast_to_reduced_precision &&
+        n->kind() != aten::_autocast_to_full_precision) {
       return false;
     }
 
@@ -710,6 +757,10 @@ class TensorExprFuser {
     }
     // Cleanup the subgraph from duplicated constants while we're at it.
     ConstantPooling(subgraph);
+
+    if (GRAPH_DEBUG_ENABLED) {
+      GRAPH_EXPORT("", subgraph);
+    }
     return false;
   }
 
@@ -805,9 +856,8 @@ class TensorExprFuser {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
-    } else {
-      TORCH_CHECK_NOT_IMPLEMENTED(false, "Unknown device for tensorexpr fuser")
     }
+    return false;
   }
 
   bool isFusableOnDevice(Node* node) {
@@ -963,15 +1013,22 @@ class TensorExprFuser {
           return false;
         }
       }
-      // cant support non-constant pin_memory or pin_memory = True
-      if (auto maybe_index =
-              node->schema().argumentIndexWithName("pin_memory")) {
-        int index = *maybe_index;
-        auto inp = node->input(index);
-        if (inp->type() != NoneType::get() &&
-            constant_as<bool>(inp).value_or(true)) {
+
+      if (has_unsupported_pin_memory(node)) {
+        return false;
+      }
+    }
+
+    if (node->kind() == aten::_autocast_to_reduced_precision ||
+        node->kind() == aten::_autocast_to_full_precision) {
+      for (auto i : c10::irange(1, node->inputs().size())) {
+        if (node->inputs().at(i)->node()->kind() != prim::Constant) {
           return false;
         }
+      }
+
+      if (has_unsupported_pin_memory(node)) {
+        return false;
       }
     }
 
@@ -1049,6 +1106,7 @@ class TensorExprFuser {
       // aten::cat, though it does not have a shape function.
       REQ(node->kind() == prim::ListConstruct ||
           node->kind() == prim::TensorExprGroup ||
+          node->isMemberOf(tensorexpr::getCustomOperatorSet()) ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 

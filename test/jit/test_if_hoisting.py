@@ -3,6 +3,7 @@
 import torch
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
+from typing import Dict
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -149,13 +150,13 @@ class TestIfHoisting(JitTestCase):
         self.run_pass("dce", op_graph)
 
         FileCheck().check_count("prim::If", 1, exactly=True).run(op_graph)
-        FileCheck().check_count("aten::add", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::add(", 2, exactly=True).run(op_graph)
         FileCheck().check_count("aten::add_", 1, exactly=True).run(op_graph)
 
         t1 = torch.Tensor([1])
         t2 = torch.Tensor([5, 6])
-        self.assertEqual(fn(True, t1), fn_script(True, t1))
-        self.assertEqual(fn(False, t2), fn_script(False, t2))
+        self.assertEqual(fn(True, t1.clone()), fn_script(True, t1.clone()))
+        self.assertEqual(fn(False, t2.clone()), fn_script(False, t2.clone()))
 
     def test_mutate_after(self):
         """
@@ -180,7 +181,6 @@ class TestIfHoisting(JitTestCase):
 
         FileCheck().check_count("prim::If", 1, exactly=True).run(op_graph)
         FileCheck().check_count("aten::add", 2, exactly=True).run(op_graph)
-
         t1 = torch.Tensor([1])
         t2 = torch.Tensor([5, 6])
         self.assertEqual(fn(True, t1.clone()), fn_script(True, t1.clone()))
@@ -212,3 +212,26 @@ class TestIfHoisting(JitTestCase):
         t2 = torch.Tensor([5, 6])
         self.assertEqual(fn(True, t1), fn_script(True, t1))
         self.assertEqual(fn(False, t2), fn_script(False, t2))
+
+    def test_hoist_mutation_2(self):
+        def fn(x, y, cond: bool, d: Dict[str, torch.Tensor]):
+            if cond:
+                m = x.relu()
+                f1 = torch.rand((2, 2))
+                d["test"] = f1
+                z = d["test"]
+            else:
+                m = y.gelu()
+                f2 = torch.rand((3, 2))
+                d["test"] = f2
+                z = d["test"]
+            return m, z
+
+        fn_s = torch.jit.script(fn)
+        op_graph = fn_s.graph
+        self.run_pass("common_expression_hoisting", op_graph)
+        self.run_pass("dce", op_graph)
+        FileCheck().check_count("aten::__getitem__", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::_set_item", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::relu", 1, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::gelu", 1, exactly=True).run(op_graph)
