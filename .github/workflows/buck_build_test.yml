@@ -66,4 +66,4 @@ jobs:
       - name: Build Buck target
         run: |
           touch .buckconfig
-          buck build third_party:fmt
+          buck build --keep-going //third_party:
