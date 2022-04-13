@@ -399,7 +399,7 @@ def optimize_for_inference(
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
-    logging.info(f"mkldnn conversions: {mkldnn_conversions}")
+    logging.getLogger(__name__).info(f"mkldnn conversions: {mkldnn_conversions}")
     fx_graph.lint()
     result = fx.GraphModule(model, fx_graph)
     return result

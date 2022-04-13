@@ -94,7 +94,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input_, const Te
   auto cutoff_values = cutoffs;
   cutoff_values.insert(cutoff_values.begin(), 0);
 
-  for (size_t i = 0; i < cutoff_values.size() - 1; ++i) {
+  for (const auto i : c10::irange(cutoff_values.size() - 1)) {
     int64_t low_idx = cutoff_values[i];
     int64_t high_idx = cutoff_values[i + 1];
 
@@ -148,7 +148,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::_get_full_log_prob(const Tensor& input, c
 
   out.index_put_({Slice(), Slice(None, shortlist_size)}, head_logprob.index({Slice(), Slice(None, shortlist_size)}));
 
-  for (size_t i = 0; i < cutoffs.size() - 1; ++i) {
+  for (const auto i : c10::irange(cutoffs.size() - 1)) {
     int64_t start_idx = cutoffs[i];
     int64_t stop_idx = cutoffs[i+1];
     const Tensor cluster_output = tail[i]->as<Sequential>()->forward(input);

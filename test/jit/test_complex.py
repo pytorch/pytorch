@@ -328,3 +328,33 @@ class TestComplex(JitTestCase):
         t = torch.randn(2, 3, dtype=torch.cdouble)
         self.checkScript(tensor_real, (t, ))
         self.checkScript(tensor_imag, (t, ))
+
+    def test_binary_op_complex_tensor(self):
+        def mul(x: complex, y: torch.Tensor):
+            return x * y
+
+        def add(x: complex, y: torch.Tensor):
+            return x + y
+
+        def eq(x: complex, y: torch.Tensor):
+            return x == y
+
+        def ne(x: complex, y: torch.Tensor):
+            return x != y
+
+        def sub(x: complex, y: torch.Tensor):
+            return x - y
+
+        def div(x: complex, y: torch.Tensor):
+            return x - y
+
+        ops = [mul, add, eq, ne, sub, div]
+
+        for shape in [(1, ), (2, 2)]:
+            x = 0.71 + 0.71j
+            y = torch.randn(shape, dtype=torch.cfloat)
+            for op in ops:
+                eager_result = op(x, y)
+                scripted = torch.jit.script(op)
+                jit_result = scripted(x, y)
+                self.assertEqual(eager_result, jit_result)
