@@ -130,7 +130,7 @@ if sys.version_info >= (3, 8):
                 await actions_local_runner.ShellCheck(self.test_sh_files, True).run()
 
             self.assertIn("SC2148: Tips depend on target shell", f.getvalue())
-            self.assertIn("SC1068: Don't put spaces around the = in assignments", f.getvalue())
+            self.assertIn("SC2283: Remove spaces around = to assign", f.getvalue())
 
         async def test_mypy(self):
             self.maxDiff = None
