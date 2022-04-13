@@ -14,7 +14,7 @@ def define_targets(rules):
         tools = ["//tools/setup_helpers:generate_code"],
         outs = _GENERATED_CPP + GENERATED_AUTOGRAD_H + GENERATED_LAZY_H + GENERATED_TESTING_PY,
         cmd = "$(location //tools/setup_helpers:generate_code) " +
-              "--install_dir $OUT " +
+              "--install_dir $(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--gen_lazy_ts_backend",
     )
