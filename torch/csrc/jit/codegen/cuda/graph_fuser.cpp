@@ -576,7 +576,7 @@ struct CudaGraphFuser {
     Value* producer_for_chunk = *it;
     size_t producer_index = it - chunk->inputs().begin();
 
-    // all uses of the chunk must be in in this consumer
+    // all uses of the chunk must be in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
         if (u.user != consumer)
@@ -2084,8 +2084,9 @@ void decomposeLinearOps(Block* block) {
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
-      {{aten::view, prim::view_copy},
-       {aten::reshape, prim::reshape_copy},
+      // TODO: revert disabled aten::view
+      {// {aten::view, prim::view_copy},
+       // {aten::reshape, prim::reshape_copy},
        {aten::squeeze, prim::squeeze_copy},
        {aten::unsqueeze, prim::unsqueeze_copy}});
 
@@ -2132,8 +2133,9 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
-      {{prim::view_copy, aten::view},
-       {prim::reshape_copy, aten::reshape},
+      // TODO: revert disabled aten::view
+      {// {prim::view_copy, aten::view},
+       // {prim::reshape_copy, aten::reshape},
        {prim::squeeze_copy, aten::squeeze},
        {prim::unsqueeze_copy, aten::unsqueeze}});
 

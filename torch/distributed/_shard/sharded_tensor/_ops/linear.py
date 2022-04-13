@@ -1,4 +1,4 @@
-from typing import List, cast
+from typing import List
 
 import torch
 import torch.distributed as dist
@@ -147,7 +147,7 @@ def _validate_linear_op_param(args, kwargs):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 1:  # type: ignore[arg-type]
         raise ValueError("Input needs to have at least 1 dim")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:
