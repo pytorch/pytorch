@@ -161,8 +161,10 @@ TORCH_API void ExportModule(
     bool save_mobile_debug_info = false,
 #if defined(ENABLE_FLATBUFFER)
     bool use_flatbuffer = true
+#else
+    bool use_flatbuffer = false
 #endif
-    bool use_flatbuffer = false);
+);
 
 TORCH_API void ExportModule(
     const Module& module,
@@ -172,8 +174,10 @@ TORCH_API void ExportModule(
     bool save_mobile_debug_info = false,
 #if defined(ENABLE_FLATBUFFER)
     bool use_flatbuffer = true
+#else
+    bool use_flatbuffer = false
 #endif
-    bool use_flatbuffer = false);
+);
 
 TORCH_API void ExportModule(
     const Module& module,
@@ -183,8 +187,10 @@ TORCH_API void ExportModule(
     bool save_mobile_debug_info = false,
 #if defined(ENABLE_FLATBUFFER)
     bool use_flatbuffer = true
+#else
+    bool use_flatbuffer = false
 #endif
-    bool use_flatbuffer = false);
+);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
