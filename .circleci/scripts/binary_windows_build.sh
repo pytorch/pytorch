@@ -7,15 +7,17 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache-windows
-export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
+export SCCACHE_IGNORE_SERVER_IO_ERROR=1
 export VC_YEAR=2019
 
 if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 
+
 echo "Free Space for CUDA DEBUG BUILD"
 if [[ "${CIRCLECI:-}" == 'true' ]]; then
+    export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
     if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
         rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
     fi
@@ -70,6 +72,7 @@ pushd "$BUILDER_ROOT"
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
     ./windows/internal/build_conda.bat
 elif [[ "$PACKAGE_TYPE" == 'wheel' || "$PACKAGE_TYPE" == 'libtorch' ]]; then
+    export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
     ./windows/internal/build_wheels.bat
 fi
 

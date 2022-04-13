@@ -22,6 +22,7 @@ __all__ = [
     'sum',
     'softmax',
     'log_softmax',
+    '_csr_to_block_csr',
 ]
 
 
@@ -29,9 +30,14 @@ addmm = _add_docstr(_sparse._sparse_addmm, r"""
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 
 This function does exact same thing as :func:`torch.addmm` in the forward,
-except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
-need to have `sparse_dim = 2`. Note that the gradients of :attr:`mat1` is a
-coalesced sparse tensor.
+except that it supports backward for sparse COO matrix :attr:`mat1`.
+When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
+When inputs are COO tensors, this function also supports backward for both inputs.
+
+Supports both CSR and COO storage formats.
+
+.. note::
+    This function doesn't support computing derivaties with respect to CSR matrices.
 
 Args:
     mat (Tensor): a dense matrix to be added
@@ -42,17 +48,21 @@ Args:
 """)
 
 
-def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
-    r"""
+mm = _add_docstr(_sparse._sparse_mm, r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
-    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
+    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, if :attr:`mat1` is a
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
-    :math:`(n \times p)` tensor. :attr:`mat1` need to have `sparse_dim = 2`.
-    This function also supports backward for both matrices. Note that the gradients of
-    :attr:`mat1` is a coalesced sparse tensor.
+    :math:`(n \times p)` tensor.
+    When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
+    When inputs are COO tensors, this function also supports backward for both inputs.
+
+    Supports both CSR and COO storage formats.
+
+.. note::
+    This function doesn't support computing derivaties with respect to CSR matrices.
 
     Args:
-        mat1 (SparseTensor): the first sparse matrix to be multiplied
+        mat1 (Tensor): the first sparse matrix to be multiplied
         mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
 
     Shape:
@@ -85,10 +95,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
                                [0, 1, 2, 0, 1, 2]]),
                values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
-    """
-    if mat1.is_sparse and mat2.is_sparse:
-        return torch._sparse_sparse_matmul(mat1, mat2)
-    return torch._sparse_mm(mat1, mat2)
+    """)
 
 
 sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
@@ -256,3 +263,5 @@ Args:
         performed. This is useful for preventing data type
         overflows. Default: None
 """)
+
+_csr_to_block_csr = _sparse._csr_to_block_csr

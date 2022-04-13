@@ -102,6 +102,7 @@ Tensor max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
+      self._fw_grad(/*level */ 0).defined() ||
       !self.device().is_cpu()) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
