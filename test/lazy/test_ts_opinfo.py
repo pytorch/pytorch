@@ -54,21 +54,46 @@ def init_lists():
 torch.manual_seed(42)
 
 class TestLazyTensor(JitTestCase):
+    def clone_move(self, t):
+        dev = 'lazy'
+        copy_t = t.clone().to(device=dev)
+        return copy_t
+
+    def test_view_mark_step_preserved(self):
+        test_device = get_test_device()
+        inp = torch.rand(4, device=test_device)
+        inp_lazy = self.clone_move(inp)
+
+        def foo(x, *, mark_step):
+            y = x.view(2, 2)
+            y.add_(1)
+            z = x + x
+
+            if mark_step:
+                torch._lazy.mark_step()
+
+            # y and x should contiue to be aliased after the mark_step call.
+            y.add_(1)
+            return x
+
+
+        out_ref = foo(inp, mark_step=False)
+        out = foo(inp_lazy, mark_step=True)
+        # out will have some pending mutations, which will be synced by the .cpu() call.
+        torch.testing.assert_close(out_ref.cpu(), out.cpu())
+
+
     def testConvolutionBackward(self):
-        def clone_move(t):
-            dev = 'lazy'
-            copy_t = t.detach().clone().requires_grad_(True).to(device=dev)
-            return copy_t
 
         test_device = get_test_device()
         inp = torch.rand(1, 3, 128, 128, device=test_device, requires_grad=True)
-        inp_copy = clone_move(inp)
+        inp_copy = self.clone_move(inp)
         grad = torch.rand(1, 32, 121, 121, device=test_device)  # no requires_grad
-        grad_copy = clone_move(grad)
+        grad_copy = self.clone_move(grad)
         weight = torch.rand(32, 3, 8, 8, device=test_device, requires_grad=True)
-        weight_copy = clone_move(weight)
+        weight_copy = self.clone_move(weight)
         bias = torch.rand(32, device=test_device, requires_grad=True)
-        bias_copy = clone_move(bias)
+        bias_copy = self.clone_move(bias)
 
         # run eager
         conv_out = torch.nn.functional.conv2d(inp, weight, bias)

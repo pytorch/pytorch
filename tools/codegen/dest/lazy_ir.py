@@ -210,18 +210,10 @@ def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding
     unwrapped_tensor_args: List[str] = []
     for arg in sig.arguments():
         if isinstance(arg.argument, Argument) and arg.argument.type.is_tensor_like():
-            # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
-            # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
-            a_ = arg.name
             unwrapped_name = f'{arg.name}_meta'
-            unwrapped_tensor_args.append(
-                f"auto {unwrapped_name} = at::native::empty_strided_meta({a_}.sizes(), {a_}.strides(), \
-/*dtype=*/c10::make_optional({a_}.scalar_type()), /*layout=*/c10::make_optional({a_}.layout()), \
-/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);"
-            )
+            unwrapped_tensor_args.append(f"auto {unwrapped_name} = at::native::to_meta({arg.name});")
             context.append(arg.with_name(unwrapped_name))
         else:
-            # for non-tensor inputs, we want to pass them directly into the redispatch calls.
             context.append(arg)
     unwrap_tensor_args_str = '\n        '.join(unwrapped_tensor_args)
     return unwrap_tensor_args_str, context
@@ -233,28 +225,12 @@ class GenLazyNativeFuncDefinition:
     tensor_class: str
     gen_forced_fallback_code: bool
 
-    @method_with_native_function
-    def __call__(self, func: NativeFunction) -> List[str]:
-        sig = kernel_signature(func, self.backend_index)
+    def gen_shape_call(self, func: NativeFunction) -> str:
         metadata = self.backend_index.get_kernel(func)
         assert metadata is not None
         schema = LazyIrSchema(func.func)
         all_args = schema.filtered_args()
-        value_args = schema.filtered_args(values=True, scalars=False)
         returns_length = len(schema.returns)
-
-        fallback_str = ""
-        if self.gen_forced_fallback_code:
-            fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
-
-        value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
-        get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
-        TORCH_INTERNAL_ASSERT(common_device);
-        """
-
-        lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
-        node_ctor_input_str = node_ctor_inputs(schema)
 
         # Note [Generated LTC Shape Functions]
         # LTC uses meta tensors from core to do shape inference when possible, and otherwise
@@ -270,24 +246,25 @@ class GenLazyNativeFuncDefinition:
         if is_structured or is_view_copy_op:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
+
                 def this_shape(i: int) -> str:
                     return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
-                shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
+
+                shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
-            if is_structured:
-                meta_str = f"""\
-        auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
-        {meta_out}"""
-            else:
-                # view_copy ops always have a CompositeExplicitAutograd kernel
-                # Convert tensor args to the meta device and call it.
-                dispatcher_sig = DispatcherSignature.from_schema(func.func)
-                meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
-                meta_call_args = [e.expr for e in translate(meta_call_ctx, dispatcher_sig.arguments(), method=False)]
-                meta_str = f"""\
+            # Convert tensor args to the meta device and call it.
+            # (We can't pass in the input tensors directly, because they are "functional wrappers".
+            # If any of the meta kernels call a tensor op and redispatch, we don't want to hit the functionalize kernels.)
+            # Even at::meta:: functions might redispatch, e.g. if they call into view ops.
+            dispatcher_sig = DispatcherSignature.from_schema(func.func)
+            meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
+            meta_call_args = [e.expr for e in translate(meta_call_ctx, dispatcher_sig.arguments(), method=False)]
+            dispatch_ns = 'meta' if is_structured else 'compositeexplicitautograd'
+            # view_copy ops always have a CompositeExplicitAutograd kernel
+            meta_str = f"""\
         {meta_conversion_str}
-        auto out_meta = at::compositeexplicitautograd::{schema.aten_name}({', '.join(meta_call_args)});
+        auto out_meta = at::{dispatch_ns}::{schema.aten_name}({', '.join(meta_call_args)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, func)
@@ -296,6 +273,42 @@ class GenLazyNativeFuncDefinition:
 
         meta_str += f"""
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
+
+        # Calculating which dimensions are symbolic
+        func_schema_str = "aten::" + str(func.func)
+        meta_str += f"""
+        if(symbolicShapeEnabled()){{
+            std::vector<jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
+            char* schema_str = "{func_schema_str}";
+            applySymbolicShapesOnLT(schema_str, inputs, shapes);
+        }}
+        """
+        return meta_str
+
+    @method_with_native_function
+    def __call__(self, func: NativeFunction) -> List[str]:
+        sig = kernel_signature(func, self.backend_index)
+        metadata = self.backend_index.get_kernel(func)
+        assert metadata is not None
+        schema = LazyIrSchema(func.func)
+        value_args = schema.filtered_args(values=True, scalars=False)
+        returns_length = len(schema.returns)
+
+        fallback_str = ""
+        if self.gen_forced_fallback_code:
+            fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
+
+        value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
+        assert (
+            len(value_types_names) > 0
+        ), "Code below assumes there is at least one tensor arg"
+        get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
+        TORCH_INTERNAL_ASSERT(common_device);
+        """
+
+        lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
+        node_ctor_input_str = node_ctor_inputs(schema)
+        shape_str = self.gen_shape_call(func)
 
         node_str = f"""auto node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
@@ -311,24 +324,28 @@ class GenLazyNativeFuncDefinition:
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
-            assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
-                                        f"and has tuple outputs, but got tuple of len {returns_length}."
+            assert returns_length == 1, (
+                "We assumed there was no such case where an op is an in-place variant "
+                f"and has tuple outputs, but got tuple of len {returns_length}."
+            )
             bridge_str = f"""lazy_{first_tensor_name}->SetInPlaceIrValue(node);
         auto& result = {first_tensor_name};"""
 
-
-        return [f"""\
+        return [
+            f"""\
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {fallback_str}
         TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
-        {meta_str}
+        {shape_str}
         {node_str}
         {bridge_str}
         return result;
     }};\n
-    """]
+    """
+        ]
+
 
 class ComputeShapeSignature:
     """

@@ -154,13 +154,7 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     auto lazy_self = torch::lazy::TryGetLtcTensor(self);
     if (!lazy_self && device && device->type() == c10::kLazy) {
       // Case 1: eager->lazy (we create a new lazy tensor)
-
-      auto eager_tensor = self.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
-      lazy_self = torch::lazy::GetOrCreateLtcTensor(eager_tensor,
-                                                    torch::lazy::atenDeviceToBackendDevice(*device));
-      auto out = torch::lazy::CreateAtenFromLtcTensor(lazy_self);
-      // See Note [Lazy Tensor Functionalization]
-      return at::functionalization::impl::to_functional_tensor(out);
+      return torch::lazy::to_lazy_tensor(self, options, *device, /*non_blocking=*/non_blocking, /*functionalize_output=*/true);
     } else if(device && device->type() != c10::kLazy) {
       // Case 2: lazy->eager (forces a graph break since we are materializing a tensor)
 
@@ -219,6 +213,18 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     }
 };
 
+at::Tensor LazyNativeFunctions::diagonal(const at::Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+
+  auto input = GetLtcTensor(self);
+  auto input_shape = input->shape();
+  dim1 = at::maybe_wrap_dim(dim1, self);
+  dim2 = at::maybe_wrap_dim(dim2, self);
+  auto diagonal_info = DiagonalInfo {offset, dim1, dim2};
+  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, diagonal_info);
+
+  return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
+}
 
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size, c10::optional<at::ScalarType> dtype,
