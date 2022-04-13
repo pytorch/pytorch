@@ -230,6 +230,11 @@ inline bool isFusibleNode(const Node* node) {
     }
     return false;
   }
+  // linear can't be fused, but for other reasons it needs to be parsible
+  // see aten::linear in parser.cpp
+  if (node->kind() == aten::linear) {
+    return false;
+  }
   // Check if we have a tensor type it's one we support
   if (!checkInputTensorTypes(node)) {
     GRAPH_UPDATE(
