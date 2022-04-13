@@ -7154,24 +7154,6 @@
 - func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   variants: method, function
 
-- func: qr_orthogonalization(Tensor self, float epsilon=1e-8) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: qr_orthogonalization
-
-- func: qr_orthogonalization.out(Tensor self, float epsilon=1e-8, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: qr_orthogonalization_out
-
-- func: qr_orthogonalization_(Tensor(a!) self, float epsilon=1e-8) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: qr_orthogonalization_
-
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
     CPU, CUDA: geqrf_out
@@ -11224,6 +11206,24 @@
   dispatch:
     CPU: _linalg_qr_helper_default
     CUDA: _linalg_qr_helper_cuda
+
+- func: linalg_orthogonalize(Tensor self, float epsilon=1e-8) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_orthogonalize
+
+- func: linalg_orthogonalize.out(Tensor self, float epsilon=1e-8, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_orthogonalize_out
+
+- func: linalg_orthogonalize_(Tensor(a!) self, float epsilon=1e-8) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_orthogonalize_
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg

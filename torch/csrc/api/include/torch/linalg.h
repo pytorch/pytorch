@@ -188,6 +188,18 @@ inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& i
   return torch::linalg_qr_out(Q, R, input, mode);
 }
 
+inline Tensor orthogonalize(const Tensor& self, const double epsilon){
+  return torch::linalg_orthogonalize(self, epsilon);
+}
+
+inline Tensor& orthogonalize_out(Tensor& out, const Tensor& self, const double epsilon){
+  return torch::linalg_orthogonalize_out(out, self, epsilon);
+}
+
+inline Tensor& orthogonalize_(Tensor& self, const double epsilon){
+  return torch::linalg_orthogonalize_(self, epsilon);
+}
+
 inline Tensor solve(const Tensor& input, const Tensor& other) {
   return torch::linalg_solve(input, other);
 }

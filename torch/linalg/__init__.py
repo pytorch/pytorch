@@ -2378,3 +2378,19 @@ Examples::
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)
+
+orthogonalize = _add_docstr(_linalg.linalg_orthogonalize, r"""
+orthogonalize(A, epsilon=1e-8, *, out=None) -> (Tensor, Tensor)
+
+Orthogonalize a matrix
+
+Args:
+    
+
+Keyword args:
+
+Returns:
+    
+
+Examples::
+""")

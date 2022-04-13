@@ -14,7 +14,7 @@ namespace at { namespace native {
 
 namespace {
 
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr_orthogonalization ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ householder_orthogonalization ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 __device__ __forceinline__ void wait_barrier(int* barrier, int target){
     if (threadIdx.x == 0){
@@ -108,7 +108,7 @@ __global__ void q_loop(scalar_t *Q, scalar_t *vs, const uint n, const uint m){
 }
 
 template <int BLOCK_THREADS, typename scalar_t> 
-void qr_main(const Tensor& R, Tensor& Q, Tensor& vs, const uint m, const uint n){
+void householder_main(const Tensor& R, Tensor& Q, Tensor& vs, const uint m, const uint n){
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     int barriers[m];
@@ -131,24 +131,24 @@ void qr_main(const Tensor& R, Tensor& Q, Tensor& vs, const uint m, const uint n)
     );
 }
 
-void qr_orthogonalization_cuda_impl(Tensor& R, Tensor& out, Tensor& vs){
+void householder_orthogonalization_cuda_impl(Tensor& R, Tensor& out, Tensor& vs){
     const uint m = R.size(0);
     const uint n = R.size(1);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
     R.scalar_type(), "qr_orthogonalization", ([&] {
       if (n < 512)
-          qr_main<256, scalar_t>(R, out, vs, m, n);
+          householder_main<256, scalar_t>(R, out, vs, m, n);
       else if (n < 1024)
-          qr_main<512, scalar_t>(R, out, vs, m, n);
+          householder_main<512, scalar_t>(R, out, vs, m, n);
       else
-          qr_main<1024, scalar_t>(R, out, vs, m, n);
+          householder_main<1024, scalar_t>(R, out, vs, m, n);
     })
     );
     
 }
 
-REGISTER_DISPATCH(qr_orthogonalization_stub, &qr_orthogonalization_cuda_impl);
+REGISTER_DISPATCH(householder_orthogonalization_stub, &householder_orthogonalization_cuda_impl);
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
