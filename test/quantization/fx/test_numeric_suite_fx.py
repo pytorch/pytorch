@@ -2094,7 +2094,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_resnet18(self):
         import torchvision
         m = torchvision.models.quantization.resnet18(pretrained=False, quantize=False).eval()
@@ -2106,7 +2105,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_mobilenet_v2(self):
         import torchvision
         m = torchvision.models.quantization.mobilenet_v2(pretrained=False, quantize=False).eval()
