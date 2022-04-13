@@ -75,49 +75,8 @@
 namespace at {
 namespace native {
 
-inline std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
-}
-
-inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
-  checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
-  auto indices = expandTensors(self, orig);
-  // next broadcast all index tensors together
-  try {
-    indices = expand_outplace(indices);
-  } catch (std::exception& e) {
-    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
-                      " with shapes ", shapes_as_str(indices));
-  }
-  // add missing null Tensors so that it matches self.dim()
-  while (indices.size() < (size_t)self.dim()) {
-    indices.emplace_back();
-  }
-  // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the front
-  if (!hasContiguousSubspace(indices)) {
-    std::tie(self, indices) = transposeToFront(self, indices);
-  }
-  // Ensure indices are on the same device as self
-  for (auto & indice : indices) {
-    if (indice.defined() && indice.device() != self.device()) {
-      indice = indice.to(self.device());
-    }
-  }
-  return AdvancedIndex(self, indices);
-}
+std::string shapes_as_str(TensorList tensors);
+AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
 } // namespace native
 
@@ -452,6 +411,21 @@ static bool all_strides_match(TensorList tensors) {
   return true;
 }
 
+inline std::string shapes_as_str(TensorList tensors) {
+  std::ostringstream os;
+  bool first = true;
+  for (auto& tensor : tensors) {
+    if (tensor.defined()) {
+      if (!first) {
+        os << ", ";
+      }
+      os << tensor.sizes();
+      first = false;
+    }
+  }
+  return os.str();
+}
+
 // Replace indexed dimensions in src with stride 0 and the size of the result tensor.
 // The offset in these dimensions is computed by the kernel using the index tensor's
 // values and the stride of src. The new shape is not meaningful. It's used to make
@@ -564,7 +538,34 @@ const Tensor& value){
   return std::make_tuple(true, mask);
 }
 
-
+inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
+  checkIndexTensorTypes(orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
+  // next broadcast all index tensors together
+  try {
+    indices = expand_outplace(indices);
+  } catch (std::exception& e) {
+    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
+                      " with shapes ", shapes_as_str(indices));
+  }
+  // add missing null Tensors so that it matches self.dim()
+  while (indices.size() < (size_t)self.dim()) {
+    indices.emplace_back();
+  }
+  // if the non-null indices are not all adjacent, transpose self and indices
+  // together so that they're adjacent at the front
+  if (!hasContiguousSubspace(indices)) {
+    std::tie(self, indices) = transposeToFront(self, indices);
+  }
+  // Ensure indices are on the same device as self
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
+    }
+  }
+  return AdvancedIndex(self, indices);
+}
 
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
   TORCH_CHECK(is_expandable_to(value.sizes(), info.src.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),

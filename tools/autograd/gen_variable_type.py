@@ -176,9 +176,12 @@ MATERIALIZE_OPTIONALTENSORLIST = CodeTemplate("""\
 auto ${tensorlist_name}_materialized = ${tensorlist_name}.materialize();
 """)
 
+# See [Note: IOptTensorListRef]
+# 'cpp_list_type' is needed here for supporting code generation using
+# both 'IOptTensorListRef' and 'List<optional<Tensor>>' types.
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (const auto& tensor : ${tensorlist_name})
+for (const typename ${cpp_list_type}::value_type& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
 """)
@@ -786,7 +789,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     tensorlist_name = f"{arg}_materialized"
                 else:
                     tensorlist_name = arg
-                stmts_before_call += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name),
+                stmts_before_call += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name,
+                                                                                 cpp_list_type=noref_cpp_type),
                                       SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name)]
                 stmts_after_call += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name),
                                      ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name)]

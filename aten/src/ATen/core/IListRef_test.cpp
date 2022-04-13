@@ -134,10 +134,10 @@ TEST(ITensorListRefTest, UnboxedIndirect_Equal) {
   //   3. `initializer_list` for `std::vector`
   //   4. temporary `std::vector`
   auto vec = get_tensor_vector();
-  // Explicit constructors
-  check_elements_same(at::ITensorListRef{vec[0]}, std::vector<at::Tensor>{vec[0]}, /* use_count= */ 4);
-  check_elements_same(at::ITensorListRef{vec.data(), vec.size()}, vec, /* use_count= */ 1);
-  check_elements_same(at::ITensorListRef{&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
+  // Implicit constructors
+  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 4);
+  check_elements_same({vec.data(), vec.size()}, vec, /* use_count= */ 1);
+  check_elements_same({&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
   // Vector constructor
   check_elements_same(vec, vec, /* use_count= */ 1);
   // InitializerList constructor
