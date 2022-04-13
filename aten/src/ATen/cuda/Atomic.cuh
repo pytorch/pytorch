@@ -352,14 +352,14 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) -> at::Half {
-                                  return at::_isnan(val) ? val : std::max(bsum, val);
+                                  return at::_isnan(val) ? val : std::max<at::Half>(bsum, val);
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMax(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) -> at::BFloat16 {
-                                      return at::_isnan(val) ? val : std::max(bsum, val);
+                                      return at::_isnan(val) ? val : std::max<at::BFloat16>(bsum, val);
                                     });
 }
 
@@ -392,14 +392,14 @@ inline __device__ float gpuAtomicMax(float * address, float val) {
 inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) -> at::Half {
-                                  return at::_isnan(val) ? val : std::min(bsum, val);
+                                  return at::_isnan(val) ? val : std::min<at::Half>(bsum, val);
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMin(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) -> at::BFloat16 {
-                                      return at::_isnan(val) ? val : std::min(bsum, val);
+                                      return at::_isnan(val) ? val : std::min<at::BFloat16>(bsum, val);
                                     });
 }
 
