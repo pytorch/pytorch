@@ -574,7 +574,7 @@ class MultiProcessTestCase(TestCase):
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
         # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel.replicated_tensor_ddp_interop import _set_ddp_with_replicated_tensor
+        from torch.nn.parallel.replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
         _set_ddp_with_replicated_tensor(True)
 
         self = cls(test_name)

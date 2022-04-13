@@ -525,7 +525,7 @@ class TestDistBackend(MultiProcessTestCase):
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
         # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel.replicated_tensor_ddp_interop import _set_ddp_with_replicated_tensor
+        from torch.nn.parallel.replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
         _set_ddp_with_replicated_tensor(True)
 
         if BACKEND == "nccl" and not torch.cuda.is_available():
@@ -8711,7 +8711,7 @@ class DistributedTest:
             # Disable DDP + ReplicatedTensor since stateless looks for 'module'
             # whereas with ReplicatedTensor, we run '_replicated_tensor_module'
             # in the forward pass.
-            from torch.nn.parallel.replicated_tensor_ddp_interop import _ddp_replicated_tensor
+            from torch.nn.parallel.replicated_tensor_ddp_utils import _ddp_replicated_tensor
             with _ddp_replicated_tensor(False):
                 res = _stateless.functional_call(module, parameters, x)
             self.assertEqual(x, res)

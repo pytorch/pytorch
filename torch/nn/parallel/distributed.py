@@ -32,6 +32,7 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
+from .replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
 
@@ -958,7 +959,6 @@ class DistributedDataParallel(Module, Joinable):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        from .replicated_tensor_ddp_interop import _ddp_with_replicated_tensor_enabled
         module_to_run = self._replicated_tensor_module if _ddp_with_replicated_tensor_enabled() else self.module
 
         if self.device_ids:

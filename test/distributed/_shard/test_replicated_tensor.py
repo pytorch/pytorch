@@ -199,6 +199,9 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, 'not supported for ShardedTensor'):
             st1 % replica_tensor
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
     def test_with_ddp(self):
         # Test Replicated params for DDP
         replica_tensor = ReplicatedTensor(torch.rand(4, 8, device=self.rank))
@@ -275,7 +278,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             self.assertIsInstance(out, ReplicatedTensor)
 
         # Test with context manager.
-        from torch.nn.parallel.replicated_tensor_ddp_interop import _ddp_replicated_tensor
+        from torch.nn.parallel.replicated_tensor_ddp_utils import _ddp_replicated_tensor
         with _ddp_replicated_tensor(False):
             for _ in range(5):
                 with _ddp_replicated_tensor(True):
