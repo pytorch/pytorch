@@ -719,7 +719,7 @@ void svd_cusolver(const Tensor& A,
     TORCH_WARN_ONCE(
       "The default driver of SVD on CUDA was changed to achieve the best numerical stability. "
       "You may experience slower speed than before. "
-      "To get the old behavior, set `driver = gesvdj` kwarg in SVD function calls. ",
+      "To get the old behavior, set `driver = \"gesvdj\"` kwarg in SVD function calls. ",
       check_svd_doc);
     svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
   } else {
