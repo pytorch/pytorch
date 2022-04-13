@@ -97,6 +97,7 @@ def build_constructor_arg_db():
         torch.nn.LazyLinear: ((5,), {}),
         torch.nn.LeakyReLU: ((), {}),
         torch.nn.Linear: ((10, 5), {}),
+        torch.nn.Bias: ((5,), {}),
         torch.nn.LocalResponseNorm: ((2,), {}),
         torch.nn.LogSigmoid: ((), {}),
         torch.nn.LogSoftmax: ((), {}),
