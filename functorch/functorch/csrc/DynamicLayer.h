@@ -10,6 +10,7 @@
 #include <c10/util/Optional.h>
 #include <unordered_map>
 #include <mutex>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 
 // Forward declared bc I am lazy
 namespace c10 { struct AutogradMetaInterface; }
@@ -45,6 +46,11 @@ struct TORCH_API DynamicLayer {
 
   // only valid for jvp transform
   optional<bool> prevFwdGradMode() const;
+
+  void saveLocalDispatchKeySet(c10::impl::LocalDispatchKeySet keyset);
+  void clearSavedLocalDispatchKeySet();
+  c10::impl::LocalDispatchKeySet getSavedLocalDispatchKeySet() const;
+
  private:
   DispatchKey key_;
   int64_t layerId_;
@@ -55,6 +61,8 @@ struct TORCH_API DynamicLayer {
   optional<RandomnessType> randomness_;
   optional<bool> prevGradMode_;
   optional<bool> prevFwdGradMode_;
+
+  optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
 };
 
 TORCH_API int64_t initAndPushDynamicLayer(
