@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch {
@@ -34,6 +35,16 @@ class TORCH_API Generic : public TsNode {
 
   Generic(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed);
 
+  bool Equal(
+      OpKind op,
+      OpList operands,
+      Shape shape,
+      size_t num_outputs = 1,
+      hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) const {
+    TORCH_INTERNAL_ASSERT(false, "Reusing Generic nodes is unsupported")
+    return false;
+  }
+
  private:
   hash_t hash_seed_;
 };
@@ -44,8 +55,13 @@ inline NodePtr GenericOp(
     Shape shape,
     size_t num_outputs = 1,
     hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
-  return MakeNode<Generic>(
-      op, operands, std::move(shape), num_outputs, hash_seed);
+  return ReuseOrMakeNode<Generic>(
+      torch::lazy::OpKind(ltc_tensor_data),
+      op,
+      operands,
+      std::move(shape),
+      num_outputs,
+      hash_seed);
 }
 
 } // namespace lazy

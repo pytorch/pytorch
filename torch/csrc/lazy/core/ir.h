@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -13,10 +14,12 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/hash.h>
-#include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
-#include <c10/util/Flags.h>
+#include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/core/trie.h>
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
@@ -77,16 +80,8 @@ class TORCH_API Node {
  public:
   static bool enableDynamicShape();
 
-  // Creates a new node with the given op name. The op is a unique identifier
-  // for the operation. The num_outputs tells how many outputs a given operation
-  // generates.
-  //
-  // None leaf node's node_hash does not contains shape information always.
-  // So we pass in the hash value rather than a function.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
-
-  // Contructor used to create leaf nodes.
-  Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
+  Node(const Node&) = delete;
+  Node& operator=(const Node&) = delete;
 
   virtual ~Node();
 
@@ -138,6 +133,22 @@ class TORCH_API Node {
 
   virtual std::string ToString() const;
 
+ protected:
+  // Creates a new node with the given op name. The op is a unique identifier
+  // for the operation. The num_outputs tells how many outputs a given operation
+  // generates.
+  //
+  // None leaf node's node_hash does not contains shape information always.
+  // So we pass in the hash value rather than a function.
+  Node(
+      OpKind op,
+      size_t num_outputs,
+      hash_t node_hash,
+      std::function<hash_t(bool)> dag_hash_fn);
+
+  // Contructor used to create leaf nodes.
+  Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
+
  private:
   // The ID of the operation captured by this node.
   OpKind op_;
@@ -170,12 +181,6 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   return stream;
 }
 
-// TODO(alanwaketan): Support r-value reference argument type.
-template <typename T, typename... Args>
-NodePtr MakeNode(Args&&... args) {
-  return std::make_shared<T>(std::forward<Args>(args)...);
-}
-
 template <typename T>
 const T* NodeCast(const Node* node, OpKind op) {
   if (op != node->op()) {
@@ -188,6 +193,43 @@ const T* NodeCast(const Node* node, OpKind op) {
 #endif
 }
 
+template <typename T, typename... Args>
+NodePtr ReuseNode(OpKind op, Args&&... args) {
+  if (FLAGS_torch_lazy_reuse_ir) {
+    std::deque<std::unique_ptr<TrieNode>>& successors =
+        Trie::Get()->Current()->successors;
+    for (auto it = successors.begin(); it != successors.end(); it++) {
+      NodePtr ir_node = (*it)->ir_node;
+      const T* concrete_node = NodeCast<T>(ir_node.get(), op);
+      if (concrete_node && concrete_node->Equal(std::forward<Args>(args)...)) {
+        TORCH_LAZY_COUNTER("IrNodeReused::" + std::string(typeid(T).name()), 1);
+        Trie::Get()->SetCurrent(it);
+        return ir_node;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// TODO(alanwaketan): Support r-value reference argument type.
+template <typename T, typename... Args>
+NodePtr MakeNode(Args&&... args) {
+  NodePtr node = std::make_shared<T>(std::forward<Args>(args)...);
+  if (FLAGS_torch_lazy_reuse_ir) {
+    Trie::Get()->Insert(node);
+  }
+  return node;
+}
+
+template <typename T, typename... Args>
+NodePtr ReuseOrMakeNode(OpKind op, Args&&... args) {
+  NodePtr node = ReuseNode<T>(op, std::forward<Args>(args)...);
+  if (!node) {
+    node = MakeNode<T>(std::forward<Args>(args)...);
+  }
+
+  return node;
+}
 
 // Represents a specific output produced by a node. Since the output of a node
 // can be composed by multiple outputs, the node+index coordinates fully qualify
@@ -209,6 +251,8 @@ struct TORCH_API Output {
   bool operator!=(const Output& rhs) const {
     return !operator==(rhs);
   }
+
+  bool operator==(const Value& rhs) const;
 
   const Shape& shape() const {
     return node->shape(index);

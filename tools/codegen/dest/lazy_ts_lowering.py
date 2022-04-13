@@ -39,3 +39,26 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
 
     return {schema.aten_name}_out;
 """
+
+def ts_equal_method_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+    func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
+    schema = LazyIrSchema(func)
+
+    value_comparsion = []
+    for arg in schema.positional_args:
+        if arg.is_lazy_value:
+            if isinstance(arg.lazy_type, OptionalCType):
+                value_comparsion.append(f"(!has_{arg.name} || operand(i++) == {arg.name}.value())")
+                continue
+            value_comparsion.append(f"operand(i++) == {arg.name}")
+
+    for arg in schema.keyword_values:
+        value_comparsion.append(f"operand(i++) == {arg.name}")
+
+    for arg in schema.keyword_scalars:
+        value_comparsion.append(f"this->{arg.name} == {arg.name}")
+
+    value_comparsion_str = " &&\n        ".join(value_comparsion)
+
+    return f"""size_t i = 0;
+    return ({value_comparsion_str});"""

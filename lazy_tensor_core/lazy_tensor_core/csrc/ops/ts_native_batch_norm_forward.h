@@ -13,6 +13,18 @@ class TSNativeBatchNormForward : public torch::lazy::TsNode {
                            const torch::lazy::Value& running_var, bool training,
                            double momentum, double eps);
 
+  bool Equal(const torch::lazy::Value& input, const torch::lazy::Value& weight,
+             const torch::lazy::Value& bias,
+             const torch::lazy::Value& running_mean,
+             const torch::lazy::Value& running_var, bool training,
+             double momentum, double eps) const {
+    size_t i = 0;
+    return (operand(i++) == input && operand(i++) == weight &&
+            operand(i++) == bias && operand(i++) == running_mean &&
+            operand(i++) == running_var && training_ == training &&
+            momentum_ == momentum && eps == eps_);
+  }
+
   std::string ToString() const override;
 
   bool training() const { return training_; }

@@ -17,6 +17,11 @@ C10_DEFINE_bool(
     false,
     "Use thread pool to schedule backend execution");
 
+C10_DEFINE_bool(
+    torch_lazy_reuse_ir,
+    false,
+    "Reuse IR node from previous tracing");
+
 C10_DEFINE_int(
     torch_lazy_compilation_cache_size,
     1024,

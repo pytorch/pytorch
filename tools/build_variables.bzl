@@ -421,6 +421,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
+    "torch/csrc/lazy/core/trie.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/diagonal.cpp",

@@ -236,17 +236,18 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       // convert an eager tensor back to a lazy one inside the torchscript executor
       // lazy:0 -> lazy:1 is handled in case3, so we can safely drop the device argument
       device = c10::nullopt;
-
-      auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
-      TORCH_INTERNAL_ASSERT(shapes.size() == 1);
-      auto node = torch::lazy::MakeNode<ir::ops::ToCopy>(lazy_self->GetIrValue(),
-                            dtype,
-                            layout,
-                            device,
-                            pin_memory,
-                            non_blocking,
-                            memory_format,
-                            std::move(shapes));
+      torch::lazy::NodePtr node = torch::lazy::ReuseNode<ir::ops::ToCopy>(
+          torch::lazy::OpKind(at::aten::_to_copy), lazy_self->GetIrValue(),
+          dtype, layout, device, pin_memory, non_blocking, memory_format);
+      if (!node) {
+        auto shapes = torch::lazy::compute_shape__to_copy(
+            self, dtype, layout, device, pin_memory, non_blocking,
+            memory_format);
+        TORCH_INTERNAL_ASSERT(shapes.size() == 1);
+        node = torch::lazy::MakeNode<ir::ops::ToCopy>(
+            lazy_self->GetIrValue(), dtype, layout, device, pin_memory,
+            non_blocking, memory_format, std::move(shapes));
+      }
 
       auto result = torch::lazy::CreateAtenFromLtcTensor(
               torch::lazy::LazyTensor::Create(std::move(node), lazy_self->GetDevice()));
@@ -404,8 +405,11 @@ at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double
     // TORCH_LAZY_FN_COUNTER("lazy::");
     // auto device = bridge::GetBackendDevice(self);
     // LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
-    // std::vector<torch::lazy::Shape> shapes = {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())};
-    // auto node = torch::lazy::MakeNode<ir::ops::Normal>(lazy_self.GetIrValue(), mean, std, std::move(shapes));
+    // std::vector<torch::lazy::Shape> shapes =
+    // {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())};
+    // auto node = torch::lazy::ReuseOrMakeNode<ir::ops::Normal>(
+    //     torch::lazy::OpKind(at::aten::normal_), lazy_self.GetIrValue(), mean,
+    //     std, std::move(shapes));
     // lazy_self.SetInPlaceIrValue(node);
     // return self;
 };

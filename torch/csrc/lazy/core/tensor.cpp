@@ -3,6 +3,7 @@
 
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
@@ -201,7 +202,8 @@ void LazyTensor::SetInPlaceIrValue(Value ir_value) {
   auto tensor_shape = shape();
   if (tensor_shape.Get().scalar_type() !=
       ir_value.shape().scalar_type()) {
-    ir_value = MakeNode<Cast>(ir_value, tensor_shape.Get().scalar_type());
+    ir_value = ReuseOrMakeNode<Cast>(
+        ltc_cast, ir_value, tensor_shape.Get().scalar_type());
   }
   SetIrValue(std::move(ir_value));
 }
@@ -272,7 +274,8 @@ Value LazyTensor::GetIrValueForTensor(
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
     if (IsSpecialScalar(value)) {
-      return MakeNode<Scalar>(value, tensor.scalar_type());
+      return ReuseOrMakeNode<Scalar>(
+          torch::lazy::OpKind(at::prim::Constant), value, tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;
@@ -423,7 +426,7 @@ void LazyTensor::UpdateFromTensorOut(const LazyTensorPtr& tensor) {
 Value LazyTensor::CreateTensorNode(BackendDataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
-  return MakeNode<DeviceData>(std::move(data));
+  return DeviceData::Create(std::move(data));
 }
 
 std::vector<LazyTensorPtr> LazyTensor::MakeOutputTensors(NodePtr node) const {
@@ -468,7 +471,8 @@ torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
     values.push_back(impl->tensor()->GetIrValue());
   }
 
-  return torch::lazy::Value(torch::lazy::MakeNode<TensorList>(std::move(values)));
+  return torch::lazy::Value(torch::lazy::ReuseOrMakeNode<TensorList>(
+      tensor_list_opkind, std::move(values)));
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {

@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/core/lazy_view.h>
 
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
@@ -28,35 +29,46 @@ namespace {
 Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
   switch (view_info.view_type) {
     case ViewInfo::Type::kSelect:
-      return MakeNode<Select>(
+      return ReuseOrMakeNode<Select>(
+          OpKind(at::aten::select),
           ir_value,
           view_info.select->dim,
           view_info.select->start,
           view_info.select->end,
           view_info.select->stride);
     case ViewInfo::Type::kNarrow:
-      return MakeNode<Narrow>(
-          ir_value, view_info.indices, view_info.shape.sizes());
+      return ReuseOrMakeNode<Narrow>(
+          OpKind(at::aten::narrow),
+          ir_value,
+          view_info.indices,
+          view_info.shape.sizes());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:
-      return MakeNode<Permute>(ir_value, view_info.permutation);
+      return ReuseOrMakeNode<Permute>(
+          OpKind(at::aten::permute), ir_value, view_info.permutation);
     case ViewInfo::Type::kReshape:
-      return MakeNode<View>(ir_value, view_info.shape.sizes().vec());
+      return ReuseOrMakeNode<View>(
+          OpKind(at::aten::view), ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kResize:
-      return MakeNode<Resize>(ir_value, view_info.shape.sizes().vec());
+      return ReuseOrMakeNode<Resize>(
+          OpKind(at::aten::resize), ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kSqueeze:
-      return MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+      return ReuseOrMakeNode<Squeeze>(
+          OpKind(at::aten::squeeze), ir_value, view_info.squeeze_index);
     case ViewInfo::Type::kUnsqueeze:
-      return MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
+      return ReuseOrMakeNode<Unsqueeze>(
+          OpKind(at::aten::unsqueeze), ir_value, view_info.squeeze_index);
     case ViewInfo::Type::kAsStrided:
-      return MakeNode<AsStrided>(
+      return ReuseOrMakeNode<AsStrided>(
+          OpKind(at::aten::as_strided),
           ir_value,
           view_info.shape.sizes().vec(),
           view_info.as_strided->stride,
           view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
-      return MakeNode<Diagonal>(
+      return ReuseOrMakeNode<Diagonal>(
+          OpKind(at::aten::diagonal),
           ir_value,
           view_info.diagonal->offset,
           view_info.diagonal->dim1,
@@ -80,7 +92,8 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
     const ViewInfo& view_info = update_data.view_infos[i - 1];
     switch (view_info.view_type) {
       case ViewInfo::Type::kSelect:
-        result = MakeNode<SelectViewUpdate>(
+        result = ReuseOrMakeNode<SelectViewUpdate>(
+            OpKind(ltc_select_view_update),
             tmp_values[i - 1],
             result,
             view_info.select->dim,
@@ -89,29 +102,43 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
             view_info.select->stride);
         break;
       case ViewInfo::Type::kNarrow:
-        result = MakeNode<NarrowViewUpdate>(
-            tmp_values[i - 1], result, view_info.indices);
+        result = ReuseOrMakeNode<NarrowViewUpdate>(
+            ltc_narrow_view_update,
+            tmp_values[i - 1],
+            result,
+            view_info.indices);
         break;
       case ViewInfo::Type::kNoOp:
         break;
       case ViewInfo::Type::kPermute:
-        result = MakeNode<Permute>(
-            result, InversePermutation(view_info.permutation));
+        result = ReuseOrMakeNode<Permute>(
+            OpKind(at::aten::permute),
+            result,
+            InversePermutation(view_info.permutation));
         break;
       case ViewInfo::Type::kReshape:
-        result = MakeNode<View>(result, view_info.source_shape.sizes().vec());
+        result = ReuseOrMakeNode<View>(
+            OpKind(at::aten::view),
+            result,
+            view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kResize:
-        result = MakeNode<Resize>(result, view_info.source_shape.sizes().vec());
+        result = ReuseOrMakeNode<Resize>(
+            OpKind(at::aten::resize),
+            result,
+            view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kSqueeze:
-          result = MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
-          break;
+        result = ReuseOrMakeNode<torch::lazy::Unsqueeze>(
+            OpKind(at::aten::unsqueeze), ir_value, view_info.squeeze_index);
+        break;
       case ViewInfo::Type::kUnsqueeze:
-          result = MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
-          break;
+        result = ReuseOrMakeNode<torch::lazy::Squeeze>(
+            OpKind(at::aten::squeeze), ir_value, view_info.squeeze_index);
+        break;
       case ViewInfo::Type::kAsStrided:
-        result = MakeNode<AsStridedViewUpdate>(
+        result = ReuseOrMakeNode<AsStridedViewUpdate>(
+            ltc_as_strided_view_update,
             tmp_values[i - 1],
             result,
             view_info.source_shape.sizes().vec(),
@@ -119,7 +146,8 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
             view_info.as_strided->offset);
         break;
       case ViewInfo::Type::kDiagonal:
-        result = MakeNode<DiagonalViewUpdate>(
+        result = ReuseOrMakeNode<DiagonalViewUpdate>(
+            ltc_diagonal_view_update,
             tmp_values[i - 1],
             result,
             view_info.diagonal->offset,

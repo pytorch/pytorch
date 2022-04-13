@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch {
@@ -14,6 +15,16 @@ class TORCH_API Scalar : public TsNode {
  public:
   Scalar(const at::Scalar& value, Shape shape);
   Scalar(const at::Scalar& value, c10::ScalarType type);
+
+  bool Equal(const at::Scalar& value, Shape shape) const {
+    TORCH_INTERNAL_ASSERT(false, "Reusing Scalar nodes is unsupported")
+    return false;
+  }
+
+  bool Equal(const at::Scalar& value, c10::ScalarType type) const {
+    TORCH_INTERNAL_ASSERT(false, "Reusing Scalar nodes is unsupported")
+    return false;
+  }
 
   std::string ToString() const override;
 
