@@ -77,7 +77,6 @@ def get_extensions():
     extra_link_args = []
     extra_compile_args = {"cxx": [
         "-O3",
-        "-g",
         "-std=c++14",
         "-fdiagnostics-color=always",
     ]}
