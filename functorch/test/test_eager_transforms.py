@@ -849,7 +849,7 @@ class TestGradTransform(TestCase):
                         fn = op(fn)
 
                 expected = f"{repr(x)}"
-                level = 1
+                level = 0
                 for op in op_list:
                     level += 1
                     if op == grad:
