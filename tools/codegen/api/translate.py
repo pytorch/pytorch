@@ -26,7 +26,6 @@ from tools.codegen.api.types import (
     scalar_t,
     opmath_t,
     optionalIntArrayRefT,
-    symIntArrayT,
     symIntArrayRefT
 )
 
@@ -62,7 +61,6 @@ options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
 longVec_ctype = VectorCType(BaseCType(longT))
 optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
-symIntArray_ctype = BaseCType(symIntArrayT)
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
 optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
 

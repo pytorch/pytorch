@@ -1386,7 +1386,7 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
 TEST(TestSymIntArrayRef, BasicConversion) {
   const size_t X = 2, Y = 4, Z = 5;
   std::vector<int64_t> tgt_size_v{2, 4, 5};
-  c10::SymIntArray tgt_size({X, Y, Z});
+  std::vector<c10::SymInt> tgt_size({X, Y, Z});
   auto a = at::randn({1, 4, 1}, at::kCPU);
   auto b = a.expand(tgt_size);
   auto c = a.expand(tgt_size_v);

@@ -96,10 +96,6 @@ ALL_VIEW_FUNCTIONS = {
     '_unsafe_view': 'self',
 }
 
-SYMINTARRAYREF_TO_SYMINTARRAY = CodeTemplate("""\
-auto ${vec} = c10::SymIntArray(${arg}.vec());
-""")
-
 ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
 """)
@@ -260,15 +256,11 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                             'over by value, also add a test in pytorch/xla/test/test_operations.py where this code '
                             'is exercised.')
 
-        if arg_type == BaseCType(intArrayRefT):
+        if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(symIntArrayRefT):
             # It's not safe to close over IntArrayRef by value, since this is a
             # reference type, so materialize a vector to close over by value
             arg_vec = arg + '_vec'
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
-            updated_unpacked_args.append(arg_vec)
-        elif arg_type == BaseCType(symIntArrayRefT):
-            arg_vec = arg + '_vec'
-            replay_view_func += SYMINTARRAYREF_TO_SYMINTARRAY.substitute(arg=arg, vec=arg_vec)
             updated_unpacked_args.append(arg_vec)
         elif arg_type == OptionalCType(BaseCType(longT)):
             # Materialize int64_t? to int64_t

@@ -117,38 +117,6 @@ struct OptionalArray {
   }
 };
 
-struct SymIntArray {
-  std::vector<c10::SymInt> list;
-
-  SymIntArray(){}
-  SymIntArray(std::vector<c10::SymInt> val) : list(std::move(val)) {}
-
-  // Used when saving an argument for the backwards pass.
-  SymIntArray& operator=(ArrayRef<c10::SymInt> ref) {
-    list = std::vector<c10::SymInt>(ref.begin(), ref.end());
-    return *this;
-  }
-
-  // Used when saving an argument for the backwards pass.
-  SymIntArray& operator=(c10::SymIntArrayRef ref) {
-    list = std::vector<c10::SymInt>(ref.begin(), ref.end());
-    return *this;
-  }
-
-  operator c10::ArrayRef<c10::SymInt>() {
-    return c10::ArrayRef<c10::SymInt>(list.data(), list.size());
-  }
-
-  operator c10::SymIntArrayRef() {
-    return c10::SymIntArrayRef(list.data(), list.size());
-  }
-
-  operator c10::SymIntArrayRef() const {
-    return c10::SymIntArrayRef(list.data(), list.size());
-  }
-};
-
-
 // Capsule is an internal implementation detail of custom C++ classes. We
 // define it as an owning wrapper for
 // c10::intrusive_ptr<torch::CustomClassHolder> This wrapper is here to serve as

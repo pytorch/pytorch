@@ -81,7 +81,6 @@ typeAndSizeT = BaseCppType("torch::autograd::generated", "TypeAndSize")
 tensorGeometryT = BaseCppType("at", "TensorGeometry")
 SymIntT = BaseCppType("c10", "SymInt")
 symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
-symIntArrayT = BaseCppType("c10", "SymIntArrayRef")
 
 # Types representing template parameters.  Technically, we probably shouldn't
 # represent them this way in codegen, but it was pretty convenient.

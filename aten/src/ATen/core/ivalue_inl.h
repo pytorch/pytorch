@@ -1702,8 +1702,6 @@ OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
   );
 }
 
-SymIntArray generic_to(IValue ivalue, _fake_type<SymIntArray>);
-
 namespace detail {
 template <typename Elem, size_t... I>
 std::array<Elem, sizeof...(I)> generic_to_array(
