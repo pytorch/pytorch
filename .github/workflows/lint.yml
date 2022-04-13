@@ -40,7 +40,7 @@ jobs:
 
           git grep -Il . >> lint_paths.txt
       - name: Run lintrunner
-        run: lintrunner --paths-from lint_paths.txt
+        run: lintrunner --paths-from lint_paths.txt --force-color
       - name: Store annotations
         if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository}}
         run: |
