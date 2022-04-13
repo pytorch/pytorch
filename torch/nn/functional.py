@@ -770,7 +770,10 @@ def _max_pool2d(
         )
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
-    return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    if input.is_quantized and input.is_cuda:
+        return torch.ops.quantized.max_pool2d(input, _pair(kernel_size), _pair(stride), _pair(padding), _pair(dilation), ceil_mode)
+    else:
+        return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 max_pool2d = boolean_dispatch(

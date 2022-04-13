@@ -118,7 +118,6 @@ class TestQuantizeEagerPTQStaticCUDA(QuantizationTestCase):
 
             convert(qeager, inplace=True)
             qeager.eval()
-
             qeager_out = qeager(input_value)
             qeager_script = torch.jit.script(qeager)
             qscript_out = qeager_script(input_value)
