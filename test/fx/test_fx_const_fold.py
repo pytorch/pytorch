@@ -5,7 +5,6 @@ import operator
 import torch
 import torch.fx
 from torch.fx.experimental import const_fold
-from torch.fx.experimental.fx_acc import acc_tracer, acc_ops
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -610,14 +609,14 @@ class TestConstFold(TestCase):
 
         mod = ConstFoldTestModule()
         in_x = torch.randn(2, 4)
-        gm = acc_tracer.trace(mod, in_x)
+        gm = torch.fx.symbolic_trace(mod)
 
         def skip_folding_quant_dequant(node: torch.fx.Node):
-            if node.target != acc_ops.quantize_per_tensor:
+            if node.target != torch.quantize_per_tensor:
                 return False
             # If quantize_per_node -> dequantize, then skip folding.
             for user in node.users:
-                if user.target == acc_ops.dequantize:
+                if user.target == torch.dequantize:
                     return True
             return False
 

@@ -219,6 +219,12 @@ index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
 See :meth:`~Tensor.index_add_` for function description.
 """)
 
+add_docstr(torch.index_copy, r"""
+index_copy(input, dim, index, source, *, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
@@ -1025,9 +1031,6 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
-           tensor or a NumPy array, copying otherwise.
-
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
 
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
@@ -1035,7 +1038,7 @@ CPU device, and not share its memory.
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
            implement the buffer protocol.
 
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that always shares memory from
+    :func:`torch.from_dlpack` creates a tensor that always shares memory from
            DLPack capsules.
 
 Args:
@@ -4522,6 +4525,96 @@ Example::
     >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]), density=True)
     (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
 """.format(**common_args))
+
+add_docstr(torch.histogramdd,
+           r"""
+histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
+
+Computes a multi-dimensional histogram of the values in a tensor.
+
+Interprets the elements of an input tensor whose innermost dimension has size N
+as a collection of N-dimensional points. Maps each of the points into a set of
+N-dimensional bins and returns the number of points (or total weight) in each bin.
+
+:attr:`input` must be a tensor with at least 2 dimensions.
+If input has shape (M, N), each of its M rows defines a point in N-dimensional space.
+If input has three or more dimensions, all but the last dimension are flattened.
+
+Each dimension is independently associated with its own strictly increasing sequence
+of bin edges. Bin edges may be specified explicitly by passing a sequence of 1D
+tensors. Alternatively, bin edges may be constructed automatically by passing a
+sequence of integers specifying the number of equal-width bins in each dimension.
+
+For each N-dimensional point in input:
+    - Each of its coordinates is binned independently among the bin edges
+        corresponding to its dimension
+    - Binning results are combined to identify the N-dimensional bin (if any)
+        into which the point falls
+    - If the point falls into a bin, the bin's count (or total weight) is incremented
+    - Points which do not fall into any bin do not contribute to the output
+
+:attr:`bins` can be a sequence of N 1D tensors, a sequence of N ints, or a single int.
+
+If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
+of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
+least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
+the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the rightmost bin is inclusive of its right edge.
+
+If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
+in each dimension. By default, the leftmost and rightmost bin edges in each dimension
+are determined by the minimum and maximum elements of the input tensor in the
+corresponding dimension. The :attr:`range` argument can be provided to manually
+specify the leftmost and rightmost bin edges in each dimension.
+
+If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
+
+.. note::
+    See also :func:`torch.histogram`, which specifically computes 1D histograms.
+    While :func:`torch.histogramdd` infers the dimensionality of its bins and
+    binned values from the shape of :attr:`input`, :func:`torch.histogram`
+    accepts and flattens :attr:`input` of any shape.
+
+Args:
+    {input}
+    bins: Tensor[], int[], or int.
+            If Tensor[], defines the sequences of bin edges.
+            If int[], defines the number of equal-width bins in each dimension.
+            If int, defines the number of equal-width bins for all dimensions.
+Keyword args:
+    range (sequence of float): Defines the leftmost and rightmost bin edges
+                                in each dimension.
+    weight (Tensor): By default, each value in the input has weight 1. If a weight
+                        tensor is passed, each N-dimensional coordinate in input
+                        contributes its associated weight towards its bin's result.
+                        The weight tensor should have the same shape as the :attr:`input`
+                        tensor excluding its innermost dimension N.
+    density (bool): If False (default), the result will contain the count (or total weight)
+                    in each bin. If True, each count (weight) is divided by the total count
+                    (total weight), then divided by the volume of its associated bin.
+Returns:
+    hist (Tensor): N-dimensional Tensor containing the values of the histogram.
+    bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
+
+Example::
+    >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
+    ...                   weight=torch.tensor([1., 2., 4., 8.]))
+        torch.return_types.histogramdd(
+            hist=tensor([[0., 1., 0.],
+                         [2., 0., 0.],
+                         [4., 0., 8.]]),
+            bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                       tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+
+    >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=[2, 2],
+    ...                   range=[0., 1., 0., 1.], density=True)
+        torch.return_types.histogramdd(
+           hist=tensor([[2., 0.],
+                        [0., 2.]]),
+           bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                      tensor([0.0000, 0.5000, 1.0000])))
+
+""")
 
 add_docstr(torch.hypot,
            r"""
@@ -8541,6 +8634,12 @@ scatter_add(input, dim, index, src) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
+add_docstr(torch.scatter_reduce, r"""
+scatter_reduce(input, dim, index, src, reduce, *, include_self=True) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
+""")
+
 add_docstr(torch.select,
            r"""
 select(input, dim, index) -> Tensor
@@ -9741,10 +9840,10 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension(s). Elements that are shifted beyond the
-last position are re-introduced at the first position. If a dimension is not
-specified, the tensor will be flattened before rolling and then restored
-to the original shape.
+Roll the tensor :attr:`input` along the given dimension(s). Elements that are
+shifted beyond the last position are re-introduced at the first position. If
+:attr:`dims` is `None`, the tensor will be flattened before rolling and then
+restored to the original shape.
 
 Args:
     {input}
@@ -9762,6 +9861,11 @@ Example::
             [3, 4],
             [5, 6],
             [7, 8]])
+    >>> torch.roll(x, 1)
+    tensor([[8, 1],
+            [2, 3],
+            [4, 5],
+            [6, 7]])
     >>> torch.roll(x, 1, 0)
     tensor([[7, 8],
             [1, 2],
@@ -11509,6 +11613,34 @@ Example::
        quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
 """)
 
+add_docstr(torch.quantize_per_tensor_dynamic,
+           r"""
+quantize_per_tensor_dynamic(input, dtype, reduce_range) -> Tensor
+
+Converts a float tensor to a quantized tensor with scale and zero_point calculated
+dynamically based on the input.
+
+Arguments:
+    input (Tensor): float tensor or list of tensors to quantize
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``
+    reduce_range (bool): a flag to indicate whether to reduce the range of quantized
+    data by 1 bit, it's required to avoid instruction overflow for some hardwares
+
+Returns:
+    Tensor: A newly (dynamically) quantized tensor
+
+Example::
+
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> print(t)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
+           zero_point=85)
+    >>> t.int_repr()
+    tensor([  0,  85, 170, 255], dtype=torch.uint8)
+""")
+
 add_docstr(torch.quantize_per_channel,
            r"""
 quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
@@ -11920,4 +12052,142 @@ Example::
     >>> torch.bucketize(v, boundaries, right=True)
     tensor([[2, 3, 5],
             [2, 3, 5]])
+""")
+
+add_docstr(torch.view_as_real_copy,
+           r"""
+Performs the same operation as :func:`torch.view_as_real`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_as_complex_copy,
+           r"""
+Performs the same operation as :func:`torch.view_as_complex`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.as_strided_copy,
+           r"""
+Performs the same operation as :func:`torch.as_strided`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.diagonal_copy,
+           r"""
+Performs the same operation as :func:`torch.diagonal`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.expand_copy,
+           r"""
+Performs the same operation as :func:`torch.expand`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.permute_copy,
+           r"""
+Performs the same operation as :func:`torch.permute`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.select_copy,
+           r"""
+Performs the same operation as :func:`torch.select`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.detach_copy,
+           r"""
+Performs the same operation as :func:`torch.detach`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.slice_copy,
+           r"""
+Performs the same operation as :func:`torch.slice`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.split_copy,
+           r"""
+Performs the same operation as :func:`torch.split`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.split_with_sizes_copy,
+           r"""
+Performs the same operation as :func:`torch.split_with_sizes`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.squeeze_copy,
+           r"""
+Performs the same operation as :func:`torch.squeeze`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.t_copy,
+           r"""
+Performs the same operation as :func:`torch.t`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.transpose_copy,
+           r"""
+Performs the same operation as :func:`torch.transpose`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unsqueeze_copy,
+           r"""
+Performs the same operation as :func:`torch.unsqueeze`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.indices_copy,
+           r"""
+Performs the same operation as :func:`torch.indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.values_copy,
+           r"""
+Performs the same operation as :func:`torch.values`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.crow_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.crow_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.col_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.col_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unbind_copy,
+           r"""
+Performs the same operation as :func:`torch.unbind`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_copy,
+           r"""
+Performs the same operation as :func:`torch.view`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unfold_copy,
+           r"""
+Performs the same operation as :func:`torch.unfold`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.alias_copy,
+           r"""
+Performs the same operation as :func:`torch.alias`, but all output tensors
+are freshly created instead of aliasing the input.
 """)

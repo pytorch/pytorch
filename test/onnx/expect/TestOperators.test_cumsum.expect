@@ -22,7 +22,7 @@ graph {
     name: "CumSum_1"
     op_type: "CumSum"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::CumSum_0"
     type {
