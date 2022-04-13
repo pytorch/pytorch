@@ -1,13 +1,11 @@
-// This file defines `SymIntArrayRef` which serves as the view onto std::vector<SymInt>
-// This class is conceptually and mostly functionally equivalent to ArrayRef<SymInt>
-// However, ArrayRef<SymInt> can't be used directly as it introduces ambiguity in 
-// the following cases:
-// a.expand({1, 2, 3})
-// matches two overloads:
-// `at::Tensor Tensor::expand(c10::SymIntArrayRef size, bool implicit)`
-// `at::Tensor Tensor::expand(at::IntArrayRef size, bool implicit)`
-// Introducing `SymIntArrayRef` allows to have a finer-grained control over which overload
-// will be used
+// This file defines `SymIntArrayRef` which serves as the view onto
+// std::vector<SymInt> This class is conceptually and mostly functionally
+// equivalent to ArrayRef<SymInt> However, ArrayRef<SymInt> can't be used
+// directly as it introduces ambiguity in the following cases: a.expand({1, 2,
+// 3}) matches two overloads: `at::Tensor Tensor::expand(c10::SymIntArrayRef
+// size, bool implicit)` `at::Tensor Tensor::expand(at::IntArrayRef size, bool
+// implicit)` Introducing `SymIntArrayRef` allows to have a finer-grained
+// control over which overload will be used
 
 #pragma once
 
@@ -55,12 +53,8 @@ class SymIntArrayRef final {
   /// Construct an empty SymIntArrayRef.
   /* implicit */ constexpr SymIntArrayRef() {}
 
-
-
-  /* implicit */ SymIntArrayRef(const std::vector<c10::SymInt>& Vec):
-    wrapped_symint_array_ref(Vec) {
-  }
-
+  /* implicit */ SymIntArrayRef(const std::vector<c10::SymInt>& Vec)
+      : wrapped_symint_array_ref(Vec) {}
 
   /// Construct an SymIntArrayRef from a pointer and length.
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA SymIntArrayRef(
@@ -131,13 +125,11 @@ class SymIntArrayRef final {
   /// slice(n, m) - Take M elements of the array starting at element N
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA SymIntArrayRef
   slice(size_t N, size_t M) const {
-    return SymIntArrayRef(
-        wrapped_symint_array_ref.begin() + N,
-        wrapped_symint_array_ref.begin() + N + M);
+    return SymIntArrayRef(wrapped_symint_array_ref.data() + N, M);
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  constexpr SymIntArrayRef slice(size_t N) const {
+  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA SymIntArrayRef slice(size_t N) const {
     return slice(N, size() - N);
   }
 
@@ -184,7 +176,7 @@ class SymIntArrayRef final {
   /// @}
 };
 
-TORCH_API at::IntArrayRef ExpectIntArrayRef(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef expectIntArrayRef(c10::SymIntArrayRef ar);
 
 std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
 

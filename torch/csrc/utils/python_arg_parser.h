@@ -80,7 +80,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, SYM_INT, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST, SYM_INT_LIST
 };
 
 struct FunctionParameter;
@@ -391,7 +391,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   auto intlist = intlistWithDefault(i, signature.params[i].default_intlist);
-  return std::vector<c10::SymInt>(c10::fmap(intlist, [](int64_t n) {return c10::SymInt(n); }));
+  return c10::fmap(intlist, [](int64_t n) {return c10::SymInt(n); });
 }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {

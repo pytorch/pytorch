@@ -605,7 +605,7 @@
   result: auto_linear
 
 - name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::ExpectIntArrayRef(self.sym_sizes()))
+  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)

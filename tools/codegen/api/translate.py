@@ -25,8 +25,7 @@ from tools.codegen.api.types import (
     intArrayRefT,
     scalar_t,
     opmath_t,
-    optionalIntArrayRefT,
-    symIntArrayRefT
+    optionalIntArrayRefT
 )
 
 # This file implements a small program synthesis engine that implements
@@ -300,8 +299,6 @@ Check this module for more information.
             return direct_solve(NamedCType(goal.name, longVec_ctype))
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
-        elif goal.type == BaseCType(symIntArrayRefT):
-            return direct_solve(NamedCType(goal.name, symIntArray_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):

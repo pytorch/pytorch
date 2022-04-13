@@ -371,8 +371,6 @@ namespace impl {
   };
   template<bool AllowDeprecatedTypes>
   struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
-    // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
-    // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
     static std::vector<c10::SymInt> call(IValue& v) {
       return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
     }

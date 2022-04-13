@@ -838,9 +838,9 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool /*unused*/) {
-  auto size = ExpectIntArrayRef(packed_size);
-  return expand(self, size, false);
+Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
+  auto size = expectIntArrayRef(packed_size);
+  return expand(self, size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
@@ -962,7 +962,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
         regular narrow on _values() */
     new_indices = indices;
     int64_t dense_dim = dim - sparse_dim + 1;
-    new_values = self._values().narrow_copy(dense_dim, start, SymInt{length});
+    new_values = self._values().narrow_copy(dense_dim, start, length);
   }
 
   auto newTensor = at::sparse_coo_tensor(new_indices, new_values, new_sizes);
