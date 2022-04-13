@@ -20,6 +20,7 @@ from torch.distributed._shard.sharded_tensor.utils import (
 import torch.distributed as dist
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
 from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._shard._utils import narrow_tensor
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
@@ -204,19 +205,11 @@ class ChunkShardingSpec(ShardingSpec):
         for shard_meta in tensor_meta.shards_metadata:
             rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
             if rank == current_rank:
-                shard_offsets = shard_meta.shard_offsets
-                shard_sizes = shard_meta.shard_sizes
-                local_tensor = tensor
-                for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
-                    if size < tensor.size(idx):
-                        # Reshape to get shard for this rank and we don't want autograd
-                        # recording here for the narrow op and 'local_shard' should be a
-                        # leaf variable in the autograd graph.
-                        local_tensor = local_tensor.narrow(
-                            idx,
-                            shard_offsets[idx],
-                            shard_sizes[idx]
-                        ).clone().detach().contiguous()
+                # Reshape to get shard for this rank and we don't want autograd
+                # recording here for the narrow op and 'local_shard' should be a
+                # leaf variable in the autograd graph.
+                local_tensor = narrow_tensor(tensor, shard_meta).clone().detach().contiguous()
+
                 # Sync requires_grad to local_shard.
                 local_tensor.requires_grad = tensor.requires_grad
                 local_shards.append(
