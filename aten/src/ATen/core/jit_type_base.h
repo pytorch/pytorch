@@ -6,6 +6,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
+#include <ATen/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -48,6 +49,7 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
+  _(SymIntType)             \
   _(UnionType)              \
   _(DynamicType)
 
@@ -140,7 +142,7 @@ struct TORCH_API Type {
   protected:
   Type(TypeKind kind) : kind_(kind) {}
 
-  virtual std::string annotation_str_impl(TypePrinter printer) const {
+  virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
     return str();
   }
   // a == b
@@ -567,7 +569,7 @@ struct TORCH_API Type {
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
-      std::vector<TypePtr> contained_types) const {
+      std::vector<TypePtr> /*contained_types*/) const {
     AT_ERROR(
         "type with contained types did not overload createWithContained: ",
         str());

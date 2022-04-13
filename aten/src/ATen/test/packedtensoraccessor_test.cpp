@@ -22,9 +22,9 @@ TEST(PackedtensoraccessorTest, TransposeTest) {
   ASSERT_EQ(original.size(0), transposed.size(2));
   ASSERT_EQ(original.size(1), transposed.size(1));
   ASSERT_EQ(original.size(2), transposed.size(0));
-  for (int i = 0; i < sizes[0]; i++) {
-    for (int j = 0; j < sizes[1]; j++) {
-      for (int k = 0; k < sizes[2]; k++) {
+  for (const auto i : c10::irange(sizes[0])) {
+    for (const auto j : c10::irange(sizes[1])) {
+      for (const auto k : c10::irange(sizes[2])) {
         ASSERT_EQ(original[i][j][k], transposed[k][j][i]);
       }
     }

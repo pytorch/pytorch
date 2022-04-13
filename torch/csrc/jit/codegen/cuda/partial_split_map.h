@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -20,15 +20,11 @@ class TORCH_CUDA_CU_API PartialSplitMap {
   void build(Fusion* fusion);
 
   Val* getStartOffset(IterDomain* root_domain) const;
-  kir::Val* getStartOffset(kir::IterDomain* root_domain) const;
   Val* getStopOffset(IterDomain* root_domain) const;
-  kir::Val* getStopOffset(kir::IterDomain* root_domain) const;
 
  private:
   std::unordered_map<IterDomain*, Val*> start_offset_map_;
-  std::unordered_map<kir::IterDomain*, kir::Val*> kir_start_offset_map_;
   std::unordered_map<IterDomain*, Val*> stop_offset_map_;
-  std::unordered_map<kir::IterDomain*, kir::Val*> kir_stop_offset_map_;
 };
 
 } // namespace cuda
