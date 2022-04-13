@@ -54,7 +54,6 @@ struct TORCH_API ViewInfo {
     kDiagonal,
     kSqueeze,
     kUnsqueeze,
-    kExpand,
   };
 
   ViewInfo() = default;

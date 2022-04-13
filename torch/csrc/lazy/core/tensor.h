@@ -134,6 +134,9 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   void ApplyPendingGraph();
 
   const c10::Storage& Storage() const { return storage_; }
+  // This is currently only used by outlier view ops such as expand that
+  // don't go through CreateViewTensor to support Tensor.is_alias_of.
+  void SetStorage(const c10::Storage& storage) { storage_ = storage; }
 
  private:
   LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
