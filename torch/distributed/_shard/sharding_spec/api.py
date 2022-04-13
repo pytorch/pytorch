@@ -20,6 +20,7 @@ from torch.distributed._shard.sharded_tensor.utils import (
 import torch.distributed as dist
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
 from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._shard._utils import narrow_tensor
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
@@ -204,19 +205,11 @@ class ChunkShardingSpec(ShardingSpec):
         for shard_meta in tensor_meta.shards_metadata:
             rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
             if rank == current_rank:
-                shard_offsets = shard_meta.shard_offsets
-                shard_sizes = shard_meta.shard_sizes
-                local_tensor = tensor
-                for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
-                    if size < tensor.size(idx):
-                        # Reshape to get shard for this rank and we don't want autograd
-                        # recording here for the narrow op and 'local_shard' should be a
-                        # leaf variable in the autograd graph.
-                        local_tensor = local_tensor.narrow(
-                            idx,
-                            shard_offsets[idx],
-                            shard_sizes[idx]
-                        ).clone().detach().contiguous()
+                # Reshape to get shard for this rank and we don't want autograd
+                # recording here for the narrow op and 'local_shard' should be a
+                # leaf variable in the autograd graph.
+                local_tensor = narrow_tensor(tensor, shard_meta).clone().detach().contiguous()
+
                 # Sync requires_grad to local_shard.
                 local_tensor.requires_grad = tensor.requires_grad
                 local_shards.append(
@@ -279,8 +272,10 @@ class EnumerableShardingSpec(ShardingSpec):
 def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     """
     Infer the sharding spec from the metadata of each shard of a ShardedTensor.
-    If the tensor is sharded only on one dimension, we then assume it's a ChunkShardingSpec.
-    Otherwise, we assume it's enum sharded.
+    If the tensor is sharded only on one dimension, we can then verify whether it's
+    a ChunkShardingSpec or not. The way to verify it is to first get the total length
+    and perform a chunk sharding with the given placements to see if we can have the
+    same chunk size as the given shards_metadata. If not, we assume it's enum sharded.
 
     Args:
         shards_metadata (List[ShardMetadata]): List of Metadata of local shards.
@@ -326,19 +321,16 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
             dim=chunk_sharding_dim,
             placements=placements,
         )
-        shard_sizes = [
-            x[chunk_sharding_dim]
-            for _, x in sorted(zip(chunk_offset_list, shard_size_list))
-        ]
-        if len(shard_sizes) == 1 or (
-            len(set(shard_sizes[:-1])) == 1 and shard_sizes[0] >= shard_sizes[-1]
-        ):
-            return chunk_spec
-        # Corner case when length = 5 and chunks = 4, local size is [2, 2, 1, 0]
-        if (
-            len(set(shard_sizes[:-2])) == 1
-            and shard_sizes[0] >= shard_sizes[-2]
-            and shard_sizes[-2] >= shard_sizes[-1]
-        ):
+        shard_sizes = sorted([x[chunk_sharding_dim] for x in shard_size_list])
+        shard_total_length = sum(shard_sizes)
+        chunks = len(placements)
+        split_size = get_split_size(shard_total_length, chunks)
+        chunk_shard_sizes = sorted(
+            [
+                get_chunked_dim_size(shard_total_length, split_size, idx)
+                for idx in range(len(placements))
+            ]
+        )
+        if shard_sizes == chunk_shard_sizes:
             return chunk_spec
     return EnumerableShardingSpec(shards_metadata)

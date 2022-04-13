@@ -1,7 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -11,6 +11,16 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {

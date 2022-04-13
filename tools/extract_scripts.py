@@ -63,6 +63,8 @@ def main() -> None:
 
         for job_name, job in workflow['jobs'].items():
             job_dir = out / p / job_name
+            if "steps" not in job:
+                continue
             steps = job['steps']
             index_chars = len(str(len(steps) - 1))
             for i, step in enumerate(steps, start=1):

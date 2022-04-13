@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <c10/util/Exception.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
@@ -44,7 +45,7 @@ BuiltinRegistryItem::BuiltinRegistryItem(
 
   fprintf(
       stderr,
-      "torch::deploy builtin %s contains %d modules\n",
+      "torch::deploy builtin %s contains %u modules\n",
       name,
       numModules);
 }
@@ -109,8 +110,8 @@ BuiltinRegistryItem* BuiltinRegistry::getItem(const std::string& name) {
                                        : get()->items_[itr->second].get();
 }
 
-int BuiltinRegistry::totalNumModules() {
-  int tot = 0;
+unsigned BuiltinRegistry::totalNumModules() {
+  unsigned tot = 0;
   for (const auto& itemptr : get()->items_) {
     tot += itemptr->numModules;
   }
@@ -119,7 +120,7 @@ int BuiltinRegistry::totalNumModules() {
 
 struct _frozen* BuiltinRegistry::getAllFrozenModules() {
   /* Allocate new memory for the combined table */
-  int totNumModules = totalNumModules();
+  size_t totNumModules = totalNumModules();
   struct _frozen* p = nullptr;
   if (totNumModules > 0 &&
       totNumModules <= SIZE_MAX / sizeof(struct _frozen) - 1) {
@@ -134,7 +135,7 @@ struct _frozen* BuiltinRegistry::getAllFrozenModules() {
   memset(&p[0], 0, sizeof(p[0]));
 
   /* Copy the tables into the new memory */
-  int off = 0;
+  unsigned off = 0;
   for (const auto& itemptr : items()) {
     if (itemptr->numModules > 0) {
       memcpy(
