@@ -271,7 +271,7 @@ def grad(
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
                 t_outputs, gO, retain_graph, create_graph, t_inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs)
+        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
