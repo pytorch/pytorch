@@ -2057,9 +2057,6 @@ void decomposeLinearOps(Block* block) {
     if (!mat0_size.has_value() || !mat1_size.has_value()) {
       continue;
     }
-    TORCH_INTERNAL_ASSERT(
-        mat0_size.has_value() && mat1_size.has_value(),
-        "concrete shape for linear input & weight are required");
     auto out_size = mat0_size.value();
     TORCH_INTERNAL_ASSERT(
         mat1_size->size() == 2 || mat1_size->size() == 1,
